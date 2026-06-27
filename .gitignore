@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+.idea/
+**/build/
+local.properties
+logs/
+debug_logs/
+*.iml
+app/libs/*.aar
+app/libs/*.aar.bak
