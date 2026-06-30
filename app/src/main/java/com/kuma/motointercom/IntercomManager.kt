@@ -3,6 +3,7 @@
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import org.json.JSONObject
 import org.webrtc.PeerConnection
 import java.io.Closeable
@@ -133,7 +134,9 @@ class IntercomManager(
     }
 
     private fun dispatch(message: JSONObject) {
-        when (message.getString(KEY_TYPE)) {
+        val type = message.getString(KEY_TYPE)
+        Log.d(TAG, "RX signaling frame: type=$type")
+        when (type) {
             TYPE_IDENTITY -> {
                 val name = message.optString(KEY_NAME).trim()
                 if (name.isNotEmpty()) {
@@ -208,6 +211,7 @@ class IntercomManager(
                     stream.writeInt(bytes.size)
                     stream.write(bytes)
                     stream.flush()
+                    Log.d(TAG, "TX signaling frame: type=${message.optString(KEY_TYPE)} bytes=${bytes.size}")
                 } catch (e: IOException) {
                     if (!closed.get()) notifyDisconnected(e)
                     close()
@@ -238,6 +242,7 @@ class IntercomManager(
     }
 
     companion object {
+        private const val TAG = "IntercomSignal"
         private const val MAX_FRAME_BYTES = 1024 * 1024
         private const val KEY_TYPE = "type"
         private const val KEY_NAME = "name"

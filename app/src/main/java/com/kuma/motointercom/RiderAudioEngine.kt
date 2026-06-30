@@ -18,6 +18,7 @@ import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
+import org.webrtc.NetworkMonitorAutoDetect
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
@@ -27,9 +28,11 @@ import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.io.Closeable
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -67,8 +70,16 @@ class RiderAudioEngine(
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
-    private val voxAudioEnabled = AtomicBoolean(true)
+    private val voxState = AtomicReference(if (VOX_GATE_ENABLED) VoxState.LISTENING else VoxState.BYPASS)
+    private val voxVolumeOpen = AtomicBoolean(!VOX_GATE_ENABLED)
     private var lastAudioLevelAt = 0L
+    private var lastVoxLogAt = 0L
+    private var voxNoiseFloor = VOX_INITIAL_NOISE_FLOOR
+    private var voxAttackStartedAt = 0L
+    private var voxAboveCloseStartedAt = 0L
+    private var voxLastVoiceAt = 0L
+    private var voxHangoverStartedAt = 0L
+    private var voxCalibrationUntil = 0L
 
     init {
         runRtc {
@@ -81,13 +92,16 @@ class RiderAudioEngine(
 
     fun createOffer() {
         runRtc {
+            Log.i(TAG, "createOffer 开始")
             peerConnectionOrThrow().createOffer(localSdpObserver(), sdpConstraints())
         }
     }
 
     fun createAnswer(remoteSdpJson: String) {
         runRtc {
+            Log.i(TAG, "createAnswer 收到远端 Offer")
             setRemoteDescription(remoteSdpJson) {
+                Log.i(TAG, "createAnswer 开始")
                 peerConnectionOrThrow().createAnswer(localSdpObserver(), sdpConstraints())
             }
         }
@@ -103,6 +117,7 @@ class RiderAudioEngine(
         runRtc {
             try {
                 val candidate = candidateFromJson(candidateJson)
+                Log.i(TAG, "收到远端 ICE candidate: ${candidateSummary(candidate)}")
                 if (remoteDescriptionSet) {
                     check(peerConnectionOrThrow().addIceCandidate(candidate)) {
                         "addIceCandidate 返回 false"
@@ -157,6 +172,7 @@ class RiderAudioEngine(
     }
 
     private fun initFactory() = mediaStep("PeerConnectionFactory 初始化") {
+        NetworkMonitorAutoDetect.setIncludeWifiDirect(true)
         initWebRtcOnce(appContext)
 
         configureAndroidAudio()
@@ -217,25 +233,169 @@ class RiderAudioEngine(
         audioSource = factoryOrThrow().createAudioSource(constraints)
         localAudioTrack = factoryOrThrow().createAudioTrack(AUDIO_TRACK_ID, audioSource).apply {
             setEnabled(true)
+            setVolume(if (VOX_GATE_ENABLED) VOX_MUTED_VOLUME else VOX_OPEN_VOLUME)
         }
-        voxAudioEnabled.set(true)
+        val initialState = if (VOX_GATE_ENABLED) VoxState.LISTENING else VoxState.BYPASS
+        voxState.set(initialState)
+        voxVolumeOpen.set(!VOX_GATE_ENABLED)
+        Log.i(
+            TAG,
+            "VOX 初始化 enabled=$VOX_GATE_ENABLED state=$initialState " +
+                "trackEnabled=true volume=${if (VOX_GATE_ENABLED) VOX_MUTED_VOLUME else VOX_OPEN_VOLUME}"
+        )
 
         localAudioSender = peerConnectionOrThrow().addTrack(localAudioTrack, listOf(STREAM_ID))
         setOpusBitrate(localAudioSender)
     }
 
     private fun handleAudioSamplesForVox(samples: JavaAudioDeviceModule.AudioSamples) {
-        val db = calculateApproxDb(samples) ?: return
-        postAudioLevel(db)
+        val energy = calculateApproxDb(samples) ?: return
+        postAudioLevel(energy)
 
-        // 45dB 固定门限：低于门限认为是环境底噪/风噪，关闭本地音轨停止向对端发包；
-        // 达到门限立即恢复，满足免按键 Hands-Free VOX 对讲。
-        val shouldEnable = db >= VOX_THRESHOLD_DB
-        if (voxAudioEnabled.compareAndSet(!shouldEnable, shouldEnable)) {
-            runRtc {
-                localAudioTrack?.setEnabled(shouldEnable)
+        val now = SystemClock.elapsedRealtime()
+        if (!VOX_GATE_ENABLED) {
+            logVoxSnapshot(now, energy, VOX_BASE_OPEN_THRESHOLD, VOX_BASE_OPEN_THRESHOLD - VOX_HYSTERESIS)
+            return
+        }
+
+        if (voxCalibrationUntil == 0L) {
+            voxCalibrationUntil = now + VOX_CALIBRATION_MS
+        }
+
+        var openThreshold = maxOf(VOX_BASE_OPEN_THRESHOLD, voxNoiseFloor + VOX_NOISE_MARGIN)
+        var closeThreshold = openThreshold - VOX_HYSTERESIS
+
+        when (voxState.get()) {
+            VoxState.BYPASS -> Unit
+
+            VoxState.LISTENING -> {
+                val calibrating = now < voxCalibrationUntil
+                val alpha = if (calibrating) VOX_CALIBRATION_ALPHA else VOX_NOISE_ALPHA
+                if (calibrating || energy < openThreshold) {
+                    voxNoiseFloor = (voxNoiseFloor + alpha * (energy - voxNoiseFloor))
+                        .coerceIn(VOX_MIN_NOISE_FLOOR, VOX_MAX_NOISE_FLOOR)
+                    openThreshold = maxOf(VOX_BASE_OPEN_THRESHOLD, voxNoiseFloor + VOX_NOISE_MARGIN)
+                    closeThreshold = openThreshold - VOX_HYSTERESIS
+                }
+
+                if (!calibrating && energy >= openThreshold) {
+                    if (voxAttackStartedAt == 0L) voxAttackStartedAt = now
+                    if (now - voxAttackStartedAt >= VOX_ATTACK_MS) {
+                        voxAttackStartedAt = 0L
+                        transitionVoxState(VoxState.OPEN, energy, openThreshold, closeThreshold)
+                    }
+                } else {
+                    voxAttackStartedAt = 0L
+                }
+            }
+
+            VoxState.OPEN -> {
+                if (energy >= closeThreshold) {
+                    if (voxAboveCloseStartedAt == 0L) voxAboveCloseStartedAt = now
+                    if (now - voxAboveCloseStartedAt >= VOX_ATTACK_MS) voxLastVoiceAt = now
+                } else {
+                    voxAboveCloseStartedAt = 0L
+                }
+
+                if (now - voxLastVoiceAt >= VOX_RELEASE_DEBOUNCE_MS) {
+                    voxAboveCloseStartedAt = 0L
+                    voxHangoverStartedAt = now
+                    transitionVoxState(VoxState.HANGOVER, energy, openThreshold, closeThreshold)
+                }
+            }
+
+            VoxState.HANGOVER -> {
+                if (energy >= openThreshold) {
+                    if (voxAttackStartedAt == 0L) voxAttackStartedAt = now
+                    if (now - voxAttackStartedAt >= VOX_ATTACK_MS) {
+                        voxAttackStartedAt = 0L
+                        voxHangoverStartedAt = 0L
+                        transitionVoxState(VoxState.OPEN, energy, openThreshold, closeThreshold)
+                    }
+                } else {
+                    voxAttackStartedAt = 0L
+                }
+
+                if (energy >= closeThreshold) {
+                    if (voxAboveCloseStartedAt == 0L) voxAboveCloseStartedAt = now
+                    if (now - voxAboveCloseStartedAt >= VOX_ATTACK_MS) {
+                        voxHangoverStartedAt = now
+                    }
+                } else {
+                    voxAboveCloseStartedAt = 0L
+                }
+
+                if (voxState.get() == VoxState.HANGOVER && now - voxHangoverStartedAt >= VOX_HANGOVER_MS) {
+                    voxAttackStartedAt = 0L
+                    voxAboveCloseStartedAt = 0L
+                    voxHangoverStartedAt = 0L
+                    transitionVoxState(VoxState.LISTENING, energy, openThreshold, closeThreshold)
+                }
             }
         }
+
+        logVoxSnapshot(now, energy, openThreshold, closeThreshold)
+    }
+
+    private fun transitionVoxState(
+        next: VoxState,
+        energy: Double,
+        openThreshold: Double,
+        closeThreshold: Double
+    ) {
+        val previous = voxState.getAndSet(next)
+        if (previous == next) return
+
+        if (next == VoxState.OPEN) {
+            val now = SystemClock.elapsedRealtime()
+            voxAboveCloseStartedAt = now
+            voxLastVoiceAt = now
+        } else if (next == VoxState.LISTENING) {
+            voxAboveCloseStartedAt = 0L
+            voxLastVoiceAt = 0L
+        }
+
+        val shouldOpenVolume = next != VoxState.LISTENING
+        val oldVolume = if (voxVolumeOpen.get()) VOX_OPEN_VOLUME else VOX_MUTED_VOLUME
+        val newVolume = if (shouldOpenVolume) VOX_OPEN_VOLUME else VOX_MUTED_VOLUME
+        if (voxVolumeOpen.compareAndSet(!shouldOpenVolume, shouldOpenVolume)) {
+            runRtc { localAudioTrack?.setVolume(newVolume) }
+        }
+
+        Log.i(
+            TAG,
+            String.format(
+                Locale.US,
+                "VOX state %s -> %s energy=%.1f noise=%.1f open=%.1f close=%.1f volume=%.1f->%.1f",
+                previous,
+                next,
+                energy,
+                voxNoiseFloor,
+                openThreshold,
+                closeThreshold,
+                oldVolume,
+                newVolume
+            )
+        )
+    }
+
+    private fun logVoxSnapshot(now: Long, energy: Double, openThreshold: Double, closeThreshold: Double) {
+        if (now - lastVoxLogAt < VOX_LOG_INTERVAL_MS) return
+        lastVoxLogAt = now
+        Log.d(
+            TAG,
+            String.format(
+                Locale.US,
+                "VOX enabled=%s state=%s energy=%.1f noise=%.1f open=%.1f close=%.1f volume=%.1f",
+                VOX_GATE_ENABLED,
+                voxState.get(),
+                energy,
+                voxNoiseFloor,
+                openThreshold,
+                closeThreshold,
+                if (voxVolumeOpen.get()) VOX_OPEN_VOLUME else VOX_MUTED_VOLUME
+            )
+        )
     }
 
     private fun postAudioLevel(db: Double) {
@@ -268,31 +428,54 @@ class RiderAudioEngine(
         val rms = sqrt(sumSquares / count)
         if (rms <= 0.0) return 0.0
 
-        // 手机麦克风没有统一 SPL 校准值，这里用 16-bit PCM dBFS + 90dB 偏移得到工程近似 dB。
-        // 阈值固定为 45dB，目标是挡住持续低能量风噪，而不是做声学测量仪。
+        // 手机麦克风没有统一 SPL 校准值；这是 dBFS + 固定偏移的工程能量值，不是真实 dB SPL。
         return (20.0 * log10(rms / Short.MAX_VALUE.toDouble()) + PCM_DBFS_TO_APPROX_SPL_OFFSET)
             .coerceAtLeast(0.0)
     }
 
+    private enum class VoxState {
+        BYPASS,
+        LISTENING,
+        OPEN,
+        HANGOVER
+    }
+
     private fun localSdpObserver(): SdpObserver = object : SdpObserver {
         override fun onCreateSuccess(sdp: SessionDescription) {
+            Log.i(TAG, "${sdp.type} 创建成功: ${sdpSummary(sdp.description)}")
             val local = SessionDescription(sdp.type, forceOpus32k(sdp.description))
             peerConnectionOrThrow().setLocalDescription(object : SimpleSdpObserver() {
                 override fun onSetSuccess() {
+                    Log.i(TAG, "setLocalDescription ${local.type} 成功: ${sdpSummary(local.description)}")
                     mainHandler.post { onLocalSdpGenerated(local.toJson()) }
+                }
+
+                override fun onSetFailure(error: String) {
+                    val failure = IllegalStateException("setLocalDescription ${local.type} 失败: $error")
+                    Log.e(TAG, failure.message, failure)
+                    postError(failure)
                 }
             }, local)
         }
 
         override fun onSetSuccess() = Unit
-        override fun onCreateFailure(error: String) = postError(IllegalStateException(error))
-        override fun onSetFailure(error: String) = postError(IllegalStateException(error))
+        override fun onCreateFailure(error: String) {
+            val failure = IllegalStateException("创建 SDP 失败: $error")
+            Log.e(TAG, failure.message, failure)
+            postError(failure)
+        }
+
+        override fun onSetFailure(error: String) {
+            val failure = IllegalStateException("设置 SDP 失败: $error")
+            Log.e(TAG, failure.message, failure)
+            postError(failure)
+        }
     }
 
     private fun setRemoteDescription(remoteSdpJson: String, onSet: () -> Unit) {
         try {
-            Log.i(TAG, "setRemoteDescription 开始")
             val remote = sessionDescriptionFromJson(remoteSdpJson)
+            Log.i(TAG, "setRemoteDescription ${remote.type} 开始: ${sdpSummary(remote.description)}")
             peerConnectionOrThrow().setRemoteDescription(object : SimpleSdpObserver() {
                 override fun onSetSuccess() {
                     Log.i(TAG, "setRemoteDescription 成功")
@@ -300,6 +483,8 @@ class RiderAudioEngine(
                     pendingRemoteCandidates.forEach {
                         if (!peerConnectionOrThrow().addIceCandidate(it)) {
                             Log.e(TAG, "补交 ICE candidate 失败")
+                        } else {
+                            Log.i(TAG, "补交 ICE candidate 成功: ${candidateSummary(it)}")
                         }
                     }
                     pendingRemoteCandidates.clear()
@@ -320,10 +505,12 @@ class RiderAudioEngine(
 
     private fun observer(): PeerConnection.Observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) {
+            Log.i(TAG, "生成本地 ICE candidate: ${candidateSummary(candidate)}")
             mainHandler.post { onLocalIceCandidateGenerated(candidate.toJson()) }
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
+            Log.i(TAG, "PeerConnection state=$newState")
             mainHandler.post { onConnectionStateChanged(newState) }
         }
 
@@ -339,10 +526,21 @@ class RiderAudioEngine(
             stream.audioTracks.forEach { enableRemoteTrack(it) }
         }
 
-        override fun onSignalingChange(state: PeerConnection.SignalingState) = Unit
-        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) = Unit
-        override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
-        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) = Unit
+        override fun onSignalingChange(state: PeerConnection.SignalingState) {
+            Log.i(TAG, "Signaling state=$state")
+        }
+
+        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
+            Log.i(TAG, "ICE connection state=$state")
+        }
+
+        override fun onIceConnectionReceivingChange(receiving: Boolean) {
+            Log.i(TAG, "ICE receiving=$receiving")
+        }
+
+        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {
+            Log.i(TAG, "ICE gathering state=$state")
+        }
         override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) = Unit
         override fun onRemoveStream(stream: MediaStream) = Unit
         override fun onDataChannel(dataChannel: DataChannel) = Unit
@@ -455,6 +653,22 @@ class RiderAudioEngine(
         .put("candidate", sdp)
         .toString()
 
+    private fun candidateSummary(candidate: IceCandidate): String =
+        "mid=${candidate.sdpMid} mLine=${candidate.sdpMLineIndex} ${candidate.sdp}"
+
+    private fun sdpSummary(sdp: String): String {
+        val lines = sdp.lineSequence()
+            .filter {
+                it.startsWith("m=") ||
+                    it.startsWith("c=") ||
+                    it.startsWith("a=candidate:") ||
+                    it.startsWith("a=ice-ufrag:")
+            }
+            .take(12)
+            .toList()
+        return lines.joinToString(" | ").ifBlank { "无候选摘要" }
+    }
+
     private fun sessionDescriptionFromJson(json: String): SessionDescription {
         val obj = JSONObject(json)
         return SessionDescription(
@@ -484,7 +698,22 @@ class RiderAudioEngine(
         private const val STREAM_ID = "rider_audio_stream"
         private const val AUDIO_TRACK_ID = "rider_audio_track"
         private const val OPUS_BITRATE_BPS = 32_000
-        private const val VOX_THRESHOLD_DB = 45.0
+        private const val VOX_GATE_ENABLED = true
+        private const val VOX_OPEN_VOLUME = 1.0
+        private const val VOX_MUTED_VOLUME = 0.0
+        private const val VOX_BASE_OPEN_THRESHOLD = 40.0
+        private const val VOX_NOISE_MARGIN = 8.0
+        private const val VOX_HYSTERESIS = 5.0
+        private const val VOX_ATTACK_MS = 25L
+        private const val VOX_RELEASE_DEBOUNCE_MS = 120L
+        private const val VOX_HANGOVER_MS = 700L
+        private const val VOX_CALIBRATION_MS = 500L
+        private const val VOX_CALIBRATION_ALPHA = 0.10
+        private const val VOX_NOISE_ALPHA = 0.02
+        private const val VOX_INITIAL_NOISE_FLOOR = 32.0
+        private const val VOX_MIN_NOISE_FLOOR = 20.0
+        private const val VOX_MAX_NOISE_FLOOR = 55.0
+        private const val VOX_LOG_INTERVAL_MS = 1_000L
         private const val PCM_DBFS_TO_APPROX_SPL_OFFSET = 90.0
         private const val AUDIO_LEVEL_INTERVAL_MS = 80L
         private const val OPUS_FMTP =

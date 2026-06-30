@@ -202,9 +202,14 @@ class IntercomService : Service() {
         wifiTunnel = WifiDirectTunnel(
             context = this,
             onTunnelReady = ::onTunnelReady,
+            localNickname = requestedRiderName.ifBlank { "骑士" },
             onPeersChanged = {
                 publishLog("发现附近设备：${it.size}")
                 if (it.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
+            },
+            onDiscoveryStatus = {
+                publishStatus(it)
+                publishLog(it)
             },
             onDisconnected = { publishStatus(SIGNAL_LOST_STATUS) },
             onError = ::handleError
