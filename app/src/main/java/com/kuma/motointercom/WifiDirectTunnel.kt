@@ -71,8 +71,13 @@ class WifiDirectTunnel(
     private var serverSocket: ServerSocket? = null
     private var signalingSocket: Socket? = null
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
+    private val pendingPeers = linkedMapOf<String, WifiP2pDevice>()
     private val acceptedPeers = linkedMapOf<String, WifiP2pDevice>()
     private var selectedPeer: WifiP2pDevice? = null
+    private var pendingRetryAttempt = 0
+    private var pendingRetryGeneration = 0
+    private var pendingRetryScheduled = false
+    private var serviceDiscoveryReady = false
     private val sessionId = UUID.randomUUID().toString()
 
     private val receiver = object : BroadcastReceiver() {
@@ -94,6 +99,8 @@ class WifiDirectTunnel(
                     )
                     if (networkInfo?.isConnected == true) {
                         requestConnectionInfo()
+                    } else if (connectingAddress != null && signalingSocket == null) {
+                        Log.d(TAG, "ignore disconnected broadcast while connecting: $connectingAddress")
                     } else {
                         resetTunnelOnly()
                         if (running) mainHandler.post { onDisconnected() }
@@ -119,11 +126,23 @@ class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     fun discoverPeers() {
         if (!running) return
+        if (!serviceDiscoveryReady) {
+            Log.d(TAG, "discoverServices skipped: service request not ready")
+            return
+        }
         val m = manager ?: return
         val c = channel ?: return
 
         try {
-            m.discoverServices(c, action("开始搜索 MotoCom 服务失败"))
+            Log.d(TAG, "discoverServices start pending=${pendingPeers.size} accepted=${acceptedPeers.size}")
+            m.discoverServices(
+                c,
+                action(
+                    "开始搜索 MotoCom 服务失败",
+                    onFailed = { Log.w(TAG, "discoverServices failure") },
+                    onSuccess = { Log.d(TAG, "discoverServices success") }
+                )
+            )
         } catch (t: Throwable) {
             postError(t)
         }
@@ -149,9 +168,13 @@ class WifiDirectTunnel(
         }
 
         try {
-            m.connect(c, config, action("连接 ${device.deviceName} 失败") {
-                connectingAddress = null
-            })
+            cancelPendingRetry()
+            Log.d(TAG, "connect start selectedPeer=${peerSummary(device)}")
+            m.connect(
+                c,
+                config,
+                action("连接 ${device.deviceName} 失败", onFailed = { connectingAddress = null })
+            )
         } catch (t: Throwable) {
             connectingAddress = null
             postError(t)
@@ -168,8 +191,11 @@ class WifiDirectTunnel(
         } catch (_: Throwable) {
         }
         serviceRequest = null
+        serviceDiscoveryReady = false
+        pendingPeers.clear()
         acceptedPeers.clear()
         selectedPeer = null
+        cancelPendingRetry()
         try {
             channel?.close()
         } catch (_: Throwable) {
@@ -245,6 +271,7 @@ class WifiDirectTunnel(
         if (!running) return
         val m = manager ?: return
         val c = channel ?: return
+        resetDiscoveryCandidates()
 
         m.setDnsSdResponseListeners(
             c,
@@ -271,9 +298,11 @@ class WifiDirectTunnel(
         try {
             m.clearLocalServices(c, action("清理本机 P2P 服务失败", onSuccess = {
                 m.addLocalService(c, serviceInfo, action("发布 MotoCom P2P 服务失败", onSuccess = {
-                    Log.d(TAG, "已发布 MotoCom 服务: $record")
+                    Log.d(TAG, "local service publish success: $record")
                     m.clearServiceRequests(c, action("清理 P2P 服务请求失败", onSuccess = {
                         m.addServiceRequest(c, request, action("添加 MotoCom 服务请求失败", onSuccess = {
+                            serviceDiscoveryReady = true
+                            Log.d(TAG, "service request add success type=$SERVICE_TYPE")
                             discoverPeers()
                         }))
                     }))
@@ -285,6 +314,7 @@ class WifiDirectTunnel(
     }
 
     private fun handleTxtRecord(record: Map<String, String>, device: WifiP2pDevice) {
+        Log.d(TAG, "TXT received from ${peerSummary(device)} record=$record")
         val reason = when {
             record[TXT_APP_ID] != APP_ID -> "appId 不匹配"
             record[TXT_PROTOCOL_VERSION] != PROTOCOL_VERSION -> "protocolVersion 不兼容"
@@ -308,6 +338,11 @@ class WifiDirectTunnel(
         registrationType: String,
         device: WifiP2pDevice
     ) {
+        Log.d(
+            TAG,
+            "service instance received from ${peerSummary(device)} " +
+                "instance=$instanceName type=$registrationType"
+        )
         val validInstance = instanceName.startsWith("$SERVICE_INSTANCE_PREFIX-")
         val validType = registrationType.startsWith("$SERVICE_TYPE.")
         if (!validInstance || !validType) {
@@ -326,7 +361,12 @@ class WifiDirectTunnel(
     private fun acceptPeer(device: WifiP2pDevice, reason: String) {
         if (device.deviceAddress.isBlank()) return
 
+        val wasPending = pendingPeers.remove(device.deviceAddress) != null
         acceptedPeers[device.deviceAddress] = device
+        Log.d(TAG, "peer accepted: ${peerSummary(device)} reason=$reason pendingBefore=$wasPending")
+        if (wasPending) {
+            Log.d(TAG, "pending -> accepted: ${peerSummary(device)} pending=${pendingPeers.size}")
+        }
         logPeer(device, accepted = true, reason = reason)
         if (selectedPeer == null) {
             selectedPeer = device
@@ -334,7 +374,11 @@ class WifiDirectTunnel(
         }
         mainHandler.post { onPeersChanged(acceptedPeers.values.toList()) }
         if (autoConnect && connectingAddress == null && signalingSocket == null) {
-            selectedPeer?.let(::connect)
+            cancelPendingRetry()
+            selectedPeer?.let {
+                Log.d(TAG, "accepted peer triggers connect: ${peerSummary(it)}")
+                connect(it)
+            }
         }
     }
 
@@ -376,17 +420,26 @@ class WifiDirectTunnel(
                 val peers = list.deviceList.toList()
                 peers.forEach { peer ->
                     val accepted = acceptedPeers.containsKey(peer.deviceAddress)
-                    logPeer(
-                        peer,
-                        accepted = accepted,
-                        reason = if (accepted) "已通过 MotoCom 服务校验" else "尚无 MotoCom TXT 身份"
-                    )
+                    if (accepted) {
+                        logPeer(peer, accepted = true, reason = "已通过 MotoCom 服务校验")
+                    } else if (peer.deviceAddress.isNotBlank()) {
+                        val added = !pendingPeers.containsKey(peer.deviceAddress)
+                        pendingPeers[peer.deviceAddress] = peer
+                        logPeerPending(peer, "等待 MotoCom TXT/service 身份")
+                        if (added) {
+                            Log.d(
+                                TAG,
+                                "pending peer added: ${peerSummary(peer)} pending=${pendingPeers.size}"
+                            )
+                        }
+                    }
                 }
                 val motoComPeers = peers.filter { acceptedPeers.containsKey(it.deviceAddress) }
                 mainHandler.post { onPeersChanged(motoComPeers) }
                 if (peers.isNotEmpty() && motoComPeers.isEmpty()) {
                     postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
                 }
+                schedulePendingRetryIfNeeded()
             }
         } catch (t: Throwable) {
             postError(t)
@@ -460,7 +513,8 @@ class WifiDirectTunnel(
             "校验 P2P group: selectedPeer=${target?.let(::peerSummary)} " +
                 "groupOwner=${group.owner?.let(::peerSummary)} networkName=${group.networkName} " +
                 "interface=${group.`interface`} clients=$clientAddresses " +
-                "localP2pIp=${localP2pIp(group.`interface`)} isGroupOwner=${info.isGroupOwner}"
+                "localP2pIp=${localP2pIp(group.`interface`)} isGroupOwner=${info.isGroupOwner} " +
+                "targetMatches=$targetMatches attempt=$attempt"
         )
 
         if (!targetMatches && attempt < GROUP_VALIDATION_RETRIES) {
@@ -539,8 +593,7 @@ class WifiDirectTunnel(
     private fun finishGroupRemoval() {
         removingGroup = false
         connectingAddress = null
-        selectedPeer = null
-        acceptedPeers.clear()
+        resetDiscoveryCandidates()
         mainHandler.postDelayed(
             { if (running) setupServiceDiscovery() },
             GROUP_REMOVAL_SETTLE_MS
@@ -611,6 +664,53 @@ class WifiDirectTunnel(
         serverSocket = null
     }
 
+    private fun resetDiscoveryCandidates() {
+        cancelPendingRetry()
+        serviceDiscoveryReady = false
+        pendingPeers.clear()
+        acceptedPeers.clear()
+        selectedPeer = null
+    }
+
+    private fun cancelPendingRetry() {
+        pendingRetryGeneration++
+        pendingRetryAttempt = 0
+        pendingRetryScheduled = false
+    }
+
+    private fun schedulePendingRetryIfNeeded() {
+        if (!running || pendingPeers.isEmpty() || acceptedPeers.isNotEmpty()) return
+        if (connectingAddress != null || signalingSocket != null || pendingRetryScheduled) return
+
+        if (pendingRetryAttempt >= PENDING_DISCOVERY_RETRY_COUNT) {
+            Log.w(
+                TAG,
+                "retry discoverServices exhausted pending=${pendingPeers.size} " +
+                    "max=$PENDING_DISCOVERY_RETRY_COUNT"
+            )
+            return
+        }
+
+        val generation = pendingRetryGeneration
+        val attempt = pendingRetryAttempt + 1
+        pendingRetryScheduled = true
+        mainHandler.postDelayed({
+            pendingRetryScheduled = false
+            if (!running || generation != pendingRetryGeneration) return@postDelayed
+            if (pendingPeers.isEmpty() || acceptedPeers.isNotEmpty()) return@postDelayed
+            if (connectingAddress != null || signalingSocket != null) return@postDelayed
+
+            pendingRetryAttempt = attempt
+            Log.d(
+                TAG,
+                "retry discoverServices attempt=$attempt/$PENDING_DISCOVERY_RETRY_COUNT " +
+                    "pending=${pendingPeers.size}"
+            )
+            discoverPeers()
+            schedulePendingRetryIfNeeded()
+        }, PENDING_DISCOVERY_RETRY_DELAY_MS)
+    }
+
     private fun action(
         message: String,
         onFailed: () -> Unit = {},
@@ -648,6 +748,10 @@ class WifiDirectTunnel(
             TAG,
             "P2P peer ${if (accepted) "ACCEPT" else "REJECT"}: ${peerSummary(device)} reason=$reason"
         )
+    }
+
+    private fun logPeerPending(device: WifiP2pDevice, reason: String) {
+        Log.d(TAG, "P2P peer PENDING: ${peerSummary(device)} reason=$reason")
     }
 
     private fun peerSummary(device: WifiP2pDevice): String =
@@ -709,6 +813,8 @@ class WifiDirectTunnel(
         private const val GROUP_REMOVAL_SETTLE_MS = 500L
         private const val GROUP_VALIDATION_RETRY_MS = 500L
         private const val GROUP_VALIDATION_RETRIES = 20
+        private const val PENDING_DISCOVERY_RETRY_DELAY_MS = 1_500L
+        private const val PENDING_DISCOVERY_RETRY_COUNT = 4
         private const val BUSY_STATUS = "无线占用中，正在自动复位重试..."
         private const val NO_MOTOCOM_PEER_STATUS = "发现附近 P2P 设备，但未发现 MotoCom 车友"
         private const val TAG = "MotoComP2P"
