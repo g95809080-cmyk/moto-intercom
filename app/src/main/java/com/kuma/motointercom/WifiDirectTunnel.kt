@@ -77,6 +77,7 @@ class WifiDirectTunnel(
     private var pendingRetryAttempt = 0
     private var pendingRetryGeneration = 0
     private var pendingRetryScheduled = false
+    private var connectWatchdogGeneration = 0
     private var serviceDiscoveryReady = false
     private val sessionId = UUID.randomUUID().toString()
 
@@ -137,7 +138,7 @@ class WifiDirectTunnel(
             Log.d(TAG, "discoverServices start pending=${pendingPeers.size} accepted=${acceptedPeers.size}")
             m.discoverServices(
                 c,
-                action(
+                discoverAction(
                     "开始搜索 MotoCom 服务失败",
                     onFailed = { Log.w(TAG, "discoverServices failure") },
                     onSuccess = { Log.d(TAG, "discoverServices success") }
@@ -161,6 +162,7 @@ class WifiDirectTunnel(
         val m = manager ?: return
         val c = channel ?: return
         connectingAddress = device.deviceAddress
+        startConnectWatchdog(device.deviceAddress)
 
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
@@ -173,9 +175,13 @@ class WifiDirectTunnel(
             m.connect(
                 c,
                 config,
-                action("连接 ${device.deviceName} 失败", onFailed = { connectingAddress = null })
+                action("连接 ${device.deviceName} 失败", onFailed = {
+                    cancelConnectWatchdog()
+                    connectingAddress = null
+                })
             )
         } catch (t: Throwable) {
+            cancelConnectWatchdog()
             connectingAddress = null
             postError(t)
         }
@@ -196,6 +202,7 @@ class WifiDirectTunnel(
         acceptedPeers.clear()
         selectedPeer = null
         cancelPendingRetry()
+        cancelConnectWatchdog()
         try {
             channel?.close()
         } catch (_: Throwable) {
@@ -296,11 +303,11 @@ class WifiDirectTunnel(
         serviceRequest = request
 
         try {
-            m.clearLocalServices(c, action("清理本机 P2P 服务失败", onSuccess = {
-                m.addLocalService(c, serviceInfo, action("发布 MotoCom P2P 服务失败", onSuccess = {
+            m.clearLocalServices(c, setupAction("清理本机 P2P 服务失败", onSuccess = {
+                m.addLocalService(c, serviceInfo, setupAction("发布 MotoCom P2P 服务失败", onSuccess = {
                     Log.d(TAG, "local service publish success: $record")
-                    m.clearServiceRequests(c, action("清理 P2P 服务请求失败", onSuccess = {
-                        m.addServiceRequest(c, request, action("添加 MotoCom 服务请求失败", onSuccess = {
+                    m.clearServiceRequests(c, setupAction("清理 P2P 服务请求失败", onSuccess = {
+                        m.addServiceRequest(c, request, setupAction("添加 MotoCom 服务请求失败", onSuccess = {
                             serviceDiscoveryReady = true
                             Log.d(TAG, "service request add success type=$SERVICE_TYPE")
                             discoverPeers()
@@ -541,6 +548,7 @@ class WifiDirectTunnel(
 
         validatingGroup = false
         tunnelStarted = true
+        cancelConnectWatchdog()
         Log.d(
             TAG,
             "MotoCom P2P group 校验通过: groupOwner=$ownerAddress networkName=${group.networkName} " +
@@ -567,6 +575,7 @@ class WifiDirectTunnel(
         val c = channel ?: return
         removingGroup = true
         resetTunnelOnly()
+        cancelConnectWatchdog()
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
@@ -652,6 +661,7 @@ class WifiDirectTunnel(
         tunnelStarted = false
         validatingGroup = false
         connectingAddress = null
+        cancelConnectWatchdog()
         try {
             signalingSocket?.close()
         } catch (_: Throwable) {
@@ -711,10 +721,62 @@ class WifiDirectTunnel(
         }, PENDING_DISCOVERY_RETRY_DELAY_MS)
     }
 
-    private fun action(
+    private fun startConnectWatchdog(peerAddress: String) {
+        val generation = ++connectWatchdogGeneration
+        mainHandler.postDelayed({
+            if (!running || generation != connectWatchdogGeneration) return@postDelayed
+            if (tunnelStarted || signalingSocket != null || connectingAddress != peerAddress) {
+                return@postDelayed
+            }
+
+            Log.w(TAG, "P2P connect timeout: peer=$peerAddress")
+            connectingAddress = null
+            removeGroupAndRediscover("P2P connect timeout")
+        }, CONNECT_WATCHDOG_MS)
+    }
+
+    private fun cancelConnectWatchdog() {
+        connectWatchdogGeneration++
+    }
+
+    private fun setupAction(
         message: String,
         onFailed: () -> Unit = {},
         onSuccess: () -> Unit = {}
+    ) = action(
+        message = message,
+        onFailed = onFailed,
+        onSuccess = onSuccess,
+        onBusy = {
+            Log.w(TAG, "setup BUSY retry setupServiceDiscovery")
+            resetTunnelOnly()
+            mainHandler.postDelayed({ if (running) setupServiceDiscovery() }, BUSY_RETRY_DELAY_MS)
+        }
+    )
+
+    private fun discoverAction(
+        message: String,
+        onFailed: () -> Unit = {},
+        onSuccess: () -> Unit = {}
+    ) = action(
+        message = message,
+        onFailed = onFailed,
+        onSuccess = onSuccess,
+        onBusy = {
+            Log.w(TAG, "discover BUSY retry discoverServices")
+            resetTunnelOnly()
+            mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
+        }
+    )
+
+    private fun action(
+        message: String,
+        onFailed: () -> Unit = {},
+        onSuccess: () -> Unit = {},
+        onBusy: () -> Unit = {
+            resetTunnelOnly()
+            mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
+        }
     ) =
         object : WifiP2pManager.ActionListener {
             override fun onSuccess() = onSuccess()
@@ -723,8 +785,7 @@ class WifiDirectTunnel(
                 onFailed()
                 if (reason == WifiP2pManager.BUSY) {
                     postError(IllegalStateException(BUSY_STATUS))
-                    resetTunnelOnly()
-                    mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
+                    onBusy()
                 } else {
                     postError(IllegalStateException("$message: ${reasonText(reason)}"))
                 }
@@ -732,6 +793,7 @@ class WifiDirectTunnel(
         }
 
     private fun postReady(targetIp: String, isServer: Boolean, socket: Socket) {
+        cancelConnectWatchdog()
         mainHandler.post { onTunnelReady(targetIp, isServer, socket) }
     }
 
@@ -807,6 +869,7 @@ class WifiDirectTunnel(
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 3_000
+        private const val CONNECT_WATCHDOG_MS = 12_000L
         private const val CLIENT_RETRY_DELAY_MS = 500L
         private const val CLIENT_RETRY_COUNT = 20
         private const val BUSY_RETRY_DELAY_MS = 1_000L
