@@ -26,12 +26,10 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -40,30 +38,40 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * 摩声遥控器面板。
+ * 摩声主控面板。
  *
  * 对讲核心常驻在 IntercomService；Activity 只负责权限、启动/停止按钮和状态显示。
  */
 class MainActivity : Activity(), IntercomService.Listener {
 
     private lateinit var statusText: TextView
+    private lateinit var statusDetailText: TextView
+    private lateinit var remoteRiderText: TextView
     private lateinit var audioSourceText: TextView
+    private lateinit var audioRouteStateText: TextView
     private lateinit var logText: TextView
     private lateinit var actionButton: Button
     private lateinit var riderNameInput: EditText
-    private lateinit var contentRoot: FrameLayout
+    private lateinit var contentRoot: LinearLayout
+    private lateinit var logScroll: ScrollView
     private lateinit var rippleView: RippleView
     private lateinit var visualizerView: VisualizerView
-    private lateinit var deviceListView: ListView
-    private lateinit var deviceAdapter: ArrayAdapter<String>
+    private lateinit var deviceListContainer: LinearLayout
+    private lateinit var deviceEmptyText: TextView
+    private lateinit var wifiDirectPill: TextView
+    private lateinit var webRtcPill: TextView
+    private lateinit var voxPill: TextView
+    private lateinit var bluetoothPill: TextView
+    private lateinit var voxListeningPill: TextView
+    private lateinit var voxOpenPill: TextView
+    private lateinit var voxHangoverPill: TextView
 
     private var intercomService: IntercomService? = null
     private var serviceBound = false
     private var intercomRunning = false
+    private var mediaConnected = false
     private var currentButtonColor = DISABLED_BUTTON_COLOR
-    private var currentBackgroundColor = BACKGROUND_IDLE_COLOR
     private var buttonColorAnimator: ValueAnimator? = null
-    private var backgroundColorAnimator: ValueAnimator? = null
     private val lanDevices = mutableListOf<IntercomService.LanRiderDevice>()
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 
@@ -121,27 +129,22 @@ class MainActivity : Activity(), IntercomService.Listener {
     }
 
     override fun onAudioSourceChanged(status: String, bluetooth: Boolean) {
-        runOnUiThread {
-            audioSourceText.text = status
-            audioSourceText.setTextColor(
-                if (bluetooth) Color.rgb(0, 230, 118) else Color.rgb(120, 120, 120)
-            )
-        }
+        runOnUiThread { updateAudioSource(status, bluetooth) }
     }
 
     override fun onLanDevicesChanged(devices: List<IntercomService.LanRiderDevice>) {
         runOnUiThread {
             lanDevices.clear()
             lanDevices.addAll(devices)
-            deviceAdapter.clear()
-            deviceAdapter.addAll(devices.map { "${it.name}  ${it.ip}" })
-            deviceAdapter.notifyDataSetChanged()
-            deviceListView.visibility = if (devices.isEmpty()) View.GONE else View.VISIBLE
+            renderLanDevices()
         }
     }
 
     override fun onAudioLevelChanged(level: Float) {
-        runOnUiThread { visualizerView.setAmplitude(level) }
+        runOnUiThread {
+            visualizerView.setAmplitude(level)
+            updateVoxDisplay(level)
+        }
     }
 
     override fun onLog(message: String) {
@@ -153,7 +156,10 @@ class MainActivity : Activity(), IntercomService.Listener {
     }
 
     override fun onRemoteRiderIdentified(name: String) {
-        appendLog("远端骑士昵称：$name")
+        runOnUiThread {
+            remoteRiderText.text = name.ifBlank { "等待车友加入" }
+            appendLog("远端骑士昵称：$name")
+        }
     }
 
     override fun onError(message: String) {
@@ -162,42 +168,42 @@ class MainActivity : Activity(), IntercomService.Listener {
     }
 
     private fun buildSimpleUi() {
-        audioSourceText = TextView(this).apply {
-            text = "当前音频源：待机"
-            textSize = 14f
-            setTypeface(Typeface.DEFAULT_BOLD)
-            setTextColor(Color.rgb(120, 120, 120))
+        window.statusBarColor = SURFACE_COLOR
+        window.navigationBarColor = SURFACE_COLOR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        }
+
+        statusText = createText("正在检查权限...", 20f, TEXT_PRIMARY, Typeface.BOLD).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(12), 0, dp(12), 0)
+        }
+        statusDetailText = createText("一对一对讲 · 无需网络", 13f, TEXT_SECONDARY, Typeface.NORMAL).apply {
+            gravity = Gravity.CENTER
+        }
+        remoteRiderText = createText("等待车友加入", 24f, TEXT_PRIMARY, Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+        }
+        audioSourceText = createText("当前音频源：待机", 15f, TEXT_PRIMARY, Typeface.BOLD)
+        audioRouteStateText = createText("待机", 13f, TEXT_SECONDARY, Typeface.NORMAL)
+        logText = createText("", 12f, TEXT_SECONDARY, Typeface.NORMAL).apply {
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(FIELD_COLOR, dp(12))
         }
 
         riderNameInput = EditText(this).apply {
-            textSize = 18f
+            textSize = 16f
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             hint = getString(R.string.edit_text_hint)
             setText(prefs.getString(KEY_RIDER_NAME, "").orEmpty())
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.rgb(150, 150, 150))
-            setPadding(dp(18), 0, dp(18), 0)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(18).toFloat()
-                setColor(Color.rgb(32, 32, 32))
-                setStroke(dp(2), Color.rgb(0, 200, 83))
-            }
-        }
-
-        statusText = TextView(this).apply {
-            textSize = 22f
-            setTextColor(Color.WHITE)
-            setTypeface(Typeface.DEFAULT_BOLD)
-            gravity = Gravity.CENTER
-            text = "正在检查权限..."
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_MUTED)
+            setPadding(dp(14), 0, dp(14), 0)
+            background = rounded(WHITE, dp(12), BORDER_COLOR, dp(1))
         }
 
         actionButton = Button(this).apply {
-            textSize = 24f
+            textSize = 16f
             setTypeface(Typeface.DEFAULT_BOLD)
             isAllCaps = false
             minWidth = 0
@@ -205,132 +211,169 @@ class MainActivity : Activity(), IntercomService.Listener {
             minimumWidth = 0
             minimumHeight = 0
             isEnabled = false
+            elevation = dp(4).toFloat()
             setOnClickListener {
                 if (intercomRunning) stopIntercom() else startIntercom()
             }
         }
         updateActionButton()
 
-        logText = TextView(this).apply {
-            textSize = 12f
-            setTextColor(Color.rgb(170, 170, 170))
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            setBackgroundColor(Color.rgb(28, 28, 28))
-        }
-
         rippleView = RippleView(this)
         visualizerView = VisualizerView(this)
 
-        deviceAdapter = object : ArrayAdapter<String>(
-            this,
-            android.R.layout.simple_list_item_1,
-            mutableListOf()
-        ) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                return (super.getView(position, convertView, parent) as TextView).apply {
-                    setTextColor(Color.WHITE)
-                    textSize = 14f
-                    setTypeface(Typeface.DEFAULT_BOLD)
-                    setBackgroundColor(Color.rgb(24, 24, 24))
-                }
-            }
+        wifiDirectPill = createPill("Wi-Fi Direct", false)
+        webRtcPill = createPill("WebRTC", false)
+        voxPill = createPill("VOX", false)
+        bluetoothPill = createPill("蓝牙耳机", false)
+        voxListeningPill = createPill("待机 / LISTENING", true)
+        voxOpenPill = createPill("开麦 / OPEN", false)
+        voxHangoverPill = createPill("保持 / HANGOVER", false)
+
+        deviceListContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        deviceEmptyText = createText("正在搜索附近 MotoCom 车友...", 13f, TEXT_SECONDARY, Typeface.NORMAL)
+
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(24))
+            background = rounded(BACKGROUND_COLOR, 0)
         }
 
-        deviceListView = ListView(this).apply {
-            visibility = View.GONE
-            adapter = deviceAdapter
-            divider = GradientDrawable().apply { setColor(Color.rgb(58, 58, 58)) }
-            dividerHeight = dp(1)
-            setBackgroundColor(Color.rgb(24, 24, 24))
-            setOnItemClickListener { _, _, position, _ ->
-                val device = lanDevices.getOrNull(position) ?: return@setOnItemClickListener
-                intercomService?.connectToLanDevice(device)
-                    ?: Toast.makeText(this@MainActivity, "后台服务未就绪", Toast.LENGTH_SHORT).show()
-            }
-        }
+        page.addView(buildHeader())
+        page.addView(buildConnectionCard(), matchWrap().withTop(dp(16)))
+        page.addView(buildAudioCard(), matchWrap().withTop(dp(12)))
+        page.addView(buildVoxCard(), matchWrap().withTop(dp(12)))
+        page.addView(buildDiscoveryCard(), matchWrap().withTop(dp(12)))
+        page.addView(buildSettingsCard(), matchWrap().withTop(dp(12)))
+        page.addView(buildLogCard(), matchWrap().withTop(dp(12)))
 
-        val statusParams = LinearLayout.LayoutParams(
+        contentRoot = page
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(BACKGROUND_COLOR)
+            isFillViewport = false
+            clipToPadding = false
+            addView(contentRoot)
+        })
+    }
+
+    private fun buildHeader(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(createIconButton("☰"))
+        row.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                addView(createText("摩声 MotoCom", 22f, TEXT_PRIMARY, Typeface.BOLD))
+                addView(createPill("一对一对讲 · 无需网络", true), wrapWrap().withTop(dp(8)))
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        row.addView(createIconButton("⚙").apply { alpha = 0.55f })
+        return row
+    }
+
+    private fun buildConnectionCard(): View {
+        val card = createCard()
+        card.gravity = Gravity.CENTER_HORIZONTAL
+        card.addView(statusText, matchWrap())
+        card.addView(statusDetailText, matchWrap().withTop(dp(6)))
+        card.addView(visualizerView, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            setMargins(dp(24), 0, dp(24), dp(20))
-        }
+            dp(58)
+        ).withTop(dp(18)))
+        card.addView(remoteRiderText, matchWrap().withTop(dp(10)))
+        card.addView(createText("对方在线状态由信令和媒体通道实时更新", 13f, TEXT_SECONDARY, Typeface.NORMAL).apply {
+            gravity = Gravity.CENTER
+        }, matchWrap().withTop(dp(4)))
+        card.addView(
+            chipRow(wifiDirectPill, webRtcPill, voxPill, bluetoothPill),
+            matchWrap().withTop(dp(16))
+        )
+        card.addView(buildMainButton(), LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(164)
+        ).withTop(dp(18)))
+        return card
+    }
 
-        val buttonContainer = FrameLayout(this).apply {
+    private fun buildMainButton(): View {
+        return FrameLayout(this).apply {
             addView(rippleView, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             ))
-            addView(actionButton, FrameLayout.LayoutParams(dp(260), dp(260), Gravity.CENTER))
+            addView(actionButton, FrameLayout.LayoutParams(dp(128), dp(128), Gravity.CENTER))
         }
+    }
 
-        val buttonParams = LinearLayout.LayoutParams(dp(330), dp(330))
+    private fun buildAudioCard(): View {
+        val card = createCard()
+        card.addView(createSectionTitle("音频输出"))
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(createIconCircle("🎧", ACCENT_GREEN_SOFT))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(audioSourceText)
+                addView(audioRouteStateText, matchWrap().withTop(dp(4)))
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).withLeft(dp(12)))
+        }
+        card.addView(row, matchWrap().withTop(dp(10)))
+        return card
+    }
 
-        val visualizerParams = LinearLayout.LayoutParams(
+    private fun buildVoxCard(): View {
+        val card = createCard()
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(createSectionTitle("VOX 状态"), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(createText("只读", 12f, TEXT_MUTED, Typeface.NORMAL))
+        }
+        card.addView(titleRow)
+        card.addView(chipRow(voxListeningPill, voxOpenPill, voxHangoverPill), matchWrap().withTop(dp(12)))
+        card.addView(createText("当前项目未暴露 VOX 设置接口，本区只展示状态，不改变底层参数。", 12f, TEXT_SECONDARY, Typeface.NORMAL), matchWrap().withTop(dp(10)))
+        return card
+    }
+
+    private fun buildDiscoveryCard(): View {
+        val card = createCard()
+        card.addView(createSectionTitle("发现车友"))
+        card.addView(createText("仅连接通过 MotoCom 身份校验的设备", 13f, TEXT_SECONDARY, Typeface.NORMAL), matchWrap().withTop(dp(4)))
+        card.addView(deviceEmptyText, matchWrap().withTop(dp(12)))
+        card.addView(deviceListContainer, matchWrap().withTop(dp(8)))
+        return card
+    }
+
+    private fun buildSettingsCard(): View {
+        val card = createCard()
+        card.addView(createSectionTitle("设置"))
+        card.addView(createText("本机昵称", 13f, TEXT_SECONDARY, Typeface.NORMAL), matchWrap().withTop(dp(12)))
+        card.addView(riderNameInput, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(54)
-        ).apply {
-            setMargins(dp(54), dp(16), dp(54), 0)
-        }
+            dp(46)
+        ).withTop(dp(6)))
+        card.addView(readOnlyRow("连接方式", "优先 Wi-Fi Direct（P2P）", "同一 Wi-Fi 下自动使用局域网发现"), matchWrap().withTop(dp(12)))
+        card.addView(readOnlyRow("高级", "日志诊断 · 帮助与反馈 · 关于我们", "本轮只做展示，不新增入口逻辑"), matchWrap().withTop(dp(10)))
+        return card
+    }
 
-        val centerPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(statusText, statusParams)
-            addView(buttonContainer, buttonParams)
-            addView(visualizerView, visualizerParams)
+    private fun buildLogCard(): View {
+        val card = createCard()
+        card.addView(createSectionTitle("日志诊断"))
+        logScroll = ScrollView(this).apply {
+            addView(logText, matchWrap())
         }
-
-        val centerParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            Gravity.CENTER
-        ).apply {
-            setMargins(0, dp(128), 0, dp(136))
-        }
-
-        val audioParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            dp(34),
-            Gravity.TOP
-        ).apply {
-            setMargins(dp(18), dp(10), dp(18), 0)
-        }
-
-        val nameParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            dp(58),
-            Gravity.TOP
-        ).apply {
-            setMargins(dp(24), dp(56), dp(24), 0)
-        }
-
-        val logParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            dp(58)
-        ).apply {
-            gravity = Gravity.BOTTOM
-            setMargins(dp(16), 0, dp(16), dp(132))
-        }
-
-        val deviceParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            dp(104)
-        ).apply {
-            gravity = Gravity.BOTTOM
-            setMargins(dp(16), 0, dp(16), dp(16))
-        }
-
-        contentRoot = FrameLayout(this).apply {
-            setBackgroundColor(BACKGROUND_IDLE_COLOR)
-            addView(audioSourceText, audioParams)
-            addView(centerPanel, centerParams)
-            addView(riderNameInput, nameParams)
-            addView(ScrollView(this@MainActivity).apply { addView(logText) }, logParams)
-            addView(deviceListView, deviceParams)
-        }
-
-        setContentView(contentRoot)
+        card.addView(logScroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(150)
+        ).withTop(dp(10)))
+        return card
     }
 
     private fun ensureRuntimePermissions() {
@@ -429,13 +472,9 @@ class MainActivity : Activity(), IntercomService.Listener {
     private fun setStatus(message: String) {
         runOnUiThread {
             statusText.text = message
-            statusText.setTextColor(
-                when {
-                    message == WIFI_OFF_STATUS -> Color.rgb(255, 82, 82)
-                    isConnectedStatus(message) -> Color.rgb(0, 230, 118)
-                    else -> Color.WHITE
-                }
-            )
+            statusText.setTextColor(statusColor(message))
+            statusDetailText.text = statusDetail(message)
+            mediaConnected = isConnectedStatus(message)
             updateMotionForStatus(message)
             appendLog(message)
         }
@@ -445,7 +484,72 @@ class MainActivity : Activity(), IntercomService.Listener {
         runOnUiThread {
             Log.d(TAG, message)
             logText.append("$message\n")
+            if (::logScroll.isInitialized) {
+                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+            }
         }
+    }
+
+    private fun updateAudioSource(status: String, bluetooth: Boolean) {
+        audioSourceText.text = status
+        audioRouteStateText.text = if (bluetooth) "蓝牙连接状态：已连接" else "手机外放 / 待机"
+        audioRouteStateText.setTextColor(if (bluetooth) ACCENT_CONNECTED else TEXT_SECONDARY)
+        bluetoothPill.applyPill(bluetooth)
+    }
+
+    private fun renderLanDevices() {
+        deviceListContainer.removeAllViews()
+        deviceEmptyText.visibility = if (lanDevices.isEmpty()) View.VISIBLE else View.GONE
+
+        lanDevices.forEachIndexed { index, device ->
+            if (index > 0) {
+                deviceListContainer.addView(
+                    separator(),
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).withTop(dp(8))
+                )
+            }
+            deviceListContainer.addView(deviceRow(device), matchWrap().withTop(dp(8)))
+        }
+    }
+
+    private fun deviceRow(device: IntercomService.LanRiderDevice): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(FIELD_COLOR, dp(14), BORDER_COLOR, dp(1))
+        }
+
+        row.addView(createIconCircle("骑", ACCENT_GREEN_SOFT))
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(createText(device.name.ifBlank { "车友" }, 16f, TEXT_PRIMARY, Typeface.BOLD))
+            addView(createText("${device.ip}:${device.port} · 局域网发现", 12f, TEXT_SECONDARY, Typeface.NORMAL), matchWrap().withTop(dp(3)))
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).withLeft(dp(10)))
+        row.addView(Button(this).apply {
+            text = "连接"
+            textSize = 14f
+            isAllCaps = false
+            setTypeface(Typeface.DEFAULT_BOLD)
+            setTextColor(Color.WHITE)
+            background = rounded(ACCENT_GREEN, dp(12))
+            minWidth = 0
+            minHeight = 0
+            minimumWidth = 0
+            minimumHeight = 0
+            setOnClickListener {
+                intercomService?.connectToLanDevice(device)
+                    ?: Toast.makeText(this@MainActivity, "后台服务未就绪", Toast.LENGTH_SHORT).show()
+            }
+        }, LinearLayout.LayoutParams(dp(76), dp(42)))
+        return row
+    }
+
+    private fun updateVoxDisplay(level: Float) {
+        val open = mediaConnected && level > 0.12f
+        voxListeningPill.applyPill(!mediaConnected)
+        voxOpenPill.applyPill(open)
+        voxHangoverPill.applyPill(mediaConnected && !open)
     }
 
     private fun hasAllRuntimePermissions(): Boolean =
@@ -489,20 +593,17 @@ class MainActivity : Activity(), IntercomService.Listener {
         rippleView.setRunning(active)
         visualizerView.setConnected(isConnectedStatus(message))
         animateButtonColor(targetButtonColor(message))
-        animateBackgroundColor(
-            when {
-                isConnectedStatus(message) -> BACKGROUND_CONNECTED_COLOR
-                isPairingStatus(message) -> BACKGROUND_PAIRING_COLOR
-                else -> BACKGROUND_IDLE_COLOR
-            }
-        )
+        wifiDirectPill.applyPill(intercomRunning || isPairingStatus(message) || isConnectedStatus(message))
+        webRtcPill.applyPill(isConnectedStatus(message) || message == MEDIA_INITIALIZING_STATUS)
+        voxPill.applyPill(isConnectedStatus(message))
+        if (!isConnectedStatus(message)) updateVoxDisplay(0f)
     }
 
     private fun targetButtonColor(message: String): Int = when {
-        isConnectedStatus(message) -> CONNECTED_BUTTON_COLOR
-        isPairingStatus(message) || intercomRunning -> PAIRING_BUTTON_COLOR
+        isConnectedStatus(message) -> ACCENT_CONNECTED
+        isPairingStatus(message) || intercomRunning -> ACCENT_GREEN
         !actionButton.isEnabled -> DISABLED_BUTTON_COLOR
-        else -> IDLE_BUTTON_COLOR
+        else -> ACCENT_GREEN
     }
 
     private fun animateButtonColor(targetColor: Int) {
@@ -521,30 +622,29 @@ class MainActivity : Activity(), IntercomService.Listener {
         }
     }
 
-    private fun animateBackgroundColor(targetColor: Int) {
-        if (!::contentRoot.isInitialized || currentBackgroundColor == targetColor) return
-        backgroundColorAnimator?.cancel()
-        backgroundColorAnimator = ValueAnimator.ofObject(
-            ArgbEvaluator(),
-            currentBackgroundColor,
-            targetColor
-        ).apply {
-            duration = COLOR_ANIMATION_MS
-            addUpdateListener {
-                currentBackgroundColor = it.animatedValue as Int
-                contentRoot.setBackgroundColor(currentBackgroundColor)
-            }
-            start()
+    private fun applyButtonColor(color: Int) {
+        actionButton.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+            setStroke(dp(7), Color.argb(60, 76, 203, 0))
         }
     }
 
-    private fun applyButtonColor(color: Int) {
-        actionButton.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(130).toFloat()
-            setColor(color)
-            setStroke(dp(4), if (color == CONNECTED_BUTTON_COLOR) Color.rgb(178, 255, 89) else Color.rgb(255, 213, 79))
-        }
+    private fun statusColor(message: String): Int = when {
+        message == WIFI_OFF_STATUS || message.contains("错误") || message.contains("缺少") -> ERROR_RED
+        isConnectedStatus(message) -> ACCENT_CONNECTED
+        isPairingStatus(message) -> ACCENT_GREEN
+        else -> TEXT_PRIMARY
+    }
+
+    private fun statusDetail(message: String): String = when {
+        isConnectedStatus(message) -> "语音通道在线，保持骑行沟通"
+        message == SIGNALING_CONNECTED_STATUS -> "信令已建立，正在准备媒体"
+        message == MEDIA_INITIALIZING_STATUS -> "正在初始化 WebRTC 音频"
+        isPairingStatus(message) -> "正在搜索附近 MotoCom 车友..."
+        message == ENDED_STATUS -> "已停止对讲，可重新启动"
+        message == WIFI_OFF_STATUS -> "需要 Wi-Fi 才能使用 P2P 或局域网发现"
+        else -> "一对一对讲 · 无需网络"
     }
 
     private fun isPairingStatus(message: String): Boolean =
@@ -556,6 +656,111 @@ class MainActivity : Activity(), IntercomService.Listener {
     private fun isConnectedStatus(message: String): Boolean =
         message == VOICE_CONNECTED_STATUS
 
+    private fun createCard(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = rounded(WHITE, dp(18), BORDER_COLOR, dp(1))
+            elevation = dp(2).toFloat()
+        }
+
+    private fun createSectionTitle(text: String): TextView =
+        createText(text, 16f, TEXT_PRIMARY, Typeface.BOLD)
+
+    private fun createText(text: String, size: Float, color: Int, style: Int): TextView =
+        TextView(this).apply {
+            this.text = text
+            textSize = size
+            setTextColor(color)
+            setTypeface(Typeface.DEFAULT, style)
+            includeFontPadding = true
+        }
+
+    private fun createPill(text: String, active: Boolean): TextView =
+        createText(text, 13f, if (active) ACCENT_CONNECTED else TEXT_SECONDARY, Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            applyPill(active)
+        }
+
+    private fun TextView.applyPill(active: Boolean) {
+        setTextColor(if (active) ACCENT_CONNECTED else TEXT_SECONDARY)
+        background = rounded(if (active) ACCENT_GREEN_SOFT else FIELD_COLOR, dp(18))
+        alpha = if (active) 1f else 0.78f
+    }
+
+    private fun createIconButton(text: String): TextView =
+        createText(text, 24f, TEXT_PRIMARY, Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            background = rounded(WHITE, dp(20), BORDER_COLOR, dp(1))
+            elevation = dp(1).toFloat()
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
+        }
+
+    private fun createIconCircle(text: String, color: Int): TextView =
+        createText(text, 18f, ACCENT_CONNECTED, Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color)
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
+        }
+
+    private fun chipRow(vararg chips: TextView): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            chips.toList().chunked(2).forEachIndexed { rowIndex, rowChips ->
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    rowChips.forEachIndexed { index, chip ->
+                        addView(chip, wrapWrap().apply { if (index > 0) leftMargin = dp(8) })
+                    }
+                }, wrapWrap().apply { if (rowIndex > 0) topMargin = dp(8) })
+            }
+        }
+
+    private fun readOnlyRow(title: String, value: String, detail: String): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(FIELD_COLOR, dp(12), BORDER_COLOR, dp(1))
+            addView(createText(title, 12f, TEXT_MUTED, Typeface.NORMAL))
+            addView(createText(value, 15f, TEXT_PRIMARY, Typeface.BOLD), matchWrap().withTop(dp(4)))
+            addView(createText(detail, 12f, TEXT_SECONDARY, Typeface.NORMAL), matchWrap().withTop(dp(3)))
+        }
+
+    private fun separator(): View =
+        View(this).apply { setBackgroundColor(BORDER_COLOR) }
+
+    private fun rounded(color: Int, radius: Int, strokeColor: Int? = null, strokeWidth: Int = 0): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius.toFloat()
+            setColor(color)
+            if (strokeColor != null && strokeWidth > 0) setStroke(strokeWidth, strokeColor)
+        }
+
+    private fun matchWrap(): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+
+    private fun wrapWrap(): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+
+    private fun LinearLayout.LayoutParams.withTop(value: Int): LinearLayout.LayoutParams =
+        apply { topMargin = value }
+
+    private fun LinearLayout.LayoutParams.withLeft(value: Int): LinearLayout.LayoutParams =
+        apply { leftMargin = value }
+
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
@@ -563,7 +768,7 @@ class MainActivity : Activity(), IntercomService.Listener {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 5f
-            color = Color.rgb(255, 213, 79)
+            color = ACCENT_GREEN
         }
         private var progress = 0f
         private var animator: ValueAnimator? = null
@@ -599,11 +804,11 @@ class MainActivity : Activity(), IntercomService.Listener {
 
             val cx = width / 2f
             val cy = height / 2f
-            val base = minOf(width, height) * 0.34f
-            val spread = minOf(width, height) * 0.16f
+            val base = minOf(width, height) * 0.32f
+            val spread = minOf(width, height) * 0.18f
             repeat(3) { index ->
                 val phase = (progress + index / 3f) % 1f
-                paint.alpha = ((1f - phase) * 90).toInt().coerceIn(0, 90)
+                paint.alpha = ((1f - phase) * 80).toInt().coerceIn(0, 80)
                 canvas.drawCircle(cx, cy, base + spread * phase, paint)
             }
         }
@@ -617,7 +822,7 @@ class MainActivity : Activity(), IntercomService.Listener {
 
     private class VisualizerView(context: Context) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(0, 230, 118)
+            color = ACCENT_GREEN
             strokeWidth = 3f
             style = Paint.Style.STROKE
         }
@@ -657,9 +862,9 @@ class MainActivity : Activity(), IntercomService.Listener {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val rows = 5
+            val rows = 4
             val spacing = height / (rows + 1f)
-            val amp = if (connected) amplitude * height * 0.22f else 0f
+            val amp = if (connected) amplitude * height * 0.24f else height * 0.04f
             repeat(rows) { row ->
                 val centerY = spacing * (row + 1)
                 path.reset()
@@ -695,15 +900,22 @@ class MainActivity : Activity(), IntercomService.Listener {
         private const val VOICE_CONNECTED_STATUS = "语音通道已连接"
         private const val ENDED_STATUS = "对讲已结束"
         private const val WIFI_OFF_STATUS = "⚠️ 请先打开 Wi-Fi开关"
-        private const val COLOR_ANIMATION_MS = 420L
+        private const val COLOR_ANIMATION_MS = 280L
         private const val RIPPLE_ANIMATION_MS = 1_800L
         private const val WAVE_ANIMATION_MS = 420L
-        private val BACKGROUND_IDLE_COLOR = Color.rgb(18, 18, 18)
-        private val BACKGROUND_PAIRING_COLOR = Color.rgb(30, 24, 10)
-        private val BACKGROUND_CONNECTED_COLOR = Color.rgb(8, 28, 18)
-        private val DISABLED_BUTTON_COLOR = Color.rgb(70, 70, 70)
-        private val IDLE_BUTTON_COLOR = Color.rgb(78, 78, 78)
-        private val PAIRING_BUTTON_COLOR = Color.rgb(245, 181, 42)
-        private val CONNECTED_BUTTON_COLOR = Color.rgb(0, 200, 83)
+
+        private val BACKGROUND_COLOR = Color.rgb(247, 249, 252)
+        private val SURFACE_COLOR = Color.WHITE
+        private val WHITE = Color.WHITE
+        private val FIELD_COLOR = Color.rgb(248, 250, 252)
+        private val BORDER_COLOR = Color.rgb(229, 231, 235)
+        private val TEXT_PRIMARY = Color.rgb(17, 24, 39)
+        private val TEXT_SECONDARY = Color.rgb(107, 114, 128)
+        private val TEXT_MUTED = Color.rgb(156, 163, 175)
+        private val ACCENT_GREEN = Color.rgb(126, 219, 34)
+        private val ACCENT_CONNECTED = Color.rgb(76, 203, 0)
+        private val ACCENT_GREEN_SOFT = Color.rgb(237, 252, 224)
+        private val ERROR_RED = Color.rgb(239, 68, 68)
+        private val DISABLED_BUTTON_COLOR = Color.rgb(190, 197, 208)
     }
 }

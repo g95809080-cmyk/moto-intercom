@@ -3,9 +3,9 @@
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
-        <item name="android:windowFullscreen">true</item>
-        <item name="android:windowBackground">@drawable/splash_background</item>
-        <item name="android:colorAccent">#00E676</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowBackground">@color/motocom_background</item>
+        <item name="android:colorAccent">@color/motocom_accent_green</item>
     </style>
 
     <style name="SplashTheme" parent="android:style/Theme.NoTitleBar.Fullscreen">
