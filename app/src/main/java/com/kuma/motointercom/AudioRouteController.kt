@@ -18,6 +18,7 @@ import java.io.Closeable
 import java.lang.reflect.Proxy
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -196,21 +197,26 @@ class AudioRouteController(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val targetId = target.id
         mainHandler.postDelayed({
-            routeExecutor.execute {
-                if (closed.get() || !wantBluetoothSco || selectedCommunicationDeviceId != targetId) return@execute
-                val current = audioManager.communicationDevice
-                Log.i(
-                    TAG,
-                    "modern route[$reason]: delayed verify target=${deviceSummary(target)}, " +
-                        "communicationDevice=${deviceSummary(current)}"
-                )
-                if (current != null && isBluetoothCommunicationDevice(current)) {
-                    val changed = selectedCommunicationDeviceId != current.id
-                    selectedCommunicationDeviceId = current.id
-                    if (changed) mainHandler.post { onScoConnected(deviceName(current)) }
-                } else {
-                    Log.w(TAG, "modern route[$reason]: Bluetooth request still pending or blocked by system")
+            if (closed.get() || routeExecutor.isShutdown || routeExecutor.isTerminated) return@postDelayed
+            try {
+                routeExecutor.execute {
+                    if (closed.get() || !wantBluetoothSco || selectedCommunicationDeviceId != targetId) return@execute
+                    val current = audioManager.communicationDevice
+                    Log.i(
+                        TAG,
+                        "modern route[$reason]: delayed verify target=${deviceSummary(target)}, " +
+                            "communicationDevice=${deviceSummary(current)}"
+                    )
+                    if (current != null && isBluetoothCommunicationDevice(current)) {
+                        val changed = selectedCommunicationDeviceId != current.id
+                        selectedCommunicationDeviceId = current.id
+                        if (changed) mainHandler.post { onScoConnected(deviceName(current)) }
+                    } else {
+                        Log.w(TAG, "modern route[$reason]: Bluetooth request still pending or blocked by system")
+                    }
                 }
+            } catch (_: RejectedExecutionException) {
+                if (!closed.get()) Log.w(TAG, "modern route[$reason]: delayed verify rejected")
             }
         }, MODERN_ROUTE_VERIFY_DELAY_MS)
     }
