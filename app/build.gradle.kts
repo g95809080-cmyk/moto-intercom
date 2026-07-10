@@ -18,4 +18,5 @@ android {
 dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("io.getstream:stream-webrtc-android:1.3.9")
+    testImplementation("junit:junit:4.13.2")
 }
