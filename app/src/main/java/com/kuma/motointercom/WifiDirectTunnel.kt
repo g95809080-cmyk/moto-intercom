@@ -570,6 +570,11 @@ class WifiDirectTunnel(
 
     @SuppressLint("MissingPermission")
     private fun removeGroupAndRediscover(reason: String) {
+        removeGroupAndRediscover(reason, attempt = 1)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun removeGroupAndRediscover(reason: String, attempt: Int) {
         if (removingGroup) return
         val m = manager ?: return
         val c = channel ?: return
@@ -586,6 +591,28 @@ class WifiDirectTunnel(
                 override fun onFailure(code: Int) {
                     Log.w(TAG, "removeGroup 失败: reason=$reason code=${reasonText(code)}")
                     removingGroup = false
+                    if (code == WifiP2pManager.BUSY) {
+                        if (attempt < REMOVE_GROUP_BUSY_RETRY_COUNT) {
+                            Log.w(
+                                TAG,
+                                "removeGroup BUSY retry attempt=${attempt + 1}/$REMOVE_GROUP_BUSY_RETRY_COUNT " +
+                                    "reason=$reason"
+                            )
+                            mainHandler.postDelayed(
+                                { if (running) removeGroupAndRediscover(reason, attempt + 1) },
+                                BUSY_RETRY_DELAY_MS
+                            )
+                        } else {
+                            Log.w(TAG, "removeGroup BUSY exhausted, rediscover anyway: reason=$reason")
+                            resetDiscoveryCandidates()
+                            mainHandler.postDelayed(
+                                { if (running) setupServiceDiscovery() },
+                                GROUP_REMOVAL_SETTLE_MS
+                            )
+                        }
+                        return
+                    }
+
                     postError(IllegalStateException("清理错误 P2P group 失败: ${reasonText(code)}"))
                     mainHandler.postDelayed(
                         { if (running) clearUntrustedGroupBeforeDiscovery() },
@@ -731,6 +758,13 @@ class WifiDirectTunnel(
 
             Log.w(TAG, "P2P connect timeout: peer=$peerAddress")
             connectingAddress = null
+            selectedPeer = null
+            acceptedPeers.clear()
+            pendingPeers.clear()
+            serviceDiscoveryReady = false
+            cancelPendingRetry()
+            Log.w(TAG, "P2P connect timeout cleanup: peer=$peerAddress")
+            Log.d(TAG, "reset discovery candidates after connect timeout")
             removeGroupAndRediscover("P2P connect timeout")
         }, CONNECT_WATCHDOG_MS)
     }
@@ -873,6 +907,7 @@ class WifiDirectTunnel(
         private const val CLIENT_RETRY_DELAY_MS = 500L
         private const val CLIENT_RETRY_COUNT = 20
         private const val BUSY_RETRY_DELAY_MS = 1_000L
+        private const val REMOVE_GROUP_BUSY_RETRY_COUNT = 3
         private const val GROUP_REMOVAL_SETTLE_MS = 500L
         private const val GROUP_VALIDATION_RETRY_MS = 500L
         private const val GROUP_VALIDATION_RETRIES = 20
