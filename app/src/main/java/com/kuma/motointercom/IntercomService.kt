@@ -464,10 +464,24 @@ class IntercomService : Service() {
     }
 
     private fun runLanTcpServer(token: SessionGeneration.Token) {
-        val server = try {
-            ServerSocket().apply {
-                reuseAddress = true
-                bind(InetSocketAddress(LAN_TCP_PORT))
+        var claimedServer: ServerSocket? = null
+        val claimed = try {
+            sessions.claimIfCurrent(token) {
+                val candidate = ServerSocket()
+                try {
+                    candidate.reuseAddress = true
+                    candidate.bind(InetSocketAddress(LAN_TCP_PORT))
+                    if (lanServerSocket.compareAndSet(null, candidate)) {
+                        claimedServer = candidate
+                        true
+                    } else {
+                        candidate.close()
+                        false
+                    }
+                } catch (t: Throwable) {
+                    candidate.close()
+                    throw t
+                }
             }
         } catch (t: Throwable) {
             postForSession(token) {
@@ -475,10 +489,8 @@ class IntercomService : Service() {
             }
             return
         }
-        if (!sessions.claimIfCurrent(token) { lanServerSocket.compareAndSet(null, server) }) {
-            server.close()
-            return
-        }
+        if (!claimed) return
+        val server = claimedServer ?: return
         try {
             while (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) {
                 val socket = server.accept()
@@ -509,10 +521,24 @@ class IntercomService : Service() {
     }
 
     private fun runLanUdpListener(token: SessionGeneration.Token, localIp: String) {
-        val socket = try {
-            DatagramSocket(LAN_UDP_PORT).apply {
-                broadcast = true
-                soTimeout = LAN_RECEIVE_TIMEOUT_MS
+        var claimedSocket: DatagramSocket? = null
+        val claimed = try {
+            sessions.claimIfCurrent(token) {
+                val candidate = DatagramSocket(LAN_UDP_PORT)
+                try {
+                    candidate.broadcast = true
+                    candidate.soTimeout = LAN_RECEIVE_TIMEOUT_MS
+                    if (lanUdpSocket.compareAndSet(null, candidate)) {
+                        claimedSocket = candidate
+                        true
+                    } else {
+                        candidate.close()
+                        false
+                    }
+                } catch (t: Throwable) {
+                    candidate.close()
+                    throw t
+                }
             }
         } catch (t: Throwable) {
             postForSession(token) {
@@ -520,10 +546,8 @@ class IntercomService : Service() {
             }
             return
         }
-        if (!sessions.claimIfCurrent(token) { lanUdpSocket.compareAndSet(null, socket) }) {
-            socket.close()
-            return
-        }
+        if (!claimed) return
+        val socket = claimedSocket ?: return
         try {
             val buffer = ByteArray(2048)
             while (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) {
