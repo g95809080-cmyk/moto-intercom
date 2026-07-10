@@ -18,7 +18,8 @@
 - Pure logic follows RED → GREEN → REFACTOR. Android-only wiring uses compile, Lint, and physical-device checks as approved in the design.
 - Every task must pass its listed verification before its local commit.
 - Do not push, open a PR, or publish an APK.
-- Final acceptance requires MI 6 `9688fa60` and Xiaomi 13 `efcb9031`; OPPO Enco X3 must be verified by human ear on Xiaomi 13.
+- Current acceptance requires automated checks plus MI 6 `9688fa60` install/start/service/cleanup evidence.
+- Xiaomi 13, two-device audio, Bluetooth routing, and all subjective listening checks are explicitly skipped for this run and must be reported as not executed, never passed.
 
 ## Target File Map
 
@@ -1706,7 +1707,7 @@ git commit -m "refactor: extract lifecycle-safe main screen"
 
 **Interfaces:**
 
-- Consumes: debug APK and both physical device serials.
+- Consumes: debug APK and connected MI 6 serial `9688fa60`.
 - Produces: saved logs under `build/device-verification/<timestamp>/` and a nonzero exit code on machine-check failure.
 
 - [ ] **Step 1: Fix manifest, theme, and resource placement**
@@ -1763,8 +1764,7 @@ Create the complete script:
 
 ```powershell
 param(
-    [string]$Mi6 = "9688fa60",
-    [string]$Xiaomi13 = "efcb9031",
+    [string[]]$Serials = @("9688fa60"),
     [string]$Adb = "C:\Users\kuma\AppData\Local\Android\Sdk\platform-tools\adb.exe",
     [string]$Apk = "app\build\outputs\apk\debug\app-debug.apk"
 )
@@ -1789,7 +1789,7 @@ function Invoke-AdbCapture {
     }
 }
 
-foreach ($serial in @($Mi6, $Xiaomi13)) {
+foreach ($serial in $Serials) {
     $state = (& $Adb -s $serial get-state 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $state -ne "device") {
         throw "ADB device not ready: $serial state=$state"
@@ -1830,36 +1830,34 @@ foreach ($serial in @($Mi6, $Xiaomi13)) {
 Write-Output "Device evidence: $((Resolve-Path $out).Path)"
 ```
 
-The script fails immediately on a machine-check error. Human audio judgments remain outside automation.
+The script fails immediately on a machine-check error. It accepts additional serials later, but this run passes only `9688fa60`.
 
-- [ ] **Step 4: Restore Xiaomi 13 ADB and run the matrix**
+- [ ] **Step 4: Run the connected-device evidence pass**
 
-Current planning-time state: MI 6 is `device`; Xiaomi 13 is `offline`. Unlock/reconnect Xiaomi 13 until:
+Confirm MI 6 is `device`:
 
 ```powershell
 & "C:\Users\kuma\AppData\Local\Android\Sdk\platform-tools\adb.exe" devices -l
 ```
 
-shows both serials as `device`. Then run:
+Then run:
 
 ```powershell
 .\scripts\verify-device-matrix.ps1
 ```
 
-- [ ] **Step 5: Execute human acceptance**
+- [ ] **Step 5: Execute objective MI 6 checks and record skipped checks**
 
 Perform in order:
 
-1. Start both apps and grant core permissions.
-2. Confirm automatic discovery and one-to-one connection.
-3. Speak MI 6 → listen Xiaomi 13; then speak Xiaomi 13 → listen MI 6.
-4. On Xiaomi 13, confirm OPPO Enco X3 receives audio and its microphone transmits audio.
-5. Background and reopen each Activity; confirm UI matches the still-running service.
-6. Stop and immediately restart once; confirm no stale socket or callback restores old state.
-7. Force-close one side during connection; confirm the other side reports loss and can rediscover.
-8. Stop both sides; confirm `dumpsys activity services com.kuma.motointercom` has no running service and `dumpsys audio` no longer routes communication audio through the app.
+1. Install and launch on MI 6; grant RECORD_AUDIO and location permissions.
+2. Start intercom through the rendered UI; confirm `dumpsys activity services com.kuma.motointercom` shows the foreground service.
+3. Background and reopen the Activity; confirm the UI reconnects to the running service without a crash.
+4. Stop and immediately restart once; confirm logs contain no stale-socket resurrection or rejected-executor crash.
+5. Stop again; confirm the service is absent and `dumpsys audio` no longer attributes communication routing to the app.
+6. Record Xiaomi 13, two-device discovery/audio, Bluetooth routing, and human listening as `NOT RUN: unavailable hardware`.
 
-Record pass/fail beside each item in `build/device-verification/<timestamp>/acceptance.txt`. Any failed item blocks the final commit.
+Record pass/fail/not-run beside each item in `build/device-verification/<timestamp>/acceptance.txt`. A failed objective MI 6 item blocks the final commit; explicitly skipped hardware/subjective items do not.
 
 - [ ] **Step 6: Commit the verified platform cleanup**
 
