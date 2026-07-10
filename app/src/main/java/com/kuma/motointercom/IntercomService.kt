@@ -30,8 +30,8 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 后台免死对讲服务。
@@ -72,8 +72,8 @@ class IntercomService : Service() {
     private var wifiTunnel: WifiDirectTunnel? = null
     private var intercomManager: IntercomManager? = null
     private var lanExecutor: ExecutorService? = null
-    private var lanUdpSocket: DatagramSocket? = null
-    private var lanServerSocket: ServerSocket? = null
+    private val lanUdpSocket = AtomicReference<DatagramSocket?>()
+    private val lanServerSocket = AtomicReference<ServerSocket?>()
     private var nsdManager: NsdManager? = null
     private var nsdRegistrationListener: NsdManager.RegistrationListener? = null
     private var nsdDiscoveryListener: NsdManager.DiscoveryListener? = null
@@ -93,7 +93,7 @@ class IntercomService : Service() {
     private var lanNodeId = UUID.randomUUID().toString()
     private var activeSession: SessionGeneration.Token? = null
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
-    private val lanClientConnecting = AtomicBoolean(false)
+    private val lanClientConnecting = AtomicLong(NO_SESSION_TOKEN)
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -133,20 +133,28 @@ class IntercomService : Service() {
     }
 
     fun requestStart(riderName: String = "") {
-        requestedRiderName = riderName.trim()
-        if (hasRequiredRuntimePermissions()) startIntercom() else publishStatus("缺少必要权限，无法启动摩声")
+        mainHandler.post {
+            requestedRiderName = riderName.trim()
+            if (hasRequiredRuntimePermissions()) startIntercom() else publishStatus("缺少必要权限，无法启动摩声")
+        }
     }
 
     fun requestStop() {
-        stopIntercom()
-        stopSelf()
+        mainHandler.post {
+            stopIntercom()
+            stopSelf()
+        }
     }
 
     fun connectToLanDevice(device: LanRiderDevice) {
+        mainHandler.post { connectToLanDeviceOnMain(device) }
+    }
+
+    private fun connectToLanDeviceOnMain(device: LanRiderDevice) {
         val token = activeSession ?: return
-        if (!isSessionCurrent(token) || tunnelChosen.get() != NO_SESSION_TOKEN) return
+        if (tunnelChosen.get() != NO_SESSION_TOKEN) return
         val executor = lanExecutor ?: Executors.newCachedThreadPool().also { lanExecutor = it }
-        if (!lanClientConnecting.compareAndSet(false, true)) return
+        if (!claimLanClient(token)) return
 
         publishStatus(PEER_FOUND_STATUS)
         publishLog("正在点名连接车友：${device.name} / ${device.ip}")
@@ -165,8 +173,10 @@ class IntercomService : Service() {
                     closeWifiDirect = true
                 )
             } catch (t: Throwable) {
-                lanClientConnecting.set(false)
-                if (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+                releaseLanClient(token)
+                postForSession(token) {
+                    if (tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+                }
             } finally {
                 try {
                     socket?.close()
@@ -191,14 +201,14 @@ class IntercomService : Service() {
         localRiderName = ""
         lanNodeId = UUID.randomUUID().toString()
         tunnelChosen.set(NO_SESSION_TOKEN)
-        lanClientConnecting.set(false)
+        lanClientConnecting.set(NO_SESSION_TOKEN)
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
 
         audioRouteController = AudioRouteController(
             context = this,
             onScoConnected = { deviceName ->
-                if (isSessionCurrent(token)) {
+                postForSession(token) {
                     bluetoothReady = true
                     publishAudioSource("当前音频源：蓝牙耳机 ($deviceName)", bluetooth = true)
                     publishToast("头盔蓝牙已连线，对讲音频已就绪")
@@ -206,7 +216,7 @@ class IntercomService : Service() {
                 }
             },
             onScoDisconnected = {
-                if (isSessionCurrent(token)) {
+                postForSession(token) {
                     bluetoothReady = false
                     publishToast(BLUETOOTH_RETRY_STATUS)
                     publishLog(BLUETOOTH_RETRY_STATUS)
@@ -214,43 +224,39 @@ class IntercomService : Service() {
                 }
             },
             onSpeakerFallback = { noBluetooth ->
-                if (isSessionCurrent(token)) {
+                postForSession(token) {
                     bluetoothReady = false
                     publishAudioSource(AUDIO_SPEAKER_STATUS, bluetooth = false)
                     if (noBluetooth) publishToast("未检测到头盔蓝牙，已切换至手机外放")
                     updateStageStatus()
                 }
             },
-            onError = { if (isSessionCurrent(token)) handleError(it) }
+            onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.switchToBluetoothSco() }
 
         publishStatus(SEARCHING_STATUS)
         wifiTunnel = WifiDirectTunnel(
             context = this,
             onTunnelReady = { targetIp, isServer, socket ->
-                if (isSessionCurrent(token)) {
-                    onTunnelReady(token, targetIp, isServer, socket)
-                } else {
-                    closeStaleSocket(socket)
-                }
+                onTunnelReady(token, targetIp, isServer, socket)
             },
             localNickname = requestedRiderName.ifBlank { "骑士" },
             onPeersChanged = {
-                if (isSessionCurrent(token)) {
+                postForSession(token) {
                     publishLog("发现附近设备：${it.size}")
                     if (it.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
                 }
             },
             onDiscoveryStatus = {
-                if (isSessionCurrent(token)) {
+                postForSession(token) {
                     publishStatus(it)
                     publishLog(it)
                 }
             },
             onDisconnected = {
-                if (isSessionCurrent(token)) publishStatus(SIGNAL_LOST_STATUS)
+                postForSession(token) { publishStatus(SIGNAL_LOST_STATUS) }
             },
-            onError = { if (isSessionCurrent(token)) handleError(it) }
+            onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.start() }
         startLanDiscovery(token)
         startNsdDiscovery(token)
@@ -278,11 +284,24 @@ class IntercomService : Service() {
         ) {
             return closeStaleSocket(signalingSocket)
         }
-        if (!isSessionCurrent(token)) {
-            tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
-            return closeStaleSocket(signalingSocket)
+        mainHandler.post {
+            if (!isSessionCurrent(token) || tunnelChosen.get() != token.value) {
+                tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
+                closeStaleSocket(signalingSocket)
+                return@post
+            }
+            activateTunnel(token, targetIp, isServer, signalingSocket, closeWifiDirect)
         }
+        return true
+    }
 
+    private fun activateTunnel(
+        token: SessionGeneration.Token,
+        targetIp: String,
+        isServer: Boolean,
+        signalingSocket: Socket,
+        closeWifiDirect: Boolean
+    ) {
         stopLanDiscovery()
         if (closeWifiDirect) {
             try {
@@ -308,34 +327,34 @@ class IntercomService : Service() {
             onConnectionStateChanged = { onConnectionStateChanged(token, it) },
             onRemoteRiderIdentified = { onRemoteRiderIdentified(token, it) },
             onAudioLevelChanged = { onAudioLevelChanged(token, it) },
-            onError = { if (isSessionCurrent(token)) handleError(it) }
+            onError = { error -> postForSession(token) { handleError(error) } }
         ).also {
             publishStatus(MEDIA_INITIALIZING_STATUS)
             it.start()
         }
 
         updateStageStatus()
-        return true
     }
 
     private fun onConnectionStateChanged(
         token: SessionGeneration.Token,
         state: PeerConnection.PeerConnectionState
     ) {
-        if (!isSessionCurrent(token)) return
-        publishLog("WebRTC 状态：$state")
-        when (state) {
-            PeerConnection.PeerConnectionState.CONNECTED -> {
-                mediaConnected = true
-                publishStatus(VOICE_CONNECTED_STATUS)
+        postForSession(token) {
+            publishLog("WebRTC 状态：$state")
+            when (state) {
+                PeerConnection.PeerConnectionState.CONNECTED -> {
+                    mediaConnected = true
+                    publishStatus(VOICE_CONNECTED_STATUS)
+                }
+                PeerConnection.PeerConnectionState.DISCONNECTED,
+                PeerConnection.PeerConnectionState.FAILED,
+                PeerConnection.PeerConnectionState.CLOSED -> {
+                    mediaConnected = false
+                    publishStatus(SIGNAL_LOST_STATUS)
+                }
+                else -> updateStageStatus()
             }
-            PeerConnection.PeerConnectionState.DISCONNECTED,
-            PeerConnection.PeerConnectionState.FAILED,
-            PeerConnection.PeerConnectionState.CLOSED -> {
-                mediaConnected = false
-                publishStatus(SIGNAL_LOST_STATUS)
-            }
-            else -> updateStageStatus()
         }
     }
 
@@ -358,14 +377,14 @@ class IntercomService : Service() {
 
         nsdRegistrationListener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {
-                if (!isSessionCurrent(token)) return
-                nsdServiceName = info.serviceName
-                publishLog("局域网服务已上线：$nsdServiceName")
+                postForSession(token) {
+                    nsdServiceName = info.serviceName
+                    publishLog("局域网服务已上线：$nsdServiceName")
+                }
             }
 
             override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
-                if (!isSessionCurrent(token)) return
-                publishLog("局域网服务注册失败：$errorCode")
+                postForSession(token) { publishLog("局域网服务注册失败：$errorCode") }
             }
 
             override fun onServiceUnregistered(info: NsdServiceInfo) = Unit
@@ -375,19 +394,23 @@ class IntercomService : Service() {
         nsdDiscoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) = Unit
             override fun onDiscoveryStopped(serviceType: String) = Unit
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) =
-                if (isSessionCurrent(token)) publishLog("局域网扫描启动失败：$errorCode") else Unit
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                postForSession(token) { publishLog("局域网扫描启动失败：$errorCode") }
+            }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
 
             override fun onServiceFound(info: NsdServiceInfo) {
-                if (!isSessionCurrent(token)) return
-                if (info.serviceType != NSD_SERVICE_TYPE || info.serviceName == nsdServiceName) return
-                resolveNsdService(token, info)
+                postForSession(token) {
+                    if (info.serviceType != NSD_SERVICE_TYPE || info.serviceName == nsdServiceName) {
+                        return@postForSession
+                    }
+                    resolveNsdService(token, info)
+                }
             }
 
             override fun onServiceLost(info: NsdServiceInfo) {
-                if (isSessionCurrent(token)) removeLanDevice(info.serviceName)
+                postForSession(token) { removeLanDevice(info.serviceName) }
             }
         }
 
@@ -415,38 +438,50 @@ class IntercomService : Service() {
         try {
             manager.resolveService(info, object : NsdManager.ResolveListener {
                 override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                    if (isSessionCurrent(token)) publishLog("局域网设备解析失败：$errorCode")
+                    postForSession(token) { publishLog("局域网设备解析失败：$errorCode") }
                 }
 
                 override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                    if (!isSessionCurrent(token)) return
-                    val id = serviceInfo.attributeString("id").ifBlank { serviceInfo.serviceName }
-                    if (id == lanNodeId) return
-                    val ip = serviceInfo.resolvedHostAddress() ?: return
-                    val name = serviceInfo.attributeString("name").ifBlank { serviceInfo.serviceName }
-                    rememberLanDevice(
-                        LanRiderDevice(
-                            id = id,
-                            name = name,
-                            ip = ip,
-                            port = serviceInfo.port.takeIf { it > 0 } ?: LAN_TCP_PORT
+                    postForSession(token) {
+                        val id = serviceInfo.attributeString("id").ifBlank { serviceInfo.serviceName }
+                        if (id == lanNodeId) return@postForSession
+                        val ip = serviceInfo.resolvedHostAddress() ?: return@postForSession
+                        val name = serviceInfo.attributeString("name").ifBlank { serviceInfo.serviceName }
+                        rememberLanDevice(
+                            LanRiderDevice(
+                                id = id,
+                                name = name,
+                                ip = ip,
+                                port = serviceInfo.port.takeIf { it > 0 } ?: LAN_TCP_PORT
+                            )
                         )
-                    )
+                    }
                 }
             })
         } catch (t: Throwable) {
-            if (isSessionCurrent(token)) publishLog("局域网设备解析异常：${t.message}")
+            postForSession(token) { publishLog("局域网设备解析异常：${t.message}") }
         }
     }
 
     private fun runLanTcpServer(token: SessionGeneration.Token) {
-        try {
-            lanServerSocket = ServerSocket().apply {
+        val server = try {
+            ServerSocket().apply {
                 reuseAddress = true
                 bind(InetSocketAddress(LAN_TCP_PORT))
             }
+        } catch (t: Throwable) {
+            postForSession(token) {
+                if (tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            }
+            return
+        }
+        if (!sessions.claimIfCurrent(token) { lanServerSocket.compareAndSet(null, server) }) {
+            server.close()
+            return
+        }
+        try {
             while (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) {
-                val socket = lanServerSocket?.accept() ?: return
+                val socket = server.accept()
                 val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
                 if (acceptTunnel(
                         token,
@@ -456,32 +491,56 @@ class IntercomService : Service() {
                         closeWifiDirect = true
                     )
                 ) {
-                    publishLog("局域网链路已接入：$peerIp")
+                    postForSession(token) { publishLog("局域网链路已接入：$peerIp") }
                     return
                 }
             }
         } catch (t: Throwable) {
-            if (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            postForSession(token) {
+                if (tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            }
+        } finally {
+            lanServerSocket.compareAndSet(server, null)
+            try {
+                server.close()
+            } catch (_: Throwable) {
+            }
         }
     }
 
     private fun runLanUdpListener(token: SessionGeneration.Token, localIp: String) {
-        try {
-            lanUdpSocket = DatagramSocket(LAN_UDP_PORT).apply {
+        val socket = try {
+            DatagramSocket(LAN_UDP_PORT).apply {
                 broadcast = true
                 soTimeout = LAN_RECEIVE_TIMEOUT_MS
             }
+        } catch (t: Throwable) {
+            postForSession(token) {
+                if (tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            }
+            return
+        }
+        if (!sessions.claimIfCurrent(token) { lanUdpSocket.compareAndSet(null, socket) }) {
+            socket.close()
+            return
+        }
+        try {
             val buffer = ByteArray(2048)
             while (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) {
                 try {
                     val packet = DatagramPacket(buffer, buffer.size)
-                    lanUdpSocket?.receive(packet)
+                    socket.receive(packet)
                     handleLanBroadcast(token, localIp, packet)
                 } catch (_: SocketTimeoutException) {
                 }
             }
         } catch (t: Throwable) {
-            if (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            postForSession(token) {
+                if (tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            }
+        } finally {
+            lanUdpSocket.compareAndSet(socket, null)
+            socket.close()
         }
     }
 
@@ -505,7 +564,9 @@ class IntercomService : Service() {
                 }
             }
         } catch (t: Throwable) {
-            if (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            postForSession(token) {
+                if (tunnelChosen.get() == NO_SESSION_TOKEN) handleError(t)
+            }
         }
     }
 
@@ -526,10 +587,12 @@ class IntercomService : Service() {
         val peerIp = packet.address.hostAddress ?: json.optString("ip")
         if (peerIp == localIp || peerIp.isBlank()) return
 
-        publishLog("发现同一 Wi-Fi 车友：${json.optString("name")} / $peerIp")
-        if (!physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
+        postForSession(token) {
+            publishLog("发现同一 Wi-Fi 车友：${json.optString("name")} / $peerIp")
+            if (!physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
+        }
         if (compareIpv4(localIp, peerIp) <= 0) return
-        if (!lanClientConnecting.compareAndSet(false, true)) return
+        if (!claimLanClient(token)) return
 
         lanExecutor?.execute {
             var socket: Socket? = null
@@ -549,9 +612,11 @@ class IntercomService : Service() {
                     closeWifiDirect = true
                 )
             } catch (t: Throwable) {
-                lanClientConnecting.set(false)
-                if (isSessionCurrent(token) && tunnelChosen.get() == NO_SESSION_TOKEN) {
-                    publishLog("局域网连接失败：${t.message}")
+                releaseLanClient(token)
+                postForSession(token) {
+                    if (tunnelChosen.get() == NO_SESSION_TOKEN) {
+                        publishLog("局域网连接失败：${t.message}")
+                    }
                 }
             } finally {
                 try {
@@ -564,15 +629,13 @@ class IntercomService : Service() {
 
     private fun stopLanDiscovery() {
         try {
-            lanUdpSocket?.close()
+            lanUdpSocket.getAndSet(null)?.close()
         } catch (_: Throwable) {
         }
         try {
-            lanServerSocket?.close()
+            lanServerSocket.getAndSet(null)?.close()
         } catch (_: Throwable) {
         }
-        lanUdpSocket = null
-        lanServerSocket = null
         lanExecutor?.shutdownNow()
         lanExecutor = null
     }
@@ -616,7 +679,7 @@ class IntercomService : Service() {
 
     private fun publishLanDevices() {
         val snapshot = lanDevicesSnapshot()
-        mainHandler.post { listener?.onLanDevicesChanged(snapshot) }
+        dispatchOnMain { listener?.onLanDevicesChanged(snapshot) }
     }
 
     private fun lanDevicesSnapshot(): List<LanRiderDevice> =
@@ -646,24 +709,25 @@ class IntercomService : Service() {
     }
 
     private fun onIntercomDisconnected(token: SessionGeneration.Token, error: IOException) {
-        if (!isSessionCurrent(token)) return
-        publishLog("信令通道断开：${error.message}")
-        publishStatus(SIGNAL_LOST_STATUS)
-        stopIntercom()
-        stopSelf()
+        postForSession(token) {
+            publishLog("信令通道断开：${error.message}")
+            publishStatus(SIGNAL_LOST_STATUS)
+            stopIntercom()
+            stopSelf()
+        }
     }
 
     private fun onRemoteRiderIdentified(token: SessionGeneration.Token, name: String) {
-        if (!isSessionCurrent(token)) return
-        remoteRiderName = name
-        publishLog("已识别远端骑士：$name")
-        mainHandler.post { listener?.onRemoteRiderIdentified(name) }
-        updateStageStatus()
+        postForSession(token) {
+            remoteRiderName = name
+            publishLog("已识别远端骑士：$name")
+            listener?.onRemoteRiderIdentified(name)
+            updateStageStatus()
+        }
     }
 
     private fun onAudioLevelChanged(token: SessionGeneration.Token, level: Float) {
-        if (!isSessionCurrent(token)) return
-        mainHandler.post { listener?.onAudioLevelChanged(level) }
+        postForSession(token) { listener?.onAudioLevelChanged(level) }
     }
 
     private fun stopIntercom() {
@@ -698,7 +762,7 @@ class IntercomService : Service() {
         mediaConnected = false
         localRiderName = ""
         remoteRiderName = null
-        lanClientConnecting.set(false)
+        lanClientConnecting.set(NO_SESSION_TOKEN)
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(ENDED_STATUS)
         stopForegroundCompat()
@@ -706,6 +770,25 @@ class IntercomService : Service() {
 
     private fun isSessionCurrent(token: SessionGeneration.Token): Boolean =
         running && sessions.isCurrent(token) && activeSession == token
+
+    private fun claimLanClient(token: SessionGeneration.Token): Boolean =
+        sessions.claimIfCurrent(token) {
+            lanClientConnecting.compareAndSet(NO_SESSION_TOKEN, token.value)
+        }
+
+    private fun releaseLanClient(token: SessionGeneration.Token) {
+        lanClientConnecting.compareAndSet(token.value, NO_SESSION_TOKEN)
+    }
+
+    private fun dispatchOnMain(action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) action() else mainHandler.post(action)
+    }
+
+    private fun postForSession(token: SessionGeneration.Token, action: () -> Unit) {
+        dispatchOnMain {
+            if (isSessionCurrent(token)) action()
+        }
+    }
 
     private fun closeStaleSocket(socket: Socket): Boolean {
         return try {
@@ -726,28 +809,32 @@ class IntercomService : Service() {
     }
 
     private fun publishStatus(status: String) {
-        lastStatus = status
-        mainHandler.post { listener?.onStatusChanged(status, running) }
-        updateNotification()
+        dispatchOnMain {
+            lastStatus = status
+            listener?.onStatusChanged(status, running)
+            updateNotification()
+        }
     }
 
     private fun publishAudioSource(status: String, bluetooth: Boolean) {
-        audioSourceStatus = status
-        audioSourceBluetooth = bluetooth
-        mainHandler.post { listener?.onAudioSourceChanged(status, bluetooth) }
+        dispatchOnMain {
+            audioSourceStatus = status
+            audioSourceBluetooth = bluetooth
+            listener?.onAudioSourceChanged(status, bluetooth)
+        }
     }
 
     private fun publishLog(message: String) {
-        mainHandler.post { listener?.onLog(message) }
+        dispatchOnMain { listener?.onLog(message) }
     }
 
     private fun publishToast(message: String) {
-        mainHandler.post { listener?.onToast(message) }
+        dispatchOnMain { listener?.onToast(message) }
     }
 
     private fun handleError(t: Throwable) {
         val message = t.message ?: t.javaClass.simpleName
-        mainHandler.post { listener?.onError(message) }
+        dispatchOnMain { listener?.onError(message) }
     }
 
     private fun hasRequiredRuntimePermissions(): Boolean {
