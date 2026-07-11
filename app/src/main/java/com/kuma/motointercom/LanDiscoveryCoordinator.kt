@@ -34,10 +34,12 @@ internal class LanDiscoveryCoordinator(
     private val context = context.applicationContext
     private val closed = AtomicBoolean(false)
     private val executor: ExecutorService = Executors.newCachedThreadPool()
+    private val lifecycleLock = Any()
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
     private val clientConnecting = AtomicBoolean(false)
     private val devices = linkedMapOf<String, LanRiderDevice>()
+    private val serviceIds = linkedMapOf<String, String>()
 
     private var nsdManager: NsdManager? = null
     private var nsdRegistrationListener: NsdManager.RegistrationListener? = null
@@ -46,13 +48,13 @@ internal class LanDiscoveryCoordinator(
 
     fun start() {
         if (!isActive()) return
-        startLanDiscovery()
+        val localIp = localWifiIp() ?: return
+        startLanDiscovery(localIp)
         startNsdDiscovery()
     }
 
-    private fun startLanDiscovery() {
+    private fun startLanDiscovery(localIp: String) {
         if (!isActive()) return
-        val localIp = localWifiIp() ?: return
         executor.execute { runLanTcpServer() }
         executor.execute { runLanUdpListener(localIp) }
         executor.execute { runLanUdpBroadcaster(localIp) }
@@ -111,7 +113,7 @@ internal class LanDiscoveryCoordinator(
             }
 
             override fun onServiceLost(info: NsdServiceInfo) {
-                if (isActive()) removeLanDevice(info.serviceName)
+                removeLanDevice(info.serviceName)
             }
         }
 
@@ -150,6 +152,7 @@ internal class LanDiscoveryCoordinator(
                     val ip = serviceInfo.resolvedHostAddress() ?: return
                     val name = serviceInfo.attributeString("name").ifBlank { serviceInfo.serviceName }
                     rememberLanDevice(
+                        serviceInfo.serviceName,
                         LanRiderDevice(
                             id = id,
                             name = name,
@@ -168,20 +171,18 @@ internal class LanDiscoveryCoordinator(
         var localServer: ServerSocket? = null
         var acceptedSocket: Socket? = null
         try {
-            if (!isActive()) return
-            val candidate = ServerSocket()
+            val candidate = createServerSocket() ?: return
             localServer = candidate
-            candidate.reuseAddress = true
-            candidate.bind(InetSocketAddress(LAN_TCP_PORT))
-            if (!isActive() || !serverSocket.compareAndSet(null, candidate)) return
 
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
                 val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
+                if (handoff(peerIp, server = true, socket)) {
+                    acceptedSocket = null
+                    return
+                }
                 acceptedSocket = null
-                handoff(peerIp, server = true, socket)
-                return
             }
         } catch (t: Throwable) {
             error(t)
@@ -195,12 +196,8 @@ internal class LanDiscoveryCoordinator(
     private fun runLanUdpListener(localIp: String) {
         var localSocket: DatagramSocket? = null
         try {
-            if (!isActive()) return
-            val candidate = DatagramSocket(LAN_UDP_PORT)
+            val candidate = createUdpSocket() ?: return
             localSocket = candidate
-            candidate.broadcast = true
-            candidate.soTimeout = LAN_RECEIVE_TIMEOUT_MS
-            if (!isActive() || !udpSocket.compareAndSet(null, candidate)) return
 
             val buffer = ByteArray(2048)
             while (isActive()) {
@@ -273,8 +270,11 @@ internal class LanDiscoveryCoordinator(
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
             val connected = socket
-            socket = null
-            handoff(ip, server = false, connected)
+            if (handoff(ip, server = false, connected)) {
+                socket = null
+            } else {
+                clientConnecting.set(false)
+            }
         } catch (t: Throwable) {
             clientConnecting.set(false)
             if (reportFailure) error(t) else log("局域网连接失败：${t.message}")
@@ -283,21 +283,29 @@ internal class LanDiscoveryCoordinator(
         }
     }
 
-    private fun rememberLanDevice(device: LanRiderDevice) {
-        if (!isActive()) return
-        synchronized(devices) { devices[device.id] = device }
+    private fun rememberLanDevice(serviceName: String, device: LanRiderDevice) {
+        val snapshot = synchronized(devices) {
+            if (!isActive()) return
+            serviceIds[serviceName] = device.id
+            devices[device.id] = device
+            devices.values.toList()
+        }
         log("发现局域网车友：${device.name} / ${device.ip}")
-        publishLanDevices()
+        publishLanDevices(snapshot)
     }
 
-    private fun removeLanDevice(id: String) {
-        if (!isActive()) return
-        synchronized(devices) { devices.remove(id) }
-        publishLanDevices()
+    private fun removeLanDevice(serviceName: String) {
+        val snapshot = synchronized(devices) {
+            if (!isActive()) return
+            val id = serviceIds.remove(serviceName) ?: serviceName
+            devices.remove(id)
+            devices.values.toList()
+        }
+        publishLanDevices(snapshot)
     }
 
-    private fun publishLanDevices() {
-        if (isActive()) onDevicesChanged(devicesSnapshot())
+    private fun publishLanDevices(snapshot: List<LanRiderDevice>) {
+        if (isActive()) onDevicesChanged(snapshot)
     }
 
     private fun NsdServiceInfo.attributeString(key: String): String {
@@ -319,12 +327,19 @@ internal class LanDiscoveryCoordinator(
 
     private fun isActive(): Boolean = !closed.get() && isSessionCurrent(token)
 
-    private fun handoff(ip: String, server: Boolean, socket: Socket) {
+    private fun handoff(ip: String, server: Boolean, socket: Socket): Boolean {
         if (!isActive()) {
             closeQuietly(socket)
-            return
+            return false
         }
-        onTunnelReady(ip, server, socket)
+        return try {
+            onTunnelReady(ip, server, socket)
+            true
+        } catch (t: Throwable) {
+            closeQuietly(socket)
+            error(t)
+            false
+        }
     }
 
     private fun log(message: String) {
@@ -336,13 +351,50 @@ internal class LanDiscoveryCoordinator(
     }
 
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        closeQuietly(udpSocket.getAndSet(null))
-        closeQuietly(serverSocket.getAndSet(null))
+        synchronized(lifecycleLock) {
+            if (!closed.compareAndSet(false, true)) return
+            closeQuietly(udpSocket.getAndSet(null))
+            closeQuietly(serverSocket.getAndSet(null))
+        }
         stopNsdDiscovery()
         executor.shutdownNow()
-        synchronized(devices) { devices.clear() }
+        synchronized(devices) {
+            devices.clear()
+            serviceIds.clear()
+        }
         onDevicesChanged(emptyList())
+    }
+
+    private fun createServerSocket(): ServerSocket? = synchronized(lifecycleLock) {
+        if (!isActive()) return@synchronized null
+        val candidate = ServerSocket()
+        try {
+            candidate.reuseAddress = true
+            candidate.bind(InetSocketAddress(LAN_TCP_PORT))
+            if (serverSocket.compareAndSet(null, candidate)) candidate else {
+                closeQuietly(candidate)
+                null
+            }
+        } catch (t: Throwable) {
+            closeQuietly(candidate)
+            throw t
+        }
+    }
+
+    private fun createUdpSocket(): DatagramSocket? = synchronized(lifecycleLock) {
+        if (!isActive()) return@synchronized null
+        val candidate = DatagramSocket(LAN_UDP_PORT)
+        try {
+            candidate.broadcast = true
+            candidate.soTimeout = LAN_RECEIVE_TIMEOUT_MS
+            if (udpSocket.compareAndSet(null, candidate)) candidate else {
+                closeQuietly(candidate)
+                null
+            }
+        } catch (t: Throwable) {
+            closeQuietly(candidate)
+            throw t
+        }
     }
 
     private fun stopNsdDiscovery() {
