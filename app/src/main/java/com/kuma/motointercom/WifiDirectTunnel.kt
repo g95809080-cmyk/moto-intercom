@@ -54,6 +54,14 @@ class WifiDirectTunnel(
     private val onError: (Throwable) -> Unit = {}
 ) : Closeable {
 
+    private enum class State {
+        DISCOVERING,
+        P2P_CONNECTING,
+        GROUP_READY,
+        SIGNALING_READY,
+        CLOSED
+    }
+
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
     private val io: ExecutorService = Executors.newSingleThreadExecutor()
@@ -67,13 +75,13 @@ class WifiDirectTunnel(
     @Volatile private var tunnelStarted = false
     @Volatile private var removingGroup = false
     @Volatile private var validatingGroup = false
+    @Volatile private var state = State.DISCOVERING
 
     private var serverSocket: ServerSocket? = null
     private var signalingSocket: Socket? = null
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
-    private val pendingPeers = linkedMapOf<String, WifiP2pDevice>()
-    private val acceptedPeers = linkedMapOf<String, WifiP2pDevice>()
-    private var selectedPeer: WifiP2pDevice? = null
+    private val peerRegistry = WifiDirectPeerRegistry()
+    private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private var pendingRetryAttempt = 0
     private var pendingRetryGeneration = 0
     private var pendingRetryScheduled = false
@@ -100,10 +108,11 @@ class WifiDirectTunnel(
                     )
                     if (networkInfo?.isConnected == true) {
                         requestConnectionInfo()
-                    } else if (connectingAddress != null && signalingSocket == null) {
+                    } else if (state == State.P2P_CONNECTING) {
                         Log.d(TAG, "ignore disconnected broadcast while connecting: $connectingAddress")
                     } else {
                         resetTunnelOnly()
+                        state = State.DISCOVERING
                         if (running) mainHandler.post { onDisconnected() }
                         if (running && !removingGroup) discoverPeers()
                     }
@@ -135,7 +144,8 @@ class WifiDirectTunnel(
         val c = channel ?: return
 
         try {
-            Log.d(TAG, "discoverServices start pending=${pendingPeers.size} accepted=${acceptedPeers.size}")
+            val peers = peerRegistry.snapshot()
+            Log.d(TAG, "discoverServices start pending=${peers.pending.size} accepted=${peers.accepted.size}")
             m.discoverServices(
                 c,
                 discoverAction(
@@ -152,7 +162,8 @@ class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     fun connect(device: WifiP2pDevice) {
         if (!running) return
-        if (acceptedPeers[device.deviceAddress] == null) {
+        val address = normalizedAddress(device.deviceAddress)
+        if (!peerRegistry.isAccepted(address)) {
             logPeer(device, accepted = false, reason = "未发布 MotoCom DNS-SD 身份")
             postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
             return
@@ -172,6 +183,7 @@ class WifiDirectTunnel(
         try {
             cancelPendingRetry()
             Log.d(TAG, "connect start selectedPeer=${peerSummary(device)}")
+            state = State.P2P_CONNECTING
             m.connect(
                 c,
                 config,
@@ -188,6 +200,7 @@ class WifiDirectTunnel(
     }
 
     override fun close() {
+        state = State.CLOSED
         running = false
         resetTunnelOnly()
         unregisterReceiver()
@@ -198,9 +211,8 @@ class WifiDirectTunnel(
         }
         serviceRequest = null
         serviceDiscoveryReady = false
-        pendingPeers.clear()
-        acceptedPeers.clear()
-        selectedPeer = null
+        peerRegistry.reset()
+        peerDevices.clear()
         cancelPendingRetry()
         cancelConnectWatchdog()
         try {
@@ -368,18 +380,20 @@ class WifiDirectTunnel(
     private fun acceptPeer(device: WifiP2pDevice, reason: String) {
         if (device.deviceAddress.isBlank()) return
 
-        val wasPending = pendingPeers.remove(device.deviceAddress) != null
-        acceptedPeers[device.deviceAddress] = device
+        val address = normalizedAddress(device.deviceAddress)
+        peerDevices[address] = device
+        val wasPending = address in peerRegistry.snapshot().pending
+        val snapshot = peerRegistry.accept(address)
         Log.d(TAG, "peer accepted: ${peerSummary(device)} reason=$reason pendingBefore=$wasPending")
         if (wasPending) {
-            Log.d(TAG, "pending -> accepted: ${peerSummary(device)} pending=${pendingPeers.size}")
+            Log.d(TAG, "pending -> accepted: ${peerSummary(device)} pending=${snapshot.pending.size}")
         }
         logPeer(device, accepted = true, reason = reason)
-        if (selectedPeer == null) {
-            selectedPeer = device
+        val selectedPeer = snapshot.selected?.let(peerDevices::get)
+        if (snapshot.selected == address) {
             Log.d(TAG, "selectedPeer=${peerSummary(device)}")
         }
-        mainHandler.post { onPeersChanged(acceptedPeers.values.toList()) }
+        mainHandler.post { onPeersChanged(snapshot.accepted.mapNotNull(peerDevices::get)) }
         if (autoConnect && connectingAddress == null && signalingSocket == null) {
             cancelPendingRetry()
             selectedPeer?.let {
@@ -424,26 +438,33 @@ class WifiDirectTunnel(
         try {
             m.requestPeers(c) { list ->
                 if (!running) return@requestPeers
-                val peers = list.deviceList.toList()
-                peers.forEach { peer ->
-                    val accepted = acceptedPeers.containsKey(peer.deviceAddress)
+                val current = list.deviceList
+                    .filter { it.deviceAddress.isNotBlank() }
+                    .associateBy { normalizedAddress(it.deviceAddress) }
+                peerDevices.keys.retainAll(current.keys)
+                peerDevices.putAll(current)
+                var snapshot = peerRegistry.reconcile(current.keys)
+                current.forEach { (address, peer) ->
+                    val accepted = address in snapshot.accepted
                     if (accepted) {
                         logPeer(peer, accepted = true, reason = "已通过 MotoCom 服务校验")
-                    } else if (peer.deviceAddress.isNotBlank()) {
-                        val added = !pendingPeers.containsKey(peer.deviceAddress)
-                        pendingPeers[peer.deviceAddress] = peer
+                    } else {
+                        val added = address !in snapshot.pending
+                        snapshot = peerRegistry.markPending(address)
                         logPeerPending(peer, "等待 MotoCom TXT/service 身份")
                         if (added) {
                             Log.d(
                                 TAG,
-                                "pending peer added: ${peerSummary(peer)} pending=${pendingPeers.size}"
+                                "pending peer added: ${peerSummary(peer)} pending=${snapshot.pending.size}"
                             )
                         }
                     }
                 }
-                val motoComPeers = peers.filter { acceptedPeers.containsKey(it.deviceAddress) }
+                val selectedPeer = snapshot.selected?.let(peerDevices::get)
+                val motoComPeers = snapshot.accepted.mapNotNull(peerDevices::get)
+                selectedPeer?.let { Log.d(TAG, "selectedPeer=${peerSummary(it)}") }
                 mainHandler.post { onPeersChanged(motoComPeers) }
-                if (peers.isNotEmpty() && motoComPeers.isEmpty()) {
+                if (current.isNotEmpty() && motoComPeers.isEmpty()) {
                     postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
                 }
                 schedulePendingRetryIfNeeded()
@@ -469,6 +490,7 @@ class WifiDirectTunnel(
         if (!running) return
         if (!info.groupFormed) {
             resetTunnelOnly()
+            state = State.DISCOVERING
             mainHandler.post { onDisconnected() }
             discoverPeers()
             return
@@ -505,7 +527,7 @@ class WifiDirectTunnel(
     }
 
     private fun validateGroup(info: WifiP2pInfo, group: WifiP2pGroup, attempt: Int) {
-        val target = selectedPeer
+        val target = peerRegistry.snapshot().selected?.let(peerDevices::get)
         val targetAddress = target?.deviceAddress
         val ownerAddress = group.owner?.deviceAddress
         val clientAddresses = group.clientList.map { it.deviceAddress }
@@ -549,6 +571,7 @@ class WifiDirectTunnel(
         validatingGroup = false
         tunnelStarted = true
         cancelConnectWatchdog()
+        state = State.GROUP_READY
         Log.d(
             TAG,
             "MotoCom P2P group 校验通过: groupOwner=$ownerAddress networkName=${group.networkName} " +
@@ -591,6 +614,7 @@ class WifiDirectTunnel(
                 override fun onFailure(code: Int) {
                     Log.w(TAG, "removeGroup 失败: reason=$reason code=${reasonText(code)}")
                     removingGroup = false
+                    if (!running) return
                     if (code == WifiP2pManager.BUSY) {
                         if (attempt < REMOVE_GROUP_BUSY_RETRY_COUNT) {
                             Log.w(
@@ -605,6 +629,7 @@ class WifiDirectTunnel(
                         } else {
                             Log.w(TAG, "removeGroup BUSY exhausted, rediscover anyway: reason=$reason")
                             resetDiscoveryCandidates()
+                            state = State.DISCOVERING
                             mainHandler.postDelayed(
                                 { if (running) setupServiceDiscovery() },
                                 GROUP_REMOVAL_SETTLE_MS
@@ -628,8 +653,10 @@ class WifiDirectTunnel(
 
     private fun finishGroupRemoval() {
         removingGroup = false
+        if (!running) return
         connectingAddress = null
         resetDiscoveryCandidates()
+        state = State.DISCOVERING
         mainHandler.postDelayed(
             { if (running) setupServiceDiscovery() },
             GROUP_REMOVAL_SETTLE_MS
@@ -704,9 +731,8 @@ class WifiDirectTunnel(
     private fun resetDiscoveryCandidates() {
         cancelPendingRetry()
         serviceDiscoveryReady = false
-        pendingPeers.clear()
-        acceptedPeers.clear()
-        selectedPeer = null
+        peerRegistry.reset()
+        peerDevices.clear()
     }
 
     private fun cancelPendingRetry() {
@@ -716,13 +742,14 @@ class WifiDirectTunnel(
     }
 
     private fun schedulePendingRetryIfNeeded() {
-        if (!running || pendingPeers.isEmpty() || acceptedPeers.isNotEmpty()) return
+        var peers = peerRegistry.snapshot()
+        if (!running || peers.pending.isEmpty() || peers.accepted.isNotEmpty()) return
         if (connectingAddress != null || signalingSocket != null || pendingRetryScheduled) return
 
         if (pendingRetryAttempt >= PENDING_DISCOVERY_RETRY_COUNT) {
             Log.w(
                 TAG,
-                "retry discoverServices exhausted pending=${pendingPeers.size} " +
+                "retry discoverServices exhausted pending=${peers.pending.size} " +
                     "max=$PENDING_DISCOVERY_RETRY_COUNT"
             )
             return
@@ -734,14 +761,15 @@ class WifiDirectTunnel(
         mainHandler.postDelayed({
             pendingRetryScheduled = false
             if (!running || generation != pendingRetryGeneration) return@postDelayed
-            if (pendingPeers.isEmpty() || acceptedPeers.isNotEmpty()) return@postDelayed
+            peers = peerRegistry.snapshot()
+            if (peers.pending.isEmpty() || peers.accepted.isNotEmpty()) return@postDelayed
             if (connectingAddress != null || signalingSocket != null) return@postDelayed
 
             pendingRetryAttempt = attempt
             Log.d(
                 TAG,
                 "retry discoverServices attempt=$attempt/$PENDING_DISCOVERY_RETRY_COUNT " +
-                    "pending=${pendingPeers.size}"
+                    "pending=${peers.pending.size}"
             )
             discoverPeers()
             schedulePendingRetryIfNeeded()
@@ -758,9 +786,8 @@ class WifiDirectTunnel(
 
             Log.w(TAG, "P2P connect timeout: peer=$peerAddress")
             connectingAddress = null
-            selectedPeer = null
-            acceptedPeers.clear()
-            pendingPeers.clear()
+            peerRegistry.reset()
+            peerDevices.clear()
             serviceDiscoveryReady = false
             cancelPendingRetry()
             Log.w(TAG, "P2P connect timeout cleanup: peer=$peerAddress")
@@ -828,7 +855,17 @@ class WifiDirectTunnel(
 
     private fun postReady(targetIp: String, isServer: Boolean, socket: Socket) {
         cancelConnectWatchdog()
-        mainHandler.post { onTunnelReady(targetIp, isServer, socket) }
+        mainHandler.post {
+            if (!running || state == State.CLOSED) {
+                try {
+                    socket.close()
+                } catch (_: Throwable) {
+                }
+                return@post
+            }
+            onTunnelReady(targetIp, isServer, socket)
+            state = State.SIGNALING_READY
+        }
     }
 
     private fun postError(t: Throwable) {
@@ -859,6 +896,8 @@ class WifiDirectTunnel(
 
     private fun sameAddress(left: String?, right: String?): Boolean =
         !left.isNullOrBlank() && !right.isNullOrBlank() && left.equals(right, ignoreCase = true)
+
+    private fun normalizedAddress(address: String): String = address.uppercase()
 
     private fun localP2pIp(interfaceName: String?): String? {
         return try {
