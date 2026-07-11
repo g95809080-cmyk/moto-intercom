@@ -67,7 +67,7 @@ class IntercomManager(
                 onLocalIceCandidateGenerated = ::sendLocalIceCandidate,
                 onConnectionStateChanged = onConnectionStateChanged,
                 onAudioLevelChanged = onAudioLevelChanged,
-                onError = ::postError,
+                onError = ::onMediaFailure,
                 isSessionCurrent = { !closed.get() && isSessionCurrent() }
             )
         } catch (t: Throwable) {
@@ -210,6 +210,13 @@ class IntercomManager(
 
     private fun postError(t: Throwable) {
         postMain { onError(t) }
+    }
+
+    private fun onMediaFailure(t: Throwable) {
+        postError(t)
+        notifyDisconnected(
+            t as? IOException ?: IOException("WebRTC media failure", t)
+        )
     }
 
     private fun postMain(after: () -> Unit = {}, block: () -> Unit) {
