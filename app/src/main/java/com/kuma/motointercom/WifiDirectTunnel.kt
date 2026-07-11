@@ -168,12 +168,12 @@ class WifiDirectTunnel(
             postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
             return
         }
-        if (connectingAddress == device.deviceAddress || signalingSocket != null) return
+        if (connectingAddress == address || signalingSocket != null) return
 
         val m = manager ?: return
         val c = channel ?: return
-        connectingAddress = device.deviceAddress
-        startConnectWatchdog(device.deviceAddress)
+        connectingAddress = address
+        startConnectWatchdog(address)
 
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
@@ -601,8 +601,8 @@ class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     private fun removeGroupAndRediscover(reason: String, attempt: Int) {
         if (removingGroup) return
-        val m = manager ?: return
-        val c = channel ?: return
+        val m = manager ?: return recoverAfterGroupRemovalFailure()
+        val c = channel ?: return recoverAfterGroupRemovalFailure()
         removingGroup = true
         resetTunnelOnly()
         cancelConnectWatchdog()
@@ -641,16 +641,26 @@ class WifiDirectTunnel(
                     }
 
                     postError(IllegalStateException("清理错误 P2P group 失败: ${reasonText(code)}"))
-                    mainHandler.postDelayed(
-                        { if (running) clearUntrustedGroupBeforeDiscovery() },
-                        BUSY_RETRY_DELAY_MS
-                    )
+                    recoverAfterGroupRemovalFailure()
                 }
             })
         } catch (t: Throwable) {
             removingGroup = false
             postError(t)
+            recoverAfterGroupRemovalFailure()
         }
+    }
+
+    private fun recoverAfterGroupRemovalFailure() {
+        removingGroup = false
+        if (!running) return
+        connectingAddress = null
+        resetDiscoveryCandidates()
+        state = State.DISCOVERING
+        mainHandler.postDelayed(
+            { if (running) clearUntrustedGroupBeforeDiscovery() },
+            BUSY_RETRY_DELAY_MS
+        )
     }
 
     private fun finishGroupRemoval() {
