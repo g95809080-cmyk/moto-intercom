@@ -31,9 +31,8 @@ class AudioRouteController(
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val initialMode = audioManager.mode
-    @Suppress("DEPRECATION")
-    private val initialSpeakerphoneOn = audioManager.isSpeakerphoneOn
+    private var initialMode: Int? = null
+    private var initialSpeakerphoneOn: Boolean? = null
     private val receiverRegistered = AtomicBoolean(false)
     private val audioDeviceCallbackRegistered = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
@@ -41,6 +40,7 @@ class AudioRouteController(
     @Volatile private var wantBluetoothSco = false
     @Volatile private var scoEverConnected = false
     @Volatile private var bluetoothReported = false
+    @Volatile private var modernFallbackActive = false
     private var modernRoute: ModernAudioRoute? = null
 
     private val receiver = object : BroadcastReceiver() {
@@ -90,6 +90,7 @@ class AudioRouteController(
         ROUTE_EXECUTOR.execute {
             if (closed.get()) return@execute
             try {
+                captureInitialState()
                 if (!hasRequiredPermissions(appContext)) {
                     throw SecurityException("缺少蓝牙音频路由运行时权限")
                 }
@@ -114,20 +115,20 @@ class AudioRouteController(
         ROUTE_EXECUTOR.execute {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    modernRoute?.close()
+                    val route = modernRoute
                     modernRoute = null
+                    restoreStep { initialMode?.let { audioManager.mode = it } }
+                    restoreStep { route?.close() }
                 } else {
-                    stopLegacySco()
+                    restoreStep { stopLegacySco() }
+                    restoreStep {
+                        initialSpeakerphoneOn?.let {
+                            @Suppress("DEPRECATION")
+                            audioManager.isSpeakerphoneOn = it
+                        }
+                    }
+                    restoreStep { initialMode?.let { audioManager.mode = it } }
                 }
-            } catch (t: Throwable) {
-                logError(t)
-            }
-            try {
-                @Suppress("DEPRECATION")
-                audioManager.isSpeakerphoneOn = initialSpeakerphoneOn
-                audioManager.mode = initialMode
-            } catch (t: Throwable) {
-                logError(t)
             } finally {
                 unregisterReceiver()
                 unregisterAudioDeviceCallback()
@@ -137,15 +138,39 @@ class AudioRouteController(
 
     override fun close() = reset()
 
+    private fun captureInitialState() {
+        if (initialMode != null) return
+        initialMode = audioManager.mode
+        @Suppress("DEPRECATION")
+        initialSpeakerphoneOn = audioManager.isSpeakerphoneOn
+    }
+
+    private fun restoreStep(action: () -> Unit) {
+        try {
+            action()
+        } catch (t: Throwable) {
+            logError(t)
+        }
+    }
+
     private fun routeModernBluetooth(reason: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || closed.get() || !wantBluetoothSco) return
+        modernFallbackActive = false
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         val route = modernRoute()
         Log.i(TAG, "modern route[$reason]: ${route.stateSummary()}")
-        if (!route.route()) {
-            Log.w(TAG, "modern route[$reason]: no usable Bluetooth communication device")
-            if (fallbackToSpeaker) fallbackToPhone(true, "modern route unavailable")
-            return
+        when (route.route()) {
+            ModernAudioRoute.RouteResult.ROUTED -> Unit
+            ModernAudioRoute.RouteResult.NO_BLUETOOTH_DEVICE -> {
+                Log.w(TAG, "modern route[$reason]: no Bluetooth communication device")
+                if (fallbackToSpeaker) fallbackToPhone(true, "no communication Bluetooth")
+                return
+            }
+            ModernAudioRoute.RouteResult.REJECTED -> {
+                Log.w(TAG, "modern route[$reason]: setCommunicationDevice rejected")
+                if (fallbackToSpeaker) fallbackToPhone(false, "Bluetooth route rejected")
+                return
+            }
         }
         route.currentName()?.let(::publishBluetoothConnected)
         scheduleModernRouteVerification(reason)
@@ -160,7 +185,9 @@ class AudioRouteController(
                 if (!closed.get() && wantBluetoothSco) publishBluetoothConnected(name)
             },
             onDeviceLost = {
-                if (!closed.get() && wantBluetoothSco) routeModernBluetooth("communication device changed")
+                if (!closed.get() && wantBluetoothSco && !modernFallbackActive) {
+                    rerouteModernOnExecutor("communication device changed")
+                }
             }
         ).also { modernRoute = it }
     }
@@ -180,23 +207,35 @@ class AudioRouteController(
     private fun rerouteAfterDeviceChange(reason: String) {
         if (closed.get()) return
         ROUTE_EXECUTOR.execute {
-            if (closed.get() || !wantBluetoothSco) return@execute
-            try {
-                routeModernBluetooth(reason)
-            } catch (t: Throwable) {
-                reportError(t)
-                if (fallbackToSpeaker) fallbackToPhone(true, "callback route error")
-            }
+            rerouteModernOnExecutor(reason)
+        }
+    }
+
+    private fun rerouteModernOnExecutor(reason: String) {
+        if (closed.get() || !wantBluetoothSco) return
+        try {
+            routeModernBluetooth(reason)
+        } catch (t: Throwable) {
+            reportError(t)
+            if (fallbackToSpeaker) fallbackToPhone(true, "callback route error")
         }
     }
 
     private fun fallbackToPhone(noBluetooth: Boolean, reason: String) {
         if (closed.get()) return
-        wantBluetoothSco = false
         Log.i(TAG, "fallback to phone: reason=$reason, noBluetooth=$noBluetooth")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            modernRoute?.clear()
+            modernFallbackActive = true
+            val route = modernRoute()
+            val speakerRouted = try {
+                route.routeToSpeaker()
+            } catch (t: Throwable) {
+                reportError(t)
+                false
+            }
+            if (!speakerRouted) route.clear()
         } else {
+            wantBluetoothSco = false
             stopLegacySco()
             @Suppress("DEPRECATION")
             audioManager.isSpeakerphoneOn = true

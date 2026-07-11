@@ -16,6 +16,8 @@ internal class ModernAudioRoute(
     private val onBluetoothConnected: (String) -> Unit,
     private val onDeviceLost: () -> Unit
 ) : Closeable {
+    enum class RouteResult { ROUTED, NO_BLUETOOTH_DEVICE, REJECTED }
+
     private val initialDevice = audioManager.communicationDevice
     private val closed = AtomicBoolean(false)
     private val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
@@ -34,14 +36,18 @@ internal class ModernAudioRoute(
         registered = true
     }
 
-    fun route(): Boolean {
-        if (closed.get()) return false
+    fun route(): RouteResult {
+        if (closed.get()) return RouteResult.REJECTED
         val target = audioManager.availableCommunicationDevices
             .filter(::isBluetooth)
             .minByOrNull { if (it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) 0 else 1 }
-            ?: return false
+            ?: return RouteResult.NO_BLUETOOTH_DEVICE
         Log.i(TAG, "selected target=${summary(target)}")
-        return audioManager.setCommunicationDevice(target)
+        return if (audioManager.setCommunicationDevice(target)) {
+            RouteResult.ROUTED
+        } else {
+            RouteResult.REJECTED
+        }
     }
 
     fun currentName(): String? =
@@ -55,6 +61,14 @@ internal class ModernAudioRoute(
         if (!closed.get()) audioManager.clearCommunicationDevice()
     }
 
+    fun routeToSpeaker(): Boolean {
+        if (closed.get()) return false
+        val speaker = audioManager.availableCommunicationDevices
+            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            ?: return false
+        return audioManager.setCommunicationDevice(speaker)
+    }
+
     fun stateSummary(): String =
         "communicationDevice=${summary(audioManager.communicationDevice)}, " +
             "available=${audioManager.availableCommunicationDevices.joinToString(prefix = "[", postfix = "]", transform = ::summary)}"
@@ -65,7 +79,7 @@ internal class ModernAudioRoute(
             registered = false
             try {
                 audioManager.removeOnCommunicationDeviceChangedListener(listener)
-            } catch (t: IllegalArgumentException) {
+            } catch (t: Throwable) {
                 Log.w(TAG, "communication device listener was already removed", t)
             }
         }
