@@ -21,6 +21,7 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
     private var identitySeen = false
     private var sdpSeen = false
     private var candidateCount = 0
+    private var encodedCandidateCount = 0
 
     @Synchronized
     fun decode(frame: ByteArray): Message {
@@ -40,16 +41,22 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
         }
     }
 
+    @Synchronized
     fun encode(message: Message): ByteArray {
         val root = JsonObject()
         when (message) {
             is Message.Identity -> {
+                val name = message.name.trim()
+                if (name.isEmpty()) throw ProtocolException("identity is empty")
+                if (name.codePointCount(0, name.length) > MAX_IDENTITY_CODE_POINTS) {
+                    throw ProtocolException("identity is too long")
+                }
                 root.addProperty("type", "IDENTITY")
-                root.addProperty("name", message.name)
+                root.addProperty("name", name)
             }
-            is Message.Offer -> addPayload(root, "OFFER", "sdp", message.sdpJson)
-            is Message.Answer -> addPayload(root, "ANSWER", "sdp", message.sdpJson)
-            is Message.Candidate -> addPayload(root, "CANDIDATE", "candidate", message.candidateJson)
+            is Message.Offer -> addSdp(root, "OFFER", message.sdpJson)
+            is Message.Answer -> addSdp(root, "ANSWER", message.sdpJson)
+            is Message.Candidate -> addCandidate(root, message.candidateJson)
         }
         return root.toString().toByteArray(StandardCharsets.UTF_8).also {
             requireBytes("frame", it.size, MAX_FRAME_BYTES)
@@ -85,9 +92,24 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
         return Message.Candidate(raw)
     }
 
-    private fun addPayload(root: JsonObject, type: String, key: String, raw: String) {
+    private fun addSdp(root: JsonObject, type: String, raw: String) {
+        requireBytes("sdp", raw.toByteArray(StandardCharsets.UTF_8).size, MAX_SDP_BYTES)
         root.addProperty("type", type)
-        root.add(key, JsonParser.parseString(raw))
+        root.addProperty("sdp", raw)
+    }
+
+    private fun addCandidate(root: JsonObject, raw: String) {
+        requireBytes("candidate", raw.toByteArray(StandardCharsets.UTF_8).size, MAX_CANDIDATE_BYTES)
+        val candidate = try {
+            JsonParser.parseString(raw).asJsonObject
+        } catch (t: Throwable) {
+            throw ProtocolException("invalid candidate JSON", t)
+        }
+        if (++encodedCandidateCount > MAX_CANDIDATES) {
+            throw ProtocolException("too many candidates")
+        }
+        root.addProperty("type", "CANDIDATE")
+        root.add("candidate", candidate)
     }
 
     private fun JsonObject.requiredString(key: String): String =
