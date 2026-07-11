@@ -4,15 +4,13 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import org.json.JSONObject
+import com.google.gson.JsonParser
 import org.webrtc.PeerConnection
 import java.io.Closeable
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.EOFException
 import java.io.IOException
 import java.net.Socket
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -44,6 +42,9 @@ class IntercomManager(
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private val disconnectedNotified = AtomicBoolean(false)
+    private val protocol = SignalingProtocol(
+        if (isServer) SignalingProtocol.SdpKind.OFFER else SignalingProtocol.SdpKind.ANSWER
+    )
 
     private var input: DataInputStream? = null
     private var output: DataOutputStream? = null
@@ -106,66 +107,50 @@ class IntercomManager(
         reader.execute {
             try {
                 while (!closed.get()) {
-                    val frame = readFrame()
-                    dispatch(JSONObject(frame))
+                    dispatch(protocol.decode(readFrame()))
                 }
-            } catch (e: EOFException) {
-                notifyDisconnected(IOException("信令通道已关闭", e))
-            } catch (e: IOException) {
-                if (!closed.get()) notifyDisconnected(e)
             } catch (t: Throwable) {
-                if (!closed.get()) postError(t)
+                val failure = t as? IOException ?: IOException("invalid signaling message", t)
+                if (!closed.get()) notifyDisconnected(failure)
             } finally {
                 close()
             }
         }
     }
 
-    private fun readFrame(): String {
+    private fun readFrame(): ByteArray {
         val stream = input ?: throw IOException("信令输入流未初始化")
         val length = stream.readInt()
-        if (length !in 1..MAX_FRAME_BYTES) {
+        if (length !in 1..SignalingProtocol.MAX_FRAME_BYTES) {
             throw IOException("非法信令帧长度: $length")
         }
 
-        val bytes = ByteArray(length)
-        stream.readFully(bytes)
-        return String(bytes, StandardCharsets.UTF_8)
+        return ByteArray(length).also(stream::readFully)
     }
 
-    private fun dispatch(message: JSONObject) {
-        val type = message.getString(KEY_TYPE)
-        Log.d(TAG, "RX signaling frame: type=$type")
-        when (type) {
-            TYPE_IDENTITY -> {
-                val name = message.optString(KEY_NAME).trim()
-                if (name.isNotEmpty()) {
-                    mainHandler.post { onRemoteRiderIdentified(name) }
-                }
-            }
-            TYPE_OFFER -> audioEngineOrThrow().createAnswer(message.payloadString(KEY_SDP))
-            TYPE_ANSWER -> audioEngineOrThrow().setRemoteAnswer(message.payloadString(KEY_SDP))
-            TYPE_CANDIDATE -> audioEngineOrThrow().addRemoteIceCandidate(
-                message.payloadString(KEY_CANDIDATE)
-            )
-            else -> throw IOException("未知信令类型: ${message.optString(KEY_TYPE)}")
+    private fun dispatch(message: SignalingProtocol.Message) {
+        Log.d(TAG, "RX signaling frame: type=${message.javaClass.simpleName}")
+        when (message) {
+            is SignalingProtocol.Message.Identity ->
+                mainHandler.post { if (!closed.get()) onRemoteRiderIdentified(message.name) }
+            is SignalingProtocol.Message.Offer ->
+                audioEngineOrThrow().createAnswer(message.sdpJson)
+            is SignalingProtocol.Message.Answer ->
+                audioEngineOrThrow().setRemoteAnswer(message.sdpJson)
+            is SignalingProtocol.Message.Candidate ->
+                audioEngineOrThrow().addRemoteIceCandidate(message.candidateJson)
         }
     }
 
     private fun sendLocalSdp(sdpJson: String) {
         try {
-            val sdp = JSONObject(sdpJson)
-            val type = when (sdp.getString("type").uppercase()) {
-                "OFFER" -> TYPE_OFFER
-                "ANSWER" -> TYPE_ANSWER
-                else -> throw IOException("未知本地 SDP 类型: ${sdp.optString("type")}")
+            val type = JsonParser.parseString(sdpJson).asJsonObject.get("type")?.asString
+            val message = when (type?.uppercase()) {
+                "OFFER" -> SignalingProtocol.Message.Offer(sdpJson)
+                "ANSWER" -> SignalingProtocol.Message.Answer(sdpJson)
+                else -> throw IOException("未知本地 SDP 类型: $type")
             }
-
-            sendFrame(
-                JSONObject()
-                    .put(KEY_TYPE, type)
-                    .put(KEY_SDP, sdpJson)
-            )
+            sendFrame(message)
         } catch (t: Throwable) {
             postError(t)
         }
@@ -173,11 +158,7 @@ class IntercomManager(
 
     private fun sendIdentity() {
         try {
-            sendFrame(
-                JSONObject()
-                    .put(KEY_TYPE, TYPE_IDENTITY)
-                    .put(KEY_NAME, localRiderName.trim())
-            )
+            sendFrame(SignalingProtocol.Message.Identity(localRiderName.trim()))
         } catch (t: Throwable) {
             postError(t)
         }
@@ -185,24 +166,15 @@ class IntercomManager(
 
     private fun sendLocalIceCandidate(candidateJson: String) {
         try {
-            sendFrame(
-                JSONObject()
-                    .put(KEY_TYPE, TYPE_CANDIDATE)
-                    .put(KEY_CANDIDATE, JSONObject(candidateJson))
-            )
+            sendFrame(SignalingProtocol.Message.Candidate(candidateJson))
         } catch (t: Throwable) {
             postError(t)
         }
     }
 
-    private fun sendFrame(message: JSONObject) {
-        if (closed.get()) return
-
-        val bytes = message.toString().toByteArray(StandardCharsets.UTF_8)
-        if (bytes.size > MAX_FRAME_BYTES) {
-            postError(IOException("信令帧过大: ${bytes.size}"))
-            return
-        }
+    private fun sendFrame(message: SignalingProtocol.Message) {
+        if (closed.get() || writer.isShutdown) return
+        val bytes = protocol.encode(message)
 
         try {
             writer.execute {
@@ -211,7 +183,7 @@ class IntercomManager(
                     stream.writeInt(bytes.size)
                     stream.write(bytes)
                     stream.flush()
-                    Log.d(TAG, "TX signaling frame: type=${message.optString(KEY_TYPE)} bytes=${bytes.size}")
+                    Log.d(TAG, "TX signaling frame: type=${message.javaClass.simpleName} bytes=${bytes.size}")
                 } catch (e: IOException) {
                     if (!closed.get()) notifyDisconnected(e)
                     close()
@@ -222,11 +194,6 @@ class IntercomManager(
         } catch (t: Throwable) {
             if (!closed.get()) postError(t)
         }
-    }
-
-    private fun JSONObject.payloadString(key: String): String {
-        val value = get(key)
-        return if (value is JSONObject) value.toString() else value.toString()
     }
 
     private fun audioEngineOrThrow(): RiderAudioEngine =
@@ -243,14 +210,5 @@ class IntercomManager(
 
     companion object {
         private const val TAG = "IntercomSignal"
-        private const val MAX_FRAME_BYTES = 1024 * 1024
-        private const val KEY_TYPE = "type"
-        private const val KEY_NAME = "name"
-        private const val KEY_SDP = "sdp"
-        private const val KEY_CANDIDATE = "candidate"
-        private const val TYPE_IDENTITY = "IDENTITY"
-        private const val TYPE_OFFER = "OFFER"
-        private const val TYPE_ANSWER = "ANSWER"
-        private const val TYPE_CANDIDATE = "CANDIDATE"
     }
 }
