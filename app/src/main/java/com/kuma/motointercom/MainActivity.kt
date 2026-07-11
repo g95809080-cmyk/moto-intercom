@@ -42,7 +42,7 @@ import kotlin.math.sin
  *
  * 对讲核心常驻在 IntercomService；Activity 只负责权限、启动/停止按钮和状态显示。
  */
-class MainActivity : Activity(), IntercomService.Listener {
+internal class MainActivity : Activity(), IntercomService.Listener {
 
     private lateinit var statusText: TextView
     private lateinit var statusDetailText: TextView
@@ -72,7 +72,7 @@ class MainActivity : Activity(), IntercomService.Listener {
     private var mediaConnected = false
     private var currentButtonColor = DISABLED_BUTTON_COLOR
     private var buttonColorAnimator: ValueAnimator? = null
-    private val lanDevices = mutableListOf<IntercomService.LanRiderDevice>()
+    private val lanDevices = mutableListOf<LanRiderDevice>()
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 
     private val serviceConnection = object : ServiceConnection {
@@ -132,7 +132,7 @@ class MainActivity : Activity(), IntercomService.Listener {
         runOnUiThread { updateAudioSource(status, bluetooth) }
     }
 
-    override fun onLanDevicesChanged(devices: List<IntercomService.LanRiderDevice>) {
+    override fun onLanDevicesChanged(devices: List<LanRiderDevice>) {
         runOnUiThread {
             lanDevices.clear()
             lanDevices.addAll(devices)
@@ -512,7 +512,7 @@ class MainActivity : Activity(), IntercomService.Listener {
         }
     }
 
-    private fun deviceRow(device: IntercomService.LanRiderDevice): View {
+    private fun deviceRow(device: LanRiderDevice): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
