@@ -32,7 +32,8 @@ class IntercomManager(
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
     private val onRemoteRiderIdentified: (String) -> Unit = {},
     private val onAudioLevelChanged: (Float) -> Unit = {},
-    private val onError: (Throwable) -> Unit = {}
+    private val onError: (Throwable) -> Unit = {},
+    private val isSessionCurrent: () -> Boolean
 ) : Closeable {
 
     private val appContext = context.applicationContext
@@ -66,11 +67,14 @@ class IntercomManager(
                 onLocalIceCandidateGenerated = ::sendLocalIceCandidate,
                 onConnectionStateChanged = onConnectionStateChanged,
                 onAudioLevelChanged = onAudioLevelChanged,
-                onError = ::postError
+                onError = ::postError,
+                isSessionCurrent = { !closed.get() && isSessionCurrent() }
             )
         } catch (t: Throwable) {
-            postError(t)
-            close()
+            postMain(
+                after = ::close,
+                block = { onError(t) }
+            )
             return
         }
 
@@ -112,8 +116,6 @@ class IntercomManager(
             } catch (t: Throwable) {
                 val failure = t as? IOException ?: IOException("invalid signaling message", t)
                 if (!closed.get()) notifyDisconnected(failure)
-            } finally {
-                close()
             }
         }
     }
@@ -132,7 +134,7 @@ class IntercomManager(
         Log.d(TAG, "RX signaling frame: type=${message.javaClass.simpleName}")
         when (message) {
             is SignalingProtocol.Message.Identity ->
-                mainHandler.post { if (!closed.get()) onRemoteRiderIdentified(message.name) }
+                postMain { onRemoteRiderIdentified(message.name) }
             is SignalingProtocol.Message.Offer ->
                 audioEngineOrThrow().createAnswer(message.sdpJson)
             is SignalingProtocol.Message.Answer ->
@@ -186,7 +188,6 @@ class IntercomManager(
                     Log.d(TAG, "TX signaling frame: type=${message.javaClass.simpleName} bytes=${bytes.size}")
                 } catch (e: IOException) {
                     if (!closed.get()) notifyDisconnected(e)
-                    close()
                 } catch (t: Throwable) {
                     if (!closed.get()) postError(t)
                 }
@@ -201,11 +202,24 @@ class IntercomManager(
 
     private fun notifyDisconnected(e: IOException) {
         if (!disconnectedNotified.compareAndSet(false, true)) return
-        mainHandler.post { onIntercomDisconnected(e) }
+        postMain(
+            block = { onIntercomDisconnected(e) },
+            after = ::close
+        )
     }
 
     private fun postError(t: Throwable) {
-        mainHandler.post { onError(t) }
+        postMain { onError(t) }
+    }
+
+    private fun postMain(after: () -> Unit = {}, block: () -> Unit) {
+        mainHandler.post {
+            try {
+                if (!closed.get() && isSessionCurrent()) block()
+            } finally {
+                after()
+            }
+        }
     }
 
     companion object {

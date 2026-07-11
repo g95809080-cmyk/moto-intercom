@@ -280,7 +280,8 @@ class IntercomService : Service() {
             onConnectionStateChanged = { onConnectionStateChanged(token, it) },
             onRemoteRiderIdentified = { onRemoteRiderIdentified(token, it) },
             onAudioLevelChanged = { onAudioLevelChanged(token, it) },
-            onError = { error -> postForSession(token) { handleError(error) } }
+            onError = { error -> postForSession(token) { handleError(error) } },
+            isSessionCurrent = { isSessionCurrent(token) }
         ).also {
             publishStatus(MEDIA_INITIALIZING_STATUS)
             it.start()
