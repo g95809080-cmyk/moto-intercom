@@ -23,14 +23,11 @@ import android.os.Parcelable
 import android.util.Log
 import java.io.Closeable
 import java.io.IOException
-import java.net.InetSocketAddress
 import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.NetworkInterface
-import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 /**
  * 摩托车对讲 App 的 Wi-Fi Direct 连接层。
@@ -64,7 +61,6 @@ class WifiDirectTunnel(
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val io: ExecutorService = Executors.newSingleThreadExecutor()
 
     private var manager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
@@ -77,8 +73,8 @@ class WifiDirectTunnel(
     @Volatile private var validatingGroup = false
     @Volatile private var state = State.DISCOVERING
 
-    private var serverSocket: ServerSocket? = null
-    private var signalingSocket: Socket? = null
+    @Volatile private var socketTransport: WifiDirectSignalingSocket? = null
+    @Volatile private var socketTransportGeneration = 0
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
     private val peerRegistry = WifiDirectPeerRegistry()
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
@@ -168,7 +164,7 @@ class WifiDirectTunnel(
             postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
             return
         }
-        if (connectingAddress == address || signalingSocket != null) return
+        if (connectingAddress == address || state == State.SIGNALING_READY) return
 
         val m = manager ?: return
         val c = channel ?: return
@@ -217,13 +213,14 @@ class WifiDirectTunnel(
         peerDevices.clear()
         cancelPendingRetry()
         cancelConnectWatchdog()
-        try {
-            channel?.close()
-        } catch (_: Throwable) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            try {
+                channel?.close()
+            } catch (_: Throwable) {
+            }
         }
         channel = null
         manager = null
-        io.shutdownNow()
     }
 
     private fun initP2p() {
@@ -396,7 +393,7 @@ class WifiDirectTunnel(
             Log.d(TAG, "selectedPeer=${peerSummary(device)}")
         }
         mainHandler.post { onPeersChanged(snapshot.accepted.mapNotNull(peerDevices::get)) }
-        if (autoConnect && connectingAddress == null && signalingSocket == null) {
+        if (autoConnect && connectingAddress == null && state != State.SIGNALING_READY) {
             cancelPendingRetry()
             selectedPeer?.let {
                 Log.d(TAG, "accepted peer triggers connect: ${peerSummary(it)}")
@@ -531,12 +528,13 @@ class WifiDirectTunnel(
     private fun validateGroup(info: WifiP2pInfo, group: WifiP2pGroup, attempt: Int) {
         val target = peerRegistry.snapshot().selected?.let(peerDevices::get)
         val targetAddress = target?.deviceAddress
-        val ownerAddress = group.owner?.deviceAddress
+        val ownerDeviceAddress = group.owner?.deviceAddress
         val clientAddresses = group.clientList.map { it.deviceAddress }
         val targetMatches = if (info.isGroupOwner) {
-            targetAddress != null && clientAddresses.any { sameAddress(it, targetAddress) }
+            targetAddress != null && clientAddresses.size == 1 &&
+                sameAddress(clientAddresses.single(), targetAddress)
         } else {
-            targetAddress != null && sameAddress(ownerAddress, targetAddress)
+            targetAddress != null && sameAddress(ownerDeviceAddress, targetAddress)
         }
 
         Log.d(
@@ -558,33 +556,36 @@ class WifiDirectTunnel(
         if (!targetMatches) {
             validatingGroup = false
             rejectCurrentGroup(
-                "group owner/client 与 selectedPeer 不匹配: owner=$ownerAddress " +
+                "group owner/client 与 selectedPeer 不匹配: owner=$ownerDeviceAddress " +
                     "clients=$clientAddresses target=$targetAddress networkName=${group.networkName}"
             )
             return
         }
 
-        val ownerIp = info.groupOwnerAddress?.hostAddress
-        if (ownerIp.isNullOrBlank()) {
+        val ownerAddress = info.groupOwnerAddress
+        if (ownerAddress == null) {
             postError(IllegalStateException("未获取到组长 IP"))
+            removeGroupAndRediscover("P2P group 没有组长 IP")
+            return
+        }
+
+        val localAddress = localP2pAddress(group.`interface`)
+        if (localAddress == null) {
+            postError(IllegalStateException("未获取到本机 P2P 接口 IP"))
+            removeGroupAndRediscover("P2P 接口没有可用 IPv4 地址")
             return
         }
 
         validatingGroup = false
         tunnelStarted = true
-        cancelConnectWatchdog()
         state = State.GROUP_READY
         Log.d(
             TAG,
             "MotoCom P2P group 校验通过: groupOwner=$ownerAddress networkName=${group.networkName} " +
-                "interface=${group.`interface`} localP2pIp=${localP2pIp(group.`interface`)} " +
-                "remoteTargetIp=$ownerIp"
+                "interface=${group.`interface`} localP2pIp=${localAddress.hostAddress} " +
+                "remoteTargetIp=${ownerAddress.hostAddress}"
         )
-        if (info.isGroupOwner) {
-            startSignalingServer()
-        } else {
-            connectSignalingClient(ownerIp)
-        }
+        startSocketTransport(info, group, localAddress, ownerAddress, targetAddress)
     }
 
     private fun rejectCurrentGroup(reason: String) {
@@ -675,51 +676,42 @@ class WifiDirectTunnel(
         )
     }
 
-    private fun startSignalingServer() {
-        try {
-            io.execute {
-                try {
-                    serverSocket = ServerSocket().apply {
-                        reuseAddress = true
-                        bind(InetSocketAddress(signalingPort))
-                    }
-                    val socket = serverSocket!!.accept()
-                    signalingSocket = socket
-                    val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
-                    postReady(peerIp, isServer = true, socket = socket)
-                } catch (t: Throwable) {
-                    if (running) postError(t)
-                }
+    private fun startSocketTransport(
+        info: WifiP2pInfo,
+        group: WifiP2pGroup,
+        localAddress: InetAddress,
+        ownerAddress: InetAddress,
+        selectedAddress: String?
+    ) {
+        socketTransport?.close()
+        val generation = ++socketTransportGeneration
+        val transport = WifiDirectSignalingSocket(
+            port = signalingPort,
+            readyTimeoutMillis = CONNECT_WATCHDOG_MS,
+            connectTimeoutMillis = SOCKET_CONNECT_TIMEOUT_MS,
+            retryDelayMillis = SOCKET_RETRY_DELAY_MS,
+            isSessionCurrent = {
+                running && generation == socketTransportGeneration && state == State.GROUP_READY
+            },
+            onReady = { ip, server, socket ->
+                postTransportReady(generation, ip, server, socket)
+            },
+            onFailure = { error -> postTransportFailure(generation, error) }
+        )
+        socketTransport = transport
+
+        if (info.isGroupOwner) {
+            val hasOnlySelectedClient = group.clientList.size == 1 &&
+                sameAddress(group.clientList.single().deviceAddress, selectedAddress)
+            transport.startServer(localAddress) { remoteAddress ->
+                hasOnlySelectedClient && remoteOnP2pInterface(
+                    remoteAddress,
+                    localAddress,
+                    group.`interface`
+                )
             }
-        } catch (t: Throwable) {
-            if (running) postError(t)
-        }
-    }
-
-    private fun connectSignalingClient(groupOwnerIp: String) {
-        try {
-            io.execute {
-                var lastError: Throwable? = null
-
-                // 组员连接成功时，组长的 ServerSocket 可能还差几百毫秒才启动。
-                repeat(CLIENT_RETRY_COUNT) {
-                    if (!running) return@execute
-                    try {
-                        val socket = Socket()
-                        socket.connect(InetSocketAddress(groupOwnerIp, signalingPort), CONNECT_TIMEOUT_MS)
-                        signalingSocket = socket
-                        postReady(groupOwnerIp, isServer = false, socket = socket)
-                        return@execute
-                    } catch (t: Throwable) {
-                        lastError = t
-                        sleepQuietly(CLIENT_RETRY_DELAY_MS)
-                    }
-                }
-
-                postError(IOException("连接组长信令通道失败: $groupOwnerIp:$signalingPort", lastError))
-            }
-        } catch (t: Throwable) {
-            if (running) postError(t)
+        } else {
+            transport.startClient(localAddress, ownerAddress)
         }
     }
 
@@ -728,16 +720,9 @@ class WifiDirectTunnel(
         validatingGroup = false
         connectingAddress = null
         cancelConnectWatchdog()
-        try {
-            signalingSocket?.close()
-        } catch (_: Throwable) {
-        }
-        try {
-            serverSocket?.close()
-        } catch (_: Throwable) {
-        }
-        signalingSocket = null
-        serverSocket = null
+        socketTransportGeneration++
+        socketTransport?.close()
+        socketTransport = null
     }
 
     private fun resetDiscoveryCandidates() {
@@ -756,7 +741,7 @@ class WifiDirectTunnel(
     private fun schedulePendingRetryIfNeeded() {
         var peers = peerRegistry.snapshot()
         if (!running || peers.pending.isEmpty() || peers.accepted.isNotEmpty()) return
-        if (connectingAddress != null || signalingSocket != null || pendingRetryScheduled) return
+        if (connectingAddress != null || state == State.SIGNALING_READY || pendingRetryScheduled) return
 
         if (pendingRetryAttempt >= PENDING_DISCOVERY_RETRY_COUNT) {
             Log.w(
@@ -775,7 +760,7 @@ class WifiDirectTunnel(
             if (!running || generation != pendingRetryGeneration) return@postDelayed
             peers = peerRegistry.snapshot()
             if (peers.pending.isEmpty() || peers.accepted.isNotEmpty()) return@postDelayed
-            if (connectingAddress != null || signalingSocket != null) return@postDelayed
+            if (connectingAddress != null || state == State.SIGNALING_READY) return@postDelayed
 
             pendingRetryAttempt = attempt
             Log.d(
@@ -792,7 +777,7 @@ class WifiDirectTunnel(
         val generation = ++connectWatchdogGeneration
         mainHandler.postDelayed({
             if (!running || generation != connectWatchdogGeneration) return@postDelayed
-            if (tunnelStarted || signalingSocket != null || connectingAddress != peerAddress) {
+            if (state == State.SIGNALING_READY || connectingAddress != peerAddress) {
                 return@postDelayed
             }
 
@@ -865,20 +850,42 @@ class WifiDirectTunnel(
             }
         }
 
-    private fun postReady(targetIp: String, isServer: Boolean, socket: Socket) {
-        cancelConnectWatchdog()
+    private fun postTransportReady(
+        generation: Int,
+        targetIp: String,
+        isServer: Boolean,
+        socket: Socket
+    ) {
         mainHandler.post {
-            if (!running || state == State.CLOSED) {
-                try {
-                    socket.close()
-                } catch (_: Throwable) {
-                }
+            if (!isTransportCurrent(generation) || !socket.isConnected || socket.isClosed) {
+                runCatching { socket.close() }
                 return@post
             }
-            onTunnelReady(targetIp, isServer, socket)
+
             state = State.SIGNALING_READY
+            connectingAddress = null
+            cancelConnectWatchdog()
+            try {
+                onTunnelReady(targetIp, isServer, socket)
+            } catch (t: Throwable) {
+                runCatching { socket.close() }
+                postError(t)
+                removeGroupAndRediscover("signaling socket handoff failure")
+            }
         }
     }
+
+    private fun postTransportFailure(generation: Int, error: IOException) {
+        mainHandler.post {
+            if (!isTransportCurrent(generation)) return@post
+            postError(error)
+            removeGroupAndRediscover("signaling socket failure")
+        }
+    }
+
+    private fun isTransportCurrent(generation: Int): Boolean =
+        running && generation == socketTransportGeneration &&
+            socketTransport != null && state == State.GROUP_READY
 
     private fun postError(t: Throwable) {
         mainHandler.post { onError(t) }
@@ -911,7 +918,10 @@ class WifiDirectTunnel(
 
     private fun normalizedAddress(address: String): String = address.uppercase()
 
-    private fun localP2pIp(interfaceName: String?): String? {
+    private fun localP2pIp(interfaceName: String?): String? =
+        localP2pAddress(interfaceName)?.hostAddress
+
+    private fun localP2pAddress(interfaceName: String?): Inet4Address? {
         return try {
             val interfaces = if (interfaceName.isNullOrBlank()) {
                 NetworkInterface.getNetworkInterfaces().toList().filter { it.name.startsWith("p2p") }
@@ -922,18 +932,38 @@ class WifiDirectTunnel(
                 .flatMap { it.inetAddresses.toList().asSequence() }
                 .filterIsInstance<Inet4Address>()
                 .firstOrNull { !it.isLoopbackAddress }
-                ?.hostAddress
         } catch (_: Throwable) {
             null
         }
     }
 
-    private fun sleepQuietly(ms: Long) {
-        try {
-            Thread.sleep(ms)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
+    private fun remoteOnP2pInterface(
+        remoteAddress: InetAddress,
+        localAddress: InetAddress,
+        interfaceName: String?
+    ): Boolean {
+        if (remoteAddress.isAnyLocalAddress || remoteAddress.isLoopbackAddress) return false
+        val networkInterface = interfaceName?.let {
+            runCatching { NetworkInterface.getByName(it) }.getOrNull()
+        } ?: return false
+        val prefixLength = networkInterface.interfaceAddresses
+            .firstOrNull { it.address == localAddress }
+            ?.networkPrefixLength
+            ?.toInt()
+            ?: return false
+        return sameNetwork(localAddress.address, remoteAddress.address, prefixLength)
+    }
+
+    private fun sameNetwork(left: ByteArray, right: ByteArray, prefixLength: Int): Boolean {
+        if (left.size != right.size || prefixLength !in 1..(left.size * 8)) return false
+        val fullBytes = prefixLength / 8
+        for (index in 0 until fullBytes) {
+            if (left[index] != right[index]) return false
         }
+        val remainingBits = prefixLength % 8
+        if (remainingBits == 0) return true
+        val mask = 0xFF shl (8 - remainingBits) and 0xFF
+        return left[fullBytes].toInt() and mask == right[fullBytes].toInt() and mask
     }
 
     private fun reasonText(reason: Int): String = when (reason) {
@@ -953,10 +983,9 @@ class WifiDirectTunnel(
     }
 
     companion object {
-        private const val CONNECT_TIMEOUT_MS = 3_000
+        private const val SOCKET_CONNECT_TIMEOUT_MS = 3_000
         private const val CONNECT_WATCHDOG_MS = 12_000L
-        private const val CLIENT_RETRY_DELAY_MS = 500L
-        private const val CLIENT_RETRY_COUNT = 20
+        private const val SOCKET_RETRY_DELAY_MS = 500L
         private const val BUSY_RETRY_DELAY_MS = 1_000L
         private const val REMOVE_GROUP_BUSY_RETRY_COUNT = 3
         private const val GROUP_REMOVAL_SETTLE_MS = 500L
