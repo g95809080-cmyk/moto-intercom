@@ -18,8 +18,8 @@
 - Pure logic follows RED → GREEN → REFACTOR. Android-only wiring uses compile, Lint, and physical-device checks as approved in the design.
 - Every task must pass its listed verification before its local commit.
 - Do not push, open a PR, or publish an APK.
-- Current acceptance requires automated checks plus MI 6 `9688fa60` install/start/service/cleanup evidence.
-- Xiaomi 13, two-device audio, Bluetooth routing, and all subjective listening checks are explicitly skipped for this run and must be reported as not executed, never passed.
+- Current acceptance requires automated checks plus MI 6 `9688fa60` and Xiaomi 13 `efcb9031` install/start/service/cleanup evidence.
+- Two-device discovery/signaling and Xiaomi 13 Bluetooth routing require objective evidence. Human listening checks remain not run until the user confirms them.
 
 ## Target File Map
 
@@ -1707,7 +1707,7 @@ git commit -m "refactor: extract lifecycle-safe main screen"
 
 **Interfaces:**
 
-- Consumes: debug APK and connected MI 6 serial `9688fa60`.
+- Consumes: debug APK and connected MI 6 `9688fa60` plus Xiaomi 13 `efcb9031`.
 - Produces: saved logs under `build/device-verification/<timestamp>/` and a nonzero exit code on machine-check failure.
 
 - [ ] **Step 1: Fix manifest, theme, and resource placement**
@@ -1764,7 +1764,7 @@ Create the complete script:
 
 ```powershell
 param(
-    [string[]]$Serials = @("9688fa60"),
+    [string[]]$Serials = @("9688fa60", "efcb9031"),
     [string]$Adb = "C:\Users\kuma\AppData\Local\Android\Sdk\platform-tools\adb.exe",
     [string]$Apk = "app\build\outputs\apk\debug\app-debug.apk"
 )
@@ -1830,11 +1830,11 @@ foreach ($serial in $Serials) {
 Write-Output "Device evidence: $((Resolve-Path $out).Path)"
 ```
 
-The script fails immediately on a machine-check error. It accepts additional serials later, but this run passes only `9688fa60`.
+The script fails immediately on a machine-check error. This run passes both `9688fa60` and `efcb9031`.
 
 - [ ] **Step 4: Run the connected-device evidence pass**
 
-Confirm MI 6 is `device`:
+Confirm both devices are `device`:
 
 ```powershell
 & "C:\Users\kuma\AppData\Local\Android\Sdk\platform-tools\adb.exe" devices -l
@@ -1846,18 +1846,19 @@ Then run:
 .\scripts\verify-device-matrix.ps1
 ```
 
-- [ ] **Step 5: Execute objective MI 6 checks and record skipped checks**
+- [ ] **Step 5: Execute objective two-device and Bluetooth checks**
 
 Perform in order:
 
-1. Install and launch on MI 6; grant RECORD_AUDIO and location permissions.
-2. Start intercom through the rendered UI; confirm `dumpsys activity services com.kuma.motointercom` shows the foreground service.
-3. Background and reopen the Activity; confirm the UI reconnects to the running service without a crash.
-4. Stop and immediately restart once; confirm logs contain no stale-socket resurrection or rejected-executor crash.
-5. Stop again; confirm the service is absent and `dumpsys audio` no longer attributes communication routing to the app.
-6. Record Xiaomi 13, two-device discovery/audio, Bluetooth routing, and human listening as `NOT RUN: unavailable hardware`.
+1. Install and launch on MI 6 and Xiaomi 13; grant required runtime permissions.
+2. Start intercom through both rendered UIs; confirm both foreground services and capture P2P/signaling state.
+3. Confirm Xiaomi 13 selects the connected Bluetooth headset as communication device using `dumpsys audio` and app logs.
+4. Background and reopen both Activities; confirm each UI reconnects to its running service without a crash.
+5. Stop and immediately restart once; confirm logs contain no stale-socket resurrection or rejected-executor crash.
+6. Stop again on both devices; confirm services are absent and audio routing is released.
+7. Record human listening/speaking quality as `NOT RUN` until the user supplies subjective confirmation.
 
-Record pass/fail/not-run beside each item in `build/device-verification/<timestamp>/acceptance.txt`. A failed objective MI 6 item blocks the final commit; explicitly skipped hardware/subjective items do not.
+Record pass/fail/not-run beside each item in `build/device-verification/<timestamp>/acceptance.txt`. Any failed objective device item blocks the final commit; only unconfirmed human listening items may remain not run.
 
 - [ ] **Step 6: Commit the verified platform cleanup**
 
