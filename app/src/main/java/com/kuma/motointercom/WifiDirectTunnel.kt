@@ -190,11 +190,13 @@ class WifiDirectTunnel(
                 action("连接 ${device.deviceName} 失败", onFailed = {
                     cancelConnectWatchdog()
                     connectingAddress = null
+                    state = State.DISCOVERING
                 })
             )
         } catch (t: Throwable) {
             cancelConnectWatchdog()
             connectingAddress = null
+            state = State.DISCOVERING
             postError(t)
         }
     }
