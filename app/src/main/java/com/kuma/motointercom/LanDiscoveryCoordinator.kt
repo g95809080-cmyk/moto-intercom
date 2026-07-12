@@ -6,6 +6,8 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import org.json.JSONObject
 import java.io.Closeable
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -177,6 +179,12 @@ internal class LanDiscoveryCoordinator(
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
+                if (!LanTunnelHandshake.read(socket, nodeId)) {
+                    log("Ignored invalid LAN tunnel connection")
+                    closeQuietly(socket)
+                    acceptedSocket = null
+                    continue
+                }
                 val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
                 if (handoff(peerIp, server = true, socket)) {
                     acceptedSocket = null
@@ -269,6 +277,7 @@ internal class LanDiscoveryCoordinator(
             if (!isActive()) return
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
+            LanTunnelHandshake.write(socket, nodeId)
             val connected = socket
             if (handoff(ip, server = false, connected)) {
                 socket = null
@@ -434,5 +443,41 @@ internal class LanDiscoveryCoordinator(
 
         private fun ipv4Value(ip: String): Long =
             ip.split('.').fold(0L) { value, part -> (value shl 8) + part.toLong() }
+    }
+}
+
+internal object LanTunnelHandshake {
+    private const val MAGIC = 0x4D54434D // MTCM
+    private const val VERSION = 1
+    private const val MAX_NODE_ID_BYTES = 128
+    private const val READ_TIMEOUT_MS = 1_000
+
+    fun write(socket: Socket, nodeId: String) {
+        val id = nodeId.toByteArray(StandardCharsets.UTF_8)
+        require(id.isNotEmpty() && id.size <= MAX_NODE_ID_BYTES) { "invalid LAN node id" }
+        DataOutputStream(socket.getOutputStream()).apply {
+            writeInt(MAGIC)
+            writeByte(VERSION)
+            writeByte(id.size)
+            write(id)
+            flush()
+        }
+    }
+
+    fun read(socket: Socket, localNodeId: String): Boolean {
+        val previousTimeout = socket.soTimeout
+        return try {
+            socket.soTimeout = READ_TIMEOUT_MS
+            val input = DataInputStream(socket.getInputStream())
+            if (input.readInt() != MAGIC || input.readUnsignedByte() != VERSION) return false
+            val size = input.readUnsignedByte()
+            if (size !in 1..MAX_NODE_ID_BYTES) return false
+            val id = ByteArray(size).also(input::readFully).toString(StandardCharsets.UTF_8)
+            id.isNotBlank() && id != localNodeId
+        } catch (_: IOException) {
+            false
+        } finally {
+            runCatching { socket.soTimeout = previousTimeout }
+        }
     }
 }
