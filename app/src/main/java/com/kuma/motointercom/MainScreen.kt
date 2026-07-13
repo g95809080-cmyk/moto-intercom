@@ -49,8 +49,7 @@ internal class MainScreen(
     private lateinit var voxOpenPill: TextView
     private lateinit var voxHangoverPill: TextView
 
-    private var intercomRunning = false
-    private var canStart = false
+    private var productState: IntercomState = IntercomState.Offline
     private var mediaConnected = false
     private var currentButtonColor = DISABLED_BUTTON_COLOR
     private var buttonColorAnimator: ValueAnimator? = null
@@ -61,31 +60,31 @@ internal class MainScreen(
         root = buildSimpleUi(initialRiderName)
     }
 
-    fun setIntercomState(state: IntercomUiState, canStart: Boolean) {
-        intercomRunning = state == IntercomUiState.RUNNING
-        this.canStart = canStart
+    fun setIntercomState(state: IntercomState, canStart: Boolean) {
+        productState = state
+        mediaConnected = state is IntercomState.Connected
         actionButton.isEnabled = when (state) {
-            IntercomUiState.STOPPED -> canStart
-            IntercomUiState.RUNNING -> true
-            IntercomUiState.STARTING,
-            IntercomUiState.STOPPING -> false
+            IntercomState.Offline -> canStart
+            is IntercomState.Stopping -> false
+            else -> true
         }
         actionButton.text = when (state) {
-            IntercomUiState.STOPPED -> "启动摩声"
-            IntercomUiState.STARTING -> "启动中..."
-            IntercomUiState.RUNNING -> "结束对讲"
-            IntercomUiState.STOPPING -> "停止中..."
+            IntercomState.Offline -> "启动摩声"
+            is IntercomState.Stopping -> "停止中..."
+            else -> "结束对讲"
         }
+        if (state is IntercomState.Connected) setRemoteRider(state.peer.nickname)
+        statusText.setTextColor(statusColor(state))
+        statusDetailText.text = statusDetail(state)
         updateActionButton()
-        updateMotionForStatus(statusText.text.toString())
+        updateMotionForState()
     }
 
     fun setStatus(message: String) {
         statusText.text = message
-        statusText.setTextColor(statusColor(message))
-        statusDetailText.text = statusDetail(message)
-        mediaConnected = isConnectedStatus(message)
-        updateMotionForStatus(message)
+        statusText.setTextColor(statusColor(productState))
+        statusDetailText.text = statusDetail(productState)
+        updateMotionForState()
         appendLog(message)
     }
 
@@ -350,13 +349,6 @@ internal class MainScreen(
         return card
     }
 
-    private fun setIntercomRunning(running: Boolean) {
-        setIntercomState(
-            if (running) IntercomUiState.RUNNING else IntercomUiState.STOPPED,
-            canStart
-        )
-    }
-
     private fun updateAudioSource(status: String, bluetooth: Boolean) {
         audioSourceText.text = status
         audioRouteStateText.text = if (bluetooth) "蓝牙连接状态：已连接" else "手机外放 / 待机"
@@ -427,23 +419,28 @@ internal class MainScreen(
 
     private fun updateActionButton() {
         actionButton.setTextColor(Color.WHITE)
-        animateButtonColor(targetButtonColor(statusText.text.toString()))
+        animateButtonColor(targetButtonColor(productState))
     }
 
-    private fun updateMotionForStatus(message: String) {
-        val active = isPairingStatus(message) || isConnectedStatus(message)
+    private fun updateMotionForState() {
+        val active = productState != IntercomState.Offline && productState !is IntercomState.Stopping
+        val connected = productState is IntercomState.Connected
+        val mediaActive = productState is IntercomState.Connecting ||
+            productState is IntercomState.Optimizing ||
+            connected ||
+            productState is IntercomState.Recovering
         rippleView.setRunning(active)
-        visualizerView.setConnected(isConnectedStatus(message))
-        animateButtonColor(targetButtonColor(message))
-        wifiDirectPill.applyPill(intercomRunning || isPairingStatus(message) || isConnectedStatus(message))
-        webRtcPill.applyPill(isConnectedStatus(message) || message == MEDIA_INITIALIZING_STATUS)
-        voxPill.applyPill(isConnectedStatus(message))
-        if (!isConnectedStatus(message)) updateVoxDisplay(0f)
+        visualizerView.setConnected(connected)
+        animateButtonColor(targetButtonColor(productState))
+        wifiDirectPill.applyPill(active)
+        webRtcPill.applyPill(mediaActive)
+        voxPill.applyPill(connected)
+        if (!connected) updateVoxDisplay(0f)
     }
 
-    private fun targetButtonColor(message: String): Int = when {
-        isConnectedStatus(message) -> ACCENT_CONNECTED
-        isPairingStatus(message) || intercomRunning -> ACCENT_GREEN
+    private fun targetButtonColor(state: IntercomState): Int = when {
+        state is IntercomState.Connected -> ACCENT_CONNECTED
+        state != IntercomState.Offline && state !is IntercomState.Stopping -> ACCENT_GREEN
         !actionButton.isEnabled -> DISABLED_BUTTON_COLOR
         else -> ACCENT_GREEN
     }
@@ -472,30 +469,26 @@ internal class MainScreen(
         }
     }
 
-    private fun statusColor(message: String): Int = when {
-        message == WIFI_OFF_STATUS || message.contains("错误") || message.contains("缺少") -> ERROR_RED
-        isConnectedStatus(message) -> ACCENT_CONNECTED
-        isPairingStatus(message) -> ACCENT_GREEN
-        else -> TEXT_PRIMARY
+    private fun statusColor(state: IntercomState): Int = when (state) {
+        is IntercomState.Connected -> ACCENT_CONNECTED
+        is IntercomState.Recovering,
+        is IntercomState.Resetting -> ERROR_RED
+        IntercomState.Offline,
+        is IntercomState.Stopping -> TEXT_PRIMARY
+        else -> ACCENT_GREEN
     }
 
-    private fun statusDetail(message: String): String = when {
-        isConnectedStatus(message) -> "语音通道在线，保持骑行沟通"
-        message == SIGNALING_CONNECTED_STATUS -> "信令已建立，正在准备媒体"
-        message == MEDIA_INITIALIZING_STATUS -> "正在初始化 WebRTC 音频"
-        isPairingStatus(message) -> "正在搜索附近 MotoCom 车友..."
-        message == ENDED_STATUS -> "已停止对讲，可重新启动"
-        message == WIFI_OFF_STATUS -> "需要 Wi-Fi 才能使用 P2P 或局域网发现"
-        else -> "一对一对讲 · 无需网络"
+    private fun statusDetail(state: IntercomState): String = when (state) {
+        IntercomState.Offline -> "已停止对讲，可重新启动"
+        is IntercomState.Discovering -> "正在搜索附近 MotoCom 车友..."
+        is IntercomState.IncomingConfirmation -> "等待确认陌生车友的连接请求"
+        is IntercomState.Connecting -> "正在建立信令与媒体通道"
+        is IntercomState.Optimizing -> "正在选择更稳定的连接通道"
+        is IntercomState.Connected -> "语音通道在线，保持骑行沟通"
+        is IntercomState.Recovering -> "正在恢复原车友连接"
+        is IntercomState.Resetting -> "正在重置无线连接"
+        is IntercomState.Stopping -> "正在停止对讲"
     }
-
-    private fun isPairingStatus(message: String): Boolean =
-        message == SEARCHING_STATUS ||
-            message == PEER_FOUND_STATUS ||
-            message == SIGNALING_CONNECTED_STATUS ||
-            message == MEDIA_INITIALIZING_STATUS
-
-    private fun isConnectedStatus(message: String): Boolean = message == VOICE_CONNECTED_STATUS
 
     private fun createCard(): LinearLayout =
         LinearLayout(activity).apply {
@@ -619,14 +612,6 @@ internal class MainScreen(
         (value * activity.resources.displayMetrics.density).toInt()
 
     private companion object {
-        const val SEARCHING_STATUS = "无线配对中，请把两台手机靠近.."
-        const val PEER_FOUND_STATUS = "已发现车友"
-        const val SIGNALING_CONNECTED_STATUS = "信令已连接"
-        const val MEDIA_INITIALIZING_STATUS = "媒体初始化中"
-        const val VOICE_CONNECTED_STATUS = "语音通道已连接"
-        const val ENDED_STATUS = "对讲已结束"
-        const val WIFI_OFF_STATUS = "⚠️ 请先打开 Wi-Fi开关"
-
         private const val TAG = "MotoIntercom"
         private const val COLOR_ANIMATION_MS = 280L
         private val BACKGROUND_COLOR = Color.rgb(247, 249, 252)

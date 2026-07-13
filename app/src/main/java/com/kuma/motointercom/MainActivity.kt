@@ -15,20 +15,13 @@ import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 
-internal enum class IntercomUiState {
-    STOPPED,
-    STARTING,
-    RUNNING,
-    STOPPING
-}
-
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
 internal class MainActivity : Activity(), IntercomService.Listener {
     private lateinit var screen: MainScreen
     private var intercomService: IntercomService? = null
     private var bindingRegistered = false
     private var serviceConnected = false
-    private var intercomState = IntercomUiState.STOPPED
+    private var intercomState: IntercomState = IntercomState.Offline
     private var lastToggleElapsed = 0L
     private var optionalPermissionRequested = false
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
@@ -46,7 +39,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             Log.d(TAG, "service disconnected")
             serviceConnected = false
             intercomService = null
-            setIntercomState(IntercomUiState.STOPPED)
+            setIntercomState(IntercomState.Offline)
             screen.setStatus("后台服务已断开")
         }
     }
@@ -60,16 +53,15 @@ internal class MainActivity : Activity(), IntercomService.Listener {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastToggleElapsed < TOGGLE_DEBOUNCE_MS) return@MainScreen
                 when (intercomState) {
-                    IntercomUiState.STOPPED -> {
+                    IntercomState.Offline -> {
                         lastToggleElapsed = now
                         startIntercom()
                     }
-                    IntercomUiState.RUNNING -> {
+                    is IntercomState.Stopping -> Unit
+                    else -> {
                         lastToggleElapsed = now
                         stopIntercom()
                     }
-                    IntercomUiState.STARTING,
-                    IntercomUiState.STOPPING -> Unit
                 }
             },
             onConnectDevice = { device ->
@@ -84,7 +76,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     override fun onStart() {
         super.onStart()
         if (!bindIntercomService(flags = 0)) {
-            setIntercomState(IntercomUiState.STOPPED)
+            setIntercomState(IntercomState.Offline)
         }
         requestOptionalPermissionsIfNeeded()
     }
@@ -127,13 +119,13 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
             Log.d(TAG, "service status running=$running status=$status")
-            val confirmedState = when {
-                running -> IntercomUiState.RUNNING
-                intercomState == IntercomUiState.STARTING -> IntercomUiState.STARTING
-                else -> IntercomUiState.STOPPED
-            }
-            setIntercomState(confirmedState)
             screen.setStatus(status)
+        }
+    }
+
+    override fun onIntercomStateChanged(state: IntercomState) {
+        runOnUiThread {
+            if (serviceConnected) setIntercomState(state)
         }
     }
 
@@ -212,7 +204,6 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             return
         }
 
-        setIntercomState(IntercomUiState.STARTING)
         screen.setStatus(SEARCHING_STATUS)
         val riderName = screen.riderName
         prefs.edit().putString(KEY_RIDER_NAME, riderName).apply()
@@ -250,7 +241,6 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     }
 
     private fun stopIntercom() {
-        setIntercomState(IntercomUiState.STOPPING)
         screen.setStatus(STOPPING_STATUS)
         intercomService?.requestStop() ?: startService(IntercomService.stopIntent(this))
     }
@@ -268,7 +258,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         return bindingRegistered
     }
 
-    private fun setIntercomState(state: IntercomUiState) {
+    private fun setIntercomState(state: IntercomState) {
         if (intercomState != state) Log.d(TAG, "intercom UI state $intercomState -> $state")
         intercomState = state
         screen.setIntercomState(state, hasCorePermissions())

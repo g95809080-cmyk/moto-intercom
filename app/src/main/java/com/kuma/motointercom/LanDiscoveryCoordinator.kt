@@ -29,7 +29,7 @@ internal class LanDiscoveryCoordinator(
     private val nodeId: String,
     private val riderName: String,
     private val onDevicesChanged: (List<LanRiderDevice>) -> Unit,
-    private val onTunnelReady: (String, Boolean, Socket) -> Unit,
+    private val onTunnelReady: (String, Boolean, String, Socket) -> Unit,
     private val onLog: (String) -> Unit,
     private val onError: (Throwable) -> Unit
 ) : Closeable {
@@ -66,7 +66,9 @@ internal class LanDiscoveryCoordinator(
         if (!isActive() || !clientConnecting.compareAndSet(false, true)) return
         log("正在点名连接车友：${device.name} / ${device.ip}")
         try {
-            executor.execute { connect(device.ip, device.port, reportFailure = true) }
+            executor.execute {
+                connect(device.ip, device.port, device.id, reportFailure = true)
+            }
         } catch (t: Throwable) {
             clientConnecting.set(false)
             error(t)
@@ -179,14 +181,15 @@ internal class LanDiscoveryCoordinator(
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
-                if (!LanTunnelHandshake.read(socket, nodeId)) {
+                val remoteDeviceId = LanTunnelHandshake.read(socket, nodeId)
+                if (remoteDeviceId == null) {
                     log("Ignored invalid LAN tunnel connection")
                     closeQuietly(socket)
                     acceptedSocket = null
                     continue
                 }
                 val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
-                if (handoff(peerIp, server = true, socket)) {
+                if (handoff(peerIp, server = true, remoteDeviceId, socket)) {
                     acceptedSocket = null
                     return
                 }
@@ -263,7 +266,12 @@ internal class LanDiscoveryCoordinator(
         if (!shouldInitiateClient(localIp, peerIp) || !clientConnecting.compareAndSet(false, true)) return
         try {
             executor.execute {
-                connect(peerIp, json.optInt("tcpPort", LAN_TCP_PORT), reportFailure = false)
+                connect(
+                    peerIp,
+                    json.optInt("tcpPort", LAN_TCP_PORT),
+                    json.optString("id"),
+                    reportFailure = false
+                )
             }
         } catch (t: Throwable) {
             clientConnecting.set(false)
@@ -271,7 +279,12 @@ internal class LanDiscoveryCoordinator(
         }
     }
 
-    private fun connect(ip: String, port: Int, reportFailure: Boolean) {
+    private fun connect(
+        ip: String,
+        port: Int,
+        remoteDeviceId: String,
+        reportFailure: Boolean
+    ) {
         var socket: Socket? = null
         try {
             if (!isActive()) return
@@ -279,7 +292,7 @@ internal class LanDiscoveryCoordinator(
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
             LanTunnelHandshake.write(socket, nodeId)
             val connected = socket
-            if (handoff(ip, server = false, connected)) {
+            if (handoff(ip, server = false, remoteDeviceId, connected)) {
                 socket = null
             } else {
                 clientConnecting.set(false)
@@ -336,13 +349,18 @@ internal class LanDiscoveryCoordinator(
 
     private fun isActive(): Boolean = !closed.get() && isSessionCurrent(token)
 
-    private fun handoff(ip: String, server: Boolean, socket: Socket): Boolean {
+    private fun handoff(
+        ip: String,
+        server: Boolean,
+        remoteDeviceId: String,
+        socket: Socket
+    ): Boolean {
         if (!isActive()) {
             closeQuietly(socket)
             return false
         }
         return try {
-            onTunnelReady(ip, server, socket)
+            onTunnelReady(ip, server, remoteDeviceId, socket)
             true
         } catch (t: Throwable) {
             closeQuietly(socket)
@@ -464,18 +482,18 @@ internal object LanTunnelHandshake {
         }
     }
 
-    fun read(socket: Socket, localNodeId: String): Boolean {
+    fun read(socket: Socket, localNodeId: String): String? {
         val previousTimeout = socket.soTimeout
         return try {
             socket.soTimeout = READ_TIMEOUT_MS
             val input = DataInputStream(socket.getInputStream())
-            if (input.readInt() != MAGIC || input.readUnsignedByte() != VERSION) return false
+            if (input.readInt() != MAGIC || input.readUnsignedByte() != VERSION) return null
             val size = input.readUnsignedByte()
-            if (size !in 1..MAX_NODE_ID_BYTES) return false
+            if (size !in 1..MAX_NODE_ID_BYTES) return null
             val id = ByteArray(size).also(input::readFully).toString(StandardCharsets.UTF_8)
-            id.isNotBlank() && id != localNodeId
+            id.takeIf { it.isNotBlank() && it != localNodeId }
         } catch (_: IOException) {
-            false
+            null
         } finally {
             runCatching { socket.soTimeout = previousTimeout }
         }
