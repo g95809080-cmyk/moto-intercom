@@ -166,7 +166,12 @@ class SessionOrchestratorTest {
         try {
             orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
             orchestrator.dispatchAndAwait(
-                SessionEvent.TunnelReady(provisional, null, Transport.WIFI_DIRECT)
+                SessionEvent.TunnelReady(
+                    provisional,
+                    null,
+                    Transport.WIFI_DIRECT,
+                    IdentityVerificationSource.NONE
+                )
             )
             orchestrator.dispatchAndAwait(
                 SessionEvent.RemoteIdentityReceived(runtime, provisional.id, peer)
@@ -199,7 +204,12 @@ class SessionOrchestratorTest {
         try {
             orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
             orchestrator.dispatchAndAwait(
-                SessionEvent.TunnelReady(provisional, null, Transport.WIFI_DIRECT)
+                SessionEvent.TunnelReady(
+                    provisional,
+                    null,
+                    Transport.WIFI_DIRECT,
+                    IdentityVerificationSource.NONE
+                )
             )
             orchestrator.dispatchAndAwait(
                 SessionEvent.RemoteIdentityReceived(
@@ -240,7 +250,12 @@ class SessionOrchestratorTest {
         try {
             orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
             orchestrator.dispatchAndAwait(
-                SessionEvent.TunnelReady(unverified, null, Transport.WIFI_DIRECT)
+                SessionEvent.TunnelReady(
+                    unverified,
+                    null,
+                    Transport.WIFI_DIRECT,
+                    IdentityVerificationSource.DISCOVERY_UNVERIFIED
+                )
             )
             orchestrator.dispatchAndAwait(
                 SessionEvent.WebRtcStateChanged(
@@ -253,6 +268,86 @@ class SessionOrchestratorTest {
             )
 
             assertTrue(repository.saved.isEmpty())
+        } finally {
+            orchestrator.close()
+        }
+    }
+
+    @Test
+    fun lanDiscoveryIdentityWithLegacySignalingIsNotPersisted() = runBlocking {
+        val repository = RecordingPairingRepository()
+        val orchestrator = orchestrator(repository)
+        val discoveryAttempt = attempt("attempt-lan-discovery", "peer-from-discovery", Transport.LAN)
+        val legacyPeer = resolveRemoteIdentity(
+            SignalingProtocol.Message.Identity("Legacy LAN Rider"),
+            expectedRemoteDeviceId = "peer-from-discovery",
+            requireClaimedDeviceId = true
+        )
+        try {
+            orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
+            orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(discoveryAttempt))
+            orchestrator.dispatchAndAwait(
+                SessionEvent.TunnelReady(
+                    discoveryAttempt,
+                    "peer-from-discovery",
+                    Transport.LAN,
+                    IdentityVerificationSource.DISCOVERY_UNVERIFIED
+                )
+            )
+            orchestrator.dispatchAndAwait(
+                SessionEvent.RemoteIdentityReceived(runtime, discoveryAttempt.id, legacyPeer)
+            )
+            orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    runtime,
+                    discoveryAttempt.id,
+                    WebRtcConnectionState.CONNECTED,
+                    100L,
+                    recovery("recovery-lan-legacy")
+                )
+            )
+
+            assertTrue(repository.saved.isEmpty())
+        } finally {
+            orchestrator.close()
+        }
+    }
+
+    @Test
+    fun lanSocketHandshakeIdentityIsPersistedAfterConnected() = runBlocking {
+        val repository = RecordingPairingRepository()
+        val orchestrator = orchestrator(repository)
+        val lanAttempt = attempt("attempt-lan-verified", "peer-lan", Transport.LAN)
+        try {
+            orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
+            orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(lanAttempt))
+            orchestrator.dispatchAndAwait(
+                SessionEvent.TunnelReady(
+                    lanAttempt,
+                    "peer-lan",
+                    Transport.LAN,
+                    IdentityVerificationSource.SOCKET_HANDSHAKE
+                )
+            )
+            orchestrator.dispatchAndAwait(
+                SessionEvent.RemoteIdentityReceived(
+                    runtime,
+                    lanAttempt.id,
+                    PeerIdentity(null, "Legacy LAN Rider")
+                )
+            )
+            orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    runtime,
+                    lanAttempt.id,
+                    WebRtcConnectionState.CONNECTED,
+                    100L,
+                    recovery("recovery-lan-verified")
+                )
+            )
+
+            assertEquals(listOf("peer-lan"), repository.saved.map(PairingRecord::remoteDeviceId))
+            assertEquals("LAN", repository.saved.single().lastTransport)
         } finally {
             orchestrator.close()
         }

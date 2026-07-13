@@ -265,6 +265,7 @@ class IntercomService : Service() {
                     targetIp,
                     isServer,
                     remoteDeviceId = null,
+                    identityVerificationSource = IdentityVerificationSource.NONE,
                     attempt = attempt,
                     transport = Transport.WIFI_DIRECT,
                     signalingSocket = socket
@@ -301,12 +302,13 @@ class IntercomService : Service() {
                     listener?.onLanDevicesChanged(devices)
                 }
             },
-            onTunnelReady = { ip, server, remoteDeviceId, transportAttempt, socket ->
+            onTunnelReady = { ip, server, remoteDeviceId, verificationSource, transportAttempt, socket ->
                 acceptTunnel(
                     token,
                     ip,
                     server,
                     remoteDeviceId,
+                    verificationSource,
                     transportAttempt ?: attempt,
                     Transport.LAN,
                     socket,
@@ -323,6 +325,7 @@ class IntercomService : Service() {
         targetIp: String,
         isServer: Boolean,
         remoteDeviceId: String?,
+        identityVerificationSource: IdentityVerificationSource,
         attempt: ConnectionAttempt?,
         transport: Transport,
         signalingSocket: Socket
@@ -332,6 +335,7 @@ class IntercomService : Service() {
             targetIp,
             isServer,
             remoteDeviceId,
+            identityVerificationSource,
             attempt,
             transport,
             signalingSocket,
@@ -344,6 +348,7 @@ class IntercomService : Service() {
         targetIp: String,
         isServer: Boolean,
         remoteDeviceId: String?,
+        identityVerificationSource: IdentityVerificationSource,
         suppliedAttempt: ConnectionAttempt?,
         transport: Transport,
         signalingSocket: Socket,
@@ -371,11 +376,17 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 suppliedAttempt,
                 remoteDeviceId,
+                identityVerificationSource,
                 transport,
                 isServer
             )
             val queued = orchestrator.dispatch(
-                SessionEvent.TunnelReady(attempt, remoteDeviceId, transport)
+                SessionEvent.TunnelReady(
+                    attempt,
+                    remoteDeviceId,
+                    transport,
+                    identityVerificationSource
+                )
             ) { accepted ->
                 dispatchOnMain {
                     if (
@@ -392,6 +403,7 @@ class IntercomService : Service() {
                         targetIp,
                         isServer,
                         remoteDeviceId,
+                        identityVerificationSource,
                         attempt,
                         signalingSocket,
                         closeWifiDirect
@@ -411,6 +423,7 @@ class IntercomService : Service() {
         targetIp: String,
         isServer: Boolean,
         remoteDeviceId: String?,
+        identityVerificationSource: IdentityVerificationSource,
         attempt: ConnectionAttempt,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
@@ -418,12 +431,17 @@ class IntercomService : Service() {
         lanDiscovery?.close()
         lanDiscovery = null
         if (closeWifiDirect) {
+            val closingTunnel = wifiTunnel
             try {
-                wifiTunnel?.close()
+                closingTunnel?.close {
+                    dispatchOnMain {
+                        if (wifiTunnel === closingTunnel) wifiTunnel = null
+                    }
+                }
             } catch (t: Throwable) {
+                if (wifiTunnel === closingTunnel) wifiTunnel = null
                 handleError(t)
             }
-            wifiTunnel = null
         }
 
         physicalLinkReady = true
@@ -442,7 +460,7 @@ class IntercomService : Service() {
             localRuntimeSessionId = attempt.runtimeSessionId,
             expectedRemoteDeviceId = attempt.targetDeviceId ?: remoteDeviceId,
             requireClaimedRemoteDeviceId =
-                attempt.preferredTransport == Transport.WIFI_DIRECT,
+                !identityVerificationSource.verifiesStableDeviceId,
             onIntercomDisconnected = {
                 onIntercomDisconnected(token, attempt, recoverySpec, it)
             },
@@ -512,65 +530,68 @@ class IntercomService : Service() {
         }
     }
 
-    private fun restartDiscoveryAfterDisconnect(
-        token: SessionGeneration.Token,
-        effect: SessionEffect.RestartDiscovery
+    private fun abortResourcesAndResumeDiscovery(
+        runtimeSessionId: RuntimeSessionId,
+        nextAttempt: ConnectionAttempt?
     ) {
-        if (!isSessionCurrent(token)) return
-
-        val generation = ++recoveryGeneration
-        val runtimeSessionId = activeRuntimeSessionId
-            ?.takeIf { it == effect.runtimeSessionId }
-            ?: return
+        val token = activeSession ?: return
+        if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
+        val generation = ++recoveryGeneration
         sessions.invalidate()
         activeSession = null
-        tunnelChosen.set(NO_SESSION_TOKEN)
-        lanDiscovery?.close()
-        lanDiscovery = null
-
-        try {
-            intercomManager?.close()
-        } catch (t: Throwable) {
-            handleError(t)
-        }
-        try {
-            wifiTunnel?.close()
-        } catch (t: Throwable) {
-            handleError(t)
-        }
-        try {
-            audioRouteController?.close()
-        } catch (t: Throwable) {
-            handleError(t)
-        }
+        val managerToClose = intercomManager
+        val lanToClose = lanDiscovery
+        val wifiToClose = wifiTunnel
+        val audioToClose = audioRouteController
         intercomManager = null
+        lanDiscovery = null
         wifiTunnel = null
         audioRouteController = null
-        bluetoothReady = false
-        physicalLinkReady = false
-        mediaConnected = false
-        localRiderName = ""
-        remoteRiderName = null
-        publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
-        publishStatus(SIGNAL_LOST_STATUS)
 
-        mainHandler.postDelayed({
-            if (!running || generation != recoveryGeneration || activeSession != null) {
-                return@postDelayed
-            }
-            val recoveryToken = sessions.start()
-            activeSession = recoveryToken
-            tunnelChosen.set(NO_SESSION_TOKEN)
-            publishLog("重新启动车友发现")
-            startAudioRoute(recoveryToken)
-            startDiscoveryTransports(
-                recoveryToken,
-                deviceId,
-                runtimeSessionId,
-                effect.attempt
-            )
-        }, PEER_RECONNECT_BACKOFF_MS)
+        AttemptResourceController(
+            runtimeSessionId = runtimeSessionId,
+            closeIntercomAndSocket = { managerToClose?.close() },
+            closeLanDiscovery = { lanToClose?.close() },
+            closeWifiDirect = { onClosed ->
+                if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
+            },
+            closeAudioRoute = { audioToClose?.close() },
+            releaseTunnel = { tunnelChosen.set(NO_SESSION_TOKEN) },
+            clearConnectionState = {
+                bluetoothReady = false
+                physicalLinkReady = false
+                mediaConnected = false
+                localRiderName = ""
+                remoteRiderName = null
+                publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
+                publishStatus(SIGNAL_LOST_STATUS)
+            },
+            resumeDiscovery = { resumedRuntimeSessionId ->
+                mainHandler.postDelayed({
+                    if (
+                        !running ||
+                        generation != recoveryGeneration ||
+                        activeSession != null ||
+                        activeRuntimeSessionId != resumedRuntimeSessionId
+                    ) {
+                        return@postDelayed
+                    }
+                    val recoveryToken = sessions.start()
+                    activeSession = recoveryToken
+                    tunnelChosen.set(NO_SESSION_TOKEN)
+                    publishLog("重新启动车友发现")
+                    startAudioRoute(recoveryToken)
+                    startDiscoveryTransports(
+                        recoveryToken,
+                        deviceId,
+                        resumedRuntimeSessionId,
+                        nextAttempt
+                    )
+                }, PEER_RECONNECT_BACKOFF_MS)
+            },
+            onError = ::handleError
+        ).abortAndResumeDiscovery()
     }
 
     private fun onRemoteIdentity(
@@ -662,10 +683,12 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.AbortAttemptAndResumeDiscovery -> {
+                publishLog("连接尝试已中止：${effect.attemptId.value}")
+                abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
+            }
             is SessionEffect.RestartDiscovery -> {
-                val token = activeSession ?: return
-                if (activeRuntimeSessionId != effect.runtimeSessionId) return
-                restartDiscoveryAfterDisconnect(token, effect)
+                abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
             }
         }
     }
@@ -688,22 +711,25 @@ class IntercomService : Service() {
         runtimeSessionId: RuntimeSessionId,
         suppliedAttempt: ConnectionAttempt?,
         remoteDeviceId: String?,
+        identityVerificationSource: IdentityVerificationSource,
         transport: Transport,
         isServer: Boolean
     ): ConnectionAttempt {
+        val verifiedRemoteDeviceId = remoteDeviceId
+            ?.takeIf { identityVerificationSource.verifiesStableDeviceId }
         if (suppliedAttempt != null) {
-            val target = suppliedAttempt.targetDeviceId ?: remoteDeviceId
+            val target = suppliedAttempt.targetDeviceId ?: verifiedRemoteDeviceId
             return suppliedAttempt.copy(
                 targetDeviceId = target,
                 preferredTransport = transport
             )
         }
         val trigger = when {
-            remoteDeviceId == null -> ConnectionTrigger.LEGACY_PROVISIONAL
+            verifiedRemoteDeviceId == null -> ConnectionTrigger.LEGACY_PROVISIONAL
             isServer -> ConnectionTrigger.INBOUND
             else -> ConnectionTrigger.AUTO_DISCOVERY
         }
-        return createAttempt(runtimeSessionId, remoteDeviceId, trigger, transport)
+        return createAttempt(runtimeSessionId, verifiedRemoteDeviceId, trigger, transport)
     }
 
     private fun createRecoverySpec(): RecoveryAttemptSpec = RecoveryAttemptSpec(

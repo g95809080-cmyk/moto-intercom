@@ -129,6 +129,53 @@ class IntercomStateMachineTest {
     }
 
     @Test
+    fun connectionPhaseTerminalStatesOutputAttemptAbortEffect() {
+        val connectionStates = listOf<IntercomState>(
+            IntercomState.Connecting(attempt, peer),
+            IntercomState.Optimizing(attempt, peer)
+        )
+        val terminalStates = listOf(
+            WebRtcConnectionState.DISCONNECTED,
+            WebRtcConnectionState.FAILED,
+            WebRtcConnectionState.CLOSED
+        )
+
+        connectionStates.forEach { connectionState ->
+            terminalStates.forEach { terminalState ->
+                val transition = requireNotNull(
+                    reduceIntercomState(
+                        connectionState,
+                        SessionEvent.WebRtcStateChanged(
+                            runtime,
+                            attempt.id,
+                            terminalState,
+                            1L,
+                            recovery
+                        )
+                    )
+                )
+
+                assertTrue(transition.state is IntercomState.Discovering)
+                assertEquals(
+                    SessionEffect.AbortAttemptAndResumeDiscovery(runtime, attempt.id),
+                    transition.effects.single()
+                )
+            }
+        }
+
+        val signalingTransition = requireNotNull(
+            reduceIntercomState(
+                IntercomState.Connecting(attempt, peer),
+                SessionEvent.SignalingDisconnected(runtime, attempt.id, recovery)
+            )
+        )
+        assertEquals(
+            SessionEffect.AbortAttemptAndResumeDiscovery(runtime, attempt.id),
+            signalingTransition.effects.single()
+        )
+    }
+
+    @Test
     fun rejectsIllegalAndStoppedTransitions() {
         val connected = SessionEvent.WebRtcStateChanged(
             runtime,
