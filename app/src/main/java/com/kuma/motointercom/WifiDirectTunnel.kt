@@ -28,7 +28,6 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.Socket
-import java.util.UUID
 
 /**
  * 摩托车对讲 App 的 Wi-Fi Direct 连接层。
@@ -46,6 +45,7 @@ class WifiDirectTunnel(
     private val signalingPort: Int = 8888,
     private val autoConnect: Boolean = true,
     private val localNickname: String = "骑士",
+    private val sessionId: String,
     private val onPeersChanged: (List<WifiP2pDevice>) -> Unit = {},
     private val onDiscoveryStatus: (String) -> Unit = {},
     private val onDisconnected: () -> Unit = {},
@@ -86,8 +86,6 @@ class WifiDirectTunnel(
     private var connectWatchdogGeneration = 0
     private var lifecycleGeneration = 0
     private var serviceDiscoveryReady = false
-    private val sessionId = UUID.randomUUID().toString()
-
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {

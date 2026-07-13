@@ -13,10 +13,14 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.webrtc.PeerConnection
 import java.io.IOException
 import java.net.Socket
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -45,6 +49,9 @@ class IntercomService : Service() {
     private val binder = LocalBinder()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = SessionGeneration()
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private lateinit var identityStore: LocalIdentityStore
 
     private var listener: Listener? = null
     private var audioRouteController: AudioRouteController? = null
@@ -63,8 +70,15 @@ class IntercomService : Service() {
     private var localRiderName = ""
     private var remoteRiderName: String? = null
     private var activeSession: SessionGeneration.Token? = null
+    private var activeRuntimeSessionId: RuntimeSessionId? = null
+    private var localDeviceId = ""
     private var recoveryGeneration = 0
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
+
+    override fun onCreate() {
+        super.onCreate()
+        identityStore = DataStoreLocalIdentityStore(this)
+    }
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -92,6 +106,7 @@ class IntercomService : Service() {
 
     override fun onDestroy() {
         stopIntercom()
+        serviceScope.cancel()
         super.onDestroy()
     }
 
@@ -132,7 +147,9 @@ class IntercomService : Service() {
         }
 
         val token = sessions.start()
+        val runtimeSessionId = RuntimeSessionId.create()
         activeSession = token
+        activeRuntimeSessionId = runtimeSessionId
         running = true
         bluetoothReady = false
         physicalLinkReady = false
@@ -142,8 +159,26 @@ class IntercomService : Service() {
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
 
-        startAudioRoute(token)
-        startDiscoveryTransports(token)
+        serviceScope.launch {
+            try {
+                val deviceId = identityStore.getOrCreateDeviceId()
+                val storedNickname = identityStore.getNickname()
+                val nickname = requestedRiderName.ifBlank { storedNickname }.ifBlank { "骑士" }
+                if (requestedRiderName.isNotBlank()) identityStore.updateNickname(requestedRiderName)
+                postForSession(token) {
+                    if (activeRuntimeSessionId != runtimeSessionId) return@postForSession
+                    localDeviceId = deviceId
+                    requestedRiderName = nickname
+                    startAudioRoute(token)
+                    startDiscoveryTransports(token, deviceId, runtimeSessionId)
+                }
+            } catch (t: Throwable) {
+                postForSession(token) {
+                    handleError(t)
+                    stopIntercom()
+                }
+            }
+        }
     }
 
     private fun startAudioRoute(token: SessionGeneration.Token) {
@@ -177,7 +212,11 @@ class IntercomService : Service() {
         ).also { it.switchToBluetoothSco() }
     }
 
-    private fun startDiscoveryTransports(token: SessionGeneration.Token) {
+    private fun startDiscoveryTransports(
+        token: SessionGeneration.Token,
+        deviceId: String,
+        runtimeSessionId: RuntimeSessionId
+    ) {
         publishStatus(SEARCHING_STATUS)
         wifiTunnel = WifiDirectTunnel(
             context = this,
@@ -185,6 +224,7 @@ class IntercomService : Service() {
                 onTunnelReady(token, targetIp, isServer, socket)
             },
             localNickname = requestedRiderName.ifBlank { "骑士" },
+            sessionId = runtimeSessionId.value,
             onPeersChanged = {
                 postForSession(token) {
                     publishLog("发现附近设备：${it.size}")
@@ -206,7 +246,7 @@ class IntercomService : Service() {
             context = this,
             token = token,
             isSessionCurrent = ::isSessionCurrent,
-            nodeId = UUID.randomUUID().toString(),
+            nodeId = deviceId,
             riderName = requestedRiderName.ifBlank { "骑士" },
             onDevicesChanged = { devices ->
                 postForSession(token) {
@@ -331,6 +371,8 @@ class IntercomService : Service() {
         if (!isSessionCurrent(token)) return
 
         val generation = ++recoveryGeneration
+        val runtimeSessionId = activeRuntimeSessionId ?: return
+        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         sessions.invalidate()
         activeSession = null
         tunnelChosen.set(NO_SESSION_TOKEN)
@@ -372,7 +414,7 @@ class IntercomService : Service() {
             tunnelChosen.set(NO_SESSION_TOKEN)
             publishLog("重新启动车友发现")
             startAudioRoute(recoveryToken)
-            startDiscoveryTransports(recoveryToken)
+            startDiscoveryTransports(recoveryToken, deviceId, runtimeSessionId)
         }, PEER_RECONNECT_BACKOFF_MS)
     }
 
@@ -393,6 +435,8 @@ class IntercomService : Service() {
         recoveryGeneration++
         sessions.invalidate()
         activeSession = null
+        activeRuntimeSessionId = null
+        localDeviceId = ""
         running = false
         tunnelChosen.set(NO_SESSION_TOKEN)
         lanDiscovery?.close()
