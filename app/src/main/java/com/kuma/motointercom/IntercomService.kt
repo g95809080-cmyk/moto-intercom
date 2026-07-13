@@ -63,6 +63,7 @@ class IntercomService : Service() {
     private var localRiderName = ""
     private var remoteRiderName: String? = null
     private var activeSession: SessionGeneration.Token? = null
+    private var recoveryGeneration = 0
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -141,6 +142,11 @@ class IntercomService : Service() {
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
 
+        startAudioRoute(token)
+        startDiscoveryTransports(token)
+    }
+
+    private fun startAudioRoute(token: SessionGeneration.Token) {
         audioRouteController = AudioRouteController(
             context = this,
             onScoConnected = { deviceName ->
@@ -169,7 +175,9 @@ class IntercomService : Service() {
             },
             onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.switchToBluetoothSco() }
+    }
 
+    private fun startDiscoveryTransports(token: SessionGeneration.Token) {
         publishStatus(SEARCHING_STATUS)
         wifiTunnel = WifiDirectTunnel(
             context = this,
@@ -315,10 +323,57 @@ class IntercomService : Service() {
     private fun onIntercomDisconnected(token: SessionGeneration.Token, error: IOException) {
         postForSession(token) {
             publishLog("信令通道断开：${error.message}")
-            publishStatus(SIGNAL_LOST_STATUS)
-            stopIntercom()
-            stopSelf()
+            recoverAfterPeerDisconnect(token)
         }
+    }
+
+    private fun recoverAfterPeerDisconnect(token: SessionGeneration.Token) {
+        if (!isSessionCurrent(token)) return
+
+        val generation = ++recoveryGeneration
+        sessions.invalidate()
+        activeSession = null
+        tunnelChosen.set(NO_SESSION_TOKEN)
+        lanDiscovery?.close()
+        lanDiscovery = null
+
+        try {
+            intercomManager?.close()
+        } catch (t: Throwable) {
+            handleError(t)
+        }
+        try {
+            wifiTunnel?.close()
+        } catch (t: Throwable) {
+            handleError(t)
+        }
+        try {
+            audioRouteController?.close()
+        } catch (t: Throwable) {
+            handleError(t)
+        }
+        intercomManager = null
+        wifiTunnel = null
+        audioRouteController = null
+        bluetoothReady = false
+        physicalLinkReady = false
+        mediaConnected = false
+        localRiderName = ""
+        remoteRiderName = null
+        publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
+        publishStatus(SIGNAL_LOST_STATUS)
+
+        mainHandler.postDelayed({
+            if (!running || generation != recoveryGeneration || activeSession != null) {
+                return@postDelayed
+            }
+            val recoveryToken = sessions.start()
+            activeSession = recoveryToken
+            tunnelChosen.set(NO_SESSION_TOKEN)
+            publishLog("重新启动车友发现")
+            startAudioRoute(recoveryToken)
+            startDiscoveryTransports(recoveryToken)
+        }, PEER_RECONNECT_BACKOFF_MS)
     }
 
     private fun onRemoteRiderIdentified(token: SessionGeneration.Token, name: String) {
@@ -335,6 +390,7 @@ class IntercomService : Service() {
     }
 
     private fun stopIntercom() {
+        recoveryGeneration++
         sessions.invalidate()
         activeSession = null
         running = false
@@ -497,6 +553,7 @@ class IntercomService : Service() {
 
     companion object {
         private const val NO_SESSION_TOKEN = 0L
+        private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
