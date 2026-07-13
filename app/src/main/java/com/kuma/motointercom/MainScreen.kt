@@ -61,10 +61,21 @@ internal class MainScreen(
         root = buildSimpleUi(initialRiderName)
     }
 
-    fun setRunning(running: Boolean, canStart: Boolean) {
-        intercomRunning = running
+    fun setIntercomState(state: IntercomUiState, canStart: Boolean) {
+        intercomRunning = state == IntercomUiState.RUNNING
         this.canStart = canStart
-        actionButton.isEnabled = canStart
+        actionButton.isEnabled = when (state) {
+            IntercomUiState.STOPPED -> canStart
+            IntercomUiState.RUNNING -> true
+            IntercomUiState.STARTING,
+            IntercomUiState.STOPPING -> false
+        }
+        actionButton.text = when (state) {
+            IntercomUiState.STOPPED -> "启动摩声"
+            IntercomUiState.STARTING -> "启动中..."
+            IntercomUiState.RUNNING -> "结束对讲"
+            IntercomUiState.STOPPING -> "停止中..."
+        }
         updateActionButton()
         updateMotionForStatus(statusText.text.toString())
     }
@@ -340,7 +351,10 @@ internal class MainScreen(
     }
 
     private fun setIntercomRunning(running: Boolean) {
-        setRunning(running, canStart)
+        setIntercomState(
+            if (running) IntercomUiState.RUNNING else IntercomUiState.STOPPED,
+            canStart
+        )
     }
 
     private fun updateAudioSource(status: String, bluetooth: Boolean) {
@@ -412,7 +426,6 @@ internal class MainScreen(
     }
 
     private fun updateActionButton() {
-        actionButton.text = if (intercomRunning) "结束对讲" else "启动摩声"
         actionButton.setTextColor(Color.WHITE)
         animateButtonColor(targetButtonColor(statusText.text.toString()))
     }

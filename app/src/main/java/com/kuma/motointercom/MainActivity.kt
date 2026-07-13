@@ -11,7 +11,16 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
+import android.os.SystemClock
+import android.util.Log
 import android.widget.Toast
+
+internal enum class IntercomUiState {
+    STOPPED,
+    STARTING,
+    RUNNING,
+    STOPPING
+}
 
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
 internal class MainActivity : Activity(), IntercomService.Listener {
@@ -19,12 +28,14 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     private var intercomService: IntercomService? = null
     private var bindingRegistered = false
     private var serviceConnected = false
-    private var intercomRunning = false
+    private var intercomState = IntercomUiState.STOPPED
+    private var lastToggleElapsed = 0L
     private var optionalPermissionRequested = false
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            Log.d(TAG, "service connected")
             val local = service as IntercomService.LocalBinder
             intercomService = local.service()
             serviceConnected = true
@@ -32,10 +43,10 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
+            Log.d(TAG, "service disconnected")
             serviceConnected = false
             intercomService = null
-            intercomRunning = false
-            screen.setRunning(false, hasCorePermissions())
+            setIntercomState(IntercomUiState.STOPPED)
             screen.setStatus("后台服务已断开")
         }
     }
@@ -46,7 +57,20 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             activity = this,
             initialRiderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty(),
             onToggleIntercom = {
-                if (intercomRunning) stopIntercom() else startIntercom()
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastToggleElapsed < TOGGLE_DEBOUNCE_MS) return@MainScreen
+                when (intercomState) {
+                    IntercomUiState.STOPPED -> {
+                        lastToggleElapsed = now
+                        startIntercom()
+                    }
+                    IntercomUiState.RUNNING -> {
+                        lastToggleElapsed = now
+                        stopIntercom()
+                    }
+                    IntercomUiState.STARTING,
+                    IntercomUiState.STOPPING -> Unit
+                }
             },
             onConnectDevice = { device ->
                 intercomService?.connectToLanDevice(device)
@@ -59,7 +83,9 @@ internal class MainActivity : Activity(), IntercomService.Listener {
 
     override fun onStart() {
         super.onStart()
-        bindIntercomService(flags = 0)
+        if (!bindIntercomService(flags = 0)) {
+            setIntercomState(IntercomUiState.STOPPED)
+        }
         requestOptionalPermissionsIfNeeded()
     }
 
@@ -83,7 +109,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         when (requestCode) {
             REQUEST_CORE_PERMISSIONS -> {
                 val canStart = hasCorePermissions()
-                screen.setRunning(intercomRunning, canStart)
+                screen.setIntercomState(intercomState, canStart)
                 screen.setStatus(if (canStart) READY_STATUS else "缺少必要权限，无法启动摩声")
                 if (canStart) requestOptionalPermissionsIfNeeded()
             }
@@ -92,7 +118,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
                 if (permissions.indices.any { grantResults.getOrNull(it) != PackageManager.PERMISSION_GRANTED }) {
                     screen.appendLog("通知权限未授予；不影响对讲启动")
                 }
-                screen.setRunning(intercomRunning, hasCorePermissions())
+                screen.setIntercomState(intercomState, hasCorePermissions())
             }
         }
     }
@@ -100,8 +126,13 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     override fun onStatusChanged(status: String, running: Boolean) {
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
-            intercomRunning = running
-            screen.setRunning(running, hasCorePermissions())
+            Log.d(TAG, "service status running=$running status=$status")
+            val confirmedState = when {
+                running -> IntercomUiState.RUNNING
+                intercomState == IntercomUiState.STARTING -> IntercomUiState.STARTING
+                else -> IntercomUiState.STOPPED
+            }
+            setIntercomState(confirmedState)
             screen.setStatus(status)
         }
     }
@@ -155,10 +186,10 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     private fun ensureCorePermissions() {
         val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
         if (missing.isEmpty()) {
-            screen.setRunning(intercomRunning, true)
+            screen.setIntercomState(intercomState, true)
             screen.setStatus(READY_STATUS)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            screen.setRunning(intercomRunning, false)
+            screen.setIntercomState(intercomState, false)
             screen.setStatus("正在申请必要权限...")
             requestPermissions(missing.toTypedArray(), REQUEST_CORE_PERMISSIONS)
         }
@@ -181,8 +212,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             return
         }
 
-        intercomRunning = true
-        screen.setRunning(true, true)
+        setIntercomState(IntercomUiState.STARTING)
         screen.setStatus(SEARCHING_STATUS)
         val riderName = screen.riderName
         prefs.edit().putString(KEY_RIDER_NAME, riderName).apply()
@@ -220,19 +250,28 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     }
 
     private fun stopIntercom() {
-        screen.setStatus(ENDED_STATUS)
+        setIntercomState(IntercomUiState.STOPPING)
+        screen.setStatus(STOPPING_STATUS)
         intercomService?.requestStop() ?: startService(IntercomService.stopIntent(this))
-        intercomRunning = false
-        screen.setRunning(false, hasCorePermissions())
-        screen.setStatus(ENDED_STATUS)
     }
 
     private fun bindIntercomService(
         intent: Intent = Intent(this, IntercomService::class.java),
         flags: Int
-    ) {
-        if (bindingRegistered) return
+    ): Boolean {
+        if (bindingRegistered && serviceConnected) return true
+        if (bindingRegistered) {
+            runCatching { unbindService(serviceConnection) }
+            bindingRegistered = false
+        }
         bindingRegistered = bindService(intent, serviceConnection, flags)
+        return bindingRegistered
+    }
+
+    private fun setIntercomState(state: IntercomUiState) {
+        if (intercomState != state) Log.d(TAG, "intercom UI state $intercomState -> $state")
+        intercomState = state
+        screen.setIntercomState(state, hasCorePermissions())
     }
 
     private fun hasCorePermissions(): Boolean =
@@ -250,7 +289,9 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         const val KEY_RIDER_NAME = "rider_name"
         const val READY_STATUS = "请点击下方启动对讲"
         const val SEARCHING_STATUS = "无线配对中，请把两台手机靠近.."
-        const val ENDED_STATUS = "对讲已结束"
+        const val STOPPING_STATUS = "正在结束对讲..."
         const val WIFI_OFF_STATUS = "⚠️ 请先打开 Wi-Fi开关"
+        const val TOGGLE_DEBOUNCE_MS = 2_000L
+        const val TAG = "MotoIntercomUi"
     }
 }
