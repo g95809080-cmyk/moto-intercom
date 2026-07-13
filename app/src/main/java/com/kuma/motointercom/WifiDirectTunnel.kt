@@ -84,6 +84,7 @@ class WifiDirectTunnel(
     private var pendingRetryGeneration = 0
     private var pendingRetryScheduled = false
     private var connectWatchdogGeneration = 0
+    private var lifecycleGeneration = 0
     private var serviceDiscoveryReady = false
     private val sessionId = UUID.randomUUID().toString()
 
@@ -120,6 +121,7 @@ class WifiDirectTunnel(
     }
 
     fun start() {
+        lifecycleGeneration++
         running = true
         if (!hasRequiredPermissions(appContext)) {
             postError(SecurityException("缺少 Wi-Fi Direct 运行时权限"))
@@ -200,29 +202,136 @@ class WifiDirectTunnel(
     }
 
     override fun close() {
+        val cleanupGeneration = ++lifecycleGeneration
+        Log.d(TAG, "close cleanup start generation=$cleanupGeneration")
         state = State.CLOSED
         running = false
         resetTunnelOnly()
+        cancelPendingRetry()
+        cancelConnectWatchdog()
         unregisterReceiver()
-        try {
-            serviceRequest?.let { request -> manager?.removeServiceRequest(channel, request, null) }
-            manager?.clearLocalServices(channel, null)
-        } catch (_: Throwable) {
+        val m = manager
+        val c = channel
+        if (m == null || c == null) {
+            finishCloseCleanup(cleanupGeneration, c)
+            return
         }
+        cancelConnectForClose(m, c, cleanupGeneration)
+    }
+
+    private fun cancelConnectForClose(
+        m: WifiP2pManager,
+        c: WifiP2pManager.Channel,
+        generation: Int
+    ) {
+        runCloseCleanupAction(
+            label = "cancelConnect",
+            action = { listener -> m.cancelConnect(c, listener) },
+            onComplete = { removeGroupForClose(m, c, generation, attempt = 1) }
+        )
+    }
+
+    private fun removeGroupForClose(
+        m: WifiP2pManager,
+        c: WifiP2pManager.Channel,
+        generation: Int,
+        attempt: Int
+    ) {
+        try {
+            m.removeGroup(c, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "removeGroup success during close")
+                    clearServiceRequestsForClose(m, c, generation)
+                }
+
+                override fun onFailure(reason: Int) {
+                    Log.w(TAG, "removeGroup failure during close: ${reasonText(reason)}")
+                    if (reason == WifiP2pManager.BUSY && attempt < REMOVE_GROUP_BUSY_RETRY_COUNT) {
+                        Log.w(
+                            TAG,
+                            "removeGroup BUSY retry during close " +
+                                "attempt=${attempt + 1}/$REMOVE_GROUP_BUSY_RETRY_COUNT"
+                        )
+                        mainHandler.postDelayed(
+                            { removeGroupForClose(m, c, generation, attempt + 1) },
+                            BUSY_RETRY_DELAY_MS
+                        )
+                    } else {
+                        clearServiceRequestsForClose(m, c, generation)
+                    }
+                }
+            })
+        } catch (t: Throwable) {
+            Log.w(TAG, "removeGroup failure during close", t)
+            clearServiceRequestsForClose(m, c, generation)
+        }
+    }
+
+    private fun clearServiceRequestsForClose(
+        m: WifiP2pManager,
+        c: WifiP2pManager.Channel,
+        generation: Int
+    ) {
+        runCloseCleanupAction(
+            label = "clearServiceRequests",
+            action = { listener -> m.clearServiceRequests(c, listener) },
+            onComplete = { clearLocalServicesForClose(m, c, generation) }
+        )
+    }
+
+    private fun clearLocalServicesForClose(
+        m: WifiP2pManager,
+        c: WifiP2pManager.Channel,
+        generation: Int
+    ) {
+        runCloseCleanupAction(
+            label = "clearLocalServices",
+            action = { listener -> m.clearLocalServices(c, listener) },
+            onComplete = { finishCloseCleanup(generation, c) }
+        )
+    }
+
+    private fun runCloseCleanupAction(
+        label: String,
+        action: (WifiP2pManager.ActionListener) -> Unit,
+        onComplete: () -> Unit
+    ) {
+        try {
+            action(object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "$label success during close")
+                    onComplete()
+                }
+
+                override fun onFailure(reason: Int) {
+                    Log.w(TAG, "$label failure during close: ${reasonText(reason)}")
+                    onComplete()
+                }
+            })
+        } catch (t: Throwable) {
+            Log.w(TAG, "$label failure during close", t)
+            onComplete()
+        }
+    }
+
+    private fun finishCloseCleanup(generation: Int, c: WifiP2pManager.Channel?) {
+        if (generation != lifecycleGeneration) return
         serviceRequest = null
         serviceDiscoveryReady = false
         peerRegistry.reset()
         peerDevices.clear()
-        cancelPendingRetry()
-        cancelConnectWatchdog()
+        removingGroup = false
+        connectingAddress = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             try {
-                channel?.close()
-            } catch (_: Throwable) {
+                c?.close()
+            } catch (t: Throwable) {
+                Log.w(TAG, "channel close failure", t)
             }
         }
         channel = null
         manager = null
+        Log.d(TAG, "close cleanup finished generation=$generation")
     }
 
     private fun initP2p() {
@@ -289,6 +398,7 @@ class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     private fun setupServiceDiscovery() {
         if (!running) return
+        val generation = lifecycleGeneration
         val m = manager ?: return
         val c = channel ?: return
         resetDiscoveryCandidates()
@@ -316,11 +426,11 @@ class WifiDirectTunnel(
         serviceRequest = request
 
         try {
-            m.clearLocalServices(c, setupAction("清理本机 P2P 服务失败", onSuccess = {
-                m.addLocalService(c, serviceInfo, setupAction("发布 MotoCom P2P 服务失败", onSuccess = {
+            m.clearLocalServices(c, setupAction(generation, "清理本机 P2P 服务失败", onSuccess = {
+                m.addLocalService(c, serviceInfo, setupAction(generation, "发布 MotoCom P2P 服务失败", onSuccess = {
                     Log.d(TAG, "local service publish success: $record")
-                    m.clearServiceRequests(c, setupAction("清理 P2P 服务请求失败", onSuccess = {
-                        m.addServiceRequest(c, request, setupAction("添加 MotoCom 服务请求失败", onSuccess = {
+                    m.clearServiceRequests(c, setupAction(generation, "清理 P2P 服务请求失败", onSuccess = {
+                        m.addServiceRequest(c, request, setupAction(generation, "添加 MotoCom 服务请求失败", onSuccess = {
                             serviceDiscoveryReady = true
                             Log.d(TAG, "service request add success type=$SERVICE_TYPE")
                             discoverPeers()
@@ -845,6 +955,7 @@ class WifiDirectTunnel(
     }
 
     private fun setupAction(
+        generation: Int,
         message: String,
         onFailed: () -> Unit = {},
         onSuccess: () -> Unit = {}
@@ -855,9 +966,16 @@ class WifiDirectTunnel(
         onBusy = {
             Log.w(TAG, "setup BUSY retry setupServiceDiscovery")
             resetTunnelOnly()
-            mainHandler.postDelayed({ if (running) setupServiceDiscovery() }, BUSY_RETRY_DELAY_MS)
-        }
+            mainHandler.postDelayed(
+                { if (isSetupCurrent(generation)) setupServiceDiscovery() },
+                BUSY_RETRY_DELAY_MS
+            )
+        },
+        isCurrent = { isSetupCurrent(generation) }
     )
+
+    private fun isSetupCurrent(generation: Int): Boolean =
+        running && generation == lifecycleGeneration
 
     private fun discoverAction(
         message: String,
@@ -881,12 +999,16 @@ class WifiDirectTunnel(
         onBusy: () -> Unit = {
             resetTunnelOnly()
             mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
-        }
+        },
+        isCurrent: () -> Boolean = { true }
     ) =
         object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = onSuccess()
+            override fun onSuccess() {
+                if (isCurrent()) onSuccess()
+            }
 
             override fun onFailure(reason: Int) {
+                if (!isCurrent()) return
                 onFailed()
                 if (reason == WifiP2pManager.BUSY) {
                     postError(IllegalStateException(BUSY_STATUS))
