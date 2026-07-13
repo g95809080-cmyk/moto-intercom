@@ -28,9 +28,13 @@ class IntercomManager(
     private val signalingSocket: Socket,
     private val isServer: Boolean,
     private val localRiderName: String,
+    private val localDeviceId: String,
+    private val localRuntimeSessionId: RuntimeSessionId,
+    private val expectedRemoteDeviceId: String?,
+    private val requireClaimedRemoteDeviceId: Boolean,
     private val onIntercomDisconnected: (IOException) -> Unit,
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
-    private val onRemoteRiderIdentified: (String) -> Unit = {},
+    private val onRemoteIdentity: (PeerIdentity) -> Unit = {},
     private val onAudioLevelChanged: (Float) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
     private val isSessionCurrent: () -> Boolean
@@ -133,8 +137,14 @@ class IntercomManager(
     private fun dispatch(message: SignalingProtocol.Message) {
         Log.d(TAG, "RX signaling frame: type=${message.javaClass.simpleName}")
         when (message) {
-            is SignalingProtocol.Message.Identity ->
-                postMain { onRemoteRiderIdentified(message.name) }
+            is SignalingProtocol.Message.Identity -> {
+                val identity = resolveRemoteIdentity(
+                    message,
+                    expectedRemoteDeviceId,
+                    requireClaimedRemoteDeviceId
+                )
+                postMain { onRemoteIdentity(identity) }
+            }
             is SignalingProtocol.Message.Offer ->
                 audioEngineOrThrow().createAnswer(message.sdpJson)
             is SignalingProtocol.Message.Answer ->
@@ -160,7 +170,13 @@ class IntercomManager(
 
     private fun sendIdentity() {
         try {
-            sendFrame(SignalingProtocol.Message.Identity(localRiderName.trim()))
+            sendFrame(
+                SignalingProtocol.Message.Identity(
+                    name = localRiderName.trim(),
+                    deviceId = localDeviceId,
+                    runtimeSessionId = localRuntimeSessionId.value
+                )
+            )
         } catch (t: Throwable) {
             postError(t)
         }
@@ -232,4 +248,31 @@ class IntercomManager(
     companion object {
         private const val TAG = "IntercomSignal"
     }
+}
+
+internal fun resolveRemoteIdentity(
+    message: SignalingProtocol.Message.Identity,
+    expectedRemoteDeviceId: String?,
+    requireClaimedDeviceId: Boolean = false
+): PeerIdentity {
+    val expected = expectedRemoteDeviceId?.trim()?.takeIf(String::isNotEmpty)
+    val claimed = message.deviceId?.trim()?.takeIf(String::isNotEmpty)
+    if (expected != null && claimed != null && expected != claimed) {
+        throw SignalingProtocol.ProtocolException(
+            "remote deviceId mismatch: expected=$expected claimed=$claimed"
+        )
+    }
+    val remoteRuntimeSessionId = message.runtimeSessionId?.let(::RuntimeSessionId)
+    val hasExtendedIdentity = claimed != null && remoteRuntimeSessionId != null
+    val verifiedDeviceId = if (requireClaimedDeviceId && !hasExtendedIdentity) {
+        null
+    } else {
+        expected ?: claimed
+    }
+    return PeerIdentity(
+        deviceId = verifiedDeviceId,
+        nickname = message.name,
+        runtimeSessionId = remoteRuntimeSessionId,
+        isDeviceIdVerified = verifiedDeviceId != null
+    )
 }

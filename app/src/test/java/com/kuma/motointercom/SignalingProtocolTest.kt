@@ -22,6 +22,31 @@ class SignalingProtocolTest {
     }
 
     @Test
+    fun identityCarriesStableDeviceAndRuntimeSessionIds() {
+        val protocol = SignalingProtocol(SignalingProtocol.SdpKind.OFFER)
+        val identity = SignalingProtocol.Message.Identity(
+            name = "Rider",
+            deviceId = "device-stable",
+            runtimeSessionId = "runtime-current"
+        )
+        val encoded = protocol.encode(identity)
+
+        assertEquals(identity, protocol.decode(encoded))
+    }
+
+    @Test
+    fun legacyIdentityWithoutIdsRemainsCompatible() {
+        val protocol = SignalingProtocol(SignalingProtocol.SdpKind.OFFER)
+
+        assertEquals(
+            SignalingProtocol.Message.Identity("Legacy Rider"),
+            protocol.decode(
+                """{"type":"IDENTITY","name":"Legacy Rider"}""".toByteArray()
+            )
+        )
+    }
+
+    @Test
     fun rejectsOfferBeforeIdentity() {
         val protocol = SignalingProtocol(SignalingProtocol.SdpKind.OFFER)
         assertThrows(SignalingProtocol.ProtocolException::class.java) {

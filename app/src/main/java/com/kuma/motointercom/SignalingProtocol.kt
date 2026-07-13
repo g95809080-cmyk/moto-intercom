@@ -9,7 +9,11 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
     enum class SdpKind { OFFER, ANSWER }
 
     sealed interface Message {
-        data class Identity(val name: String) : Message
+        data class Identity(
+            val name: String,
+            val deviceId: String? = null,
+            val runtimeSessionId: String? = null
+        ) : Message
         data class Offer(val sdpJson: String) : Message
         data class Answer(val sdpJson: String) : Message
         data class Candidate(val candidateJson: String) : Message
@@ -53,6 +57,22 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
                 }
                 root.addProperty("type", "IDENTITY")
                 root.addProperty("name", name)
+                message.deviceId?.let {
+                    root.addProperty(
+                        "deviceId",
+                        requireIdentityField("deviceId", it, MAX_DEVICE_ID_CODE_POINTS)
+                    )
+                }
+                message.runtimeSessionId?.let {
+                    root.addProperty(
+                        "runtimeSessionId",
+                        requireIdentityField(
+                            "runtimeSessionId",
+                            it,
+                            MAX_RUNTIME_SESSION_ID_CODE_POINTS
+                        )
+                    )
+                }
             }
             is Message.Offer -> addSdp(root, "OFFER", message.sdpJson)
             is Message.Answer -> addSdp(root, "ANSWER", message.sdpJson)
@@ -70,8 +90,13 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
         if (name.codePointCount(0, name.length) > MAX_IDENTITY_CODE_POINTS) {
             throw ProtocolException("identity is too long")
         }
+        val deviceId = root.optionalIdentityField("deviceId", MAX_DEVICE_ID_CODE_POINTS)
+        val runtimeSessionId = root.optionalIdentityField(
+            "runtimeSessionId",
+            MAX_RUNTIME_SESSION_ID_CODE_POINTS
+        )
         identitySeen = true
-        return Message.Identity(name)
+        return Message.Identity(name, deviceId, runtimeSessionId)
     }
 
     private fun decodeSdp(root: JsonObject, kind: SdpKind): Message {
@@ -116,6 +141,24 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
         get(key)?.takeUnless { it.isJsonNull }?.asString
             ?: throw ProtocolException("missing $key")
 
+    private fun JsonObject.optionalIdentityField(key: String, maximumCodePoints: Int): String? {
+        val value = get(key)?.takeUnless { it.isJsonNull } ?: return null
+        return requireIdentityField(key, value.asString, maximumCodePoints)
+    }
+
+    private fun requireIdentityField(
+        name: String,
+        rawValue: String,
+        maximumCodePoints: Int
+    ): String {
+        val value = rawValue.trim()
+        if (value.isEmpty()) throw ProtocolException("$name is empty")
+        if (value.codePointCount(0, value.length) > maximumCodePoints) {
+            throw ProtocolException("$name is too long")
+        }
+        return value
+    }
+
     private fun JsonObject.requiredPayload(key: String): String {
         val value = get(key) ?: throw ProtocolException("missing $key")
         return if (value.isJsonPrimitive && value.asJsonPrimitive.isString) value.asString else value.toString()
@@ -131,5 +174,7 @@ internal class SignalingProtocol(private val expectedRemoteSdp: SdpKind) {
         const val MAX_CANDIDATE_BYTES = 4 * 1024
         const val MAX_CANDIDATES = 256
         const val MAX_IDENTITY_CODE_POINTS = 64
+        const val MAX_DEVICE_ID_CODE_POINTS = 128
+        const val MAX_RUNTIME_SESSION_ID_CODE_POINTS = 128
     }
 }
