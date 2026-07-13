@@ -2,12 +2,5 @@
 <resources>
     <color name="splash_background">#F7F9FC</color>
     <color name="motocom_background">#F7F9FC</color>
-    <color name="motocom_surface">#FFFFFF</color>
-    <color name="motocom_text_primary">#111827</color>
-    <color name="motocom_text_secondary">#6B7280</color>
     <color name="motocom_accent_green">#7EDB22</color>
-    <color name="motocom_connected_green">#4CCB00</color>
-    <color name="motocom_warning_orange">#FFAA00</color>
-    <color name="motocom_error_red">#EF4444</color>
-    <color name="motocom_card_border">#E5E7EB</color>
 </resources>

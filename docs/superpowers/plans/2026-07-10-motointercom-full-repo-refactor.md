@@ -20,6 +20,8 @@
 - Do not push, open a PR, or publish an APK.
 - Current acceptance requires automated checks plus MI 6 `9688fa60` and Xiaomi 13 `efcb9031` install/start/service/cleanup evidence.
 - Two-device discovery/signaling and Xiaomi 13 Bluetooth routing require objective evidence. Human listening checks remain not run until the user confirms them.
+- 2026-07-12 override: the user confirmed only MI 6 `9688fa60` is attached and no Bluetooth device is connected. For this run, MI 6 objective lifecycle/P2P checks remain required; two-device, Xiaomi 13 Bluetooth, and human-listening checks are recorded as not run and do not block the Task 9 commit.
+- 2026-07-13 override: both devices are online again, with no Bluetooth device attached. This supersedes the MI 6-only matrix: two-device lifecycle/P2P/signaling checks are required; phone-audio fallback is required on both devices; Bluetooth routing and human-listening checks remain not run and do not block the Task 9 commit.
 
 ## Target File Map
 
