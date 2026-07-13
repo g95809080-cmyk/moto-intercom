@@ -86,6 +86,8 @@ class WifiDirectTunnel(
     private var connectWatchdogGeneration = 0
     private var lifecycleGeneration = 0
     private var serviceDiscoveryReady = false
+    private val closeLock = Any()
+    private val closeCallbacks = mutableListOf<() -> Unit>()
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -199,10 +201,30 @@ class WifiDirectTunnel(
         }
     }
 
-    override fun close() {
+    override fun close() = close {}
+
+    internal fun close(onComplete: () -> Unit) {
+        var startCleanup = false
+        var completeNow = false
+        synchronized(closeLock) {
+            when {
+                state != State.CLOSED -> {
+                    closeCallbacks += onComplete
+                    state = State.CLOSED
+                    startCleanup = true
+                }
+                manager == null && channel == null -> completeNow = true
+                else -> closeCallbacks += onComplete
+            }
+        }
+        if (completeNow) {
+            onComplete()
+            return
+        }
+        if (!startCleanup) return
+
         val cleanupGeneration = ++lifecycleGeneration
         Log.d(TAG, "close cleanup start generation=$cleanupGeneration")
-        state = State.CLOSED
         running = false
         resetTunnelOnly()
         cancelPendingRetry()
@@ -330,6 +352,22 @@ class WifiDirectTunnel(
         channel = null
         manager = null
         Log.d(TAG, "close cleanup finished generation=$generation")
+        notifyCloseCompleted()
+    }
+
+    private fun notifyCloseCompleted() {
+        val callbacks = synchronized(closeLock) {
+            val result = closeCallbacks.toList()
+            closeCallbacks.clear()
+            result
+        }
+        callbacks.forEach { callback ->
+            try {
+                callback()
+            } catch (t: Throwable) {
+                Log.w(TAG, "close completion callback failure", t)
+            }
+        }
     }
 
     private fun initP2p() {

@@ -17,6 +17,15 @@ enum class Transport {
     WIFI_DIRECT
 }
 
+enum class IdentityVerificationSource {
+    SOCKET_HANDSHAKE,
+    DISCOVERY_UNVERIFIED,
+    NONE;
+
+    val verifiesStableDeviceId: Boolean
+        get() = this == SOCKET_HANDSHAKE
+}
+
 data class ConnectionAttempt(
     val id: ConnectionAttemptId,
     val runtimeSessionId: RuntimeSessionId,

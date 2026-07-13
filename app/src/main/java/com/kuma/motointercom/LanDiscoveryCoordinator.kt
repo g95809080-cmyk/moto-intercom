@@ -29,7 +29,14 @@ internal class LanDiscoveryCoordinator(
     private val nodeId: String,
     private val riderName: String,
     private val onDevicesChanged: (List<LanRiderDevice>) -> Unit,
-    private val onTunnelReady: (String, Boolean, String, ConnectionAttempt?, Socket) -> Unit,
+    private val onTunnelReady: (
+        String,
+        Boolean,
+        String,
+        IdentityVerificationSource,
+        ConnectionAttempt?,
+        Socket
+    ) -> Unit,
     private val onLog: (String) -> Unit,
     private val onError: (Throwable) -> Unit
 ) : Closeable {
@@ -181,7 +188,7 @@ internal class LanDiscoveryCoordinator(
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
-                val remoteDeviceId = LanTunnelHandshake.read(socket, nodeId)
+                val remoteDeviceId = LanTunnelHandshake.exchangeAsServer(socket, nodeId)
                 if (remoteDeviceId == null) {
                     log("Ignored invalid LAN tunnel connection")
                     closeQuietly(socket)
@@ -189,7 +196,16 @@ internal class LanDiscoveryCoordinator(
                     continue
                 }
                 val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
-                if (handoff(peerIp, server = true, remoteDeviceId, attempt = null, socket)) {
+                if (
+                    handoff(
+                        peerIp,
+                        server = true,
+                        remoteDeviceId,
+                        IdentityVerificationSource.SOCKET_HANDSHAKE,
+                        attempt = null,
+                        socket
+                    )
+                ) {
                     acceptedSocket = null
                     return
                 }
@@ -292,9 +308,27 @@ internal class LanDiscoveryCoordinator(
             if (!isActive()) return
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
-            LanTunnelHandshake.write(socket, nodeId)
+            val verifiedRemoteDeviceId = LanTunnelHandshake.exchangeAsClient(
+                socket,
+                localNodeId = nodeId,
+                expectedRemoteNodeId = remoteDeviceId
+            )
+            if (verifiedRemoteDeviceId == null) {
+                clientConnecting.set(false)
+                log("LAN socket identity mismatch for $ip")
+                return
+            }
             val connected = socket
-            if (handoff(ip, server = false, remoteDeviceId, attempt, connected)) {
+            if (
+                handoff(
+                    ip,
+                    server = false,
+                    verifiedRemoteDeviceId,
+                    IdentityVerificationSource.SOCKET_HANDSHAKE,
+                    attempt,
+                    connected
+                )
+            ) {
                 socket = null
             } else {
                 clientConnecting.set(false)
@@ -355,6 +389,7 @@ internal class LanDiscoveryCoordinator(
         ip: String,
         server: Boolean,
         remoteDeviceId: String,
+        identityVerificationSource: IdentityVerificationSource,
         attempt: ConnectionAttempt?,
         socket: Socket
     ): Boolean {
@@ -363,7 +398,14 @@ internal class LanDiscoveryCoordinator(
             return false
         }
         return try {
-            onTunnelReady(ip, server, remoteDeviceId, attempt, socket)
+            onTunnelReady(
+                ip,
+                server,
+                remoteDeviceId,
+                identityVerificationSource,
+                attempt,
+                socket
+            )
             true
         } catch (t: Throwable) {
             closeQuietly(socket)
@@ -469,36 +511,61 @@ internal class LanDiscoveryCoordinator(
 
 internal object LanTunnelHandshake {
     private const val MAGIC = 0x4D54434D // MTCM
-    private const val VERSION = 1
+    private const val VERSION = 2
     private const val MAX_NODE_ID_BYTES = 128
     private const val READ_TIMEOUT_MS = 1_000
 
-    fun write(socket: Socket, nodeId: String) {
-        val id = nodeId.toByteArray(StandardCharsets.UTF_8)
-        require(id.isNotEmpty() && id.size <= MAX_NODE_ID_BYTES) { "invalid LAN node id" }
-        DataOutputStream(socket.getOutputStream()).apply {
-            writeInt(MAGIC)
-            writeByte(VERSION)
-            writeByte(id.size)
-            write(id)
-            flush()
-        }
+    fun exchangeAsClient(
+        socket: Socket,
+        localNodeId: String,
+        expectedRemoteNodeId: String
+    ): String? = exchange(socket) { input, output ->
+        write(output, localNodeId)
+        read(input, localNodeId)?.takeIf { it == expectedRemoteNodeId.trim() }
     }
 
-    fun read(socket: Socket, localNodeId: String): String? {
+    fun exchangeAsServer(socket: Socket, localNodeId: String): String? =
+        exchange(socket) { input, output ->
+            val remoteNodeId = read(input, localNodeId) ?: return@exchange null
+            write(output, localNodeId)
+            remoteNodeId
+        }
+
+    private fun <T> exchange(
+        socket: Socket,
+        action: (DataInputStream, DataOutputStream) -> T?
+    ): T? {
         val previousTimeout = socket.soTimeout
         return try {
             socket.soTimeout = READ_TIMEOUT_MS
-            val input = DataInputStream(socket.getInputStream())
-            if (input.readInt() != MAGIC || input.readUnsignedByte() != VERSION) return null
-            val size = input.readUnsignedByte()
-            if (size !in 1..MAX_NODE_ID_BYTES) return null
-            val id = ByteArray(size).also(input::readFully).toString(StandardCharsets.UTF_8)
-            id.takeIf { it.isNotBlank() && it != localNodeId }
+            action(
+                DataInputStream(socket.getInputStream()),
+                DataOutputStream(socket.getOutputStream())
+            )
         } catch (_: IOException) {
             null
         } finally {
             runCatching { socket.soTimeout = previousTimeout }
         }
+    }
+
+    private fun write(output: DataOutputStream, nodeId: String) {
+        val id = nodeId.trim().toByteArray(StandardCharsets.UTF_8)
+        require(id.isNotEmpty() && id.size <= MAX_NODE_ID_BYTES) { "invalid LAN node id" }
+        output.writeInt(MAGIC)
+        output.writeByte(VERSION)
+        output.writeByte(id.size)
+        output.write(id)
+        output.flush()
+    }
+
+    private fun read(input: DataInputStream, localNodeId: String): String? {
+        if (input.readInt() != MAGIC || input.readUnsignedByte() != VERSION) return null
+        val size = input.readUnsignedByte()
+        if (size !in 1..MAX_NODE_ID_BYTES) return null
+        val id = ByteArray(size).also(input::readFully)
+            .toString(StandardCharsets.UTF_8)
+            .trim()
+        return id.takeIf { it.isNotEmpty() && it != localNodeId.trim() }
     }
 }

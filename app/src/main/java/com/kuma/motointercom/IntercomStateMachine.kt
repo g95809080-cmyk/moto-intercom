@@ -33,7 +33,8 @@ sealed interface SessionEvent {
     data class TunnelReady(
         val attempt: ConnectionAttempt,
         val remoteDeviceId: String?,
-        val transport: Transport
+        val transport: Transport,
+        val identityVerificationSource: IdentityVerificationSource
     ) : SessionEvent
 
     data class TransportOptimizing(
@@ -78,6 +79,11 @@ sealed interface SessionEvent {
 }
 
 sealed interface SessionEffect {
+    data class AbortAttemptAndResumeDiscovery(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId
+    ) : SessionEffect
+
     data class RestartDiscovery(
         val runtimeSessionId: RuntimeSessionId,
         val attempt: ConnectionAttempt?
@@ -144,7 +150,7 @@ internal fun reduceIntercomState(
         runtimeSessionId = event.runtimeSessionId,
         attemptId = event.attemptId,
         recovery = event.recovery,
-        restartDiscovery = true
+        restartConnectedDiscovery = true
     )
 
     is SessionEvent.RecoveryExhausted ->
@@ -209,11 +215,22 @@ private fun reduceTunnelReady(
     current: IntercomState,
     event: SessionEvent.TunnelReady
 ): SessionTransition? {
-    val normalizedAttempt = event.attempt
-        .copy(preferredTransport = event.transport)
-        .withRemoteDeviceIdIfUnknown(event.remoteDeviceId)
-    val peer = event.remoteDeviceId?.trim()?.takeIf(String::isNotEmpty)?.let {
-        PeerIdentity(deviceId = it, nickname = "", isDeviceIdVerified = true)
+    val remoteDeviceId = event.remoteDeviceId?.trim()?.takeIf(String::isNotEmpty)
+    val verifiedByTunnel = event.identityVerificationSource.verifiesStableDeviceId
+    val expectedDeviceId = event.attempt.targetDeviceId
+    if (
+        verifiedByTunnel &&
+        expectedDeviceId != null &&
+        remoteDeviceId != null &&
+        expectedDeviceId != remoteDeviceId
+    ) {
+        return null
+    }
+    val normalizedAttempt = event.attempt.copy(preferredTransport = event.transport).let {
+        if (verifiedByTunnel) it.withVerifiedRemoteDeviceIdIfUnknown(remoteDeviceId) else it
+    }
+    val peer = remoteDeviceId?.let {
+        PeerIdentity(deviceId = it, nickname = "", isDeviceIdVerified = verifiedByTunnel)
     } ?: normalizedAttempt.initialPeer()
 
     return when (current) {
@@ -256,7 +273,11 @@ private fun reduceRemoteIdentity(
             ?: return attempt
         val expected = attempt.targetDeviceId
         if (expected != null && expected != remoteDeviceId) return null
-        return attempt.withVerifiedTarget(remoteDeviceId)
+        return if (event.peer.isDeviceIdVerified) {
+            attempt.withVerifiedTarget(remoteDeviceId)
+        } else {
+            attempt
+        }
     }
 
     return when (current) {
@@ -264,35 +285,50 @@ private fun reduceRemoteIdentity(
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
                 val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(IntercomState.IncomingConfirmation(attempt, event.peer))
+                transition(
+                    IntercomState.IncomingConfirmation(
+                        attempt,
+                        mergePeer(it.peer, event.peer) ?: event.peer
+                    )
+                )
             }
 
         is IntercomState.Connecting -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
                 val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(IntercomState.Connecting(attempt, event.peer))
+                transition(IntercomState.Connecting(attempt, mergePeer(it.peer, event.peer)))
             }
 
         is IntercomState.Optimizing -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
                 val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(IntercomState.Optimizing(attempt, event.peer))
+                transition(IntercomState.Optimizing(attempt, mergePeer(it.peer, event.peer)))
             }
 
         is IntercomState.Connected -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
                 val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(it.copy(attempt = attempt, peer = event.peer))
+                transition(
+                    it.copy(
+                        attempt = attempt,
+                        peer = mergePeer(it.peer, event.peer) ?: event.peer
+                    )
+                )
             }
 
         is IntercomState.Recovering -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
                 val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(IntercomState.Recovering(attempt, event.peer))
+                transition(
+                    IntercomState.Recovering(
+                        attempt,
+                        mergePeer(it.peer, event.peer) ?: event.peer
+                    )
+                )
             }
 
         else -> null
@@ -326,7 +362,7 @@ private fun reduceWebRtcState(
         runtimeSessionId = event.runtimeSessionId,
         attemptId = event.attemptId,
         recovery = event.recovery,
-        restartDiscovery = false
+        restartConnectedDiscovery = false
     )
 
     WebRtcConnectionState.OTHER -> null
@@ -337,14 +373,16 @@ private fun reduceDisconnect(
     runtimeSessionId: RuntimeSessionId,
     attemptId: ConnectionAttemptId,
     recovery: RecoveryAttemptSpec,
-    restartDiscovery: Boolean
+    restartConnectedDiscovery: Boolean
 ): SessionTransition? = when (current) {
     is IntercomState.Connecting -> current
         .takeIf { it.matches(runtimeSessionId, attemptId) }
         ?.let {
             transition(
                 IntercomState.Discovering(runtimeSessionId),
-                restartEffect(runtimeSessionId, null, restartDiscovery)
+                listOf(
+                    SessionEffect.AbortAttemptAndResumeDiscovery(runtimeSessionId, attemptId)
+                )
             )
         }
 
@@ -353,7 +391,9 @@ private fun reduceDisconnect(
         ?.let {
             transition(
                 IntercomState.Discovering(runtimeSessionId),
-                restartEffect(runtimeSessionId, null, restartDiscovery)
+                listOf(
+                    SessionEffect.AbortAttemptAndResumeDiscovery(runtimeSessionId, attemptId)
+                )
             )
         }
 
@@ -363,7 +403,7 @@ private fun reduceDisconnect(
             val recoveryAttempt = it.attempt.toRecovery(recovery)
             transition(
                 IntercomState.Recovering(recoveryAttempt, it.peer),
-                restartEffect(runtimeSessionId, recoveryAttempt, restartDiscovery)
+                restartEffect(runtimeSessionId, recoveryAttempt, restartConnectedDiscovery)
             )
         }
 
@@ -375,7 +415,7 @@ private fun reduceDisconnect(
         ?.let {
             transition(
                 it,
-                restartEffect(runtimeSessionId, it.attempt, restartDiscovery)
+                restartEffect(runtimeSessionId, it.attempt, restartConnectedDiscovery)
             )
         }
 
@@ -411,7 +451,9 @@ private fun ConnectionAttempt.initialPeer(): PeerIdentity? = targetDeviceId?.let
 
 private fun PeerIdentity?.orUnknown(): PeerIdentity = this ?: PeerIdentity(null, "")
 
-private fun ConnectionAttempt.withRemoteDeviceIdIfUnknown(deviceId: String?): ConnectionAttempt {
+private fun ConnectionAttempt.withVerifiedRemoteDeviceIdIfUnknown(
+    deviceId: String?
+): ConnectionAttempt {
     val normalized = deviceId?.trim()?.takeIf(String::isNotEmpty) ?: return this
     return if (targetDeviceId == null) withVerifiedTarget(normalized) else this
 }
@@ -427,7 +469,7 @@ private fun mergePeer(first: PeerIdentity?, second: PeerIdentity?): PeerIdentity
         nickname = second.nickname.ifBlank { first.nickname },
         deviceName = second.deviceName.ifBlank { first.deviceName },
         runtimeSessionId = second.runtimeSessionId ?: first.runtimeSessionId,
-        isDeviceIdVerified = second.isDeviceIdVerified
+        isDeviceIdVerified = first.isDeviceIdVerified || second.isDeviceIdVerified
     )
 }
 
