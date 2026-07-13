@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import org.webrtc.PeerConnection
 import java.io.IOException
@@ -33,6 +34,7 @@ class IntercomService : Service() {
 
     internal interface Listener {
         fun onStatusChanged(status: String, running: Boolean)
+        fun onIntercomStateChanged(state: IntercomState) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
         fun onLanDevicesChanged(devices: List<LanRiderDevice>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
@@ -52,6 +54,8 @@ class IntercomService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private lateinit var identityStore: LocalIdentityStore
+    private lateinit var pairingRepository: PairingRepository
+    private lateinit var orchestrator: SessionOrchestrator
 
     private var listener: Listener? = null
     private var audioRouteController: AudioRouteController? = null
@@ -71,6 +75,9 @@ class IntercomService : Service() {
     private var remoteRiderName: String? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
+    private var activeAttemptId: ConnectionAttemptId? = null
+    private var activeRemoteDeviceId: String? = null
+    private var activeTransport: String? = null
     private var localDeviceId = ""
     private var recoveryGeneration = 0
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
@@ -78,6 +85,13 @@ class IntercomService : Service() {
     override fun onCreate() {
         super.onCreate()
         identityStore = DataStoreLocalIdentityStore(this)
+        pairingRepository = RoomPairingRepository(PairingDatabase.getInstance(this).pairingDao())
+        orchestrator = SessionOrchestrator(pairingRepository, onError = ::handleError)
+        serviceScope.launch {
+            orchestrator.state.collect { state ->
+                dispatchOnMain { listener?.onIntercomStateChanged(state) }
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -106,6 +120,7 @@ class IntercomService : Service() {
 
     override fun onDestroy() {
         stopIntercom()
+        orchestrator.close()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -113,6 +128,7 @@ class IntercomService : Service() {
     internal fun setListener(listener: Listener?) {
         this.listener = listener
         listener?.onStatusChanged(lastStatus, running)
+        listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
         listener?.onLanDevicesChanged(lanDiscovery?.devicesSnapshot().orEmpty())
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
@@ -135,6 +151,14 @@ class IntercomService : Service() {
     internal fun connectToLanDevice(device: LanRiderDevice) {
         mainHandler.post {
             if (activeSession == null || tunnelChosen.get() != NO_SESSION_TOKEN) return@post
+            val runtimeSessionId = activeRuntimeSessionId ?: return@post
+            val attemptId = ConnectionAttemptId.create()
+            activeAttemptId = attemptId
+            activeRemoteDeviceId = device.id
+            activeTransport = TRANSPORT_LAN
+            orchestrator.dispatch(
+                SessionEvent.ConnectRequested(runtimeSessionId, attemptId, device.id)
+            )
             publishStatus(PEER_FOUND_STATUS)
             lanDiscovery?.connect(device)
         }
@@ -150,6 +174,9 @@ class IntercomService : Service() {
         val runtimeSessionId = RuntimeSessionId.create()
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
+        activeAttemptId = null
+        activeRemoteDeviceId = null
+        activeTransport = null
         running = true
         bluetoothReady = false
         physicalLinkReady = false
@@ -158,6 +185,7 @@ class IntercomService : Service() {
         tunnelChosen.set(NO_SESSION_TOKEN)
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
+        orchestrator.dispatch(SessionEvent.RuntimeStarted(runtimeSessionId))
 
         serviceScope.launch {
             try {
@@ -221,7 +249,14 @@ class IntercomService : Service() {
         wifiTunnel = WifiDirectTunnel(
             context = this,
             onTunnelReady = { targetIp, isServer, socket ->
-                onTunnelReady(token, targetIp, isServer, socket)
+                onTunnelReady(
+                    token,
+                    targetIp,
+                    isServer,
+                    remoteDeviceId = null,
+                    transport = TRANSPORT_WIFI_DIRECT,
+                    signalingSocket = socket
+                )
             },
             localNickname = requestedRiderName.ifBlank { "骑士" },
             sessionId = runtimeSessionId.value,
@@ -254,8 +289,16 @@ class IntercomService : Service() {
                     listener?.onLanDevicesChanged(devices)
                 }
             },
-            onTunnelReady = { ip, server, socket ->
-                acceptTunnel(token, ip, server, socket, closeWifiDirect = true)
+            onTunnelReady = { ip, server, remoteDeviceId, socket ->
+                acceptTunnel(
+                    token,
+                    ip,
+                    server,
+                    remoteDeviceId,
+                    TRANSPORT_LAN,
+                    socket,
+                    closeWifiDirect = true
+                )
             },
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } }
@@ -266,15 +309,27 @@ class IntercomService : Service() {
         token: SessionGeneration.Token,
         targetIp: String,
         isServer: Boolean,
+        remoteDeviceId: String?,
+        transport: String,
         signalingSocket: Socket
     ) {
-        acceptTunnel(token, targetIp, isServer, signalingSocket, closeWifiDirect = false)
+        acceptTunnel(
+            token,
+            targetIp,
+            isServer,
+            remoteDeviceId,
+            transport,
+            signalingSocket,
+            closeWifiDirect = false
+        )
     }
 
     private fun acceptTunnel(
         token: SessionGeneration.Token,
         targetIp: String,
         isServer: Boolean,
+        remoteDeviceId: String?,
+        transport: String,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
     ): Boolean {
@@ -290,7 +345,15 @@ class IntercomService : Service() {
                 closeStaleSocket(signalingSocket)
                 return@post
             }
-            activateTunnel(token, targetIp, isServer, signalingSocket, closeWifiDirect)
+            activateTunnel(
+                token,
+                targetIp,
+                isServer,
+                remoteDeviceId,
+                transport,
+                signalingSocket,
+                closeWifiDirect
+            )
         }
         return true
     }
@@ -299,6 +362,8 @@ class IntercomService : Service() {
         token: SessionGeneration.Token,
         targetIp: String,
         isServer: Boolean,
+        remoteDeviceId: String?,
+        transport: String,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
     ) {
@@ -315,6 +380,27 @@ class IntercomService : Service() {
 
         physicalLinkReady = true
         mediaConnected = false
+        activeRemoteDeviceId = remoteDeviceId ?: activeRemoteDeviceId
+        activeTransport = transport
+        val runtimeSessionId = activeRuntimeSessionId
+        if (runtimeSessionId != null) {
+            when (val state = orchestrator.state.value) {
+                is IntercomState.Recovering -> activeAttemptId = state.attemptId
+                is IntercomState.Discovering -> {
+                    val attemptId = activeAttemptId ?: ConnectionAttemptId.create().also {
+                        activeAttemptId = it
+                    }
+                    orchestrator.dispatch(
+                        SessionEvent.ConnectRequested(
+                            runtimeSessionId,
+                            attemptId,
+                            activeRemoteDeviceId
+                        )
+                    )
+                }
+                else -> Unit
+            }
+        }
         publishStatus(SIGNALING_CONNECTED_STATUS)
         localRiderName = requestedRiderName.ifBlank { if (isServer) "骑士A" else "骑士B" }
         publishLog("本机骑士昵称：$localRiderName")
@@ -347,12 +433,38 @@ class IntercomService : Service() {
             when (state) {
                 PeerConnection.PeerConnectionState.CONNECTED -> {
                     mediaConnected = true
+                    val runtimeSessionId = activeRuntimeSessionId
+                    val attemptId = activeAttemptId
+                    if (runtimeSessionId != null && attemptId != null) {
+                        orchestrator.dispatch(
+                            SessionEvent.WebRtcConnected(
+                                runtimeSessionId,
+                                attemptId,
+                                currentPeerIdentity(),
+                                System.currentTimeMillis(),
+                                activeTransport
+                            )
+                        )
+                    }
                     publishStatus(VOICE_CONNECTED_STATUS)
                 }
                 PeerConnection.PeerConnectionState.DISCONNECTED,
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.CLOSED -> {
                     mediaConnected = false
+                    val productState = orchestrator.state.value
+                    if (
+                        productState is IntercomState.Connecting ||
+                        productState is IntercomState.Optimizing
+                    ) {
+                        val runtimeSessionId = activeRuntimeSessionId
+                        val attemptId = activeAttemptId
+                        if (runtimeSessionId != null && attemptId != null) {
+                            orchestrator.dispatch(
+                                SessionEvent.AttemptFailed(runtimeSessionId, attemptId)
+                            )
+                        }
+                    }
                     publishStatus(SIGNAL_LOST_STATUS)
                 }
                 else -> updateStageStatus()
@@ -373,6 +485,18 @@ class IntercomService : Service() {
         val generation = ++recoveryGeneration
         val runtimeSessionId = activeRuntimeSessionId ?: return
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
+        val currentAttemptId = activeAttemptId
+        if (currentAttemptId != null && orchestrator.state.value is IntercomState.Connected) {
+            val recoveryAttemptId = ConnectionAttemptId.create()
+            activeAttemptId = recoveryAttemptId
+            orchestrator.dispatch(
+                SessionEvent.ConnectionLost(
+                    runtimeSessionId,
+                    currentAttemptId,
+                    recoveryAttemptId
+                )
+            )
+        }
         sessions.invalidate()
         activeSession = null
         tunnelChosen.set(NO_SESSION_TOKEN)
@@ -421,6 +545,17 @@ class IntercomService : Service() {
     private fun onRemoteRiderIdentified(token: SessionGeneration.Token, name: String) {
         postForSession(token) {
             remoteRiderName = name
+            val runtimeSessionId = activeRuntimeSessionId
+            val attemptId = activeAttemptId
+            if (mediaConnected && runtimeSessionId != null && attemptId != null) {
+                orchestrator.dispatch(
+                    SessionEvent.PeerIdentified(
+                        runtimeSessionId,
+                        attemptId,
+                        currentPeerIdentity()
+                    )
+                )
+            }
             publishLog("已识别远端骑士：$name")
             listener?.onRemoteRiderIdentified(name)
             updateStageStatus()
@@ -431,11 +566,23 @@ class IntercomService : Service() {
         postForSession(token) { listener?.onAudioLevelChanged(level) }
     }
 
+    private fun currentPeerIdentity(): PeerIdentity = PeerIdentity(
+        deviceId = activeRemoteDeviceId,
+        nickname = remoteRiderName.orEmpty().ifBlank { "骑士" }
+    )
+
     private fun stopIntercom() {
+        val runtimeSessionId = activeRuntimeSessionId
+        if (runtimeSessionId != null) {
+            orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
+        }
         recoveryGeneration++
         sessions.invalidate()
         activeSession = null
         activeRuntimeSessionId = null
+        activeAttemptId = null
+        activeRemoteDeviceId = null
+        activeTransport = null
         localDeviceId = ""
         running = false
         tunnelChosen.set(NO_SESSION_TOKEN)
@@ -467,6 +614,9 @@ class IntercomService : Service() {
         remoteRiderName = null
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(ENDED_STATUS)
+        if (runtimeSessionId != null) {
+            orchestrator.dispatch(SessionEvent.RuntimeStopped(runtimeSessionId))
+        }
         stopForegroundCompat()
     }
 
@@ -531,11 +681,7 @@ class IntercomService : Service() {
     }
 
     private fun hasRequiredRuntimePermissions(): Boolean {
-        return (
-            WifiDirectTunnel.requiredPermissions().asList() +
-                RiderAudioEngine.requiredPermissions().asList() +
-                AudioRouteController.requiredPermissions().asList()
-            ).distinct().all {
+        return PermissionPolicy.canStart(Build.VERSION.SDK_INT) {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
                 checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
         }
@@ -597,6 +743,8 @@ class IntercomService : Service() {
 
     companion object {
         private const val NO_SESSION_TOKEN = 0L
+        private const val TRANSPORT_LAN = "LAN"
+        private const val TRANSPORT_WIFI_DIRECT = "WIFI_DIRECT"
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"

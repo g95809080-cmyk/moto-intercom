@@ -1,6 +1,8 @@
 package com.kuma.motointercom
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataOutputStream
@@ -38,9 +40,9 @@ class LanDiscoveryCoordinatorTest {
                 LanTunnelHandshake.write(socket, "client")
             }
 
-            val (invalidAccepted, validAccepted) = result.get(2, TimeUnit.SECONDS)
-            assertFalse(invalidAccepted)
-            assertTrue(validAccepted)
+            val (invalidDeviceId, validDeviceId) = result.get(2, TimeUnit.SECONDS)
+            assertNull(invalidDeviceId)
+            assertEquals("client", validDeviceId)
         }
     }
 
@@ -50,7 +52,7 @@ class LanDiscoveryCoordinatorTest {
             Socket("127.0.0.1", server.localPort).use {
                 server.accept().use { socket ->
                     val started = System.nanoTime()
-                    assertFalse(LanTunnelHandshake.read(socket, "server"))
+                    assertNull(LanTunnelHandshake.read(socket, "server"))
                     assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 1_800)
                 }
             }
