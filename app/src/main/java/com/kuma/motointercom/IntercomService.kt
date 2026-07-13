@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -75,9 +76,6 @@ class IntercomService : Service() {
     private var remoteRiderName: String? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
-    private var activeAttemptId: ConnectionAttemptId? = null
-    private var activeRemoteDeviceId: String? = null
-    private var activeTransport: String? = null
     private var localDeviceId = ""
     private var recoveryGeneration = 0
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
@@ -86,10 +84,19 @@ class IntercomService : Service() {
         super.onCreate()
         identityStore = DataStoreLocalIdentityStore(this)
         pairingRepository = RoomPairingRepository(PairingDatabase.getInstance(this).pairingDao())
-        orchestrator = SessionOrchestrator(pairingRepository, onError = ::handleError)
+        orchestrator = SessionOrchestrator(
+            pairingRepository,
+            onLog = ::publishLog,
+            onError = ::handleError
+        )
         serviceScope.launch {
             orchestrator.state.collect { state ->
                 dispatchOnMain { listener?.onIntercomStateChanged(state) }
+            }
+        }
+        serviceScope.launch {
+            orchestrator.effects.collect { effect ->
+                dispatchOnMain { handleSessionEffect(effect) }
             }
         }
     }
@@ -152,15 +159,21 @@ class IntercomService : Service() {
         mainHandler.post {
             if (activeSession == null || tunnelChosen.get() != NO_SESSION_TOKEN) return@post
             val runtimeSessionId = activeRuntimeSessionId ?: return@post
-            val attemptId = ConnectionAttemptId.create()
-            activeAttemptId = attemptId
-            activeRemoteDeviceId = device.id
-            activeTransport = TRANSPORT_LAN
-            orchestrator.dispatch(
-                SessionEvent.ConnectRequested(runtimeSessionId, attemptId, device.id)
+            val attempt = createAttempt(
+                runtimeSessionId = runtimeSessionId,
+                targetDeviceId = device.id,
+                trigger = ConnectionTrigger.USER,
+                preferredTransport = Transport.LAN
             )
-            publishStatus(PEER_FOUND_STATUS)
-            lanDiscovery?.connect(device)
+            orchestrator.dispatch(
+                SessionEvent.ConnectRequested(attempt)
+            ) { accepted ->
+                dispatchOnMain {
+                    if (!accepted || activeRuntimeSessionId != runtimeSessionId) return@dispatchOnMain
+                    publishStatus(PEER_FOUND_STATUS)
+                    lanDiscovery?.connect(device, attempt)
+                }
+            }
         }
     }
 
@@ -174,9 +187,6 @@ class IntercomService : Service() {
         val runtimeSessionId = RuntimeSessionId.create()
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
-        activeAttemptId = null
-        activeRemoteDeviceId = null
-        activeTransport = null
         running = true
         bluetoothReady = false
         physicalLinkReady = false
@@ -243,7 +253,8 @@ class IntercomService : Service() {
     private fun startDiscoveryTransports(
         token: SessionGeneration.Token,
         deviceId: String,
-        runtimeSessionId: RuntimeSessionId
+        runtimeSessionId: RuntimeSessionId,
+        attempt: ConnectionAttempt? = null
     ) {
         publishStatus(SEARCHING_STATUS)
         wifiTunnel = WifiDirectTunnel(
@@ -254,7 +265,8 @@ class IntercomService : Service() {
                     targetIp,
                     isServer,
                     remoteDeviceId = null,
-                    transport = TRANSPORT_WIFI_DIRECT,
+                    attempt = attempt,
+                    transport = Transport.WIFI_DIRECT,
                     signalingSocket = socket
                 )
             },
@@ -289,13 +301,14 @@ class IntercomService : Service() {
                     listener?.onLanDevicesChanged(devices)
                 }
             },
-            onTunnelReady = { ip, server, remoteDeviceId, socket ->
+            onTunnelReady = { ip, server, remoteDeviceId, transportAttempt, socket ->
                 acceptTunnel(
                     token,
                     ip,
                     server,
                     remoteDeviceId,
-                    TRANSPORT_LAN,
+                    transportAttempt ?: attempt,
+                    Transport.LAN,
                     socket,
                     closeWifiDirect = true
                 )
@@ -310,7 +323,8 @@ class IntercomService : Service() {
         targetIp: String,
         isServer: Boolean,
         remoteDeviceId: String?,
-        transport: String,
+        attempt: ConnectionAttempt?,
+        transport: Transport,
         signalingSocket: Socket
     ) {
         acceptTunnel(
@@ -318,6 +332,7 @@ class IntercomService : Service() {
             targetIp,
             isServer,
             remoteDeviceId,
+            attempt,
             transport,
             signalingSocket,
             closeWifiDirect = false
@@ -329,7 +344,8 @@ class IntercomService : Service() {
         targetIp: String,
         isServer: Boolean,
         remoteDeviceId: String?,
-        transport: String,
+        suppliedAttempt: ConnectionAttempt?,
+        transport: Transport,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
     ): Boolean {
@@ -345,15 +361,47 @@ class IntercomService : Service() {
                 closeStaleSocket(signalingSocket)
                 return@post
             }
-            activateTunnel(
-                token,
-                targetIp,
-                isServer,
+            val runtimeSessionId = activeRuntimeSessionId
+            if (runtimeSessionId == null) {
+                tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
+                closeStaleSocket(signalingSocket)
+                return@post
+            }
+            val attempt = createTunnelAttempt(
+                runtimeSessionId,
+                suppliedAttempt,
                 remoteDeviceId,
                 transport,
-                signalingSocket,
-                closeWifiDirect
+                isServer
             )
+            val queued = orchestrator.dispatch(
+                SessionEvent.TunnelReady(attempt, remoteDeviceId, transport)
+            ) { accepted ->
+                dispatchOnMain {
+                    if (
+                        !accepted ||
+                        !isSessionCurrent(token) ||
+                        tunnelChosen.get() != token.value
+                    ) {
+                        tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
+                        closeStaleSocket(signalingSocket)
+                        return@dispatchOnMain
+                    }
+                    activateTunnel(
+                        token,
+                        targetIp,
+                        isServer,
+                        remoteDeviceId,
+                        attempt,
+                        signalingSocket,
+                        closeWifiDirect
+                    )
+                }
+            }
+            if (!queued) {
+                tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
+                closeStaleSocket(signalingSocket)
+            }
         }
         return true
     }
@@ -363,7 +411,7 @@ class IntercomService : Service() {
         targetIp: String,
         isServer: Boolean,
         remoteDeviceId: String?,
-        transport: String,
+        attempt: ConnectionAttempt,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
     ) {
@@ -380,39 +428,28 @@ class IntercomService : Service() {
 
         physicalLinkReady = true
         mediaConnected = false
-        activeRemoteDeviceId = remoteDeviceId ?: activeRemoteDeviceId
-        activeTransport = transport
-        val runtimeSessionId = activeRuntimeSessionId
-        if (runtimeSessionId != null) {
-            when (val state = orchestrator.state.value) {
-                is IntercomState.Recovering -> activeAttemptId = state.attemptId
-                is IntercomState.Discovering -> {
-                    val attemptId = activeAttemptId ?: ConnectionAttemptId.create().also {
-                        activeAttemptId = it
-                    }
-                    orchestrator.dispatch(
-                        SessionEvent.ConnectRequested(
-                            runtimeSessionId,
-                            attemptId,
-                            activeRemoteDeviceId
-                        )
-                    )
-                }
-                else -> Unit
-            }
-        }
         publishStatus(SIGNALING_CONNECTED_STATUS)
         localRiderName = requestedRiderName.ifBlank { if (isServer) "骑士A" else "骑士B" }
         publishLog("本机骑士昵称：$localRiderName")
 
+        val recoverySpec = createRecoverySpec()
         intercomManager = IntercomManager(
             context = this,
             signalingSocket = signalingSocket,
             isServer = isServer,
             localRiderName = localRiderName,
-            onIntercomDisconnected = { onIntercomDisconnected(token, it) },
-            onConnectionStateChanged = { onConnectionStateChanged(token, it) },
-            onRemoteRiderIdentified = { onRemoteRiderIdentified(token, it) },
+            localDeviceId = localDeviceId,
+            localRuntimeSessionId = attempt.runtimeSessionId,
+            expectedRemoteDeviceId = attempt.targetDeviceId ?: remoteDeviceId,
+            requireClaimedRemoteDeviceId =
+                attempt.preferredTransport == Transport.WIFI_DIRECT,
+            onIntercomDisconnected = {
+                onIntercomDisconnected(token, attempt, recoverySpec, it)
+            },
+            onConnectionStateChanged = {
+                onConnectionStateChanged(token, attempt, recoverySpec, it)
+            },
+            onRemoteIdentity = { onRemoteIdentity(token, attempt, it) },
             onAudioLevelChanged = { onAudioLevelChanged(token, it) },
             onError = { error -> postForSession(token) { handleError(error) } },
             isSessionCurrent = { isSessionCurrent(token) }
@@ -426,45 +463,30 @@ class IntercomService : Service() {
 
     private fun onConnectionStateChanged(
         token: SessionGeneration.Token,
+        attempt: ConnectionAttempt,
+        recovery: RecoveryAttemptSpec,
         state: PeerConnection.PeerConnectionState
     ) {
         postForSession(token) {
             publishLog("WebRTC 状态：$state")
+            orchestrator.dispatch(
+                SessionEvent.WebRtcStateChanged(
+                    runtimeSessionId = attempt.runtimeSessionId,
+                    attemptId = attempt.id,
+                    state = state.toProductState(),
+                    occurredAt = System.currentTimeMillis(),
+                    recovery = recovery
+                )
+            )
             when (state) {
                 PeerConnection.PeerConnectionState.CONNECTED -> {
                     mediaConnected = true
-                    val runtimeSessionId = activeRuntimeSessionId
-                    val attemptId = activeAttemptId
-                    if (runtimeSessionId != null && attemptId != null) {
-                        orchestrator.dispatch(
-                            SessionEvent.WebRtcConnected(
-                                runtimeSessionId,
-                                attemptId,
-                                currentPeerIdentity(),
-                                System.currentTimeMillis(),
-                                activeTransport
-                            )
-                        )
-                    }
                     publishStatus(VOICE_CONNECTED_STATUS)
                 }
                 PeerConnection.PeerConnectionState.DISCONNECTED,
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.CLOSED -> {
                     mediaConnected = false
-                    val productState = orchestrator.state.value
-                    if (
-                        productState is IntercomState.Connecting ||
-                        productState is IntercomState.Optimizing
-                    ) {
-                        val runtimeSessionId = activeRuntimeSessionId
-                        val attemptId = activeAttemptId
-                        if (runtimeSessionId != null && attemptId != null) {
-                            orchestrator.dispatch(
-                                SessionEvent.AttemptFailed(runtimeSessionId, attemptId)
-                            )
-                        }
-                    }
                     publishStatus(SIGNAL_LOST_STATUS)
                 }
                 else -> updateStageStatus()
@@ -472,31 +494,35 @@ class IntercomService : Service() {
         }
     }
 
-    private fun onIntercomDisconnected(token: SessionGeneration.Token, error: IOException) {
+    private fun onIntercomDisconnected(
+        token: SessionGeneration.Token,
+        attempt: ConnectionAttempt,
+        recovery: RecoveryAttemptSpec,
+        error: IOException
+    ) {
         postForSession(token) {
             publishLog("信令通道断开：${error.message}")
-            recoverAfterPeerDisconnect(token)
-        }
-    }
-
-    private fun recoverAfterPeerDisconnect(token: SessionGeneration.Token) {
-        if (!isSessionCurrent(token)) return
-
-        val generation = ++recoveryGeneration
-        val runtimeSessionId = activeRuntimeSessionId ?: return
-        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
-        val currentAttemptId = activeAttemptId
-        if (currentAttemptId != null && orchestrator.state.value is IntercomState.Connected) {
-            val recoveryAttemptId = ConnectionAttemptId.create()
-            activeAttemptId = recoveryAttemptId
             orchestrator.dispatch(
-                SessionEvent.ConnectionLost(
-                    runtimeSessionId,
-                    currentAttemptId,
-                    recoveryAttemptId
+                SessionEvent.SignalingDisconnected(
+                    runtimeSessionId = attempt.runtimeSessionId,
+                    attemptId = attempt.id,
+                    recovery = recovery
                 )
             )
         }
+    }
+
+    private fun restartDiscoveryAfterDisconnect(
+        token: SessionGeneration.Token,
+        effect: SessionEffect.RestartDiscovery
+    ) {
+        if (!isSessionCurrent(token)) return
+
+        val generation = ++recoveryGeneration
+        val runtimeSessionId = activeRuntimeSessionId
+            ?.takeIf { it == effect.runtimeSessionId }
+            ?: return
+        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         sessions.invalidate()
         activeSession = null
         tunnelChosen.set(NO_SESSION_TOKEN)
@@ -538,23 +564,32 @@ class IntercomService : Service() {
             tunnelChosen.set(NO_SESSION_TOKEN)
             publishLog("重新启动车友发现")
             startAudioRoute(recoveryToken)
-            startDiscoveryTransports(recoveryToken, deviceId, runtimeSessionId)
+            startDiscoveryTransports(
+                recoveryToken,
+                deviceId,
+                runtimeSessionId,
+                effect.attempt
+            )
         }, PEER_RECONNECT_BACKOFF_MS)
     }
 
-    private fun onRemoteRiderIdentified(token: SessionGeneration.Token, name: String) {
+    private fun onRemoteIdentity(
+        token: SessionGeneration.Token,
+        attempt: ConnectionAttempt,
+        peer: PeerIdentity
+    ) {
         postForSession(token) {
+            val name = peer.nickname
             remoteRiderName = name
-            val runtimeSessionId = activeRuntimeSessionId
-            val attemptId = activeAttemptId
-            if (mediaConnected && runtimeSessionId != null && attemptId != null) {
-                orchestrator.dispatch(
-                    SessionEvent.PeerIdentified(
-                        runtimeSessionId,
-                        attemptId,
-                        currentPeerIdentity()
-                    )
+            orchestrator.dispatch(
+                SessionEvent.RemoteIdentityReceived(
+                    runtimeSessionId = attempt.runtimeSessionId,
+                    attemptId = attempt.id,
+                    peer = peer
                 )
+            )
+            if (peer.deviceId == null) {
+                publishLog("Remote identity has no stable deviceId; pairing will be skipped")
             }
             publishLog("已识别远端骑士：$name")
             listener?.onRemoteRiderIdentified(name)
@@ -566,11 +601,6 @@ class IntercomService : Service() {
         postForSession(token) { listener?.onAudioLevelChanged(level) }
     }
 
-    private fun currentPeerIdentity(): PeerIdentity = PeerIdentity(
-        deviceId = activeRemoteDeviceId,
-        nickname = remoteRiderName.orEmpty().ifBlank { "骑士" }
-    )
-
     private fun stopIntercom() {
         val runtimeSessionId = activeRuntimeSessionId
         if (runtimeSessionId != null) {
@@ -580,9 +610,6 @@ class IntercomService : Service() {
         sessions.invalidate()
         activeSession = null
         activeRuntimeSessionId = null
-        activeAttemptId = null
-        activeRemoteDeviceId = null
-        activeTransport = null
         localDeviceId = ""
         running = false
         tunnelChosen.set(NO_SESSION_TOKEN)
@@ -632,6 +659,66 @@ class IntercomService : Service() {
             if (isSessionCurrent(token)) action()
         }
     }
+
+    private fun handleSessionEffect(effect: SessionEffect) {
+        when (effect) {
+            is SessionEffect.RestartDiscovery -> {
+                val token = activeSession ?: return
+                if (activeRuntimeSessionId != effect.runtimeSessionId) return
+                restartDiscoveryAfterDisconnect(token, effect)
+            }
+        }
+    }
+
+    private fun createAttempt(
+        runtimeSessionId: RuntimeSessionId,
+        targetDeviceId: String?,
+        trigger: ConnectionTrigger,
+        preferredTransport: Transport?
+    ): ConnectionAttempt = ConnectionAttempt(
+        id = ConnectionAttemptId.create(),
+        runtimeSessionId = runtimeSessionId,
+        targetDeviceId = targetDeviceId,
+        trigger = trigger,
+        preferredTransport = preferredTransport,
+        deadlineElapsedRealtimeMs = SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
+    )
+
+    private fun createTunnelAttempt(
+        runtimeSessionId: RuntimeSessionId,
+        suppliedAttempt: ConnectionAttempt?,
+        remoteDeviceId: String?,
+        transport: Transport,
+        isServer: Boolean
+    ): ConnectionAttempt {
+        if (suppliedAttempt != null) {
+            val target = suppliedAttempt.targetDeviceId ?: remoteDeviceId
+            return suppliedAttempt.copy(
+                targetDeviceId = target,
+                preferredTransport = transport
+            )
+        }
+        val trigger = when {
+            remoteDeviceId == null -> ConnectionTrigger.LEGACY_PROVISIONAL
+            isServer -> ConnectionTrigger.INBOUND
+            else -> ConnectionTrigger.AUTO_DISCOVERY
+        }
+        return createAttempt(runtimeSessionId, remoteDeviceId, trigger, transport)
+    }
+
+    private fun createRecoverySpec(): RecoveryAttemptSpec = RecoveryAttemptSpec(
+        id = ConnectionAttemptId.create(),
+        deadlineElapsedRealtimeMs = SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
+    )
+
+    private fun PeerConnection.PeerConnectionState.toProductState(): WebRtcConnectionState =
+        when (this) {
+            PeerConnection.PeerConnectionState.CONNECTED -> WebRtcConnectionState.CONNECTED
+            PeerConnection.PeerConnectionState.DISCONNECTED -> WebRtcConnectionState.DISCONNECTED
+            PeerConnection.PeerConnectionState.FAILED -> WebRtcConnectionState.FAILED
+            PeerConnection.PeerConnectionState.CLOSED -> WebRtcConnectionState.CLOSED
+            else -> WebRtcConnectionState.OTHER
+        }
 
     private fun closeStaleSocket(socket: Socket): Boolean {
         return try {
@@ -743,8 +830,7 @@ class IntercomService : Service() {
 
     companion object {
         private const val NO_SESSION_TOKEN = 0L
-        private const val TRANSPORT_LAN = "LAN"
-        private const val TRANSPORT_WIFI_DIRECT = "WIFI_DIRECT"
+        private const val CONNECTION_ATTEMPT_TIMEOUT_MS = 10_000L
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"

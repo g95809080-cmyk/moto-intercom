@@ -15,7 +15,9 @@ enum class SessionState {
 data class PeerIdentity(
     val deviceId: String?,
     val nickname: String,
-    val deviceName: String = ""
+    val deviceName: String = "",
+    val runtimeSessionId: RuntimeSessionId? = null,
+    val isDeviceIdVerified: Boolean = false
 )
 
 sealed interface IntercomState {
@@ -34,45 +36,53 @@ sealed interface IntercomState {
     }
 
     data class IncomingConfirmation(
-        override val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
+        val attempt: ConnectionAttempt,
         val peer: PeerIdentity
     ) : IntercomState {
         override val kind = SessionState.INCOMING_CONFIRMATION
+        override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
+        val attemptId: ConnectionAttemptId = attempt.id
     }
 
     data class Connecting(
-        override val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
-        val targetDeviceId: String?
+        val attempt: ConnectionAttempt,
+        val peer: PeerIdentity? = null
     ) : IntercomState {
         override val kind = SessionState.CONNECTING
+        override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
+        val attemptId: ConnectionAttemptId = attempt.id
+        val targetDeviceId: String? = attempt.targetDeviceId
     }
 
     data class Optimizing(
-        override val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
-        val targetDeviceId: String?
+        val attempt: ConnectionAttempt,
+        val peer: PeerIdentity? = null
     ) : IntercomState {
         override val kind = SessionState.OPTIMIZING
+        override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
+        val attemptId: ConnectionAttemptId = attempt.id
+        val targetDeviceId: String? = attempt.targetDeviceId
     }
 
     data class Connected(
-        override val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
+        val attempt: ConnectionAttempt,
         val peer: PeerIdentity,
-        val connectedAt: Long,
-        val transport: String?
+        val connectedAt: Long
     ) : IntercomState {
         override val kind = SessionState.CONNECTED
+        override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
+        val attemptId: ConnectionAttemptId = attempt.id
+        val transport: Transport? = attempt.preferredTransport
     }
 
     data class Recovering(
-        override val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
-        val targetDeviceId: String?
+        val attempt: ConnectionAttempt,
+        val peer: PeerIdentity
     ) : IntercomState {
         override val kind = SessionState.RECOVERING
+        override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
+        val attemptId: ConnectionAttemptId = attempt.id
+        val targetDeviceId: String? = attempt.targetDeviceId
     }
 
     data class Resetting(
@@ -87,4 +97,13 @@ sealed interface IntercomState {
     ) : IntercomState {
         override val kind = SessionState.STOPPING
     }
+}
+
+internal fun IntercomState.connectionAttemptOrNull(): ConnectionAttempt? = when (this) {
+    is IntercomState.IncomingConfirmation -> attempt
+    is IntercomState.Connecting -> attempt
+    is IntercomState.Optimizing -> attempt
+    is IntercomState.Connected -> attempt
+    is IntercomState.Recovering -> attempt
+    else -> null
 }

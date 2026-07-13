@@ -38,11 +38,26 @@ class LocalIdentityStoreTest {
         assertEquals(1, ids.toSet().size)
     }
 
+    @Test
+    fun reopeningDataStoreReadsTheSameDeviceId() = runBlocking {
+        val file = File(temporaryFolder.root, "reopened_local_identity.preferences_pb")
+        val first = withStore(file) { it.getOrCreateDeviceId() }
+        val afterProcessRestart = withStore(file) { it.getOrCreateDeviceId() }
+
+        assertEquals(first, afterProcessRestart)
+    }
+
     private fun withStore(block: suspend (LocalIdentityStore) -> Unit) = runBlocking {
+        withStore(File(temporaryFolder.root, "local_identity.preferences_pb"), block)
+    }
+
+    private suspend fun <T> withStore(
+        file: File,
+        block: suspend (LocalIdentityStore) -> T
+    ): T {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val file = File(temporaryFolder.root, "local_identity.preferences_pb")
         val dataStore = PreferenceDataStoreFactory.create(scope = scope) { file }
-        try {
+        return try {
             block(DataStoreLocalIdentityStore(dataStore))
         } finally {
             scope.cancel()
