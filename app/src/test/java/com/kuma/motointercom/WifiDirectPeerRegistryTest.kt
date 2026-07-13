@@ -31,4 +31,33 @@ class WifiDirectPeerRegistryTest {
         assertEquals(emptySet<String>(), snapshot.pending)
         assertEquals(emptySet<String>(), snapshot.accepted)
     }
+
+    @Test
+    fun treatsGroupMemberAsPendingUntilItsIdentityIsAccepted() {
+        val peers = WifiDirectPeerRegistry()
+        peers.reconcile(setOf("AA"))
+        peers.markPending("AA")
+
+        assertEquals(
+            WifiDirectPeerRegistry.GroupMatch.PENDING,
+            peers.matchGroup(isGroupOwner = true, owner = "LOCAL", clients = listOf("AA"))
+        )
+
+        peers.accept("AA")
+
+        assertEquals(
+            WifiDirectPeerRegistry.GroupMatch.MATCHED,
+            peers.matchGroup(isGroupOwner = true, owner = "LOCAL", clients = listOf("AA"))
+        )
+    }
+
+    @Test
+    fun rejectsGroupWhoseRemoteMemberWasNeverDiscovered() {
+        val peers = WifiDirectPeerRegistry()
+
+        assertEquals(
+            WifiDirectPeerRegistry.GroupMatch.REJECTED,
+            peers.matchGroup(isGroupOwner = false, owner = "STRANGER", clients = emptyList())
+        )
+    }
 }

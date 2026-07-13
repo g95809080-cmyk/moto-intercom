@@ -1,6 +1,8 @@
 package com.kuma.motointercom
 
 internal class WifiDirectPeerRegistry {
+    enum class GroupMatch { MATCHED, PENDING, REJECTED }
+
     data class Snapshot(
         val pending: Set<String>,
         val accepted: Set<String>,
@@ -35,6 +37,17 @@ internal class WifiDirectPeerRegistry {
 
     @Synchronized
     fun isAccepted(address: String): Boolean = address in accepted
+
+    @Synchronized
+    fun matchGroup(isGroupOwner: Boolean, owner: String?, clients: List<String>): GroupMatch {
+        val remote = (if (isGroupOwner) clients.singleOrNull() else owner)
+            ?: return GroupMatch.REJECTED
+        return when {
+            selected?.equals(remote, ignoreCase = true) == true -> GroupMatch.MATCHED
+            pending.any { it.equals(remote, ignoreCase = true) } -> GroupMatch.PENDING
+            else -> GroupMatch.REJECTED
+        }
+    }
 
     @Synchronized
     fun reset() {

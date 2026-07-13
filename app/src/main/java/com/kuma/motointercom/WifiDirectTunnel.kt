@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Parcelable
+import android.os.SystemClock
 import android.util.Log
 import java.io.Closeable
 import java.io.IOException
@@ -77,6 +78,7 @@ class WifiDirectTunnel(
     @Volatile private var socketTransportGeneration = 0
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
     private val peerRegistry = WifiDirectPeerRegistry()
+    private val groupValidationGate = WifiDirectGroupValidationGate(SystemClock::elapsedRealtime)
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private var pendingRetryAttempt = 0
     private var pendingRetryGeneration = 0
@@ -388,18 +390,11 @@ class WifiDirectTunnel(
             Log.d(TAG, "pending -> accepted: ${peerSummary(device)} pending=${snapshot.pending.size}")
         }
         logPeer(device, accepted = true, reason = reason)
-        val selectedPeer = snapshot.selected?.let(peerDevices::get)
         if (snapshot.selected == address) {
             Log.d(TAG, "selectedPeer=${peerSummary(device)}")
         }
         mainHandler.post { onPeersChanged(snapshot.accepted.mapNotNull(peerDevices::get)) }
-        if (autoConnect && connectingAddress == null && state != State.SIGNALING_READY) {
-            cancelPendingRetry()
-            selectedPeer?.let {
-                Log.d(TAG, "accepted peer triggers connect: ${peerSummary(it)}")
-                connect(it)
-            }
-        }
+        maybeAutoConnect(snapshot)
     }
 
     private fun registerReceiver() {
@@ -466,6 +461,7 @@ class WifiDirectTunnel(
                 if (current.isNotEmpty() && motoComPeers.isEmpty()) {
                     postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
                 }
+                maybeAutoConnect(snapshot)
                 schedulePendingRetryIfNeeded()
             }
         } catch (t: Throwable) {
@@ -496,46 +492,74 @@ class WifiDirectTunnel(
         }
         if (tunnelStarted || validatingGroup) return
 
+        cancelConnectWatchdog()
         validatingGroup = true
-        requestValidatedGroup(info, attempt = 0)
+        val validation = groupValidationGate.start(GROUP_IDENTITY_VALIDATION_TIMEOUT_MS)
+        scheduleGroupValidationDeadline(validation)
+        requestValidatedGroup(info, attempt = 0, validation)
+    }
+
+    private fun maybeAutoConnect(snapshot: WifiDirectPeerRegistry.Snapshot) {
+        val selectedPeer = snapshot.selected?.let(peerDevices::get) ?: return
+        if (!WifiDirectAutoConnectPolicy.shouldConnect(
+                autoConnect = autoConnect,
+                peerAvailable = selectedPeer.status == WifiP2pDevice.AVAILABLE,
+                validatingGroup = validatingGroup,
+                connecting = connectingAddress != null,
+                connectionActive = state != State.DISCOVERING
+            )
+        ) return
+
+        cancelPendingRetry()
+        Log.d(TAG, "available accepted peer triggers connect: ${peerSummary(selectedPeer)}")
+        connect(selectedPeer)
     }
 
     @SuppressLint("MissingPermission")
-    private fun requestValidatedGroup(info: WifiP2pInfo, attempt: Int) {
+    private fun requestValidatedGroup(
+        info: WifiP2pInfo,
+        attempt: Int,
+        validation: WifiDirectGroupValidationGate.Session
+    ) {
+        if (!groupValidationGate.isCurrent(validation)) return
         val m = manager ?: return
         val c = channel ?: return
         try {
             m.requestGroupInfo(c) { group ->
-                if (!running) return@requestGroupInfo
+                if (!running || !groupValidationGate.isCurrent(validation)) return@requestGroupInfo
                 if (group == null) {
                     if (attempt < GROUP_VALIDATION_RETRIES) {
                         mainHandler.postDelayed(
-                            { requestValidatedGroup(info, attempt + 1) },
+                            { requestValidatedGroup(info, attempt + 1, validation) },
                             GROUP_VALIDATION_RETRY_MS
                         )
                     } else {
+                        groupValidationGate.cancel()
+                        validatingGroup = false
                         rejectCurrentGroup("groupFormed=true 但 requestGroupInfo 为空")
                     }
                     return@requestGroupInfo
                 }
-                validateGroup(info, group, attempt)
+                validateGroup(info, group, attempt, validation)
             }
         } catch (t: Throwable) {
             postError(t)
         }
     }
 
-    private fun validateGroup(info: WifiP2pInfo, group: WifiP2pGroup, attempt: Int) {
+    private fun validateGroup(
+        info: WifiP2pInfo,
+        group: WifiP2pGroup,
+        attempt: Int,
+        validation: WifiDirectGroupValidationGate.Session
+    ) {
+        if (!groupValidationGate.isCurrent(validation)) return
         val target = peerRegistry.snapshot().selected?.let(peerDevices::get)
         val targetAddress = target?.deviceAddress
         val ownerDeviceAddress = group.owner?.deviceAddress
         val clientAddresses = group.clientList.map { it.deviceAddress }
-        val targetMatches = if (info.isGroupOwner) {
-            targetAddress != null && clientAddresses.size == 1 &&
-                sameAddress(clientAddresses.single(), targetAddress)
-        } else {
-            targetAddress != null && sameAddress(ownerDeviceAddress, targetAddress)
-        }
+        val groupMatch = peerRegistry.matchGroup(info.isGroupOwner, ownerDeviceAddress, clientAddresses)
+        val targetMatches = groupMatch == WifiDirectPeerRegistry.GroupMatch.MATCHED
 
         Log.d(
             TAG,
@@ -543,17 +567,23 @@ class WifiDirectTunnel(
                 "groupOwner=${group.owner?.let(::peerSummary)} networkName=${group.networkName} " +
                 "interface=${group.`interface`} clients=$clientAddresses " +
                 "localP2pIp=${localP2pIp(group.`interface`)} isGroupOwner=${info.isGroupOwner} " +
-                "targetMatches=$targetMatches attempt=$attempt"
+                "targetMatches=$targetMatches groupMatch=$groupMatch attempt=$attempt"
         )
 
-        if (!targetMatches && attempt < GROUP_VALIDATION_RETRIES) {
+        val retryLimit = if (groupMatch == WifiDirectPeerRegistry.GroupMatch.PENDING) {
+            GROUP_IDENTITY_VALIDATION_RETRIES
+        } else {
+            GROUP_VALIDATION_RETRIES
+        }
+        if (!targetMatches && attempt < retryLimit) {
             mainHandler.postDelayed(
-                { requestValidatedGroup(info, attempt + 1) },
+                { requestValidatedGroup(info, attempt + 1, validation) },
                 GROUP_VALIDATION_RETRY_MS
             )
             return
         }
         if (!targetMatches) {
+            groupValidationGate.cancel()
             validatingGroup = false
             rejectCurrentGroup(
                 "group owner/client 与 selectedPeer 不匹配: owner=$ownerDeviceAddress " +
@@ -576,6 +606,7 @@ class WifiDirectTunnel(
             return
         }
 
+        groupValidationGate.cancel()
         validatingGroup = false
         tunnelStarted = true
         state = State.GROUP_READY
@@ -597,6 +628,21 @@ class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     private fun removeGroupAndRediscover(reason: String) {
         removeGroupAndRediscover(reason, attempt = 1)
+    }
+
+    private fun scheduleGroupValidationDeadline(
+        validation: WifiDirectGroupValidationGate.Session
+    ) {
+        mainHandler.postDelayed({
+            if (!running || !groupValidationGate.isCurrent(validation)) return@postDelayed
+            if (!groupValidationGate.isExpired(validation)) {
+                scheduleGroupValidationDeadline(validation)
+                return@postDelayed
+            }
+            groupValidationGate.cancel()
+            validatingGroup = false
+            rejectCurrentGroup("等待 P2P group MotoCom 身份超时")
+        }, groupValidationGate.remainingMillis(validation))
     }
 
     @SuppressLint("MissingPermission")
@@ -716,6 +762,7 @@ class WifiDirectTunnel(
     }
 
     private fun resetTunnelOnly() {
+        groupValidationGate.cancel()
         tunnelStarted = false
         validatingGroup = false
         connectingAddress = null
@@ -991,6 +1038,8 @@ class WifiDirectTunnel(
         private const val GROUP_REMOVAL_SETTLE_MS = 500L
         private const val GROUP_VALIDATION_RETRY_MS = 500L
         private const val GROUP_VALIDATION_RETRIES = 20
+        private const val GROUP_IDENTITY_VALIDATION_RETRIES = 60
+        private const val GROUP_IDENTITY_VALIDATION_TIMEOUT_MS = 30_000L
         private const val PENDING_DISCOVERY_RETRY_DELAY_MS = 1_500L
         private const val PENDING_DISCOVERY_RETRY_COUNT = 4
         private const val BUSY_STATUS = "无线占用中，正在自动复位重试..."
