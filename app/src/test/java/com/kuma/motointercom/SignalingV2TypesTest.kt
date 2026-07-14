@@ -135,7 +135,7 @@ class SignalingV2TypesTest {
                 .responseScopeOrNull()
         )
         assertEquals(
-            ResponseScope.ATTEMPT,
+            ResponseScope.CHANNEL,
             SignalingMessageV2.ConnectReject(
                 RejectReason.UNSUPPORTED_VERSION,
                 retryable = false

@@ -157,7 +157,7 @@ internal enum class RejectReason(val scope: ResponseScope) {
     CONFIRMATION_UNAVAILABLE(ResponseScope.ATTEMPT),
     CANCELED(ResponseScope.ATTEMPT),
     GLARE_LOST(ResponseScope.ATTEMPT),
-    UNSUPPORTED_VERSION(ResponseScope.ATTEMPT)
+    UNSUPPORTED_VERSION(ResponseScope.CHANNEL)
 }
 
 internal enum class SignalingPhase {
