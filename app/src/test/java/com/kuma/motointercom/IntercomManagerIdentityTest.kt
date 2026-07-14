@@ -13,41 +13,43 @@ class IntercomManagerIdentityTest {
             SignalingProtocol.Message.Identity(
                 name = "P2P Rider",
                 deviceId = "peer-stable",
-                runtimeSessionId = "remote-runtime"
+                runtimeSessionId = "remote-runtime",
+                deviceName = "Phone P2P"
             ),
             expectedRemoteDeviceId = null
         )
 
         assertEquals("peer-stable", peer.deviceId)
         assertEquals(RuntimeSessionId("remote-runtime"), peer.runtimeSessionId)
+        assertEquals("Phone P2P", peer.deviceName)
         assertTrue(peer.isDeviceIdVerified)
     }
 
     @Test
-    fun legacyP2pIdentityRemainsUnknown() {
+    fun targetLockDoesNotFillMissingSocketIdentity() {
         val peer = resolveRemoteIdentity(
             SignalingProtocol.Message.Identity("Legacy Rider"),
-            expectedRemoteDeviceId = "peer-from-previous-session",
-            requireClaimedDeviceId = true
+            expectedRemoteDeviceId = "peer-from-previous-session"
         )
 
         assertNull(peer.deviceId)
         assertNull(peer.runtimeSessionId)
+        assertTrue(!peer.isDeviceIdVerified)
     }
 
     @Test
-    fun p2pIdentityWithoutRuntimeSessionIsNotVerified() {
-        val peer = resolveRemoteIdentity(
-            SignalingProtocol.Message.Identity(
-                name = "Partial Rider",
-                deviceId = "peer-stable"
-            ),
-            expectedRemoteDeviceId = null,
-            requireClaimedDeviceId = true
-        )
-
-        assertNull(peer.deviceId)
-        assertNull(peer.runtimeSessionId)
+    fun targetLockedIdentityWithoutRuntimeSessionFailsClosed() {
+        assertThrows(SignalingProtocol.ProtocolException::class.java) {
+            resolveRemoteIdentity(
+                SignalingProtocol.Message.Identity(
+                    name = "Partial Rider",
+                    deviceId = "peer-stable"
+                ),
+                expectedRemoteDeviceId = "peer-stable",
+                requireClaimedDeviceId = true,
+                expectedRemoteRuntimeSessionId = RuntimeSessionId("remote-runtime")
+            )
+        }
     }
 
     @Test

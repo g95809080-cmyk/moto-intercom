@@ -80,9 +80,9 @@ class SessionOrchestrator(
     private suspend fun maybePersistConnectedPeer(state: IntercomState) {
         val connected = state as? IntercomState.Connected ?: return
         val deviceId = connected.peer.deviceId?.takeIf(String::isNotBlank)
-        if (deviceId == null || !connected.peer.isDeviceIdVerified) {
+        if (deviceId == null || !connected.peer.isVerifiedFor(connected.attempt.targetLock)) {
             onLog(
-                "Pairing skipped: remote deviceId is unknown or unverified for " +
+                "Pairing skipped: remote Socket identity is incomplete or unverified for " +
                     "runtime=${connected.runtimeSessionId.value} attempt=${connected.attemptId.value}"
             )
             return

@@ -8,7 +8,13 @@ import org.junit.Test
 
 class IntercomStateMachineTest {
     private val runtime = RuntimeSessionId("runtime-current")
-    private val peer = PeerIdentity("peer-a", "Rider A", "Phone A")
+    private val peer = PeerIdentity(
+        deviceId = "peer-a",
+        nickname = "Rider A",
+        deviceName = "Phone A",
+        runtimeSessionId = RuntimeSessionId("session-peer-a"),
+        isDeviceIdVerified = true
+    )
     private val attempt = attempt("attempt-current")
     private val recovery = RecoveryAttemptSpec(ConnectionAttemptId("attempt-recovery"), 20_000L)
 
@@ -94,6 +100,7 @@ class IntercomStateMachineTest {
         val effect = transition.effects.single() as SessionEffect.OpenTargetedTransport
         assertEquals(TargetLock("peer-b", RuntimeSessionId("peer-b-session")), connecting.attempt.targetLock)
         assertEquals(ChannelPlan.single(Transport.LAN), connecting.attempt.channelPlan)
+        assertNull(connecting.peer)
         assertEquals(connecting.attempt, effect.attempt)
     }
 
@@ -223,9 +230,8 @@ class IntercomStateMachineTest {
                 IntercomState.Discovering(runtime),
                 SessionEvent.TunnelReady(
                     attempt,
-                    "peer-a",
-                    Transport.LAN,
-                    IdentityVerificationSource.SOCKET_HANDSHAKE
+                    peer,
+                    Transport.LAN
                 )
             )
         )
@@ -234,20 +240,99 @@ class IntercomStateMachineTest {
                 IntercomState.Connecting(attempt, peer),
                 SessionEvent.TunnelReady(
                     attempt,
-                    "peer-a",
+                    peer,
+                    Transport.WIFI_DIRECT
+                )
+            )
+        )
+        assertNull(
+            nextIntercomState(
+                IntercomState.Connecting(attempt, peer),
+                SessionEvent.TunnelReady(
+                    attempt,
+                    peer.copy(deviceId = "peer-c"),
+                    Transport.LAN
+                )
+            )
+        )
+    }
+
+    @Test
+    fun socketIdentityMustMatchBothLockedDeviceAndRuntime() {
+        val connecting = IntercomState.Connecting(attempt)
+
+        assertNull(
+            nextIntercomState(
+                connecting,
+                SessionEvent.TunnelReady(
+                    attempt,
+                    peer.copy(runtimeSessionId = null),
+                    Transport.LAN
+                )
+            )
+        )
+        assertNull(
+            nextIntercomState(
+                connecting,
+                SessionEvent.TunnelReady(
+                    attempt,
+                    peer.copy(runtimeSessionId = RuntimeSessionId("session-new")),
+                    Transport.LAN
+                )
+            )
+        )
+        assertEquals(
+            peer,
+            (requireNotNull(
+                nextIntercomState(
+                    connecting,
+                    SessionEvent.TunnelReady(attempt, peer, Transport.LAN)
+                )
+            ) as IntercomState.Connecting).peer
+        )
+    }
+
+    @Test
+    fun openFailureAndTimeoutAbortOnlyTheCurrentAttempt() {
+        val connecting = IntercomState.Connecting(attempt)
+        val openFailure = requireNotNull(
+            reduceIntercomState(
+                connecting,
+                SessionEvent.TargetedTransportOpenFailed(
+                    runtime,
+                    attempt.id,
+                    Transport.LAN,
+                    "adapter unavailable"
+                )
+            )
+        )
+        assertTrue(openFailure.state is IntercomState.Discovering)
+        assertEquals(
+            SessionEffect.AbortAttemptAndResumeDiscovery(runtime, attempt.id),
+            openFailure.effects.single()
+        )
+
+        val timeout = requireNotNull(
+            reduceIntercomState(
+                connecting,
+                SessionEvent.AttemptTimedOut(runtime, attempt.id)
+            )
+        )
+        assertTrue(timeout.state is IntercomState.Discovering)
+        assertNull(
+            reduceIntercomState(
+                connecting,
+                SessionEvent.AttemptTimedOut(runtime, ConnectionAttemptId("attempt-old"))
+            )
+        )
+        assertNull(
+            reduceIntercomState(
+                connecting,
+                SessionEvent.TargetedTransportOpenFailed(
+                    runtime,
+                    attempt.id,
                     Transport.WIFI_DIRECT,
-                    IdentityVerificationSource.NONE
-                )
-            )
-        )
-        assertNull(
-            nextIntercomState(
-                IntercomState.Connecting(attempt, peer),
-                SessionEvent.TunnelReady(
-                    attempt,
-                    "peer-c",
-                    Transport.LAN,
-                    IdentityVerificationSource.SOCKET_HANDSHAKE
+                    "stale transport"
                 )
             )
         )
@@ -284,6 +369,23 @@ class IntercomStateMachineTest {
                     1L,
                     recovery
                 )
+            )
+        )
+        assertNull(
+            reduceIntercomState(
+                state,
+                SessionEvent.TargetedTransportOpenFailed(
+                    runtime,
+                    attempt.id,
+                    Transport.LAN,
+                    "late failure"
+                )
+            )
+        )
+        assertNull(
+            reduceIntercomState(
+                state,
+                SessionEvent.AttemptTimedOut(runtime, attempt.id)
             )
         )
         assertEquals(replacement.id, (state as IntercomState.Connecting).attemptId)

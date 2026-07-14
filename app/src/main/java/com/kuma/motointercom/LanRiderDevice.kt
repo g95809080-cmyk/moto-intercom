@@ -15,7 +15,7 @@ internal data class LanRiderDevice(
             sessionId == targetLock.expectedRemoteSessionId
 }
 
-internal fun ConnectionAttempt?.acceptsLanRemote(remoteDeviceId: String?): Boolean =
+internal fun ConnectionAttempt?.acceptsLanPreflightDevice(remoteDeviceId: String?): Boolean =
     this != null && channelPlan.transport == Transport.LAN && targetDeviceId == remoteDeviceId
 
 internal class LanDiscoveryDeviceRegistry {

@@ -59,6 +59,17 @@ class IntercomService : Service() {
     private lateinit var identityStore: LocalIdentityStore
     private lateinit var pairingRepository: PairingRepository
     private lateinit var orchestrator: SessionOrchestrator
+    private val attemptDeadlineScheduler = AttemptDeadlineScheduler(
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        onTimedOut = { attempt ->
+            publishLog("Connection attempt timed out: ${attempt.id.value}")
+            orchestrator.dispatch(
+                SessionEvent.AttemptTimedOut(attempt.runtimeSessionId, attempt.id)
+            )
+        }
+    )
 
     private var listener: Listener? = null
     private var audioRouteController: AudioRouteController? = null
@@ -279,13 +290,12 @@ class IntercomService : Service() {
         if (Transport.WIFI_DIRECT in plannedTransports) {
         wifiTunnel = WifiDirectTunnel(
             context = this,
-            onTunnelReady = { targetIp, isServer, attempt, socket ->
+            onTunnelReady = { targetIp, isServer, attempt, peer, socket ->
                 onTunnelReady(
                     token,
                     targetIp,
                     isServer,
-                    remoteDeviceId = null,
-                    identityVerificationSource = IdentityVerificationSource.NONE,
+                    peer,
                     attempt = attempt,
                     transport = Transport.WIFI_DIRECT,
                     signalingSocket = socket
@@ -363,13 +373,12 @@ class IntercomService : Service() {
                     if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
                 }
             },
-            onTunnelReady = { ip, server, remoteDeviceId, verificationSource, attempt, socket ->
+            onTunnelReady = { ip, server, peer, attempt, socket ->
                 acceptTunnel(
                     token,
                     ip,
                     server,
-                    remoteDeviceId,
-                    verificationSource,
+                    peer,
                     attempt,
                     Transport.LAN,
                     socket,
@@ -380,15 +389,14 @@ class IntercomService : Service() {
             onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.start() }
         }
-        targetAttempt?.let(::openTargetedTransport)
+        targetAttempt?.let(::beginTargetedTransport)
     }
 
     private fun onTunnelReady(
         token: SessionGeneration.Token,
         targetIp: String,
         isServer: Boolean,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
+        peer: PeerIdentity,
         attempt: ConnectionAttempt,
         transport: Transport,
         signalingSocket: Socket
@@ -397,8 +405,7 @@ class IntercomService : Service() {
             token,
             targetIp,
             isServer,
-            remoteDeviceId,
-            identityVerificationSource,
+            peer,
             attempt,
             transport,
             signalingSocket,
@@ -410,14 +417,17 @@ class IntercomService : Service() {
         token: SessionGeneration.Token,
         targetIp: String,
         isServer: Boolean,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
+        peer: PeerIdentity,
         suppliedAttempt: ConnectionAttempt,
         transport: Transport,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
     ): Boolean {
         if (suppliedAttempt.channelPlan.transport != transport) {
+            return closeStaleSocket(signalingSocket)
+        }
+        if (!peer.isVerifiedFor(suppliedAttempt.targetLock)) {
+            publishLog("Rejected tunnel with incomplete or mismatched Socket IDENTITY")
             return closeStaleSocket(signalingSocket)
         }
         if (!sessions.claimIfCurrent(token) {
@@ -442,9 +452,8 @@ class IntercomService : Service() {
             val queued = orchestrator.dispatch(
                 SessionEvent.TunnelReady(
                     attempt,
-                    remoteDeviceId,
-                    transport,
-                    identityVerificationSource
+                    peer,
+                    transport
                 )
             ) { accepted ->
                 dispatchOnMain {
@@ -461,8 +470,7 @@ class IntercomService : Service() {
                         token,
                         targetIp,
                         isServer,
-                        remoteDeviceId,
-                        identityVerificationSource,
+                        peer,
                         attempt,
                         signalingSocket,
                         closeWifiDirect
@@ -481,8 +489,7 @@ class IntercomService : Service() {
         token: SessionGeneration.Token,
         targetIp: String,
         isServer: Boolean,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
+        peer: PeerIdentity,
         attempt: ConnectionAttempt,
         signalingSocket: Socket,
         closeWifiDirect: Boolean
@@ -505,6 +512,7 @@ class IntercomService : Service() {
 
         physicalLinkReady = true
         mediaConnected = false
+        remoteRiderName = peer.nickname
         publishStatus(SIGNALING_CONNECTED_STATUS)
         localRiderName = requestedRiderName.ifBlank { if (isServer) "骑士A" else "骑士B" }
         publishLog("本机骑士昵称：$localRiderName")
@@ -516,11 +524,12 @@ class IntercomService : Service() {
             isServer = isServer,
             localRiderName = localRiderName,
             localDeviceId = localDeviceId,
+            localDeviceName = Build.MODEL.orEmpty(),
             localRuntimeSessionId = attempt.runtimeSessionId,
             expectedRemoteDeviceId = attempt.targetDeviceId,
             expectedRemoteRuntimeSessionId = attempt.targetLock.expectedRemoteSessionId,
-            requireClaimedRemoteDeviceId =
-                !identityVerificationSource.verifiesStableDeviceId,
+            requireClaimedRemoteDeviceId = true,
+            identityAlreadyExchanged = true,
             onIntercomDisconnected = {
                 onIntercomDisconnected(token, attempt, recoverySpec, it)
             },
@@ -532,6 +541,11 @@ class IntercomService : Service() {
             onError = { error -> postForSession(token) { handleError(error) } },
             isSessionCurrent = { isSessionCurrent(token) }
         ).also {
+            publishLog(
+                "Verified remote Socket identity: ${peer.deviceId} / " +
+                    peer.runtimeSessionId?.value
+            )
+            listener?.onRemoteRiderIdentified(peer.nickname)
             publishStatus(MEDIA_INITIALIZING_STATUS)
             it.start()
         }
@@ -558,6 +572,7 @@ class IntercomService : Service() {
             )
             when (state) {
                 PeerConnection.PeerConnectionState.CONNECTED -> {
+                    attemptDeadlineScheduler.cancel(attempt)
                     mediaConnected = true
                     publishStatus(VOICE_CONNECTED_STATUS)
                 }
@@ -596,6 +611,7 @@ class IntercomService : Service() {
     ) {
         val token = activeSession ?: return
         if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
+        attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         val generation = ++recoveryGeneration
         markDiscoveryUnavailable()
@@ -689,6 +705,7 @@ class IntercomService : Service() {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
         recoveryGeneration++
+        attemptDeadlineScheduler.cancel()
         sessions.invalidate()
         activeSession = null
         activeRuntimeSessionId = null
@@ -746,11 +763,7 @@ class IntercomService : Service() {
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
             is SessionEffect.OpenTargetedTransport -> {
-                if (openTargetedTransport(effect.attempt)) {
-                    publishStatus(PEER_FOUND_STATUS)
-                } else {
-                    publishLog("Targeted transport is not available for ${effect.attempt.id.value}")
-                }
+                beginTargetedTransport(effect.attempt)
             }
             is SessionEffect.AbortAttemptAndResumeDiscovery -> {
                 publishLog("连接尝试已中止：${effect.attemptId.value}")
@@ -764,10 +777,31 @@ class IntercomService : Service() {
 
     private fun openTargetedTransport(attempt: ConnectionAttempt): Boolean {
         if (activeRuntimeSessionId != attempt.runtimeSessionId) return false
-        return when (attempt.channelPlan.transport) {
-            Transport.LAN -> lanDiscovery?.connect(attempt) == true
-            Transport.WIFI_DIRECT -> wifiTunnel?.connect(attempt) == true
+        return openPlannedTransport(
+            attempt,
+            openLan = { lanDiscovery?.connect(it) == true },
+            openWifiDirect = { wifiTunnel?.connect(it) == true }
+        )
+    }
+
+    private fun beginTargetedTransport(attempt: ConnectionAttempt) {
+        attemptDeadlineScheduler.schedule(attempt)
+        val result = runCatching { openTargetedTransport(attempt) }
+        if (result.getOrDefault(false)) {
+            publishStatus(PEER_FOUND_STATUS)
+            return
         }
+        attemptDeadlineScheduler.cancel(attempt)
+        val reason = result.exceptionOrNull()?.message ?: "transport adapter unavailable"
+        publishLog("Targeted transport open failed for ${attempt.id.value}: $reason")
+        orchestrator.dispatch(
+            SessionEvent.TargetedTransportOpenFailed(
+                runtimeSessionId = attempt.runtimeSessionId,
+                attemptId = attempt.id,
+                transport = attempt.channelPlan.transport,
+                reason = reason
+            )
+        )
     }
 
     private fun createRecoverySpec(): RecoveryAttemptSpec = RecoveryAttemptSpec(

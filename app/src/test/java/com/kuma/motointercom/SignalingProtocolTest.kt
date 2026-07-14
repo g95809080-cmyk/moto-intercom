@@ -27,11 +27,27 @@ class SignalingProtocolTest {
         val identity = SignalingProtocol.Message.Identity(
             name = "Rider",
             deviceId = "device-stable",
-            runtimeSessionId = "runtime-current"
+            runtimeSessionId = "runtime-current",
+            deviceName = "Phone Model"
         )
         val encoded = protocol.encode(identity)
 
         assertEquals(identity, protocol.decode(encoded))
+    }
+
+    @Test
+    fun identityPreflightAllowsSdpDecoderToResumeAfterIdentity() {
+        val protocol = SignalingProtocol(
+            SignalingProtocol.SdpKind.OFFER,
+            identityAlreadySeen = true
+        )
+
+        val message = protocol.decode(
+            """{"type":"OFFER","sdp":"{\"type\":\"OFFER\",\"sdp\":\"v=0\"}"}"""
+                .toByteArray()
+        )
+
+        assertEquals(SignalingProtocol.Message.Offer("""{"type":"OFFER","sdp":"v=0"}"""), message)
     }
 
     @Test

@@ -45,6 +45,7 @@ internal class WifiDirectTunnel(
         targetIp: String,
         isServer: Boolean,
         attempt: ConnectionAttempt,
+        peer: PeerIdentity,
         signalingSocket: Socket
     ) -> Unit,
     private val signalingPort: Int = 8888,
@@ -1152,6 +1153,16 @@ internal class WifiDirectTunnel(
         isServer: Boolean,
         socket: Socket
     ) {
+        val verifiedPeer = LegacyIdentityHandshake.exchange(
+            socket,
+            SignalingProtocol.Message.Identity(
+                name = localNickname,
+                deviceId = localDeviceId,
+                runtimeSessionId = sessionId,
+                deviceName = localDeviceName
+            ),
+            attempt.targetLock
+        )
         mainHandler.post {
             if (
                 !isTransportCurrent(generation) ||
@@ -1167,7 +1178,7 @@ internal class WifiDirectTunnel(
             connectingAddress = null
             cancelConnectWatchdog()
             try {
-                onTunnelReady(targetIp, isServer, attempt, socket)
+                onTunnelReady(targetIp, isServer, attempt, verifiedPeer, socket)
             } catch (t: Throwable) {
                 runCatching { socket.close() }
                 postError(t)

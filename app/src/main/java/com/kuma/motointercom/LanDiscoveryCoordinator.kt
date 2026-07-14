@@ -35,8 +35,7 @@ internal class LanDiscoveryCoordinator(
     private val onTunnelReady: (
         String,
         Boolean,
-        String,
-        IdentityVerificationSource,
+        PeerIdentity,
         ConnectionAttempt,
         Socket
     ) -> Unit,
@@ -222,9 +221,24 @@ internal class LanDiscoveryCoordinator(
                     continue
                 }
                 val remoteDeviceId = LanTunnelHandshake.exchangeAsServer(socket, nodeId)
-                val verifiedRemoteDeviceId = remoteDeviceId?.takeIf(attempt::acceptsLanRemote)
-                if (verifiedRemoteDeviceId == null || targetAttempt.get() != attempt) {
+                if (
+                    !attempt.acceptsLanPreflightDevice(remoteDeviceId) ||
+                    targetAttempt.get() != attempt
+                ) {
                     log("Ignored invalid or wrong-target LAN tunnel connection")
+                    closeQuietly(socket)
+                    acceptedSocket = null
+                    continue
+                }
+                val verifiedPeer = try {
+                    LegacyIdentityHandshake.exchange(socket, localIdentity(), attempt.targetLock)
+                } catch (t: Throwable) {
+                    log("Rejected LAN socket with incomplete or mismatched IDENTITY: ${t.message}")
+                    closeQuietly(socket)
+                    acceptedSocket = null
+                    continue
+                }
+                if (targetAttempt.get() != attempt) {
                     closeQuietly(socket)
                     acceptedSocket = null
                     continue
@@ -234,8 +248,7 @@ internal class LanDiscoveryCoordinator(
                     handoff(
                         peerIp,
                         server = true,
-                        verifiedRemoteDeviceId,
-                        IdentityVerificationSource.SOCKET_HANDSHAKE,
+                        verifiedPeer,
                         attempt,
                         socket
                     )
@@ -330,14 +343,26 @@ internal class LanDiscoveryCoordinator(
             if (!isActive() || targetAttempt.get() != attempt) return
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
-            val verifiedRemoteDeviceId = LanTunnelHandshake.exchangeAsClient(
+            val preliminaryRemoteDeviceId = LanTunnelHandshake.exchangeAsClient(
                 socket,
                 localNodeId = nodeId,
                 expectedRemoteNodeId = remoteDeviceId
-            )?.takeIf(attempt::acceptsLanRemote)
-            if (verifiedRemoteDeviceId == null || targetAttempt.get() != attempt) {
+            )
+            if (
+                !attempt.acceptsLanPreflightDevice(preliminaryRemoteDeviceId) ||
+                targetAttempt.get() != attempt
+            ) {
                 clientConnecting.set(false)
                 log("LAN socket identity mismatch for $ip")
+                return
+            }
+            val verifiedPeer = LegacyIdentityHandshake.exchange(
+                socket,
+                localIdentity(),
+                attempt.targetLock
+            )
+            if (targetAttempt.get() != attempt) {
+                clientConnecting.set(false)
                 return
             }
             val connected = socket
@@ -345,8 +370,7 @@ internal class LanDiscoveryCoordinator(
                 handoff(
                     ip,
                     server = false,
-                    verifiedRemoteDeviceId,
-                    IdentityVerificationSource.SOCKET_HANDSHAKE,
+                    verifiedPeer,
                     attempt,
                     connected
                 )
@@ -403,12 +427,11 @@ internal class LanDiscoveryCoordinator(
     private fun handoff(
         ip: String,
         server: Boolean,
-        remoteDeviceId: String,
-        identityVerificationSource: IdentityVerificationSource,
+        peer: PeerIdentity,
         attempt: ConnectionAttempt,
         socket: Socket
     ): Boolean {
-        if (!isActive() || targetAttempt.get() != attempt || !attempt.acceptsLanRemote(remoteDeviceId)) {
+        if (!isActive() || targetAttempt.get() != attempt || !peer.isVerifiedFor(attempt.targetLock)) {
             closeQuietly(socket)
             return false
         }
@@ -416,8 +439,7 @@ internal class LanDiscoveryCoordinator(
             onTunnelReady(
                 ip,
                 server,
-                remoteDeviceId,
-                identityVerificationSource,
+                peer,
                 attempt,
                 socket
             )
@@ -436,6 +458,13 @@ internal class LanDiscoveryCoordinator(
     private fun error(t: Throwable) {
         if (isActive()) onError(t)
     }
+
+    private fun localIdentity() = SignalingProtocol.Message.Identity(
+        name = riderName,
+        deviceId = nodeId,
+        runtimeSessionId = runtimeSessionId.value,
+        deviceName = deviceName
+    )
 
     override fun close() {
         synchronized(lifecycleLock) {

@@ -11,15 +11,6 @@ enum class Transport {
     WIFI_DIRECT
 }
 
-enum class IdentityVerificationSource {
-    SOCKET_HANDSHAKE,
-    DISCOVERY_UNVERIFIED,
-    NONE;
-
-    val verifiesStableDeviceId: Boolean
-        get() = this == SOCKET_HANDSHAKE
-}
-
 data class TargetLock(
     val targetDeviceId: String,
     val expectedRemoteSessionId: RuntimeSessionId
@@ -77,3 +68,12 @@ data class RecoveryAttemptSpec(
 
 internal fun plannedDiscoveryTransports(attempt: ConnectionAttempt?): Set<Transport> =
     attempt?.channelPlan?.plannedTransports ?: Transport.entries.toSet()
+
+internal fun openPlannedTransport(
+    attempt: ConnectionAttempt,
+    openLan: (ConnectionAttempt) -> Boolean,
+    openWifiDirect: (ConnectionAttempt) -> Boolean
+): Boolean = when (attempt.channelPlan.transport) {
+    Transport.LAN -> openLan(attempt)
+    Transport.WIFI_DIRECT -> openWifiDirect(attempt)
+}

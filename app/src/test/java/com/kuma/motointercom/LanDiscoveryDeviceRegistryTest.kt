@@ -57,9 +57,9 @@ class LanDiscoveryDeviceRegistryTest {
             deadlineElapsedRealtimeMs = 1L
         )
 
-        assertFalse(null.acceptsLanRemote("peer-b"))
-        assertFalse(attempt.acceptsLanRemote("peer-c"))
-        assertEquals(true, attempt.acceptsLanRemote("peer-b"))
+        assertFalse(null.acceptsLanPreflightDevice("peer-b"))
+        assertFalse(attempt.acceptsLanPreflightDevice("peer-c"))
+        assertEquals(true, attempt.acceptsLanPreflightDevice("peer-b"))
     }
 
     private fun device(

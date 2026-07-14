@@ -20,6 +20,11 @@ data class PeerIdentity(
     val isDeviceIdVerified: Boolean = false
 )
 
+internal fun PeerIdentity.isVerifiedFor(targetLock: TargetLock): Boolean =
+    isDeviceIdVerified &&
+        deviceId == targetLock.targetDeviceId &&
+        runtimeSessionId == targetLock.expectedRemoteSessionId
+
 sealed interface IntercomState {
     val kind: SessionState
     val runtimeSessionId: RuntimeSessionId?

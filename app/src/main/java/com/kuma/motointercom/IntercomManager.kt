@@ -29,10 +29,12 @@ class IntercomManager(
     private val isServer: Boolean,
     private val localRiderName: String,
     private val localDeviceId: String,
+    private val localDeviceName: String,
     private val localRuntimeSessionId: RuntimeSessionId,
     private val expectedRemoteDeviceId: String?,
     private val expectedRemoteRuntimeSessionId: RuntimeSessionId?,
     private val requireClaimedRemoteDeviceId: Boolean,
+    private val identityAlreadyExchanged: Boolean = false,
     private val onIntercomDisconnected: (IOException) -> Unit,
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
     private val onRemoteIdentity: (PeerIdentity) -> Unit = {},
@@ -49,7 +51,8 @@ class IntercomManager(
     private val closed = AtomicBoolean(false)
     private val disconnectedNotified = AtomicBoolean(false)
     private val protocol = SignalingProtocol(
-        if (isServer) SignalingProtocol.SdpKind.OFFER else SignalingProtocol.SdpKind.ANSWER
+        if (isServer) SignalingProtocol.SdpKind.OFFER else SignalingProtocol.SdpKind.ANSWER,
+        identityAlreadySeen = identityAlreadyExchanged
     )
 
     private var input: DataInputStream? = null
@@ -84,7 +87,7 @@ class IntercomManager(
         }
 
         startReader()
-        sendIdentity()
+        if (!identityAlreadyExchanged) sendIdentity()
 
         // Wi-Fi Direct 组员主动发起 Offer；组长只等 Offer，避免双方同时 offer 冲突。
         if (!isServer) {
@@ -176,7 +179,8 @@ class IntercomManager(
                 SignalingProtocol.Message.Identity(
                     name = localRiderName.trim(),
                     deviceId = localDeviceId,
-                    runtimeSessionId = localRuntimeSessionId.value
+                    runtimeSessionId = localRuntimeSessionId.value,
+                    deviceName = localDeviceName
                 )
             )
         } catch (t: Throwable) {
@@ -265,7 +269,19 @@ internal fun resolveRemoteIdentity(
             "remote deviceId mismatch: expected=$expected claimed=$claimed"
         )
     }
-    val remoteRuntimeSessionId = message.runtimeSessionId?.let(::RuntimeSessionId)
+    if (requireClaimedDeviceId && claimed == null) {
+        throw SignalingProtocol.ProtocolException("remote deviceId is missing")
+    }
+    val remoteRuntimeSessionId = message.runtimeSessionId
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?.let(::RuntimeSessionId)
+    if (
+        (requireClaimedDeviceId || expectedRemoteRuntimeSessionId != null) &&
+        remoteRuntimeSessionId == null
+    ) {
+        throw SignalingProtocol.ProtocolException("remote runtimeSessionId is missing")
+    }
     if (
         expectedRemoteRuntimeSessionId != null &&
         remoteRuntimeSessionId != null &&
@@ -278,15 +294,11 @@ internal fun resolveRemoteIdentity(
         )
     }
     val hasExtendedIdentity = claimed != null && remoteRuntimeSessionId != null
-    val verifiedDeviceId = if (requireClaimedDeviceId && !hasExtendedIdentity) {
-        null
-    } else {
-        expected ?: claimed
-    }
     return PeerIdentity(
-        deviceId = verifiedDeviceId,
+        deviceId = claimed,
         nickname = message.name,
+        deviceName = message.deviceName,
         runtimeSessionId = remoteRuntimeSessionId,
-        isDeviceIdVerified = verifiedDeviceId != null
+        isDeviceIdVerified = hasExtendedIdentity
     )
 }
