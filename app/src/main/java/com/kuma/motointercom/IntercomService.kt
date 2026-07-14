@@ -457,11 +457,14 @@ class IntercomService : Service() {
                 )
             ) { accepted ->
                 dispatchOnMain {
-                    if (
-                        !accepted ||
-                        !isSessionCurrent(token) ||
-                        tunnelChosen.get() != token.value
-                    ) {
+                    val activationCurrent = canActivateTunnel(
+                        accepted = accepted,
+                        sessionCurrent = isSessionCurrent(token),
+                        tunnelClaimed = tunnelChosen.get() == token.value,
+                        currentAttempt = orchestrator.currentAttempt,
+                        expectedAttempt = attempt
+                    )
+                    if (!activationCurrent) {
                         tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
                         closeStaleSocket(signalingSocket)
                         return@dispatchOnMain
@@ -975,3 +978,11 @@ class IntercomService : Service() {
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)
     }
 }
+
+internal fun canActivateTunnel(
+    accepted: Boolean,
+    sessionCurrent: Boolean,
+    tunnelClaimed: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    expectedAttempt: ConnectionAttempt
+): Boolean = accepted && sessionCurrent && tunnelClaimed && currentAttempt == expectedAttempt

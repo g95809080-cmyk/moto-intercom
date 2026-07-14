@@ -158,6 +158,44 @@ class SessionOrchestratorTest {
     }
 
     @Test
+    fun timeoutProcessedAfterTunnelReadyPreventsDelayedTunnelActivation() = runBlocking {
+        val orchestrator = orchestrator()
+        val attempt = attempt("attempt-timeout-race", "peer-a", Transport.LAN)
+        val peer = PeerIdentity(
+            deviceId = "peer-a",
+            nickname = "Rider A",
+            runtimeSessionId = RuntimeSessionId("session-peer-a"),
+            isDeviceIdVerified = true
+        )
+        try {
+            orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
+            orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(attempt))
+            val tunnelAccepted = orchestrator.dispatchAndAwait(
+                SessionEvent.TunnelReady(attempt, peer, Transport.LAN)
+            )
+            assertTrue(tunnelAccepted)
+
+            val timeoutAccepted = orchestrator.dispatchAndAwait(
+                SessionEvent.AttemptTimedOut(runtime, attempt.id)
+            )
+            assertTrue(timeoutAccepted)
+            assertTrue(orchestrator.state.value is IntercomState.Discovering)
+
+            assertFalse(
+                canActivateTunnel(
+                    accepted = tunnelAccepted,
+                    sessionCurrent = true,
+                    tunnelClaimed = true,
+                    currentAttempt = orchestrator.currentAttempt,
+                    expectedAttempt = attempt
+                )
+            )
+        } finally {
+            orchestrator.close()
+        }
+    }
+
+    @Test
     fun p2pVerifiedIdentityIsPersistedOnlyAfterConnected() = runBlocking {
         val repository = RecordingPairingRepository()
         val orchestrator = orchestrator(repository)
