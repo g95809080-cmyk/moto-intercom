@@ -98,6 +98,67 @@ class PresenceAggregatorTest {
     }
 
     @Test
+    fun lateSupersededSessionAtSameEndpointKeepsCurrentCandidate() {
+        val endpointId = "shared-endpoint"
+        aggregator.replaceCandidates(
+            Transport.LAN,
+            listOf(candidate(Transport.LAN, sessionId = "session-old", endpointId = endpointId))
+        )
+        aggregator.replaceCandidates(
+            Transport.LAN,
+            listOf(candidate(Transport.LAN, sessionId = "session-new", endpointId = endpointId))
+        )
+
+        val snapshot = aggregator.replaceCandidates(
+            Transport.LAN,
+            listOf(candidate(Transport.LAN, sessionId = "session-old", endpointId = endpointId))
+        )
+
+        val presence = snapshot.presences.single()
+        assertEquals(RuntimeSessionId("session-new"), presence.sessionId)
+        assertTrue(presence.candidates.single().isAvailable)
+        assertNull(snapshot.nextExpiryElapsedRealtimeMs)
+    }
+
+    @Test
+    fun p2pSameMacLateTxtClaimCannotRollbackCurrentSession() {
+        val mac = "aa:bb:cc:dd:ee:ff"
+        aggregator.replaceCandidates(
+            Transport.WIFI_DIRECT,
+            listOf(candidate(Transport.WIFI_DIRECT, sessionId = "session-old", endpointId = mac))
+        )
+        aggregator.replaceCandidates(
+            Transport.WIFI_DIRECT,
+            listOf(candidate(Transport.WIFI_DIRECT, sessionId = "session-new", endpointId = mac))
+        )
+
+        val presence = aggregator.replaceCandidates(
+            Transport.WIFI_DIRECT,
+            listOf(candidate(Transport.WIFI_DIRECT, sessionId = "session-old", endpointId = mac))
+        ).presences.single()
+
+        assertEquals(RuntimeSessionId("session-new"), presence.sessionId)
+        assertEquals(mac, presence.candidates.single().endpointId)
+        assertTrue(presence.candidates.single().isAvailable)
+    }
+
+    @Test
+    fun candidateRecoveryWithinRetentionCancelsOldExpiry() {
+        val lan = candidate(Transport.LAN)
+        aggregator.replaceCandidates(Transport.LAN, listOf(lan))
+        val unavailable = aggregator.replaceCandidates(Transport.LAN, emptyList())
+        assertEquals(now + PresenceAggregator.DEFAULT_RETENTION_MS, unavailable.nextExpiryElapsedRealtimeMs)
+
+        now += PresenceAggregator.DEFAULT_RETENTION_MS / 2
+        val recovered = aggregator.replaceCandidates(Transport.LAN, listOf(lan))
+        assertTrue(recovered.presences.single().candidates.single().isAvailable)
+        assertNull(recovered.nextExpiryElapsedRealtimeMs)
+
+        now += PresenceAggregator.DEFAULT_RETENTION_MS
+        assertTrue(aggregator.expire().presences.single().candidates.single().isAvailable)
+    }
+
+    @Test
     fun provisionalCandidateIsDisplayOnlyAndNeverPaired() {
         val provisional = candidate(
             transport = Transport.WIFI_DIRECT,
@@ -120,10 +181,15 @@ class PresenceAggregatorTest {
     private fun candidate(
         transport: Transport,
         deviceId: String? = "peer-a",
-        sessionId: String? = "session-a"
+        sessionId: String? = "session-a",
+        endpointId: String = if (transport == Transport.LAN) {
+            "192.168.1.8:8890"
+        } else {
+            "aa:bb:cc:dd:ee:ff"
+        }
     ): DiscoveryCandidate = DiscoveryCandidate(
         transport = transport,
-        endpointId = if (transport == Transport.LAN) "192.168.1.8:8890" else "aa:bb:cc:dd:ee:ff",
+        endpointId = endpointId,
         address = if (transport == Transport.LAN) "192.168.1.8" else "aa:bb:cc:dd:ee:ff",
         port = if (transport == Transport.LAN) 8890 else null,
         identity = DiscoveryIdentityClaim(

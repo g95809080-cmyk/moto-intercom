@@ -336,7 +336,7 @@ class IntercomService : Service() {
                             devices.map { device ->
                                 DiscoveryCandidate(
                                     transport = Transport.LAN,
-                                    endpointId = "${device.ip}:${device.port}",
+                                    endpointId = device.discoveryEndpointId,
                                     address = device.ip,
                                     port = device.port,
                                     identity = DiscoveryIdentityClaim(

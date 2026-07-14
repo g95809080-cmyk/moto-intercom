@@ -50,8 +50,7 @@ internal class LanDiscoveryCoordinator(
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
     private val clientConnecting = AtomicBoolean(false)
-    private val devices = linkedMapOf<String, LanRiderDevice>()
-    private val serviceIds = linkedMapOf<String, String>()
+    private val deviceRegistry = LanDiscoveryDeviceRegistry()
 
     private var nsdManager: NsdManager? = null
     private var nsdRegistrationListener: NsdManager.RegistrationListener? = null
@@ -94,7 +93,7 @@ internal class LanDiscoveryCoordinator(
         if (!isActive()) return
         val manager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
         nsdManager = manager
-        nsdServiceName = "MotoCom-${nodeId.take(8)}"
+        nsdServiceName = "MotoCom-${nodeId.take(8)}-${runtimeSessionId.value.take(8)}"
 
         nsdRegistrationListener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {
@@ -173,6 +172,7 @@ internal class LanDiscoveryCoordinator(
                     rememberLanDevice(
                         serviceInfo.serviceName,
                         LanRiderDevice(
+                            discoveryEndpointId = serviceInfo.serviceName,
                             deviceId = deviceId,
                             sessionId = serviceInfo.attributeString("sessionId")
                                 .takeIf(String::isNotBlank)
@@ -345,24 +345,15 @@ internal class LanDiscoveryCoordinator(
     }
 
     private fun rememberLanDevice(serviceName: String, device: LanRiderDevice) {
-        val snapshot = synchronized(devices) {
-            if (!isActive()) return
-            val candidateId = device.deviceId ?: "service:$serviceName"
-            serviceIds[serviceName] = candidateId
-            devices[candidateId] = device
-            devices.values.toList()
-        }
+        if (!isActive()) return
+        val snapshot = deviceRegistry.remember(serviceName, device)
         log("发现局域网车友：${device.name} / ${device.ip}")
         publishLanDevices(snapshot)
     }
 
     private fun removeLanDevice(serviceName: String) {
-        val snapshot = synchronized(devices) {
-            if (!isActive()) return
-            val id = serviceIds.remove(serviceName) ?: serviceName
-            devices.remove(id)
-            devices.values.toList()
-        }
+        if (!isActive()) return
+        val snapshot = deviceRegistry.remove(serviceName)
         publishLanDevices(snapshot)
     }
 
@@ -434,10 +425,7 @@ internal class LanDiscoveryCoordinator(
         }
         stopNsdDiscovery()
         executor.shutdownNow()
-        synchronized(devices) {
-            devices.clear()
-            serviceIds.clear()
-        }
+        deviceRegistry.clear()
         onDevicesChanged(emptyList())
     }
 

@@ -73,6 +73,7 @@ internal data class RiderPresence(
             it.transport == Transport.LAN && it.isAvailable && it.port != null
         } ?: return null
         return LanRiderDevice(
+            discoveryEndpointId = lan.endpointId,
             deviceId = stableDeviceId,
             sessionId = stableSessionId,
             name = nickname,
@@ -93,6 +94,12 @@ internal class PresenceAggregator(
     private val nowElapsedRealtimeMs: () -> Long,
     private val retentionMs: Long = DEFAULT_RETENTION_MS
 ) {
+    private enum class SessionRegistration {
+        ACTIVE,
+        NEW_ACTIVE,
+        SUPERSEDED
+    }
+
     private data class CandidateKey(
         val transport: Transport,
         val endpointId: String
@@ -137,7 +144,9 @@ internal class PresenceAggregator(
             }
 
         observed.forEach { (key, candidate) ->
-            registerSession(candidate.identity)
+            if (registerSession(candidate.identity) == SessionRegistration.SUPERSEDED) {
+                return@forEach
+            }
             candidates[key] = TrackedCandidate(
                 candidate = candidate,
                 lastSeenElapsedRealtimeMs = now,
@@ -171,17 +180,24 @@ internal class PresenceAggregator(
         return PresenceSnapshot(emptyList(), null)
     }
 
-    private fun registerSession(identity: DiscoveryIdentityClaim) {
-        val deviceId = identity.claimedDeviceId?.trim()?.takeIf(String::isNotEmpty) ?: return
-        val sessionId = identity.sourceSessionId ?: return
+    private fun registerSession(identity: DiscoveryIdentityClaim): SessionRegistration {
+        val deviceId = identity.claimedDeviceId?.trim()?.takeIf(String::isNotEmpty)
+            ?: return SessionRegistration.ACTIVE
+        val sessionId = identity.sourceSessionId ?: return SessionRegistration.ACTIVE
         val active = activeSessionByDeviceId[deviceId]
-        when {
-            active == null -> activeSessionByDeviceId[deviceId] = sessionId
-            active == sessionId -> Unit
-            sessionId in supersededSessionsByDeviceId[deviceId].orEmpty() -> Unit
+        return when {
+            active == null -> {
+                activeSessionByDeviceId[deviceId] = sessionId
+                SessionRegistration.NEW_ACTIVE
+            }
+            active == sessionId -> SessionRegistration.ACTIVE
+            sessionId in supersededSessionsByDeviceId[deviceId].orEmpty() -> {
+                SessionRegistration.SUPERSEDED
+            }
             else -> {
                 supersededSessionsByDeviceId.getOrPut(deviceId, ::linkedSetOf).add(active)
                 activeSessionByDeviceId[deviceId] = sessionId
+                SessionRegistration.NEW_ACTIVE
             }
         }
     }
