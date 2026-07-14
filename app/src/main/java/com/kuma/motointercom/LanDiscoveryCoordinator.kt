@@ -4,10 +4,9 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.SystemClock
 import org.json.JSONObject
 import java.io.Closeable
-import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -32,13 +31,7 @@ internal class LanDiscoveryCoordinator(
     private val deviceName: String,
     private val protocolVersion: Int,
     private val onDevicesChanged: (List<LanRiderDevice>) -> Unit,
-    private val onTunnelReady: (
-        String,
-        Boolean,
-        PeerIdentity,
-        ConnectionAttempt,
-        Socket
-    ) -> Unit,
+    private val onControlChannelReady: (SignalingSessionV2) -> Unit,
     private val onLog: (String) -> Unit,
     private val onError: (Throwable) -> Unit
 ) : Closeable {
@@ -88,7 +81,6 @@ internal class LanDiscoveryCoordinator(
                 connect(
                     device.ip,
                     device.port,
-                    attempt.targetDeviceId,
                     attempt,
                     reportFailure = true
                 )
@@ -214,45 +206,30 @@ internal class LanDiscoveryCoordinator(
                 val socket = candidate.accept()
                 acceptedSocket = socket
                 val attempt = targetAttempt.get()
-                if (attempt == null) {
-                    log("Ignored LAN tunnel without an active Target Lock")
-                    closeQuietly(socket)
-                    acceptedSocket = null
-                    continue
-                }
-                val remoteDeviceId = LanTunnelHandshake.exchangeAsServer(socket, nodeId)
-                if (
-                    !attempt.acceptsLanPreflightDevice(remoteDeviceId) ||
-                    targetAttempt.get() != attempt
-                ) {
-                    log("Ignored invalid or wrong-target LAN tunnel connection")
-                    closeQuietly(socket)
-                    acceptedSocket = null
-                    continue
-                }
-                val verifiedPeer = try {
-                    LegacyIdentityHandshake.exchange(socket, localIdentity(), attempt.targetLock)
+                val session = try {
+                    SignalingSessionV2.establish(
+                        socket = socket,
+                        transport = Transport.LAN,
+                        physicalRole = PhysicalSocketRole.ACCEPTOR,
+                        openedAtElapsedMs = SystemClock.elapsedRealtime(),
+                        localDeviceId = nodeId,
+                        localRuntimeSessionId = runtimeSessionId,
+                        localNickname = riderName,
+                        localDeviceName = deviceName,
+                        originatingAttempt = attempt
+                    )
                 } catch (t: Throwable) {
-                    log("Rejected LAN socket with incomplete or mismatched IDENTITY: ${t.message}")
+                    log("Rejected LAN v2 HELLO: ${t.message}")
                     closeQuietly(socket)
                     acceptedSocket = null
                     continue
                 }
                 if (targetAttempt.get() != attempt) {
-                    closeQuietly(socket)
+                    session.close()
                     acceptedSocket = null
                     continue
                 }
-                val peerIp = socket.inetAddress.hostAddress ?: socket.inetAddress.hostName
-                if (
-                    handoff(
-                        peerIp,
-                        server = true,
-                        verifiedPeer,
-                        attempt,
-                        socket
-                    )
-                ) {
+                if (handoff(session, attempt)) {
                     acceptedSocket = null
                     return
                 }
@@ -334,7 +311,6 @@ internal class LanDiscoveryCoordinator(
     private fun connect(
         ip: String,
         port: Int,
-        remoteDeviceId: String,
         attempt: ConnectionAttempt,
         reportFailure: Boolean
     ) {
@@ -343,38 +319,24 @@ internal class LanDiscoveryCoordinator(
             if (!isActive() || targetAttempt.get() != attempt) return
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
-            val preliminaryRemoteDeviceId = LanTunnelHandshake.exchangeAsClient(
-                socket,
-                localNodeId = nodeId,
-                expectedRemoteNodeId = remoteDeviceId
-            )
-            if (
-                !attempt.acceptsLanPreflightDevice(preliminaryRemoteDeviceId) ||
-                targetAttempt.get() != attempt
-            ) {
-                clientConnecting.set(false)
-                log("LAN socket identity mismatch for $ip")
-                return
-            }
-            val verifiedPeer = LegacyIdentityHandshake.exchange(
-                socket,
-                localIdentity(),
-                attempt.targetLock
+            val connected = socket
+            val session = SignalingSessionV2.establish(
+                socket = connected,
+                transport = Transport.LAN,
+                physicalRole = PhysicalSocketRole.OPENER,
+                openedAtElapsedMs = SystemClock.elapsedRealtime(),
+                localDeviceId = nodeId,
+                localRuntimeSessionId = runtimeSessionId,
+                localNickname = riderName,
+                localDeviceName = deviceName,
+                originatingAttempt = attempt
             )
             if (targetAttempt.get() != attempt) {
                 clientConnecting.set(false)
+                session.close()
                 return
             }
-            val connected = socket
-            if (
-                handoff(
-                    ip,
-                    server = false,
-                    verifiedPeer,
-                    attempt,
-                    connected
-                )
-            ) {
+            if (handoff(session, attempt)) {
                 socket = null
             } else {
                 clientConnecting.set(false)
@@ -425,27 +387,22 @@ internal class LanDiscoveryCoordinator(
     private fun isActive(): Boolean = !closed.get() && isSessionCurrent(token)
 
     private fun handoff(
-        ip: String,
-        server: Boolean,
-        peer: PeerIdentity,
-        attempt: ConnectionAttempt,
-        socket: Socket
+        session: SignalingSessionV2,
+        expectedAttempt: ConnectionAttempt?
     ): Boolean {
-        if (!isActive() || targetAttempt.get() != attempt || !peer.isVerifiedFor(attempt.targetLock)) {
-            closeQuietly(socket)
+        if (
+            !isActive() ||
+            targetAttempt.get() != expectedAttempt ||
+            !session.peer.isVerifiedFor(session.targetLock)
+        ) {
+            session.close()
             return false
         }
         return try {
-            onTunnelReady(
-                ip,
-                server,
-                peer,
-                attempt,
-                socket
-            )
+            onControlChannelReady(session)
             true
         } catch (t: Throwable) {
-            closeQuietly(socket)
+            session.close()
             error(t)
             false
         }
@@ -458,13 +415,6 @@ internal class LanDiscoveryCoordinator(
     private fun error(t: Throwable) {
         if (isActive()) onError(t)
     }
-
-    private fun localIdentity() = SignalingProtocol.Message.Identity(
-        name = riderName,
-        deviceId = nodeId,
-        runtimeSessionId = runtimeSessionId.value,
-        deviceName = deviceName
-    )
 
     override fun close() {
         synchronized(lifecycleLock) {
@@ -543,66 +493,5 @@ internal class LanDiscoveryCoordinator(
         private const val LAN_BROADCAST_INTERVAL_MS = 1_000L
         private const val NSD_SERVICE_TYPE = "_motocom._tcp."
 
-    }
-}
-
-internal object LanTunnelHandshake {
-    private const val MAGIC = 0x4D54434D // MTCM
-    private const val VERSION = 2
-    private const val MAX_NODE_ID_BYTES = 128
-    private const val READ_TIMEOUT_MS = 1_000
-
-    fun exchangeAsClient(
-        socket: Socket,
-        localNodeId: String,
-        expectedRemoteNodeId: String
-    ): String? = exchange(socket) { input, output ->
-        write(output, localNodeId)
-        read(input, localNodeId)?.takeIf { it == expectedRemoteNodeId.trim() }
-    }
-
-    fun exchangeAsServer(socket: Socket, localNodeId: String): String? =
-        exchange(socket) { input, output ->
-            val remoteNodeId = read(input, localNodeId) ?: return@exchange null
-            write(output, localNodeId)
-            remoteNodeId
-        }
-
-    private fun <T> exchange(
-        socket: Socket,
-        action: (DataInputStream, DataOutputStream) -> T?
-    ): T? {
-        val previousTimeout = socket.soTimeout
-        return try {
-            socket.soTimeout = READ_TIMEOUT_MS
-            action(
-                DataInputStream(socket.getInputStream()),
-                DataOutputStream(socket.getOutputStream())
-            )
-        } catch (_: IOException) {
-            null
-        } finally {
-            runCatching { socket.soTimeout = previousTimeout }
-        }
-    }
-
-    private fun write(output: DataOutputStream, nodeId: String) {
-        val id = nodeId.trim().toByteArray(StandardCharsets.UTF_8)
-        require(id.isNotEmpty() && id.size <= MAX_NODE_ID_BYTES) { "invalid LAN node id" }
-        output.writeInt(MAGIC)
-        output.writeByte(VERSION)
-        output.writeByte(id.size)
-        output.write(id)
-        output.flush()
-    }
-
-    private fun read(input: DataInputStream, localNodeId: String): String? {
-        if (input.readInt() != MAGIC || input.readUnsignedByte() != VERSION) return null
-        val size = input.readUnsignedByte()
-        if (size !in 1..MAX_NODE_ID_BYTES) return null
-        val id = ByteArray(size).also(input::readFully)
-            .toString(StandardCharsets.UTF_8)
-            .trim()
-        return id.takeIf { it.isNotEmpty() && it != localNodeId.trim() }
     }
 }

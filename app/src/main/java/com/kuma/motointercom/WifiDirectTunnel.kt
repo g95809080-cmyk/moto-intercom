@@ -41,18 +41,12 @@ import java.net.Socket
  */
 internal class WifiDirectTunnel(
     context: Context,
-    private val onTunnelReady: (
-        targetIp: String,
-        isServer: Boolean,
-        attempt: ConnectionAttempt,
-        peer: PeerIdentity,
-        signalingSocket: Socket
-    ) -> Unit,
+    private val onControlChannelReady: (SignalingSessionV2) -> Unit,
     private val signalingPort: Int = 8888,
     private val localDeviceId: String,
     private val localNickname: String = "骑士",
     private val localDeviceName: String,
-    private val sessionId: String,
+    private val sessionId: RuntimeSessionId,
     private val onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {},
     private val onDiscoveryStatus: (String) -> Unit = {},
     private val onDisconnected: () -> Unit = {},
@@ -488,10 +482,10 @@ internal class WifiDirectTunnel(
             TXT_DEVICE_ID to localDeviceId,
             TXT_NICKNAME to localNickname.ifBlank { "骑士" },
             TXT_DEVICE_NAME to localDeviceName,
-            TXT_SESSION_ID to sessionId
+            TXT_SESSION_ID to sessionId.value
         )
         val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
-            "$SERVICE_INSTANCE_PREFIX-${sessionId.take(8)}",
+            "$SERVICE_INSTANCE_PREFIX-${sessionId.value.take(8)}",
             SERVICE_TYPE,
             record
         )
@@ -769,21 +763,31 @@ internal class WifiDirectTunnel(
     ) {
         if (!groupValidationGate.isCurrent(validation)) return
         val connectionAttempt = targetAttempt
-        val expectedAddress = targetAddress
-        val target = expectedAddress?.let(peerDevices::get)
         val ownerDeviceAddress = group.owner?.deviceAddress
         val clientAddresses = group.clientList.map { it.deviceAddress }
-        val identityMatches = connectionAttempt != null && expectedAddress != null &&
-            peerClaims[expectedAddress]?.matches(connectionAttempt.targetLock) == true
-        val groupMatch = if (identityMatches) {
-            peerRegistry.matchGroup(
-                expectedAddress,
-                info.isGroupOwner,
-                ownerDeviceAddress,
-                clientAddresses
-            )
+        val groupRemoteAddress = if (info.isGroupOwner) {
+            clientAddresses.singleOrNull()
         } else {
-            WifiDirectPeerRegistry.GroupMatch.REJECTED
+            ownerDeviceAddress
+        }
+        val expectedAddress = targetAddress
+            ?: groupRemoteAddress?.let(::normalizedAddress)
+        val target = expectedAddress?.let(peerDevices::get)
+        val claim = expectedAddress?.let(peerClaims::get)
+        val expectedTargetLock = connectionAttempt?.targetLock ?: claim?.toTargetLockOrNull()
+        val membershipMatch = peerRegistry.matchGroup(
+            expectedAddress,
+            info.isGroupOwner,
+            ownerDeviceAddress,
+            clientAddresses
+        )
+        val identityMatches = expectedTargetLock != null && claim?.matches(expectedTargetLock) == true
+        val groupMatch = when {
+            membershipMatch == WifiDirectPeerRegistry.GroupMatch.PENDING -> membershipMatch
+            membershipMatch == WifiDirectPeerRegistry.GroupMatch.MATCHED && identityMatches -> {
+                WifiDirectPeerRegistry.GroupMatch.MATCHED
+            }
+            else -> WifiDirectPeerRegistry.GroupMatch.REJECTED
         }
         val targetMatches = groupMatch == WifiDirectPeerRegistry.GroupMatch.MATCHED
 
@@ -847,9 +851,16 @@ internal class WifiDirectTunnel(
             group,
             localAddress,
             ownerAddress,
-            requireNotNull(connectionAttempt),
-            requireNotNull(expectedAddress)
+            connectionAttempt,
+            requireNotNull(expectedAddress),
+            requireNotNull(expectedTargetLock)
         )
+    }
+
+    private fun DiscoveryIdentityClaim.toTargetLockOrNull(): TargetLock? {
+        val deviceId = claimedDeviceId?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        val remoteSessionId = sourceSessionId ?: return null
+        return TargetLock(deviceId, remoteSessionId)
     }
 
     private fun rejectCurrentGroup(reason: String) {
@@ -960,8 +971,9 @@ internal class WifiDirectTunnel(
         group: WifiP2pGroup,
         localAddress: InetAddress,
         ownerAddress: InetAddress,
-        attempt: ConnectionAttempt,
-        expectedRemoteAddress: String
+        attempt: ConnectionAttempt?,
+        expectedRemoteAddress: String,
+        expectedTargetLock: TargetLock
     ) {
         socketTransport?.close()
         val generation = ++socketTransportGeneration
@@ -973,8 +985,14 @@ internal class WifiDirectTunnel(
             isSessionCurrent = {
                 running && generation == socketTransportGeneration && state == State.GROUP_READY
             },
-            onReady = { ip, server, socket ->
-                postTransportReady(generation, attempt, ip, server, socket)
+            onReady = { _, physicalRole, socket ->
+                postTransportReady(
+                    generation,
+                    attempt,
+                    expectedTargetLock,
+                    physicalRole,
+                    socket
+                )
             },
             onFailure = { error -> postTransportFailure(generation, error) }
         )
@@ -1148,29 +1166,30 @@ internal class WifiDirectTunnel(
 
     private fun postTransportReady(
         generation: Int,
-        attempt: ConnectionAttempt,
-        targetIp: String,
-        isServer: Boolean,
+        attempt: ConnectionAttempt?,
+        expectedTargetLock: TargetLock,
+        physicalRole: PhysicalSocketRole,
         socket: Socket
     ) {
-        val verifiedPeer = LegacyIdentityHandshake.exchange(
-            socket,
-            SignalingProtocol.Message.Identity(
-                name = localNickname,
-                deviceId = localDeviceId,
-                runtimeSessionId = sessionId,
-                deviceName = localDeviceName
-            ),
-            attempt.targetLock
+        val session = SignalingSessionV2.establish(
+            socket = socket,
+            transport = Transport.WIFI_DIRECT,
+            physicalRole = physicalRole,
+            openedAtElapsedMs = SystemClock.elapsedRealtime(),
+            localDeviceId = localDeviceId,
+            localRuntimeSessionId = sessionId,
+            localNickname = localNickname,
+            localDeviceName = localDeviceName,
+            originatingAttempt = attempt,
+            expectedRemoteTargetLock = expectedTargetLock
         )
         mainHandler.post {
             if (
                 !isTransportCurrent(generation) ||
                 targetAttempt != attempt ||
-                !socket.isConnected ||
-                socket.isClosed
+                session.isClosed
             ) {
-                runCatching { socket.close() }
+                session.close()
                 return@post
             }
 
@@ -1178,9 +1197,9 @@ internal class WifiDirectTunnel(
             connectingAddress = null
             cancelConnectWatchdog()
             try {
-                onTunnelReady(targetIp, isServer, attempt, verifiedPeer, socket)
+                onControlChannelReady(session)
             } catch (t: Throwable) {
-                runCatching { socket.close() }
+                session.close()
                 postError(t)
                 removeGroupAndRediscover("signaling socket handoff failure")
             }
@@ -1311,7 +1330,7 @@ internal class WifiDirectTunnel(
         private const val NO_MOTOCOM_PEER_STATUS = "发现附近 P2P 设备，但未发现 MotoCom 车友"
         private const val TAG = "MotoComP2P"
         private const val APP_ID = "MotoCom"
-        private const val PROTOCOL_VERSION = "1"
+        private const val PROTOCOL_VERSION = "2"
         private const val SERVICE_INSTANCE_PREFIX = "MotoCom"
         private const val SERVICE_TYPE = "_motocom._tcp"
         private const val TXT_APP_ID = "appId"

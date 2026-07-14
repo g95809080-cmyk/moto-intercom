@@ -8,6 +8,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class WifiDirectSignalingSocketTest {
     @Test
@@ -37,16 +38,26 @@ class WifiDirectSignalingSocketTest {
 
     @Test
     fun serverHandsOffOneAllowedLoopbackPeer() {
-        val ready = CountDownLatch(1)
+        val ready = CountDownLatch(2)
+        val serverRole = AtomicReference<PhysicalSocketRole>()
+        val clientRole = AtomicReference<PhysicalSocketRole>()
         val port = ServerSocket(0).use { it.localPort }
         val server = WifiDirectSignalingSocket(
             port, 2_000, 500, 10, { true },
-            { _, server, socket -> if (server) ready.countDown(); socket.close() },
+            { _, role, socket ->
+                serverRole.set(role)
+                ready.countDown()
+                socket.close()
+            },
             { }
         )
         val client = WifiDirectSignalingSocket(
             port, 2_000, 500, 10, { true },
-            { _, _, socket -> socket.close() },
+            { _, role, socket ->
+                clientRole.set(role)
+                ready.countDown()
+                socket.close()
+            },
             { }
         )
         val loopback = InetAddress.getLoopbackAddress()
@@ -54,6 +65,8 @@ class WifiDirectSignalingSocketTest {
             server.startServer(loopback) { it.isLoopbackAddress }
             client.startClient(loopback, loopback)
             assertTrue(ready.await(2, TimeUnit.SECONDS))
+            assertTrue(serverRole.get() == PhysicalSocketRole.ACCEPTOR)
+            assertTrue(clientRole.get() == PhysicalSocketRole.OPENER)
         } finally {
             server.close()
             client.close()

@@ -76,6 +76,7 @@ class IntercomService : Service() {
     private var wifiTunnel: WifiDirectTunnel? = null
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
+    private val signalingSessions = linkedMapOf<ControlChannelId, SignalingSessionV2>()
 
     private var bluetoothReady = false
     private var physicalLinkReady = false
@@ -290,21 +291,13 @@ class IntercomService : Service() {
         if (Transport.WIFI_DIRECT in plannedTransports) {
         wifiTunnel = WifiDirectTunnel(
             context = this,
-            onTunnelReady = { targetIp, isServer, attempt, peer, socket ->
-                onTunnelReady(
-                    token,
-                    targetIp,
-                    isServer,
-                    peer,
-                    attempt = attempt,
-                    transport = Transport.WIFI_DIRECT,
-                    signalingSocket = socket
-                )
+            onControlChannelReady = { session ->
+                registerControlChannel(token, session)
             },
             localDeviceId = deviceId,
             localNickname = requestedRiderName.ifBlank { "骑士" },
             localDeviceName = Build.MODEL.orEmpty(),
-            sessionId = runtimeSessionId.value,
+            sessionId = runtimeSessionId,
             onPeersChanged = { peers ->
                 postForSession(token) {
                     publishPresenceSnapshot(
@@ -347,7 +340,7 @@ class IntercomService : Service() {
             runtimeSessionId = runtimeSessionId,
             riderName = requestedRiderName.ifBlank { "骑士" },
             deviceName = Build.MODEL.orEmpty(),
-            protocolVersion = DISCOVERY_PROTOCOL_VERSION,
+            protocolVersion = SignalingV2Codec.PROTOCOL_VERSION,
             onDevicesChanged = { devices ->
                 postForSession(token) {
                     publishPresenceSnapshot(
@@ -373,17 +366,8 @@ class IntercomService : Service() {
                     if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
                 }
             },
-            onTunnelReady = { ip, server, peer, attempt, socket ->
-                acceptTunnel(
-                    token,
-                    ip,
-                    server,
-                    peer,
-                    attempt,
-                    Transport.LAN,
-                    socket,
-                    closeWifiDirect = true
-                )
+            onControlChannelReady = { session ->
+                registerControlChannel(token, session)
             },
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } }
@@ -392,6 +376,34 @@ class IntercomService : Service() {
         targetAttempt?.let(::beginTargetedTransport)
     }
 
+    private fun registerControlChannel(
+        token: SessionGeneration.Token,
+        session: SignalingSessionV2
+    ) {
+        dispatchOnMain {
+            if (
+                !canRegisterControlChannel(
+                    sessionCurrent = isSessionCurrent(token),
+                    currentAttempt = orchestrator.currentAttempt,
+                    session = session
+                )
+            ) {
+                session.close()
+                return@dispatchOnMain
+            }
+
+            signalingSessions.put(session.channel.channelId, session)?.close()
+            publishLog(
+                "Verified v2 control channel ${session.channel.channelId.value}: " +
+                    "transport=${session.channel.transport} " +
+                    "physicalRole=${session.channel.physicalRole} " +
+                    "requestRole=${session.requestRole} " +
+                    "remote=${session.peer.deviceId}/${session.peer.runtimeSessionId?.value}"
+            )
+        }
+    }
+
+    // Transports stop at verified control-channel registration until KUM-24B authorizes media.
     private fun onTunnelReady(
         token: SessionGeneration.Token,
         targetIp: String,
@@ -624,6 +636,7 @@ class IntercomService : Service() {
         val lanToClose = lanDiscovery
         val wifiToClose = wifiTunnel
         val audioToClose = audioRouteController
+        val signalingToClose = drainSignalingSessions()
         intercomManager = null
         lanDiscovery = null
         wifiTunnel = null
@@ -631,7 +644,10 @@ class IntercomService : Service() {
 
         AttemptResourceController(
             runtimeSessionId = runtimeSessionId,
-            closeIntercomAndSocket = { managerToClose?.close() },
+            closeIntercomAndSocket = {
+                managerToClose?.close()
+                signalingToClose.forEach(SignalingSessionV2::close)
+            },
             closeLanDiscovery = { lanToClose?.close() },
             closeWifiDirect = { onClosed ->
                 if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
@@ -716,6 +732,7 @@ class IntercomService : Service() {
         running = false
         tunnelChosen.set(NO_SESSION_TOKEN)
         publishPresenceSnapshot(presenceAggregator.clear())
+        drainSignalingSessions().forEach(SignalingSessionV2::close)
         lanDiscovery?.close()
         lanDiscovery = null
 
@@ -829,6 +846,9 @@ class IntercomService : Service() {
             false
         }
     }
+
+    private fun drainSignalingSessions(): List<SignalingSessionV2> =
+        signalingSessions.values.toList().also { signalingSessions.clear() }
 
     private fun updateStageStatus() {
         when {
@@ -949,7 +969,6 @@ class IntercomService : Service() {
 
     companion object {
         private const val NO_SESSION_TOKEN = 0L
-        private const val DISCOVERY_PROTOCOL_VERSION = 1
         private const val CONNECTION_ATTEMPT_TIMEOUT_MS = 10_000L
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
@@ -986,3 +1005,17 @@ internal fun canActivateTunnel(
     currentAttempt: ConnectionAttempt?,
     expectedAttempt: ConnectionAttempt
 ): Boolean = accepted && sessionCurrent && tunnelClaimed && currentAttempt == expectedAttempt
+
+internal fun canRegisterControlChannel(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    session: SignalingSessionV2
+): Boolean {
+    val attempt = session.originatingAttempt
+    return !session.isClosed &&
+        sessionCurrent &&
+        (attempt == null || currentAttempt == attempt) &&
+        (attempt == null || attempt.channelPlan.transport == session.channel.transport) &&
+        (attempt == null || attempt.targetLock == session.targetLock) &&
+        session.peer.isVerifiedFor(session.targetLock)
+}
