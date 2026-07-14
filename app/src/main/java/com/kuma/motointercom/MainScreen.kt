@@ -53,7 +53,7 @@ internal class MainScreen(
     private var mediaConnected = false
     private var currentButtonColor = DISABLED_BUTTON_COLOR
     private var buttonColorAnimator: ValueAnimator? = null
-    private var lanDevices = emptyList<LanRiderDevice>()
+    private var presences = emptyList<RiderPresence>()
     private val logBuffer = BoundedLogBuffer(300)
 
     init {
@@ -96,9 +96,9 @@ internal class MainScreen(
         remoteRiderText.text = name.orEmpty().ifBlank { "等待车友加入" }
     }
 
-    fun setLanDevices(devices: List<LanRiderDevice>) {
-        lanDevices = devices.toList()
-        renderLanDevices()
+    fun setPresences(value: List<RiderPresence>) {
+        presences = value.toList()
+        renderPresences()
     }
 
     fun setAudioLevel(level: Float) {
@@ -356,58 +356,83 @@ internal class MainScreen(
         bluetoothPill.applyPill(bluetooth)
     }
 
-    private fun renderLanDevices() {
+    private fun renderPresences() {
         deviceListContainer.removeAllViews()
-        deviceEmptyText.visibility = if (lanDevices.isEmpty()) View.VISIBLE else View.GONE
+        deviceEmptyText.visibility = if (presences.isEmpty()) View.VISIBLE else View.GONE
 
-        lanDevices.forEachIndexed { index, device ->
+        addPresenceGroup("已配对车友", presences.filter(RiderPresence::isPaired))
+        addPresenceGroup("附近车友", presences.filterNot(RiderPresence::isPaired))
+    }
+
+    private fun addPresenceGroup(title: String, items: List<RiderPresence>) {
+        if (items.isEmpty()) return
+        deviceListContainer.addView(
+            createText(title, 13f, TEXT_SECONDARY, Typeface.BOLD),
+            matchWrap().withTop(dp(10))
+        )
+        items.forEachIndexed { index, presence ->
             if (index > 0) {
                 deviceListContainer.addView(
                     separator(),
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).withTop(dp(8))
                 )
             }
-            deviceListContainer.addView(deviceRow(device), matchWrap().withTop(dp(8)))
+            deviceListContainer.addView(presenceRow(presence), matchWrap().withTop(dp(8)))
         }
     }
 
-    private fun deviceRow(device: LanRiderDevice): View {
+    private fun presenceRow(presence: RiderPresence): View {
         val row = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = rounded(FIELD_COLOR, dp(14), BORDER_COLOR, dp(1))
+            alpha = if (presence.candidates.any(PresenceTransportCandidate::isAvailable)) 1f else 0.65f
         }
 
         row.addView(createIconCircle("骑", ACCENT_GREEN_SOFT))
         row.addView(
             LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(createText(device.name.ifBlank { "车友" }, 16f, TEXT_PRIMARY, Typeface.BOLD))
+                addView(createText(presence.displayName, 16f, TEXT_PRIMARY, Typeface.BOLD))
                 addView(
-                    createText("${device.ip}:${device.port} · 局域网发现", 12f, TEXT_SECONDARY, Typeface.NORMAL),
+                    createText(presenceDetail(presence), 12f, TEXT_SECONDARY, Typeface.NORMAL),
                     matchWrap().withTop(dp(3))
                 )
             },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).withLeft(dp(10))
         )
-        row.addView(
-            Button(activity).apply {
-                text = "连接"
-                textSize = 14f
-                isAllCaps = false
-                setTypeface(Typeface.DEFAULT_BOLD)
-                setTextColor(Color.WHITE)
-                background = rounded(ACCENT_GREEN, dp(12))
-                minWidth = 0
-                minimumWidth = 0
-                minHeight = dp(48)
-                minimumHeight = dp(48)
-                setOnClickListener { onConnectDevice(device) }
-            },
-            LinearLayout.LayoutParams(dp(76), dp(48))
-        )
+        presence.availableLanDevice()?.let { device ->
+            row.addView(
+                Button(activity).apply {
+                    text = "连接"
+                    textSize = 14f
+                    isAllCaps = false
+                    setTypeface(Typeface.DEFAULT_BOLD)
+                    setTextColor(Color.WHITE)
+                    background = rounded(ACCENT_GREEN, dp(12))
+                    minWidth = 0
+                    minimumWidth = 0
+                    minHeight = dp(48)
+                    minimumHeight = dp(48)
+                    setOnClickListener { onConnectDevice(device) }
+                },
+                LinearLayout.LayoutParams(dp(76), dp(48))
+            )
+        }
         return row
+    }
+
+    private fun presenceDetail(presence: RiderPresence): String {
+        val transports = presence.candidates
+            .filter(PresenceTransportCandidate::isAvailable)
+            .map { if (it.transport == Transport.LAN) "LAN" else "P2P" }
+            .distinct()
+            .joinToString(" + ")
+            .ifBlank { "暂时离线" }
+        val device = presence.deviceName.ifBlank { "MotoCom" }
+        val preferred = if (presence.isPreferred) " · 优先车友" else ""
+        return "$transports · $device$preferred"
     }
 
     private fun updateVoxDisplay(level: Float) {

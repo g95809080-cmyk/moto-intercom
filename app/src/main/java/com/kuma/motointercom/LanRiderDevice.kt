@@ -1,8 +1,11 @@
 package com.kuma.motointercom
 
 internal data class LanRiderDevice(
-    val id: String,
+    val deviceId: String?,
+    val sessionId: RuntimeSessionId?,
     val name: String,
+    val deviceName: String,
+    val protocolVersion: Int,
     val ip: String,
     val port: Int
 )

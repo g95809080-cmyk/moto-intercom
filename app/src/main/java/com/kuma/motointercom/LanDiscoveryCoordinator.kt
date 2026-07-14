@@ -27,7 +27,10 @@ internal class LanDiscoveryCoordinator(
     private val token: SessionGeneration.Token,
     private val isSessionCurrent: (SessionGeneration.Token) -> Boolean,
     private val nodeId: String,
+    private val runtimeSessionId: RuntimeSessionId,
     private val riderName: String,
+    private val deviceName: String,
+    private val protocolVersion: Int,
     private val onDevicesChanged: (List<LanRiderDevice>) -> Unit,
     private val onTunnelReady: (
         String,
@@ -71,19 +74,21 @@ internal class LanDiscoveryCoordinator(
 
     fun connect(device: LanRiderDevice, attempt: ConnectionAttempt) {
         if (!isActive() || !clientConnecting.compareAndSet(false, true)) return
+        val remoteDeviceId = device.deviceId
+        if (remoteDeviceId == null) {
+            clientConnecting.set(false)
+            return
+        }
         log("正在点名连接车友：${device.name} / ${device.ip}")
         try {
             executor.execute {
-                connect(device.ip, device.port, device.id, attempt, reportFailure = true)
+                connect(device.ip, device.port, remoteDeviceId, attempt, reportFailure = true)
             }
         } catch (t: Throwable) {
             clientConnecting.set(false)
             error(t)
         }
     }
-
-    internal fun devicesSnapshot(): List<LanRiderDevice> =
-        synchronized(devices) { devices.values.toList() }
 
     private fun startNsdDiscovery() {
         if (!isActive()) return
@@ -133,7 +138,10 @@ internal class LanDiscoveryCoordinator(
             serviceType = NSD_SERVICE_TYPE
             port = LAN_TCP_PORT
             setAttribute("id", nodeId)
+            setAttribute("sessionId", runtimeSessionId.value)
             setAttribute("name", riderName)
+            setAttribute("deviceName", deviceName)
+            setAttribute("protocolVersion", protocolVersion.toString())
         }
 
         try {
@@ -158,15 +166,22 @@ internal class LanDiscoveryCoordinator(
 
                 override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                     if (!isActive()) return
-                    val id = serviceInfo.attributeString("id").ifBlank { serviceInfo.serviceName }
-                    if (id == nodeId) return
+                    val deviceId = serviceInfo.attributeString("id").takeIf(String::isNotBlank)
+                    if (deviceId == nodeId) return
                     val ip = serviceInfo.resolvedHostAddress() ?: return
                     val name = serviceInfo.attributeString("name").ifBlank { serviceInfo.serviceName }
                     rememberLanDevice(
                         serviceInfo.serviceName,
                         LanRiderDevice(
-                            id = id,
+                            deviceId = deviceId,
+                            sessionId = serviceInfo.attributeString("sessionId")
+                                .takeIf(String::isNotBlank)
+                                ?.let(::RuntimeSessionId),
                             name = name,
+                            deviceName = serviceInfo.attributeString("deviceName"),
+                            protocolVersion = serviceInfo.attributeString("protocolVersion")
+                                .toIntOrNull()
+                                ?: 0,
                             ip = ip,
                             port = serviceInfo.port.takeIf { it > 0 } ?: LAN_TCP_PORT
                         )
@@ -252,7 +267,10 @@ internal class LanDiscoveryCoordinator(
                     val bytes = JSONObject()
                         .put("type", "MOTOCOM_HELLO")
                         .put("id", nodeId)
+                        .put("sessionId", runtimeSessionId.value)
                         .put("name", riderName)
+                        .put("deviceName", deviceName)
+                        .put("protocolVersion", protocolVersion)
                         .put("ip", localIp)
                         .put("tcpPort", LAN_TCP_PORT)
                         .toString()
@@ -279,21 +297,6 @@ internal class LanDiscoveryCoordinator(
         if (peerIp == localIp || peerIp.isBlank()) return
 
         log("发现同一 Wi-Fi 车友：${json.optString("name")} / $peerIp")
-        if (!shouldInitiateClient(localIp, peerIp) || !clientConnecting.compareAndSet(false, true)) return
-        try {
-            executor.execute {
-                connect(
-                    peerIp,
-                    json.optInt("tcpPort", LAN_TCP_PORT),
-                    json.optString("id"),
-                    attempt = null,
-                    reportFailure = false
-                )
-            }
-        } catch (t: Throwable) {
-            clientConnecting.set(false)
-            error(t)
-        }
     }
 
     private fun connect(
@@ -344,8 +347,9 @@ internal class LanDiscoveryCoordinator(
     private fun rememberLanDevice(serviceName: String, device: LanRiderDevice) {
         val snapshot = synchronized(devices) {
             if (!isActive()) return
-            serviceIds[serviceName] = device.id
-            devices[device.id] = device
+            val candidateId = device.deviceId ?: "service:$serviceName"
+            serviceIds[serviceName] = candidateId
+            devices[candidateId] = device
             devices.values.toList()
         }
         log("发现局域网车友：${device.name} / ${device.ip}")
@@ -501,11 +505,6 @@ internal class LanDiscoveryCoordinator(
         private const val LAN_BROADCAST_INTERVAL_MS = 1_000L
         private const val NSD_SERVICE_TYPE = "_motocom._tcp."
 
-        internal fun shouldInitiateClient(localIp: String, peerIp: String): Boolean =
-            ipv4Value(localIp) > ipv4Value(peerIp)
-
-        private fun ipv4Value(ip: String): Long =
-            ip.split('.').fold(0L) { value, part -> (value shl 8) + part.toLong() }
     }
 }
 

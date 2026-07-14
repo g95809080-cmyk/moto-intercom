@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import org.webrtc.PeerConnection
 import java.io.IOException
 import java.net.Socket
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -37,7 +38,7 @@ class IntercomService : Service() {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
-        fun onLanDevicesChanged(devices: List<LanRiderDevice>) = Unit
+        fun onPresencesChanged(presences: List<RiderPresence>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
         fun onLog(message: String)
         fun onToast(message: String) = Unit
@@ -53,6 +54,7 @@ class IntercomService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = SessionGeneration()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val presenceAggregator = PresenceAggregator(SystemClock::elapsedRealtime)
 
     private lateinit var identityStore: LocalIdentityStore
     private lateinit var pairingRepository: PairingRepository
@@ -78,6 +80,7 @@ class IntercomService : Service() {
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var localDeviceId = ""
     private var recoveryGeneration = 0
+    private var presenceExpiryGeneration = 0
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
 
     override fun onCreate() {
@@ -97,6 +100,13 @@ class IntercomService : Service() {
         serviceScope.launch {
             orchestrator.effects.collect { effect ->
                 dispatchOnMain { handleSessionEffect(effect) }
+            }
+        }
+        serviceScope.launch {
+            pairingRepository.observeAll().collect { records ->
+                dispatchOnMain {
+                    publishPresenceSnapshot(presenceAggregator.updatePairings(records))
+                }
             }
         }
     }
@@ -137,7 +147,7 @@ class IntercomService : Service() {
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
-        listener?.onLanDevicesChanged(lanDiscovery?.devicesSnapshot().orEmpty())
+        listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
     }
 
@@ -159,9 +169,10 @@ class IntercomService : Service() {
         mainHandler.post {
             if (activeSession == null || tunnelChosen.get() != NO_SESSION_TOKEN) return@post
             val runtimeSessionId = activeRuntimeSessionId ?: return@post
+            val targetDeviceId = device.deviceId ?: return@post
             val attempt = createAttempt(
                 runtimeSessionId = runtimeSessionId,
-                targetDeviceId = device.id,
+                targetDeviceId = targetDeviceId,
                 trigger = ConnectionTrigger.USER,
                 preferredTransport = Transport.LAN
             )
@@ -193,6 +204,7 @@ class IntercomService : Service() {
         remoteRiderName = null
         localRiderName = ""
         tunnelChosen.set(NO_SESSION_TOKEN)
+        publishPresenceSnapshot(presenceAggregator.clear())
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
         orchestrator.dispatch(SessionEvent.RuntimeStarted(runtimeSessionId))
@@ -271,12 +283,29 @@ class IntercomService : Service() {
                     signalingSocket = socket
                 )
             },
+            localDeviceId = deviceId,
             localNickname = requestedRiderName.ifBlank { "骑士" },
+            localDeviceName = Build.MODEL.orEmpty(),
             sessionId = runtimeSessionId.value,
-            onPeersChanged = {
+            onPeersChanged = { peers ->
                 postForSession(token) {
-                    publishLog("发现附近设备：${it.size}")
-                    if (it.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
+                    publishPresenceSnapshot(
+                        presenceAggregator.replaceCandidates(
+                            Transport.WIFI_DIRECT,
+                            peers.map { peer ->
+                                val address = peer.device.deviceAddress.trim()
+                                DiscoveryCandidate(
+                                    transport = Transport.WIFI_DIRECT,
+                                    endpointId = address.lowercase(Locale.ROOT),
+                                    address = address,
+                                    port = null,
+                                    identity = peer.identity
+                                )
+                            }
+                        )
+                    )
+                    publishLog("发现附近设备：${peers.size}")
+                    if (peers.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
                 }
             },
             onDiscoveryStatus = {
@@ -295,11 +324,33 @@ class IntercomService : Service() {
             token = token,
             isSessionCurrent = ::isSessionCurrent,
             nodeId = deviceId,
+            runtimeSessionId = runtimeSessionId,
             riderName = requestedRiderName.ifBlank { "骑士" },
+            deviceName = Build.MODEL.orEmpty(),
+            protocolVersion = DISCOVERY_PROTOCOL_VERSION,
             onDevicesChanged = { devices ->
                 postForSession(token) {
+                    publishPresenceSnapshot(
+                        presenceAggregator.replaceCandidates(
+                            Transport.LAN,
+                            devices.map { device ->
+                                DiscoveryCandidate(
+                                    transport = Transport.LAN,
+                                    endpointId = "${device.ip}:${device.port}",
+                                    address = device.ip,
+                                    port = device.port,
+                                    identity = DiscoveryIdentityClaim(
+                                        claimedDeviceId = device.deviceId,
+                                        sourceSessionId = device.sessionId,
+                                        nickname = device.name,
+                                        deviceName = device.deviceName,
+                                        protocolVersion = device.protocolVersion
+                                    )
+                                )
+                            }
+                        )
+                    )
                     if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
-                    listener?.onLanDevicesChanged(devices)
                 }
             },
             onTunnelReady = { ip, server, remoteDeviceId, verificationSource, transportAttempt, socket ->
@@ -538,6 +589,7 @@ class IntercomService : Service() {
         if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         val generation = ++recoveryGeneration
+        markDiscoveryUnavailable()
         sessions.invalidate()
         activeSession = null
         val managerToClose = intercomManager
@@ -634,6 +686,7 @@ class IntercomService : Service() {
         localDeviceId = ""
         running = false
         tunnelChosen.set(NO_SESSION_TOKEN)
+        publishPresenceSnapshot(presenceAggregator.clear())
         lanDiscovery?.close()
         lanDiscovery = null
 
@@ -764,6 +817,24 @@ class IntercomService : Service() {
         }
     }
 
+    private fun publishPresenceSnapshot(snapshot: PresenceSnapshot) {
+        listener?.onPresencesChanged(snapshot.presences)
+        val generation = ++presenceExpiryGeneration
+        val expiry = snapshot.nextExpiryElapsedRealtimeMs ?: return
+        val delayMs = (expiry - SystemClock.elapsedRealtime()).coerceAtLeast(1L)
+        mainHandler.postDelayed({
+            if (generation != presenceExpiryGeneration) return@postDelayed
+            publishPresenceSnapshot(presenceAggregator.expire())
+        }, delayMs)
+    }
+
+    private fun markDiscoveryUnavailable() {
+        presenceAggregator.replaceCandidates(Transport.LAN, emptyList())
+        publishPresenceSnapshot(
+            presenceAggregator.replaceCandidates(Transport.WIFI_DIRECT, emptyList())
+        )
+    }
+
     private fun publishStatus(status: String) {
         dispatchOnMain {
             lastStatus = status
@@ -856,6 +927,7 @@ class IntercomService : Service() {
 
     companion object {
         private const val NO_SESSION_TOKEN = 0L
+        private const val DISCOVERY_PROTOCOL_VERSION = 1
         private const val CONNECTION_ATTEMPT_TIMEOUT_MS = 10_000L
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"

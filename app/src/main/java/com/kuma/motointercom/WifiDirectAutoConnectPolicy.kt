@@ -4,9 +4,15 @@ internal object WifiDirectAutoConnectPolicy {
     fun shouldConnect(
         autoConnect: Boolean,
         peerAvailable: Boolean,
+        stableIdentityClaimed: Boolean,
         validatingGroup: Boolean,
         connecting: Boolean,
         connectionActive: Boolean
     ): Boolean =
-        autoConnect && peerAvailable && !validatingGroup && !connecting && !connectionActive
+        autoConnect &&
+            peerAvailable &&
+            stableIdentityClaimed &&
+            !validatingGroup &&
+            !connecting &&
+            !connectionActive
 }

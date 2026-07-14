@@ -135,9 +135,9 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         }
     }
 
-    override fun onLanDevicesChanged(devices: List<LanRiderDevice>) {
+    override fun onPresencesChanged(presences: List<RiderPresence>) {
         runOnUiThread {
-            if (serviceConnected) screen.setLanDevices(devices)
+            if (serviceConnected) screen.setPresences(presences)
         }
     }
 

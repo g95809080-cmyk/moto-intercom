@@ -39,14 +39,16 @@ import java.net.Socket
  *
  * 语音采集、3A、Opus、RTP/UDP 交给 WebRTC，别在这里手写。
  */
-class WifiDirectTunnel(
+internal class WifiDirectTunnel(
     context: Context,
     private val onTunnelReady: (targetIp: String, isServer: Boolean, signalingSocket: Socket) -> Unit,
     private val signalingPort: Int = 8888,
-    private val autoConnect: Boolean = true,
+    private val autoConnect: Boolean = false,
+    private val localDeviceId: String,
     private val localNickname: String = "骑士",
+    private val localDeviceName: String,
     private val sessionId: String,
-    private val onPeersChanged: (List<WifiP2pDevice>) -> Unit = {},
+    private val onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {},
     private val onDiscoveryStatus: (String) -> Unit = {},
     private val onDisconnected: () -> Unit = {},
     private val onError: (Throwable) -> Unit = {}
@@ -80,6 +82,7 @@ class WifiDirectTunnel(
     private val peerRegistry = WifiDirectPeerRegistry()
     private val groupValidationGate = WifiDirectGroupValidationGate(SystemClock::elapsedRealtime)
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
+    private val peerClaims = linkedMapOf<String, DiscoveryIdentityClaim>()
     private var pendingRetryAttempt = 0
     private var pendingRetryGeneration = 0
     private var pendingRetryScheduled = false
@@ -450,7 +453,9 @@ class WifiDirectTunnel(
         val record = mapOf(
             TXT_APP_ID to APP_ID,
             TXT_PROTOCOL_VERSION to PROTOCOL_VERSION,
+            TXT_DEVICE_ID to localDeviceId,
             TXT_NICKNAME to localNickname.ifBlank { "骑士" },
+            TXT_DEVICE_NAME to localDeviceName,
             TXT_SESSION_ID to sessionId
         )
         val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
@@ -492,8 +497,19 @@ class WifiDirectTunnel(
             return
         }
 
+        val identity = DiscoveryIdentityClaim(
+            claimedDeviceId = record[TXT_DEVICE_ID]?.trim()?.takeIf(String::isNotEmpty),
+            sourceSessionId = record[TXT_SESSION_ID]
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.let(::RuntimeSessionId),
+            nickname = record[TXT_NICKNAME].orEmpty().trim(),
+            deviceName = record[TXT_DEVICE_NAME].orEmpty().trim().ifBlank { device.deviceName },
+            protocolVersion = record[TXT_PROTOCOL_VERSION]?.toIntOrNull() ?: 0
+        )
         acceptPeer(
             device,
+            identity,
             "MotoCom TXT 校验通过 nickname=${record[TXT_NICKNAME]} " +
                 "sessionId=${record[TXT_SESSION_ID]}"
         )
@@ -521,14 +537,32 @@ class WifiDirectTunnel(
         }
 
         // 部分小米系统不回调 TXT；精确服务类型和实例前缀仍是 App 专属身份。
-        acceptPeer(device, "MotoCom DNS-SD 服务校验通过 instance=$instanceName type=$registrationType")
+        acceptPeer(
+            device,
+            DiscoveryIdentityClaim(
+                claimedDeviceId = null,
+                sourceSessionId = null,
+                nickname = device.deviceName.orEmpty(),
+                deviceName = device.deviceName.orEmpty(),
+                protocolVersion = 0
+            ),
+            "MotoCom DNS-SD 服务校验通过 instance=$instanceName type=$registrationType"
+        )
     }
 
-    private fun acceptPeer(device: WifiP2pDevice, reason: String) {
+    private fun acceptPeer(
+        device: WifiP2pDevice,
+        identity: DiscoveryIdentityClaim,
+        reason: String
+    ) {
         if (device.deviceAddress.isBlank()) return
 
         val address = normalizedAddress(device.deviceAddress)
         peerDevices[address] = device
+        val currentIdentity = peerClaims[address]
+        if (currentIdentity?.hasStableIdentity != true || identity.hasStableIdentity) {
+            peerClaims[address] = identity
+        }
         val wasPending = address in peerRegistry.snapshot().pending
         val snapshot = peerRegistry.accept(address)
         Log.d(TAG, "peer accepted: ${peerSummary(device)} reason=$reason pendingBefore=$wasPending")
@@ -539,8 +573,23 @@ class WifiDirectTunnel(
         if (snapshot.selected == address) {
             Log.d(TAG, "selectedPeer=${peerSummary(device)}")
         }
-        mainHandler.post { onPeersChanged(snapshot.accepted.mapNotNull(peerDevices::get)) }
+        publishPeers(snapshot)
         maybeAutoConnect(snapshot)
+    }
+
+    private fun publishPeers(snapshot: WifiDirectPeerRegistry.Snapshot) {
+        val peers = snapshot.accepted.mapNotNull { address ->
+            val device = peerDevices[address] ?: return@mapNotNull null
+            val identity = peerClaims[address] ?: DiscoveryIdentityClaim(
+                claimedDeviceId = null,
+                sourceSessionId = null,
+                nickname = device.deviceName.orEmpty(),
+                deviceName = device.deviceName.orEmpty(),
+                protocolVersion = 0
+            )
+            WifiDirectRiderDevice(device, identity)
+        }
+        mainHandler.post { onPeersChanged(peers) }
     }
 
     private fun registerReceiver() {
@@ -582,6 +631,7 @@ class WifiDirectTunnel(
                     .filter { it.deviceAddress.isNotBlank() }
                     .associateBy { normalizedAddress(it.deviceAddress) }
                 peerDevices.keys.retainAll(current.keys)
+                peerClaims.keys.retainAll(current.keys)
                 peerDevices.putAll(current)
                 var snapshot = peerRegistry.reconcile(current.keys)
                 current.forEach { (address, peer) ->
@@ -603,7 +653,7 @@ class WifiDirectTunnel(
                 val selectedPeer = snapshot.selected?.let(peerDevices::get)
                 val motoComPeers = snapshot.accepted.mapNotNull(peerDevices::get)
                 selectedPeer?.let { Log.d(TAG, "selectedPeer=${peerSummary(it)}") }
-                mainHandler.post { onPeersChanged(motoComPeers) }
+                publishPeers(snapshot)
                 if (current.isNotEmpty() && motoComPeers.isEmpty()) {
                     postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
                 }
@@ -646,10 +696,12 @@ class WifiDirectTunnel(
     }
 
     private fun maybeAutoConnect(snapshot: WifiDirectPeerRegistry.Snapshot) {
-        val selectedPeer = snapshot.selected?.let(peerDevices::get) ?: return
+        val selectedAddress = snapshot.selected ?: return
+        val selectedPeer = peerDevices[selectedAddress] ?: return
         if (!WifiDirectAutoConnectPolicy.shouldConnect(
                 autoConnect = autoConnect,
                 peerAvailable = selectedPeer.status == WifiP2pDevice.AVAILABLE,
+                stableIdentityClaimed = peerClaims[selectedAddress]?.hasStableIdentity == true,
                 validatingGroup = validatingGroup,
                 connecting = connectingAddress != null,
                 connectionActive = state != State.DISCOVERING
@@ -923,6 +975,8 @@ class WifiDirectTunnel(
         serviceDiscoveryReady = false
         peerRegistry.reset()
         peerDevices.clear()
+        peerClaims.clear()
+        mainHandler.post { onPeersChanged(emptyList()) }
     }
 
     private fun cancelPendingRetry() {
@@ -1209,7 +1263,9 @@ class WifiDirectTunnel(
         private const val SERVICE_TYPE = "_motocom._tcp"
         private const val TXT_APP_ID = "appId"
         private const val TXT_PROTOCOL_VERSION = "protocolVersion"
+        private const val TXT_DEVICE_ID = "deviceId"
         private const val TXT_NICKNAME = "nickname"
+        private const val TXT_DEVICE_NAME = "deviceName"
         private const val TXT_SESSION_ID = "sessionId"
 
         fun requiredPermissions(): Array<String> {
