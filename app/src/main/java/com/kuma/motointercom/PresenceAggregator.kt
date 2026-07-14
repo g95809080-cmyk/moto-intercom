@@ -59,6 +59,12 @@ internal data class RiderPresence(
     val isSelectable: Boolean
         get() = deviceId != null && sessionId != null && candidates.any { it.isAvailable }
 
+    val availableTransports: Set<Transport>
+        get() = candidates.asSequence()
+            .filter(PresenceTransportCandidate::isAvailable)
+            .map(PresenceTransportCandidate::transport)
+            .toSet()
+
     val displayName: String
         get() = pairing?.localAlias?.takeIf(String::isNotBlank)
             ?: nickname.takeIf(String::isNotBlank)
@@ -66,40 +72,80 @@ internal data class RiderPresence(
             ?: deviceName.takeIf(String::isNotBlank)
             ?: "Rider"
 
-    fun availableLanDevice(): LanRiderDevice? {
-        val stableDeviceId = deviceId ?: return null
-        val stableSessionId = sessionId ?: return null
-        val lan = candidates.firstOrNull {
-            it.transport == Transport.LAN && it.isAvailable && it.port != null
-        } ?: return null
-        return LanRiderDevice(
-            discoveryEndpointId = lan.endpointId,
-            deviceId = stableDeviceId,
-            sessionId = stableSessionId,
-            name = nickname,
-            deviceName = deviceName,
-            protocolVersion = protocolVersion,
-            ip = lan.address,
-            port = requireNotNull(lan.port)
-        )
-    }
+    fun matches(targetLock: TargetLock): Boolean =
+        deviceId == targetLock.targetDeviceId &&
+            sessionId == targetLock.expectedRemoteSessionId
 }
 
 internal data class PresenceSnapshot(
     val presences: List<RiderPresence>,
     val nextExpiryElapsedRealtimeMs: Long?
-)
+) {
+    fun resolveCurrentSelection(selected: RiderPresence): RiderPresence? {
+        val deviceId = selected.deviceId ?: return null
+        val sessionId = selected.sessionId ?: return null
+        return presences.firstOrNull {
+            it.deviceId == deviceId &&
+                it.sessionId == sessionId &&
+                it.isSelectable
+        }
+    }
+}
+
+internal fun DiscoveryIdentityClaim.matches(targetLock: TargetLock): Boolean =
+    claimedDeviceId == targetLock.targetDeviceId &&
+        sourceSessionId == targetLock.expectedRemoteSessionId
+
+internal enum class DiscoverySessionRegistration {
+    ACTIVE,
+    NEW_ACTIVE,
+    SUPERSEDED
+}
+
+internal class DiscoverySessionTracker {
+    private val activeSessionByDeviceId = linkedMapOf<String, RuntimeSessionId>()
+    private val supersededSessionsByDeviceId =
+        linkedMapOf<String, MutableSet<RuntimeSessionId>>()
+
+    @Synchronized
+    fun register(identity: DiscoveryIdentityClaim): DiscoverySessionRegistration {
+        val deviceId = identity.claimedDeviceId?.trim()?.takeIf(String::isNotEmpty)
+            ?: return DiscoverySessionRegistration.ACTIVE
+        val sessionId = identity.sourceSessionId ?: return DiscoverySessionRegistration.ACTIVE
+        val active = activeSessionByDeviceId[deviceId]
+        return when {
+            active == null -> {
+                activeSessionByDeviceId[deviceId] = sessionId
+                DiscoverySessionRegistration.NEW_ACTIVE
+            }
+            active == sessionId -> DiscoverySessionRegistration.ACTIVE
+            sessionId in supersededSessionsByDeviceId[deviceId].orEmpty() -> {
+                DiscoverySessionRegistration.SUPERSEDED
+            }
+            else -> {
+                supersededSessionsByDeviceId.getOrPut(deviceId, ::linkedSetOf).add(active)
+                activeSessionByDeviceId[deviceId] = sessionId
+                DiscoverySessionRegistration.NEW_ACTIVE
+            }
+        }
+    }
+
+    @Synchronized
+    fun isActive(deviceId: String, sessionId: RuntimeSessionId): Boolean =
+        activeSessionByDeviceId[deviceId] == sessionId &&
+            sessionId !in supersededSessionsByDeviceId[deviceId].orEmpty()
+
+    @Synchronized
+    fun clear() {
+        activeSessionByDeviceId.clear()
+        supersededSessionsByDeviceId.clear()
+    }
+}
 
 internal class PresenceAggregator(
     private val nowElapsedRealtimeMs: () -> Long,
     private val retentionMs: Long = DEFAULT_RETENTION_MS
 ) {
-    private enum class SessionRegistration {
-        ACTIVE,
-        NEW_ACTIVE,
-        SUPERSEDED
-    }
-
     private data class CandidateKey(
         val transport: Transport,
         val endpointId: String
@@ -113,8 +159,7 @@ internal class PresenceAggregator(
 
     private val candidates = linkedMapOf<CandidateKey, TrackedCandidate>()
     private val pairings = linkedMapOf<String, PairingRecord>()
-    private val activeSessionByDeviceId = linkedMapOf<String, RuntimeSessionId>()
-    private val supersededSessionsByDeviceId = linkedMapOf<String, MutableSet<RuntimeSessionId>>()
+    private val sessionTracker = DiscoverySessionTracker()
 
     init {
         require(retentionMs >= 0L) { "Presence retention must not be negative" }
@@ -144,7 +189,10 @@ internal class PresenceAggregator(
             }
 
         observed.forEach { (key, candidate) ->
-            if (registerSession(candidate.identity) == SessionRegistration.SUPERSEDED) {
+            if (
+                sessionTracker.register(candidate.identity) ==
+                DiscoverySessionRegistration.SUPERSEDED
+            ) {
                 return@forEach
             }
             candidates[key] = TrackedCandidate(
@@ -175,31 +223,8 @@ internal class PresenceAggregator(
     @Synchronized
     fun clear(): PresenceSnapshot {
         candidates.clear()
-        activeSessionByDeviceId.clear()
-        supersededSessionsByDeviceId.clear()
+        sessionTracker.clear()
         return PresenceSnapshot(emptyList(), null)
-    }
-
-    private fun registerSession(identity: DiscoveryIdentityClaim): SessionRegistration {
-        val deviceId = identity.claimedDeviceId?.trim()?.takeIf(String::isNotEmpty)
-            ?: return SessionRegistration.ACTIVE
-        val sessionId = identity.sourceSessionId ?: return SessionRegistration.ACTIVE
-        val active = activeSessionByDeviceId[deviceId]
-        return when {
-            active == null -> {
-                activeSessionByDeviceId[deviceId] = sessionId
-                SessionRegistration.NEW_ACTIVE
-            }
-            active == sessionId -> SessionRegistration.ACTIVE
-            sessionId in supersededSessionsByDeviceId[deviceId].orEmpty() -> {
-                SessionRegistration.SUPERSEDED
-            }
-            else -> {
-                supersededSessionsByDeviceId.getOrPut(deviceId, ::linkedSetOf).add(active)
-                activeSessionByDeviceId[deviceId] = sessionId
-                SessionRegistration.NEW_ACTIVE
-            }
-        }
     }
 
     private fun buildSnapshot(now: Long): PresenceSnapshot {
@@ -215,8 +240,7 @@ internal class PresenceAggregator(
             val groupKey = if (
                 deviceId != null &&
                 sessionId != null &&
-                activeSessionByDeviceId[deviceId] == sessionId &&
-                sessionId !in supersededSessionsByDeviceId[deviceId].orEmpty()
+                sessionTracker.isActive(deviceId, sessionId)
             ) {
                 "stable:$deviceId"
             } else if (identity.hasStableIdentity) {

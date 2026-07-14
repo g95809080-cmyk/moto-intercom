@@ -22,7 +22,7 @@ internal class MainScreen(
     private val activity: Activity,
     initialRiderName: String,
     private val onToggleIntercom: () -> Unit,
-    private val onConnectDevice: (LanRiderDevice) -> Unit
+    private val onConnectPresence: (RiderPresence) -> Unit
 ) {
     val root: View
     val riderName: String
@@ -402,7 +402,7 @@ internal class MainScreen(
             },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).withLeft(dp(10))
         )
-        presence.availableLanDevice()?.let { device ->
+        if (presence.isSelectable) {
             row.addView(
                 Button(activity).apply {
                     text = "连接"
@@ -415,7 +415,7 @@ internal class MainScreen(
                     minimumWidth = 0
                     minHeight = dp(48)
                     minimumHeight = dp(48)
-                    setOnClickListener { onConnectDevice(device) }
+                    setOnClickListener { onConnectPresence(presence) }
                 },
                 LinearLayout.LayoutParams(dp(76), dp(48))
             )

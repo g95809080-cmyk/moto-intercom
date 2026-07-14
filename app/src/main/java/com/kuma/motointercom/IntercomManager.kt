@@ -31,6 +31,7 @@ class IntercomManager(
     private val localDeviceId: String,
     private val localRuntimeSessionId: RuntimeSessionId,
     private val expectedRemoteDeviceId: String?,
+    private val expectedRemoteRuntimeSessionId: RuntimeSessionId?,
     private val requireClaimedRemoteDeviceId: Boolean,
     private val onIntercomDisconnected: (IOException) -> Unit,
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
@@ -141,7 +142,8 @@ class IntercomManager(
                 val identity = resolveRemoteIdentity(
                     message,
                     expectedRemoteDeviceId,
-                    requireClaimedRemoteDeviceId
+                    requireClaimedRemoteDeviceId,
+                    expectedRemoteRuntimeSessionId
                 )
                 postMain { onRemoteIdentity(identity) }
             }
@@ -253,7 +255,8 @@ class IntercomManager(
 internal fun resolveRemoteIdentity(
     message: SignalingProtocol.Message.Identity,
     expectedRemoteDeviceId: String?,
-    requireClaimedDeviceId: Boolean = false
+    requireClaimedDeviceId: Boolean = false,
+    expectedRemoteRuntimeSessionId: RuntimeSessionId? = null
 ): PeerIdentity {
     val expected = expectedRemoteDeviceId?.trim()?.takeIf(String::isNotEmpty)
     val claimed = message.deviceId?.trim()?.takeIf(String::isNotEmpty)
@@ -263,6 +266,17 @@ internal fun resolveRemoteIdentity(
         )
     }
     val remoteRuntimeSessionId = message.runtimeSessionId?.let(::RuntimeSessionId)
+    if (
+        expectedRemoteRuntimeSessionId != null &&
+        remoteRuntimeSessionId != null &&
+        expectedRemoteRuntimeSessionId != remoteRuntimeSessionId
+    ) {
+        throw SignalingProtocol.ProtocolException(
+            "remote runtimeSessionId mismatch: " +
+                "expected=${expectedRemoteRuntimeSessionId.value} " +
+                "claimed=${remoteRuntimeSessionId.value}"
+        )
+    }
     val hasExtendedIdentity = claimed != null && remoteRuntimeSessionId != null
     val verifiedDeviceId = if (requireClaimedDeviceId && !hasExtendedIdentity) {
         null

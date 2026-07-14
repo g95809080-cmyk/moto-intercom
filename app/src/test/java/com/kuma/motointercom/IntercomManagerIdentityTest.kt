@@ -63,4 +63,20 @@ class IntercomManagerIdentityTest {
             )
         }
     }
+
+    @Test
+    fun identityClaimMustMatchTheLockedRemoteRuntimeSession() {
+        assertThrows(SignalingProtocol.ProtocolException::class.java) {
+            resolveRemoteIdentity(
+                SignalingProtocol.Message.Identity(
+                    name = "Restarted Rider",
+                    deviceId = "peer-expected",
+                    runtimeSessionId = "runtime-new"
+                ),
+                expectedRemoteDeviceId = "peer-expected",
+                requireClaimedDeviceId = true,
+                expectedRemoteRuntimeSessionId = RuntimeSessionId("runtime-old")
+            )
+        }
+    }
 }

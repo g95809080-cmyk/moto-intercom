@@ -64,8 +64,8 @@ internal class MainActivity : Activity(), IntercomService.Listener {
                     }
                 }
             },
-            onConnectDevice = { device ->
-                intercomService?.connectToLanDevice(device)
+            onConnectPresence = { presence ->
+                intercomService?.connectToPresence(presence)
                     ?: Toast.makeText(this, "后台服务未就绪", Toast.LENGTH_SHORT).show()
             }
         )

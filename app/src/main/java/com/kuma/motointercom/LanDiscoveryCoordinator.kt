@@ -37,7 +37,7 @@ internal class LanDiscoveryCoordinator(
         Boolean,
         String,
         IdentityVerificationSource,
-        ConnectionAttempt?,
+        ConnectionAttempt,
         Socket
     ) -> Unit,
     private val onLog: (String) -> Unit,
@@ -49,6 +49,7 @@ internal class LanDiscoveryCoordinator(
     private val lifecycleLock = Any()
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
+    private val targetAttempt = AtomicReference<ConnectionAttempt?>()
     private val clientConnecting = AtomicBoolean(false)
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
 
@@ -71,17 +72,27 @@ internal class LanDiscoveryCoordinator(
         executor.execute { runLanUdpBroadcaster(localIp) }
     }
 
-    fun connect(device: LanRiderDevice, attempt: ConnectionAttempt) {
-        if (!isActive() || !clientConnecting.compareAndSet(false, true)) return
-        val remoteDeviceId = device.deviceId
-        if (remoteDeviceId == null) {
-            clientConnecting.set(false)
-            return
-        }
+    fun connect(attempt: ConnectionAttempt): Boolean {
+        if (!isActive() || attempt.channelPlan.transport != Transport.LAN) return false
+        targetAttempt.set(attempt)
+        connectTargetIfAvailable()
+        return true
+    }
+
+    private fun connectTargetIfAvailable() {
+        val attempt = targetAttempt.get() ?: return
+        val device = deviceRegistry.find(attempt.targetLock) ?: return
+        if (!clientConnecting.compareAndSet(false, true)) return
         log("正在点名连接车友：${device.name} / ${device.ip}")
         try {
             executor.execute {
-                connect(device.ip, device.port, remoteDeviceId, attempt, reportFailure = true)
+                connect(
+                    device.ip,
+                    device.port,
+                    attempt.targetDeviceId,
+                    attempt,
+                    reportFailure = true
+                )
             }
         } catch (t: Throwable) {
             clientConnecting.set(false)
@@ -203,9 +214,17 @@ internal class LanDiscoveryCoordinator(
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
+                val attempt = targetAttempt.get()
+                if (attempt == null) {
+                    log("Ignored LAN tunnel without an active Target Lock")
+                    closeQuietly(socket)
+                    acceptedSocket = null
+                    continue
+                }
                 val remoteDeviceId = LanTunnelHandshake.exchangeAsServer(socket, nodeId)
-                if (remoteDeviceId == null) {
-                    log("Ignored invalid LAN tunnel connection")
+                val verifiedRemoteDeviceId = remoteDeviceId?.takeIf(attempt::acceptsLanRemote)
+                if (verifiedRemoteDeviceId == null || targetAttempt.get() != attempt) {
+                    log("Ignored invalid or wrong-target LAN tunnel connection")
                     closeQuietly(socket)
                     acceptedSocket = null
                     continue
@@ -215,9 +234,9 @@ internal class LanDiscoveryCoordinator(
                     handoff(
                         peerIp,
                         server = true,
-                        remoteDeviceId,
+                        verifiedRemoteDeviceId,
                         IdentityVerificationSource.SOCKET_HANDSHAKE,
-                        attempt = null,
+                        attempt,
                         socket
                     )
                 ) {
@@ -303,20 +322,20 @@ internal class LanDiscoveryCoordinator(
         ip: String,
         port: Int,
         remoteDeviceId: String,
-        attempt: ConnectionAttempt?,
+        attempt: ConnectionAttempt,
         reportFailure: Boolean
     ) {
         var socket: Socket? = null
         try {
-            if (!isActive()) return
+            if (!isActive() || targetAttempt.get() != attempt) return
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
             val verifiedRemoteDeviceId = LanTunnelHandshake.exchangeAsClient(
                 socket,
                 localNodeId = nodeId,
                 expectedRemoteNodeId = remoteDeviceId
-            )
-            if (verifiedRemoteDeviceId == null) {
+            )?.takeIf(attempt::acceptsLanRemote)
+            if (verifiedRemoteDeviceId == null || targetAttempt.get() != attempt) {
                 clientConnecting.set(false)
                 log("LAN socket identity mismatch for $ip")
                 return
@@ -349,6 +368,7 @@ internal class LanDiscoveryCoordinator(
         val snapshot = deviceRegistry.remember(serviceName, device)
         log("发现局域网车友：${device.name} / ${device.ip}")
         publishLanDevices(snapshot)
+        connectTargetIfAvailable()
     }
 
     private fun removeLanDevice(serviceName: String) {
@@ -385,10 +405,10 @@ internal class LanDiscoveryCoordinator(
         server: Boolean,
         remoteDeviceId: String,
         identityVerificationSource: IdentityVerificationSource,
-        attempt: ConnectionAttempt?,
+        attempt: ConnectionAttempt,
         socket: Socket
     ): Boolean {
-        if (!isActive()) {
+        if (!isActive() || targetAttempt.get() != attempt || !attempt.acceptsLanRemote(remoteDeviceId)) {
             closeQuietly(socket)
             return false
         }
@@ -425,6 +445,7 @@ internal class LanDiscoveryCoordinator(
         }
         stopNsdDiscovery()
         executor.shutdownNow()
+        targetAttempt.set(null)
         deviceRegistry.clear()
         onDevicesChanged(emptyList())
     }

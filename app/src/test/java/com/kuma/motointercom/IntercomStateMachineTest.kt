@@ -75,6 +75,29 @@ class IntercomStateMachineTest {
     }
 
     @Test
+    fun presenceSelectionCreatesTargetLockBeforeOpeningTransport() {
+        val transition = requireNotNull(
+            reduceIntercomState(
+                IntercomState.Discovering(runtime),
+                SessionEvent.ConnectPresenceRequested(
+                    runtimeSessionId = runtime,
+                    attemptId = ConnectionAttemptId("attempt-presence"),
+                    targetDeviceId = "peer-b",
+                    targetSessionId = RuntimeSessionId("peer-b-session"),
+                    availableTransports = setOf(Transport.WIFI_DIRECT, Transport.LAN),
+                    deadlineElapsedRealtimeMs = 10_000L
+                )
+            )
+        )
+
+        val connecting = transition.state as IntercomState.Connecting
+        val effect = transition.effects.single() as SessionEffect.OpenTargetedTransport
+        assertEquals(TargetLock("peer-b", RuntimeSessionId("peer-b-session")), connecting.attempt.targetLock)
+        assertEquals(ChannelPlan.single(Transport.LAN), connecting.attempt.channelPlan)
+        assertEquals(connecting.attempt, effect.attempt)
+    }
+
+    @Test
     fun connectedThenDisconnectedMovesToRecovering() {
         var state: IntercomState = IntercomState.Connecting(attempt, peer)
         state = requireNotNull(
@@ -123,9 +146,11 @@ class IntercomStateMachineTest {
         val effect = transition.effects.single() as SessionEffect.RestartDiscovery
 
         assertTrue(transition.state is IntercomState.Recovering)
-        assertEquals(recovery.id, effect.attempt?.id)
-        assertEquals("peer-a", effect.attempt?.targetDeviceId)
-        assertEquals(ConnectionTrigger.RECOVERY, effect.attempt?.trigger)
+        assertEquals(recovery.id, effect.attempt.id)
+        assertEquals("peer-a", effect.attempt.targetDeviceId)
+        assertEquals(ConnectionTrigger.RECOVERY, effect.attempt.trigger)
+        assertEquals(setOf(Transport.LAN), plannedDiscoveryTransports(effect.attempt))
+        assertEquals(setOf(Transport.LAN, Transport.WIFI_DIRECT), plannedDiscoveryTransports(null))
     }
 
     @Test
@@ -192,6 +217,43 @@ class IntercomStateMachineTest {
     }
 
     @Test
+    fun tunnelCannotCreateAnImplicitAttemptOrUseTheWrongTransport() {
+        assertNull(
+            nextIntercomState(
+                IntercomState.Discovering(runtime),
+                SessionEvent.TunnelReady(
+                    attempt,
+                    "peer-a",
+                    Transport.LAN,
+                    IdentityVerificationSource.SOCKET_HANDSHAKE
+                )
+            )
+        )
+        assertNull(
+            nextIntercomState(
+                IntercomState.Connecting(attempt, peer),
+                SessionEvent.TunnelReady(
+                    attempt,
+                    "peer-a",
+                    Transport.WIFI_DIRECT,
+                    IdentityVerificationSource.NONE
+                )
+            )
+        )
+        assertNull(
+            nextIntercomState(
+                IntercomState.Connecting(attempt, peer),
+                SessionEvent.TunnelReady(
+                    attempt,
+                    "peer-c",
+                    Transport.LAN,
+                    IdentityVerificationSource.SOCKET_HANDSHAKE
+                )
+            )
+        )
+    }
+
+    @Test
     fun ignoresOldRuntimeSessionEvents() {
         val discovering = IntercomState.Discovering(runtime)
         val oldAttempt = attempt(
@@ -234,9 +296,9 @@ class IntercomStateMachineTest {
     ) = ConnectionAttempt(
         id = ConnectionAttemptId(id),
         runtimeSessionId = runtimeSessionId,
-        targetDeviceId = target,
+        targetLock = TargetLock(target, RuntimeSessionId("session-$target")),
         trigger = ConnectionTrigger.USER,
-        preferredTransport = Transport.LAN,
+        channelPlan = ChannelPlan.single(Transport.LAN),
         deadlineElapsedRealtimeMs = 10_000L
     )
 }

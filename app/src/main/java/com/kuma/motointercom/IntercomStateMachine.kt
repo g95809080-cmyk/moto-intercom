@@ -28,6 +28,15 @@ sealed interface SessionEvent {
 
     data class ConnectRequested(val attempt: ConnectionAttempt) : SessionEvent
 
+    data class ConnectPresenceRequested(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val targetDeviceId: String,
+        val targetSessionId: RuntimeSessionId,
+        val availableTransports: Set<Transport>,
+        val deadlineElapsedRealtimeMs: Long
+    ) : SessionEvent
+
     data class AttemptReplaced(val attempt: ConnectionAttempt) : SessionEvent
 
     data class TunnelReady(
@@ -79,6 +88,10 @@ sealed interface SessionEvent {
 }
 
 sealed interface SessionEffect {
+    data class OpenTargetedTransport(
+        val attempt: ConnectionAttempt
+    ) : SessionEffect
+
     data class AbortAttemptAndResumeDiscovery(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId
@@ -86,7 +99,7 @@ sealed interface SessionEffect {
 
     data class RestartDiscovery(
         val runtimeSessionId: RuntimeSessionId,
-        val attempt: ConnectionAttempt?
+        val attempt: ConnectionAttempt
     ) : SessionEffect
 }
 
@@ -131,6 +144,17 @@ internal fun reduceIntercomState(
                 current is IntercomState.Discovering &&
                     current.matches(event.attempt.runtimeSessionId)
             }
+
+    is SessionEvent.ConnectPresenceRequested ->
+        event.toAttemptOrNull()?.let { attempt ->
+            transition(
+                IntercomState.Connecting(attempt, attempt.initialPeer()),
+                listOf(SessionEffect.OpenTargetedTransport(attempt))
+            ).takeIf {
+                current is IntercomState.Discovering &&
+                    current.matches(event.runtimeSessionId)
+            }
+        }
 
     is SessionEvent.AttemptReplaced -> replaceAttempt(current, event.attempt)
 
@@ -215,46 +239,43 @@ private fun reduceTunnelReady(
     current: IntercomState,
     event: SessionEvent.TunnelReady
 ): SessionTransition? {
+    if (event.transport != event.attempt.channelPlan.transport) return null
     val remoteDeviceId = event.remoteDeviceId?.trim()?.takeIf(String::isNotEmpty)
     val verifiedByTunnel = event.identityVerificationSource.verifiesStableDeviceId
-    val expectedDeviceId = event.attempt.targetDeviceId
-    if (
-        verifiedByTunnel &&
-        expectedDeviceId != null &&
-        remoteDeviceId != null &&
-        expectedDeviceId != remoteDeviceId
-    ) {
-        return null
-    }
-    val normalizedAttempt = event.attempt.copy(preferredTransport = event.transport).let {
-        if (verifiedByTunnel) it.withVerifiedRemoteDeviceIdIfUnknown(remoteDeviceId) else it
-    }
+    if (verifiedByTunnel && remoteDeviceId != event.attempt.targetDeviceId) return null
     val peer = remoteDeviceId?.let {
-        PeerIdentity(deviceId = it, nickname = "", isDeviceIdVerified = verifiedByTunnel)
-    } ?: normalizedAttempt.initialPeer()
+        PeerIdentity(
+            deviceId = it,
+            nickname = "",
+            runtimeSessionId = event.attempt.targetLock.expectedRemoteSessionId,
+            isDeviceIdVerified = verifiedByTunnel
+        )
+    } ?: event.attempt.initialPeer()
 
     return when (current) {
-        is IntercomState.Discovering ->
-            transition(IntercomState.Connecting(normalizedAttempt, peer))
-                .takeIf { current.matches(normalizedAttempt.runtimeSessionId) }
-
         is IntercomState.Connecting -> current
-            .takeIf { it.matches(normalizedAttempt.runtimeSessionId, normalizedAttempt.id) }
+            .takeIf {
+                it.matches(event.attempt.runtimeSessionId, event.attempt.id) &&
+                    it.attempt == event.attempt
+            }
             ?.let {
                 transition(
                     IntercomState.Connecting(
-                        normalizedAttempt.mergeVerifiedAttempt(it.attempt),
+                        it.attempt,
                         mergePeer(it.peer, peer)
                     )
                 )
             }
 
         is IntercomState.Recovering -> current
-            .takeIf { it.matches(normalizedAttempt.runtimeSessionId, normalizedAttempt.id) }
+            .takeIf {
+                it.matches(event.attempt.runtimeSessionId, event.attempt.id) &&
+                    it.attempt == event.attempt
+            }
             ?.let {
                 transition(
                     IntercomState.Recovering(
-                        normalizedAttempt.mergeVerifiedAttempt(it.attempt),
+                        it.attempt,
                         mergePeer(it.peer, peer) ?: it.peer
                     )
                 )
@@ -268,26 +289,22 @@ private fun reduceRemoteIdentity(
     current: IntercomState,
     event: SessionEvent.RemoteIdentityReceived
 ): SessionTransition? {
-    fun updatedAttempt(attempt: ConnectionAttempt): ConnectionAttempt? {
+    fun matchesTarget(attempt: ConnectionAttempt): Boolean {
         val remoteDeviceId = event.peer.deviceId?.trim()?.takeIf(String::isNotEmpty)
-            ?: return attempt
-        val expected = attempt.targetDeviceId
-        if (expected != null && expected != remoteDeviceId) return null
-        return if (event.peer.isDeviceIdVerified) {
-            attempt.withVerifiedTarget(remoteDeviceId)
-        } else {
-            attempt
-        }
+        if (remoteDeviceId != null && remoteDeviceId != attempt.targetDeviceId) return false
+        val remoteSessionId = event.peer.runtimeSessionId
+        return remoteSessionId == null ||
+            remoteSessionId == attempt.targetLock.expectedRemoteSessionId
     }
 
     return when (current) {
         is IntercomState.IncomingConfirmation -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
-                val attempt = updatedAttempt(it.attempt) ?: return null
+                if (!matchesTarget(it.attempt)) return null
                 transition(
                     IntercomState.IncomingConfirmation(
-                        attempt,
+                        it.attempt,
                         mergePeer(it.peer, event.peer) ?: event.peer
                     )
                 )
@@ -296,24 +313,23 @@ private fun reduceRemoteIdentity(
         is IntercomState.Connecting -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
-                val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(IntercomState.Connecting(attempt, mergePeer(it.peer, event.peer)))
+                if (!matchesTarget(it.attempt)) return null
+                transition(IntercomState.Connecting(it.attempt, mergePeer(it.peer, event.peer)))
             }
 
         is IntercomState.Optimizing -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
-                val attempt = updatedAttempt(it.attempt) ?: return null
-                transition(IntercomState.Optimizing(attempt, mergePeer(it.peer, event.peer)))
+                if (!matchesTarget(it.attempt)) return null
+                transition(IntercomState.Optimizing(it.attempt, mergePeer(it.peer, event.peer)))
             }
 
         is IntercomState.Connected -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
-                val attempt = updatedAttempt(it.attempt) ?: return null
+                if (!matchesTarget(it.attempt)) return null
                 transition(
                     it.copy(
-                        attempt = attempt,
                         peer = mergePeer(it.peer, event.peer) ?: event.peer
                     )
                 )
@@ -322,10 +338,10 @@ private fun reduceRemoteIdentity(
         is IntercomState.Recovering -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
-                val attempt = updatedAttempt(it.attempt) ?: return null
+                if (!matchesTarget(it.attempt)) return null
                 transition(
                     IntercomState.Recovering(
-                        attempt,
+                        it.attempt,
                         mergePeer(it.peer, event.peer) ?: event.peer
                     )
                 )
@@ -426,40 +442,26 @@ private fun ConnectionAttempt.toRecovery(spec: RecoveryAttemptSpec): ConnectionA
     ConnectionAttempt(
         id = spec.id,
         runtimeSessionId = runtimeSessionId,
-        targetDeviceId = targetDeviceId,
-        trigger = if (targetDeviceId == null) {
-            ConnectionTrigger.LEGACY_PROVISIONAL_RECOVERY
-        } else {
-            ConnectionTrigger.RECOVERY
-        },
-        preferredTransport = preferredTransport,
+        targetLock = targetLock,
+        trigger = ConnectionTrigger.RECOVERY,
+        channelPlan = channelPlan,
         deadlineElapsedRealtimeMs = spec.deadlineElapsedRealtimeMs
     )
 
 private fun IntercomState.Connecting.toConnected(connectedAt: Long): IntercomState.Connected =
-    IntercomState.Connected(attempt, peer ?: attempt.initialPeer().orUnknown(), connectedAt)
+    IntercomState.Connected(attempt, peer ?: attempt.initialPeer(), connectedAt)
 
 private fun IntercomState.Optimizing.toConnected(connectedAt: Long): IntercomState.Connected =
-    IntercomState.Connected(attempt, peer ?: attempt.initialPeer().orUnknown(), connectedAt)
+    IntercomState.Connected(attempt, peer ?: attempt.initialPeer(), connectedAt)
 
 private fun IntercomState.Recovering.toConnected(connectedAt: Long): IntercomState.Connected =
     IntercomState.Connected(attempt, peer, connectedAt)
 
-private fun ConnectionAttempt.initialPeer(): PeerIdentity? = targetDeviceId?.let {
-    PeerIdentity(deviceId = it, nickname = "")
-}
-
-private fun PeerIdentity?.orUnknown(): PeerIdentity = this ?: PeerIdentity(null, "")
-
-private fun ConnectionAttempt.withVerifiedRemoteDeviceIdIfUnknown(
-    deviceId: String?
-): ConnectionAttempt {
-    val normalized = deviceId?.trim()?.takeIf(String::isNotEmpty) ?: return this
-    return if (targetDeviceId == null) withVerifiedTarget(normalized) else this
-}
-
-private fun ConnectionAttempt.mergeVerifiedAttempt(previous: ConnectionAttempt): ConnectionAttempt =
-    copy(targetDeviceId = targetDeviceId ?: previous.targetDeviceId)
+private fun ConnectionAttempt.initialPeer(): PeerIdentity = PeerIdentity(
+    deviceId = targetDeviceId,
+    nickname = "",
+    runtimeSessionId = targetLock.expectedRemoteSessionId
+)
 
 private fun mergePeer(first: PeerIdentity?, second: PeerIdentity?): PeerIdentity? = when {
     first == null -> second
@@ -473,9 +475,26 @@ private fun mergePeer(first: PeerIdentity?, second: PeerIdentity?): PeerIdentity
     )
 }
 
+private fun SessionEvent.ConnectPresenceRequested.toAttemptOrNull(): ConnectionAttempt? {
+    if (targetDeviceId.isBlank() || deadlineElapsedRealtimeMs <= 0L) return null
+    val transport = when {
+        Transport.LAN in availableTransports -> Transport.LAN
+        Transport.WIFI_DIRECT in availableTransports -> Transport.WIFI_DIRECT
+        else -> return null
+    }
+    return ConnectionAttempt(
+        id = attemptId,
+        runtimeSessionId = runtimeSessionId,
+        targetLock = TargetLock(targetDeviceId, targetSessionId),
+        trigger = ConnectionTrigger.USER,
+        channelPlan = ChannelPlan.single(transport),
+        deadlineElapsedRealtimeMs = deadlineElapsedRealtimeMs
+    )
+}
+
 private fun restartEffect(
     runtimeSessionId: RuntimeSessionId,
-    attempt: ConnectionAttempt?,
+    attempt: ConnectionAttempt,
     enabled: Boolean
 ): List<SessionEffect> = if (enabled) {
     listOf(SessionEffect.RestartDiscovery(runtimeSessionId, attempt))

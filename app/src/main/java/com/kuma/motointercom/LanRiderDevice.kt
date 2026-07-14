@@ -9,7 +9,14 @@ internal data class LanRiderDevice(
     val protocolVersion: Int,
     val ip: String,
     val port: Int
-)
+) {
+    fun matches(targetLock: TargetLock): Boolean =
+        deviceId == targetLock.targetDeviceId &&
+            sessionId == targetLock.expectedRemoteSessionId
+}
+
+internal fun ConnectionAttempt?.acceptsLanRemote(remoteDeviceId: String?): Boolean =
+    this != null && channelPlan.transport == Transport.LAN && targetDeviceId == remoteDeviceId
 
 internal class LanDiscoveryDeviceRegistry {
     private val devicesByServiceName = linkedMapOf<String, LanRiderDevice>()
@@ -29,6 +36,12 @@ internal class LanDiscoveryDeviceRegistry {
         devicesByServiceName.remove(serviceName)
         return devicesByServiceName.values.toList()
     }
+
+    @Synchronized
+    fun find(targetLock: TargetLock): LanRiderDevice? = devicesByServiceName.values
+        .asSequence()
+        .filter { it.matches(targetLock) }
+        .minByOrNull(LanRiderDevice::discoveryEndpointId)
 
     @Synchronized
     fun clear() {

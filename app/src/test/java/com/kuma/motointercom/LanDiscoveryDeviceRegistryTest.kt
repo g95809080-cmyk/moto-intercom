@@ -1,6 +1,8 @@
 package com.kuma.motointercom
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LanDiscoveryDeviceRegistryTest {
@@ -29,9 +31,44 @@ class LanDiscoveryDeviceRegistryTest {
         assertEquals(setOf("session-old", "session-new"), snapshot.mapNotNull { it.sessionId?.value }.toSet())
     }
 
-    private fun device(serviceName: String, sessionId: String) = LanRiderDevice(
+    @Test
+    fun threeDeviceLookupReturnsOnlyTheLockedDeviceAndSession() {
+        val registry = LanDiscoveryDeviceRegistry()
+        registry.remember("S-c", device("S-c", "session-c", "peer-c"))
+        registry.remember("S-a", device("S-a", "session-a", "peer-a"))
+        registry.remember("S-b", device("S-b", "session-b", "peer-b"))
+
+        val selected = registry.find(
+            TargetLock("peer-b", RuntimeSessionId("session-b"))
+        )
+
+        assertEquals("S-b", selected?.discoveryEndpointId)
+        assertNull(registry.find(TargetLock("peer-b", RuntimeSessionId("session-old"))))
+    }
+
+    @Test
+    fun lanHandoffRequiresAnExplicitMatchingAttempt() {
+        val attempt = ConnectionAttempt(
+            id = ConnectionAttemptId("attempt-lan"),
+            runtimeSessionId = RuntimeSessionId("runtime"),
+            targetLock = TargetLock("peer-b", RuntimeSessionId("session-b")),
+            trigger = ConnectionTrigger.USER,
+            channelPlan = ChannelPlan.single(Transport.LAN),
+            deadlineElapsedRealtimeMs = 1L
+        )
+
+        assertFalse(null.acceptsLanRemote("peer-b"))
+        assertFalse(attempt.acceptsLanRemote("peer-c"))
+        assertEquals(true, attempt.acceptsLanRemote("peer-b"))
+    }
+
+    private fun device(
+        serviceName: String,
+        sessionId: String,
+        deviceId: String = "peer-a"
+    ) = LanRiderDevice(
         discoveryEndpointId = serviceName,
-        deviceId = "peer-a",
+        deviceId = deviceId,
         sessionId = RuntimeSessionId(sessionId),
         name = "Rider A",
         deviceName = "Phone A",

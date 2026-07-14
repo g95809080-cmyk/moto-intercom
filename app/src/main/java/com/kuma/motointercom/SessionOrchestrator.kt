@@ -98,7 +98,7 @@ class SessionOrchestrator(
                     pairedAt = connected.connectedAt,
                     lastConnectedAt = connected.connectedAt,
                     isPreferred = false,
-                    lastTransport = connected.transport?.name,
+                    lastTransport = connected.transport.name,
                     failureCount = 0
                 )
             )

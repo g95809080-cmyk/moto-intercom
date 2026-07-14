@@ -26,6 +26,17 @@ class PresenceAggregatorTest {
     }
 
     @Test
+    fun stableP2pOnlyPresenceIsSelectable() {
+        val presence = aggregator.replaceCandidates(
+            Transport.WIFI_DIRECT,
+            listOf(candidate(Transport.WIFI_DIRECT))
+        ).presences.single()
+
+        assertTrue(presence.isSelectable)
+        assertEquals(setOf(Transport.WIFI_DIRECT), presence.availableTransports)
+    }
+
+    @Test
     fun retainsLostTransportForTenSecondsWithoutRemovingAvailableTransport() {
         aggregator.replaceCandidates(Transport.LAN, listOf(candidate(Transport.LAN)))
         aggregator.replaceCandidates(Transport.WIFI_DIRECT, listOf(candidate(Transport.WIFI_DIRECT)))
@@ -156,6 +167,24 @@ class PresenceAggregatorTest {
 
         now += PresenceAggregator.DEFAULT_RETENTION_MS
         assertTrue(aggregator.expire().presences.single().candidates.single().isAvailable)
+    }
+
+    @Test
+    fun stalePresenceSelectionCannotResolveAfterSessionRollover() {
+        val oldPresence = aggregator.replaceCandidates(
+            Transport.LAN,
+            listOf(candidate(Transport.LAN, sessionId = "session-old"))
+        ).presences.single()
+        val currentSnapshot = aggregator.replaceCandidates(
+            Transport.LAN,
+            listOf(candidate(Transport.LAN, sessionId = "session-new"))
+        )
+
+        assertNull(currentSnapshot.resolveCurrentSelection(oldPresence))
+        assertEquals(
+            RuntimeSessionId("session-new"),
+            currentSnapshot.resolveCurrentSelection(currentSnapshot.presences.single())?.sessionId
+        )
     }
 
     @Test
