@@ -57,7 +57,7 @@ class SignalingV2TypesTest {
             sourceDeviceId = DEVICE_A,
             targetDeviceId = DEVICE_B,
             sourceSessionId = SESSION_A,
-            message = SignalingMessageV2.ConnectRequest()
+            message = SignalingMessageV2.ConnectRequest(RequestTrigger.USER)
         )
 
         pinned.requireIncoming(incoming)
@@ -94,7 +94,7 @@ class SignalingV2TypesTest {
                 sourceDeviceId = DEVICE_A,
                 targetDeviceId = DEVICE_B,
                 sourceSessionId = SESSION_A,
-                message = SignalingMessageV2.ConnectRequest()
+                message = SignalingMessageV2.ConnectRequest(RequestTrigger.USER)
             )
         )
         responderContext.requireOutgoing(
@@ -102,7 +102,7 @@ class SignalingV2TypesTest {
                 sourceDeviceId = DEVICE_B,
                 targetDeviceId = DEVICE_A,
                 sourceSessionId = SESSION_B,
-                message = SignalingMessageV2.ConnectAccept
+                message = SignalingMessageV2.ConnectAccept("Rider B", "Phone B")
             )
         )
     }
@@ -126,17 +126,46 @@ class SignalingV2TypesTest {
     fun responseScopeSeparatesChannelAndAttemptOutcomes() {
         assertEquals(
             ResponseScope.CHANNEL,
-            SignalingMessageV2.ConnectReject(RejectReason.SUPERSEDED_CHANNEL)
+            SignalingMessageV2.ConnectReject(RejectReason.SUPERSEDED_CHANNEL, retryable = false)
                 .responseScopeOrNull()
         )
         assertEquals(
             ResponseScope.ATTEMPT,
-            SignalingMessageV2.ConnectReject(RejectReason.USER_REJECTED)
+            SignalingMessageV2.ConnectReject(RejectReason.USER_REJECTED, retryable = false)
                 .responseScopeOrNull()
         )
-        assertEquals(ResponseScope.ATTEMPT, SignalingMessageV2.ConnectAccept.responseScopeOrNull())
-        assertEquals(ResponseScope.ATTEMPT, SignalingMessageV2.Busy.responseScopeOrNull())
-        assertNull(SignalingMessageV2.Disconnect.responseScopeOrNull())
+        assertEquals(
+            ResponseScope.ATTEMPT,
+            SignalingMessageV2.ConnectReject(
+                RejectReason.UNSUPPORTED_VERSION,
+                retryable = false
+            ).responseScopeOrNull()
+        )
+        assertEquals(
+            ResponseScope.ATTEMPT,
+            SignalingMessageV2.ConnectAccept("Rider B", "Phone B").responseScopeOrNull()
+        )
+        assertEquals(
+            ResponseScope.ATTEMPT,
+            SignalingMessageV2.Busy(BusyReason.parse("ACTIVE_ATTEMPT"), null)
+                .responseScopeOrNull()
+        )
+        assertNull(
+            SignalingMessageV2.Disconnect(DisconnectReason.parse("USER_REQUESTED"))
+                .responseScopeOrNull()
+        )
+    }
+
+    @Test
+    fun wireReasonTokensAreStrictAndBounded() {
+        assertEquals("ACTIVE_ATTEMPT", BusyReason.parse("ACTIVE_ATTEMPT").value)
+        assertEquals("USER_REQUESTED", DisconnectReason.parse("USER_REQUESTED").value)
+        assertThrows(IllegalArgumentException::class.java) {
+            BusyReason.parse("active_attempt")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DisconnectReason.parse("A".repeat(65))
+        }
     }
 
     private fun requestKey(attemptId: String) = WireRequestKey(

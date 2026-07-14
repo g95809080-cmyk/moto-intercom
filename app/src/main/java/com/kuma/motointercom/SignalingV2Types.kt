@@ -126,6 +126,28 @@ internal enum class ResponseScope {
     ATTEMPT
 }
 
+internal enum class RequestTrigger {
+    USER,
+    AUTO_PAIRED,
+    INBOUND,
+    RECOVERY
+}
+
+@JvmInline
+internal value class BusyReason private constructor(val value: String) {
+    companion object {
+        fun parse(value: String): BusyReason = BusyReason(wireReason(value, "busy reason"))
+    }
+}
+
+@JvmInline
+internal value class DisconnectReason private constructor(val value: String) {
+    companion object {
+        fun parse(value: String): DisconnectReason =
+            DisconnectReason(wireReason(value, "disconnect reason"))
+    }
+}
+
 internal enum class RejectReason(val scope: ResponseScope) {
     SUPERSEDED_CHANNEL(ResponseScope.CHANNEL),
     IDENTITY_MISMATCH(ResponseScope.CHANNEL),
@@ -134,7 +156,8 @@ internal enum class RejectReason(val scope: ResponseScope) {
     TIMEOUT(ResponseScope.ATTEMPT),
     CONFIRMATION_UNAVAILABLE(ResponseScope.ATTEMPT),
     CANCELED(ResponseScope.ATTEMPT),
-    GLARE_LOST(ResponseScope.ATTEMPT)
+    GLARE_LOST(ResponseScope.ATTEMPT),
+    UNSUPPORTED_VERSION(ResponseScope.ATTEMPT)
 }
 
 internal enum class SignalingPhase {
@@ -189,3 +212,13 @@ private fun compareUuid(left: String, right: String): Int {
 
 private fun compareValues(vararg comparisons: Int): Int =
     comparisons.firstOrNull { it != 0 } ?: 0
+
+private fun wireReason(raw: String, field: String): String {
+    require(WIRE_REASON_PATTERN.matches(raw)) {
+        "$field must be an uppercase ASCII token of at most $MAX_WIRE_REASON_LENGTH characters"
+    }
+    return raw
+}
+
+private const val MAX_WIRE_REASON_LENGTH = 64
+private val WIRE_REASON_PATTERN = Regex("[A-Z][A-Z0-9_]{0,${MAX_WIRE_REASON_LENGTH - 1}}")

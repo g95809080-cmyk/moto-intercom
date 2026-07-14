@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.DataInputStream
@@ -24,30 +25,47 @@ internal sealed interface SignalingMessageV2 {
     data class Hello(
         val requestRole: RequestRole,
         val nickname: String = "",
-        val deviceName: String = ""
+        val deviceName: String = "",
+        val capabilities: Set<String> = emptySet()
     ) : SignalingMessageV2 {
         override val type = SignalingMessageTypeV2.HELLO
     }
 
     data class ConnectRequest(
+        val trigger: RequestTrigger,
         val preferredTransportHint: Transport? = null
     ) : SignalingMessageV2 {
         override val type = SignalingMessageTypeV2.CONNECT_REQUEST
     }
 
-    data object ConnectAccept : SignalingMessageV2 {
+    data class ConnectAccept(
+        val nickname: String,
+        val deviceName: String
+    ) : SignalingMessageV2 {
         override val type = SignalingMessageTypeV2.CONNECT_ACCEPT
     }
 
-    data class ConnectReject(val reason: RejectReason) : SignalingMessageV2 {
+    data class ConnectReject(
+        val reason: RejectReason,
+        val retryable: Boolean
+    ) : SignalingMessageV2 {
         override val type = SignalingMessageTypeV2.CONNECT_REJECT
     }
 
-    data object Busy : SignalingMessageV2 {
+    data class Busy(
+        val reason: BusyReason,
+        val retryAfterMs: Long?
+    ) : SignalingMessageV2 {
+        init {
+            require(retryAfterMs == null || retryAfterMs >= 0L) {
+                "retryAfterMs must not be negative"
+            }
+        }
+
         override val type = SignalingMessageTypeV2.BUSY
     }
 
-    data object Disconnect : SignalingMessageV2 {
+    data class Disconnect(val reason: DisconnectReason) : SignalingMessageV2 {
         override val type = SignalingMessageTypeV2.DISCONNECT
     }
 
@@ -95,9 +113,9 @@ internal data class SignalingEnvelopeV2(
 }
 
 internal fun SignalingMessageV2.responseScopeOrNull(): ResponseScope? = when (this) {
-    SignalingMessageV2.ConnectAccept -> ResponseScope.ATTEMPT
+    is SignalingMessageV2.ConnectAccept -> ResponseScope.ATTEMPT
     is SignalingMessageV2.ConnectReject -> reason.scope
-    SignalingMessageV2.Busy -> ResponseScope.ATTEMPT
+    is SignalingMessageV2.Busy -> ResponseScope.ATTEMPT
     else -> null
 }
 
@@ -172,15 +190,33 @@ internal class SignalingV2Codec {
                         boundedText("deviceName", it, MAX_DEVICE_NAME_CODE_POINTS)
                     )
                 }
+                add("capabilities", encodeCapabilities(message.capabilities))
             }
-            is SignalingMessageV2.ConnectRequest ->
+            is SignalingMessageV2.ConnectRequest -> {
+                addProperty("trigger", message.trigger.name)
                 message.preferredTransportHint?.let {
                     addProperty("preferredTransportHint", it.name)
                 }
-            SignalingMessageV2.ConnectAccept,
-            SignalingMessageV2.Busy,
-            SignalingMessageV2.Disconnect -> Unit
-            is SignalingMessageV2.ConnectReject -> addProperty("reason", message.reason.name)
+            }
+            is SignalingMessageV2.ConnectAccept -> {
+                addProperty(
+                    "nickname",
+                    boundedText("nickname", message.nickname, MAX_NICKNAME_CODE_POINTS)
+                )
+                addProperty(
+                    "deviceName",
+                    boundedText("deviceName", message.deviceName, MAX_DEVICE_NAME_CODE_POINTS)
+                )
+            }
+            is SignalingMessageV2.ConnectReject -> {
+                addProperty("reason", message.reason.name)
+                addProperty("retryable", message.retryable)
+            }
+            is SignalingMessageV2.Busy -> {
+                addProperty("reason", message.reason.value)
+                message.retryAfterMs?.let { addProperty("retryAfterMs", it) }
+            }
+            is SignalingMessageV2.Disconnect -> addProperty("reason", message.reason.value)
             is SignalingMessageV2.Offer -> addProperty(
                 "sdp",
                 boundedPayload("sdp", message.sdpJson, MAX_SDP_BYTES)
@@ -207,7 +243,10 @@ internal class SignalingV2Codec {
         payload: JsonObject
     ): SignalingMessageV2 = when (type) {
         SignalingMessageTypeV2.HELLO -> {
-            payload.requireKeys(setOf("requestRole"), setOf("requestRole", "nickname", "deviceName"))
+            payload.requireKeys(
+                setOf("requestRole", "capabilities"),
+                setOf("requestRole", "nickname", "deviceName", "capabilities")
+            )
             SignalingMessageV2.Hello(
                 requestRole = payload.requiredEnum("requestRole"),
                 nickname = payload.optionalBoundedText(
@@ -217,30 +256,52 @@ internal class SignalingV2Codec {
                 deviceName = payload.optionalBoundedText(
                     "deviceName",
                     MAX_DEVICE_NAME_CODE_POINTS
-                )
+                ),
+                capabilities = payload.requiredCapabilities("capabilities")
             )
         }
         SignalingMessageTypeV2.CONNECT_REQUEST -> {
-            payload.requireKeys(emptySet(), setOf("preferredTransportHint"))
+            payload.requireKeys(
+                setOf("trigger"),
+                setOf("trigger", "preferredTransportHint")
+            )
             SignalingMessageV2.ConnectRequest(
+                trigger = payload.requiredEnum("trigger"),
                 preferredTransportHint = payload.optionalEnum<Transport>("preferredTransportHint")
             )
         }
         SignalingMessageTypeV2.CONNECT_ACCEPT -> {
-            payload.requireExactKeys(emptySet())
-            SignalingMessageV2.ConnectAccept
+            payload.requireExactKeys(setOf("nickname", "deviceName"))
+            SignalingMessageV2.ConnectAccept(
+                nickname = payload.requiredBoundedText(
+                    "nickname",
+                    MAX_NICKNAME_CODE_POINTS
+                ),
+                deviceName = payload.requiredBoundedText(
+                    "deviceName",
+                    MAX_DEVICE_NAME_CODE_POINTS
+                )
+            )
         }
         SignalingMessageTypeV2.CONNECT_REJECT -> {
-            payload.requireExactKeys(setOf("reason"))
-            SignalingMessageV2.ConnectReject(payload.requiredEnum("reason"))
+            payload.requireExactKeys(setOf("reason", "retryable"))
+            SignalingMessageV2.ConnectReject(
+                reason = payload.requiredEnum("reason"),
+                retryable = payload.requiredBoolean("retryable")
+            )
         }
         SignalingMessageTypeV2.BUSY -> {
-            payload.requireExactKeys(emptySet())
-            SignalingMessageV2.Busy
+            payload.requireKeys(setOf("reason"), setOf("reason", "retryAfterMs"))
+            SignalingMessageV2.Busy(
+                reason = BusyReason.parse(payload.requiredString("reason")),
+                retryAfterMs = payload.optionalNonNegativeLong("retryAfterMs")
+            )
         }
         SignalingMessageTypeV2.DISCONNECT -> {
-            payload.requireExactKeys(emptySet())
-            SignalingMessageV2.Disconnect
+            payload.requireExactKeys(setOf("reason"))
+            SignalingMessageV2.Disconnect(
+                DisconnectReason.parse(payload.requiredString("reason"))
+            )
         }
         SignalingMessageTypeV2.OFFER -> {
             payload.requireExactKeys(setOf("sdp"))
@@ -282,6 +343,23 @@ internal class SignalingV2Codec {
             ?: throw SignalingV2Exception("$key must be an integer")
     }
 
+    private fun JsonObject.requiredLong(key: String): Long {
+        val value = get(key) ?: throw SignalingV2Exception("missing $key")
+        if (!value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) {
+            throw SignalingV2Exception("$key must be an integer")
+        }
+        return value.asString.toLongOrNull()
+            ?: throw SignalingV2Exception("$key must be an integer")
+    }
+
+    private fun JsonObject.requiredBoolean(key: String): Boolean {
+        val value = get(key) ?: throw SignalingV2Exception("missing $key")
+        if (!value.isJsonPrimitive || !value.asJsonPrimitive.isBoolean) {
+            throw SignalingV2Exception("$key must be a boolean")
+        }
+        return value.asBoolean
+    }
+
     private fun JsonObject.requiredObject(key: String): JsonObject {
         val value = get(key) ?: throw SignalingV2Exception("missing $key")
         if (!value.isJsonObject) throw SignalingV2Exception("$key must be an object")
@@ -299,9 +377,43 @@ internal class SignalingV2Codec {
         return requiredEnum<T>(key)
     }
 
+    private fun JsonObject.requiredBoundedText(key: String, maximumCodePoints: Int): String =
+        boundedText(key, requiredString(key), maximumCodePoints)
+
     private fun JsonObject.optionalBoundedText(key: String, maximumCodePoints: Int): String {
         if (!has(key)) return ""
-        return boundedText(key, requiredString(key), maximumCodePoints)
+        return requiredBoundedText(key, maximumCodePoints)
+    }
+
+    private fun JsonObject.optionalNonNegativeLong(key: String): Long? {
+        if (!has(key)) return null
+        return requiredLong(key).also {
+            if (it < 0L) throw SignalingV2Exception("$key must not be negative")
+        }
+    }
+
+    private fun JsonObject.requiredCapabilities(key: String): Set<String> {
+        val value = get(key) ?: throw SignalingV2Exception("missing $key")
+        if (!value.isJsonArray) throw SignalingV2Exception("$key must be an array")
+        val array = value.asJsonArray
+        if (array.size() > MAX_CAPABILITIES) {
+            throw SignalingV2Exception("too many $key entries")
+        }
+        val capabilities = linkedSetOf<String>()
+        array.forEachIndexed { index, element ->
+            if (!element.isJsonPrimitive || !element.asJsonPrimitive.isString) {
+                throw SignalingV2Exception("$key[$index] must be a string")
+            }
+            val capability = boundedText(
+                "$key[$index]",
+                element.asString,
+                MAX_CAPABILITY_CODE_POINTS
+            )
+            if (!capabilities.add(capability)) {
+                throw SignalingV2Exception("duplicate $key entry: $capability")
+            }
+        }
+        return capabilities
     }
 
     private fun JsonObject.requiredPayload(key: String, maximumBytes: Int): String =
@@ -333,6 +445,25 @@ internal class SignalingV2Codec {
         return raw
     }
 
+    private fun encodeCapabilities(raw: Set<String>): JsonArray {
+        if (raw.size > MAX_CAPABILITIES) {
+            throw SignalingV2Exception("too many capabilities entries")
+        }
+        val capabilities = raw.mapIndexed { index, capability ->
+            boundedText(
+                "capabilities[$index]",
+                capability,
+                MAX_CAPABILITY_CODE_POINTS
+            )
+        }
+        if (capabilities.toSet().size != capabilities.size) {
+            throw SignalingV2Exception("duplicate capabilities entry")
+        }
+        return JsonArray().apply {
+            capabilities.sorted().forEach { add(it) }
+        }
+    }
+
     private fun parseJsonObject(name: String, raw: String): JsonObject = try {
         JsonParser.parseString(raw).asJsonObject
     } catch (t: Throwable) {
@@ -362,6 +493,8 @@ internal class SignalingV2Codec {
         const val MAX_CANDIDATES = 256
         const val MAX_NICKNAME_CODE_POINTS = 64
         const val MAX_DEVICE_NAME_CODE_POINTS = 128
+        const val MAX_CAPABILITIES = 32
+        const val MAX_CAPABILITY_CODE_POINTS = 64
 
         private val ENVELOPE_KEYS = setOf(
             "protocolVersion",
@@ -463,18 +596,18 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
             }
         SignalingPhase.AWAITING_REMOTE_DECISION -> when {
             direction == FrameDirection.INBOUND &&
-                message == SignalingMessageV2.ConnectAccept -> SignalingPhase.ACCEPTED
+                message is SignalingMessageV2.ConnectAccept -> SignalingPhase.ACCEPTED
             direction == FrameDirection.INBOUND &&
                 (message is SignalingMessageV2.ConnectReject ||
-                    message == SignalingMessageV2.Busy) -> SignalingPhase.CLOSED
+                    message is SignalingMessageV2.Busy) -> SignalingPhase.CLOSED
             else -> null
         }
         SignalingPhase.AWAITING_LOCAL_DECISION -> when {
             direction == FrameDirection.OUTBOUND &&
-                message == SignalingMessageV2.ConnectAccept -> SignalingPhase.ACCEPTED
+                message is SignalingMessageV2.ConnectAccept -> SignalingPhase.ACCEPTED
             direction == FrameDirection.OUTBOUND &&
                 (message is SignalingMessageV2.ConnectReject ||
-                    message == SignalingMessageV2.Busy) -> SignalingPhase.CLOSED
+                    message is SignalingMessageV2.Busy) -> SignalingPhase.CLOSED
             else -> null
         }
         SignalingPhase.GLARE_PENDING -> null
@@ -492,7 +625,7 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
         SignalingPhase.MEDIA_NEGOTIATING,
         SignalingPhase.CONNECTED -> when (message) {
             is SignalingMessageV2.Candidate -> phase
-            SignalingMessageV2.Disconnect -> SignalingPhase.CLOSED
+            is SignalingMessageV2.Disconnect -> SignalingPhase.CLOSED
             else -> null
         }
         SignalingPhase.CLOSED -> null
@@ -502,7 +635,7 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
         direction: FrameDirection,
         message: SignalingMessageV2
     ): SignalingPhase? = when {
-        message == SignalingMessageV2.Disconnect -> SignalingPhase.CLOSED
+        message is SignalingMessageV2.Disconnect -> SignalingPhase.CLOSED
         requestRole == RequestRole.REQUESTER &&
             direction == FrameDirection.OUTBOUND &&
             message is SignalingMessageV2.Offer -> SignalingPhase.AWAITING_ANSWER
@@ -517,7 +650,7 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
         message: SignalingMessageV2,
         answerDirection: FrameDirection
     ): SignalingPhase? = when {
-        message == SignalingMessageV2.Disconnect -> SignalingPhase.CLOSED
+        message is SignalingMessageV2.Disconnect -> SignalingPhase.CLOSED
         message is SignalingMessageV2.Candidate -> phase
         direction == answerDirection && message is SignalingMessageV2.Answer ->
             SignalingPhase.MEDIA_NEGOTIATING

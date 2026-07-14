@@ -14,12 +14,23 @@ class SignalingProtocolV2Test {
     @Test
     fun roundTripsEveryEnabledV2MessageWithRequiredEnvelopeIdentity() {
         val messages = listOf<SignalingMessageV2>(
-            SignalingMessageV2.Hello(RequestRole.REQUESTER, "Rider A", "Phone A"),
-            SignalingMessageV2.ConnectRequest(Transport.WIFI_DIRECT),
-            SignalingMessageV2.ConnectAccept,
-            SignalingMessageV2.ConnectReject(RejectReason.USER_REJECTED),
-            SignalingMessageV2.Busy,
-            SignalingMessageV2.Disconnect,
+            SignalingMessageV2.Hello(
+                RequestRole.REQUESTER,
+                "Rider A",
+                "Phone A",
+                setOf("AUDIO", "IDENTITY_V2")
+            ),
+            SignalingMessageV2.ConnectRequest(
+                RequestTrigger.AUTO_PAIRED,
+                Transport.WIFI_DIRECT
+            ),
+            SignalingMessageV2.ConnectAccept("Rider B", "Phone B"),
+            SignalingMessageV2.ConnectReject(
+                RejectReason.UNSUPPORTED_VERSION,
+                retryable = false
+            ),
+            SignalingMessageV2.Busy(BusyReason.parse("ACTIVE_ATTEMPT"), 2_000L),
+            SignalingMessageV2.Disconnect(DisconnectReason.parse("USER_REQUESTED")),
             SignalingMessageV2.Offer("{\"type\":\"offer\",\"sdp\":\"v=0\"}"),
             SignalingMessageV2.Answer("{\"type\":\"answer\",\"sdp\":\"v=0\"}"),
             SignalingMessageV2.Candidate("{\"candidate\":\"candidate:1\",\"sdpMid\":\"0\"}")
@@ -33,12 +44,151 @@ class SignalingProtocolV2Test {
     }
 
     @Test
+    fun roundTripsEveryApprovedRequestTrigger() {
+        RequestTrigger.entries.forEach { trigger ->
+            val message = SignalingMessageV2.ConnectRequest(
+                trigger = trigger,
+                preferredTransportHint = Transport.LAN
+            )
+            val expected = envelope(message)
+
+            assertEquals(expected, SignalingV2Codec().decode(SignalingV2Codec().encode(expected)))
+        }
+    }
+
+    @Test
+    fun helloCapabilitiesAreBoundedUniqueStrings() {
+        val empty = envelope(
+            SignalingMessageV2.Hello(
+                requestRole = RequestRole.REQUESTER,
+                capabilities = emptySet()
+            )
+        )
+        assertEquals(empty, SignalingV2Codec().decode(SignalingV2Codec().encode(empty)))
+
+        val invalidFrames = listOf(
+            rawFrame(
+                type = "HELLO",
+                payload = "{\"requestRole\":\"REQUESTER\",\"capabilities\":[\"AUDIO\",\"AUDIO\"]}"
+            ),
+            rawFrame(
+                type = "HELLO",
+                payload = "{\"requestRole\":\"REQUESTER\",\"capabilities\":[1]}"
+            ),
+            rawFrame(
+                type = "HELLO",
+                payload = "{\"requestRole\":\"REQUESTER\",\"capabilities\":[\"${"c".repeat(SignalingV2Codec.MAX_CAPABILITY_CODE_POINTS + 1)}\"]}"
+            ),
+            rawFrame(
+                type = "HELLO",
+                payload = "{\"requestRole\":\"REQUESTER\",\"capabilities\":[]}".replace(
+                    "[]",
+                    (0..SignalingV2Codec.MAX_CAPABILITIES).joinToString(
+                        prefix = "[",
+                        postfix = "]"
+                    ) { "\"C$it\"" }
+                )
+            )
+        )
+
+        invalidFrames.forEach { frame ->
+            assertThrows(SignalingV2Exception::class.java) {
+                SignalingV2Codec().decode(frame.toByteArray())
+            }
+        }
+        assertThrows(SignalingV2Exception::class.java) {
+            SignalingV2Codec().encode(
+                envelope(
+                    SignalingMessageV2.Hello(
+                        requestRole = RequestRole.REQUESTER,
+                        capabilities = setOf("AUDIO", " AUDIO ")
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun approvedControlPayloadsDecodeWithExactKeys() {
+        val expected = listOf<SignalingMessageV2>(
+            SignalingMessageV2.Hello(
+                RequestRole.REQUESTER,
+                "Rider A",
+                "Phone A",
+                setOf("AUDIO")
+            ),
+            SignalingMessageV2.ConnectRequest(RequestTrigger.USER, Transport.LAN),
+            SignalingMessageV2.ConnectAccept("Rider B", "Phone B"),
+            SignalingMessageV2.ConnectReject(RejectReason.USER_REJECTED, retryable = false),
+            SignalingMessageV2.Busy(BusyReason.parse("ACTIVE_ATTEMPT"), null),
+            SignalingMessageV2.Busy(BusyReason.parse("ACTIVE_ATTEMPT"), 1_500L),
+            SignalingMessageV2.Disconnect(DisconnectReason.parse("REMOTE_REQUESTED"))
+        )
+
+        expected.forEach { message ->
+            val envelope = envelope(message)
+            assertEquals(envelope, SignalingV2Codec().decode(SignalingV2Codec().encode(envelope)))
+        }
+    }
+
+    @Test
+    fun rejectsMissingMalformedAndOutOfBoundsControlFields() {
+        val invalidFrames = listOf(
+            rawFrame(payload = "{}"),
+            rawFrame(payload = "{\"trigger\":true}"),
+            rawFrame(type = "CONNECT_ACCEPT", payload = "{\"nickname\":\"Rider B\"}"),
+            rawFrame(
+                type = "CONNECT_ACCEPT",
+                payload = "{\"nickname\":\"\",\"deviceName\":\"Phone B\"}"
+            ),
+            rawFrame(
+                type = "CONNECT_ACCEPT",
+                payload = "{\"nickname\":\"${"n".repeat(SignalingV2Codec.MAX_NICKNAME_CODE_POINTS + 1)}\",\"deviceName\":\"Phone B\"}"
+            ),
+            rawFrame(
+                type = "CONNECT_REJECT",
+                payload = "{\"reason\":\"USER_REJECTED\"}"
+            ),
+            rawFrame(
+                type = "CONNECT_REJECT",
+                payload = "{\"reason\":\"USER_REJECTED\",\"retryable\":\"false\"}"
+            ),
+            rawFrame(type = "BUSY", payload = "{}"),
+            rawFrame(
+                type = "BUSY",
+                payload = "{\"reason\":\"ACTIVE_ATTEMPT\",\"retryAfterMs\":-1}"
+            ),
+            rawFrame(
+                type = "BUSY",
+                payload = "{\"reason\":\"active_attempt\"}"
+            ),
+            rawFrame(type = "DISCONNECT", payload = "{}"),
+            rawFrame(
+                type = "DISCONNECT",
+                payload = "{\"reason\":1}"
+            )
+        )
+
+        invalidFrames.forEach { frame ->
+            assertThrows(SignalingV2Exception::class.java) {
+                SignalingV2Codec().decode(frame.toByteArray())
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            SignalingMessageV2.Busy(BusyReason.parse("ACTIVE_ATTEMPT"), -1L)
+        }
+    }
+
+    @Test
     fun rejectsUnknownVersionTypeFieldsAndNonCanonicalIds() {
         val valid = rawFrame()
         val invalidFrames = listOf(
             valid.replace("\"protocolVersion\":2", "\"protocolVersion\":1"),
             valid.replace("\"CONNECT_REQUEST\"", "\"PING\""),
-            valid.replace("\"payload\":{}", "\"payload\":{},\"extra\":true"),
+            valid.replace(
+                "\"payload\":{\"trigger\":\"USER\"}",
+                "\"payload\":{\"trigger\":\"USER\"},\"extra\":true"
+            ),
             valid.replace(DEVICE_A, DEVICE_A.uppercase()),
             valid.replace(DEVICE_B, DEVICE_A),
             valid.replace("\"targetDeviceId\":\"$DEVICE_B\",", "")
@@ -58,11 +208,11 @@ class SignalingProtocolV2Test {
             rawFrame(payload = "{\"unexpected\":true}"),
             rawFrame(
                 type = "CONNECT_REJECT",
-                payload = "{\"reason\":\"NOT_A_REASON\"}"
+                payload = "{\"reason\":\"NOT_A_REASON\",\"retryable\":false}"
             ),
             rawFrame(
                 type = "HELLO",
-                payload = "{\"requestRole\":\"REQUESTER\",\"extra\":1}"
+                payload = "{\"requestRole\":\"REQUESTER\",\"capabilities\":[],\"extra\":1}"
             )
         )
 
@@ -116,11 +266,17 @@ class SignalingProtocolV2Test {
             FrameDirection.INBOUND,
             SignalingMessageV2.Hello(RequestRole.RESPONDER)
         )
-        requester.onFrame(FrameDirection.OUTBOUND, SignalingMessageV2.ConnectRequest())
+        requester.onFrame(
+            FrameDirection.OUTBOUND,
+            SignalingMessageV2.ConnectRequest(RequestTrigger.USER)
+        )
         assertThrows(SignalingV2Exception::class.java) {
             requester.onFrame(FrameDirection.OUTBOUND, SignalingMessageV2.Offer("offer"))
         }
-        requester.onFrame(FrameDirection.INBOUND, SignalingMessageV2.ConnectAccept)
+        requester.onFrame(
+            FrameDirection.INBOUND,
+            SignalingMessageV2.ConnectAccept("Rider B", "Phone B")
+        )
         requester.onFrame(FrameDirection.OUTBOUND, SignalingMessageV2.Offer("offer"))
         requester.onFrame(
             FrameDirection.INBOUND,
@@ -146,11 +302,17 @@ class SignalingProtocolV2Test {
             FrameDirection.OUTBOUND,
             SignalingMessageV2.Hello(RequestRole.RESPONDER)
         )
-        responder.onFrame(FrameDirection.INBOUND, SignalingMessageV2.ConnectRequest())
+        responder.onFrame(
+            FrameDirection.INBOUND,
+            SignalingMessageV2.ConnectRequest(RequestTrigger.USER)
+        )
         assertThrows(SignalingV2Exception::class.java) {
             responder.onFrame(FrameDirection.INBOUND, SignalingMessageV2.Offer("offer"))
         }
-        responder.onFrame(FrameDirection.OUTBOUND, SignalingMessageV2.ConnectAccept)
+        responder.onFrame(
+            FrameDirection.OUTBOUND,
+            SignalingMessageV2.ConnectAccept("Rider B", "Phone B")
+        )
         responder.onFrame(FrameDirection.INBOUND, SignalingMessageV2.Offer("offer"))
         responder.onFrame(FrameDirection.OUTBOUND, SignalingMessageV2.Answer("answer"))
         responder.markConnected()
@@ -189,7 +351,9 @@ class SignalingProtocolV2Test {
 
     @Test
     fun framingUsesBoundedLengthPrefixedFrames() {
-        val frame = SignalingV2Codec().encode(envelope(SignalingMessageV2.ConnectRequest()))
+        val frame = SignalingV2Codec().encode(
+            envelope(SignalingMessageV2.ConnectRequest(RequestTrigger.USER))
+        )
         val output = ByteArrayOutputStream()
         SignalingV2Framing.write(DataOutputStream(output), frame)
 
@@ -216,7 +380,7 @@ class SignalingProtocolV2Test {
 
     private fun rawFrame(
         type: String = "CONNECT_REQUEST",
-        payload: String = "{}"
+        payload: String = "{\"trigger\":\"USER\"}"
     ): String = """
         {
           "protocolVersion":2,
