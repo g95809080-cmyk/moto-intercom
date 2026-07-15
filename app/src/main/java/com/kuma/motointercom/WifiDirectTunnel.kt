@@ -485,7 +485,7 @@ internal class WifiDirectTunnel(
             TXT_SESSION_ID to sessionId.value
         )
         val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
-            "$SERVICE_INSTANCE_PREFIX-${sessionId.value.take(8)}",
+            P2pServiceInstanceCodec.encode(localDeviceId, sessionId),
             SERVICE_TYPE,
             record
         )
@@ -551,9 +551,8 @@ internal class WifiDirectTunnel(
             "service instance received from ${peerSummary(device)} " +
                 "instance=$instanceName type=$registrationType"
         )
-        val validInstance = instanceName.startsWith("$SERVICE_INSTANCE_PREFIX-")
         val validType = registrationType.startsWith("$SERVICE_TYPE.")
-        if (!validInstance || !validType) {
+        if (!validType) {
             logPeer(
                 device,
                 accepted = false,
@@ -562,7 +561,28 @@ internal class WifiDirectTunnel(
             return
         }
 
-        // 部分小米系统不回调 TXT；精确服务类型和实例前缀仍是 App 专属身份。
+        val instanceIdentity = P2pServiceInstanceCodec.decodeClaim(
+            instanceName,
+            device.deviceName.orEmpty()
+        )
+        if (instanceIdentity != null) {
+            acceptPeer(
+                device,
+                instanceIdentity,
+                "MotoCom v2 service instance identity claim instance=$instanceName"
+            )
+            return
+        }
+        if (!P2pServiceInstanceCodec.isLegacy(instanceName)) {
+            logPeer(
+                device,
+                accepted = false,
+                reason = "DNS-SD 服务实例身份无效 instance=$instanceName"
+            )
+            return
+        }
+
+        // Legacy instances remain provisional when a vendor omits TXT callbacks.
         acceptPeer(
             device,
             DiscoveryIdentityClaim(
@@ -1331,7 +1351,6 @@ internal class WifiDirectTunnel(
         private const val TAG = "MotoComP2P"
         private const val APP_ID = "MotoCom"
         private const val PROTOCOL_VERSION = "2"
-        private const val SERVICE_INSTANCE_PREFIX = "MotoCom"
         private const val SERVICE_TYPE = "_motocom._tcp"
         private const val TXT_APP_ID = "appId"
         private const val TXT_PROTOCOL_VERSION = "protocolVersion"
