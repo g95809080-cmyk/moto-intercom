@@ -18,12 +18,18 @@ internal sealed interface SessionEvent {
 
     data class IncomingAccepted(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val actionNonce: String,
+        val occurredAtElapsedMs: Long
     ) : SessionEvent
 
     data class IncomingRejected(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val actionNonce: String,
+        val occurredAtElapsedMs: Long
     ) : SessionEvent
 
     data class ConnectRequested(val attempt: ConnectionAttempt) : SessionEvent
@@ -129,6 +135,26 @@ internal sealed interface SessionEvent {
         val wireRequestKey: WireRequestKey,
         val recovery: RecoveryAttemptSpec,
         val reason: String
+    ) : SessionEvent
+
+    data class ConfirmationAvailabilityChanged(
+        val runtimeSessionId: RuntimeSessionId,
+        val availability: ConfirmationAvailability
+    ) : SessionEvent
+
+    data class IncomingDecisionTimedOut(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val actionNonce: String,
+        val occurredAtElapsedMs: Long
+    ) : SessionEvent
+
+    data class ConfirmationSurfaceUnavailable(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val actionNonce: String
     ) : SessionEvent
 
     data class TargetedTransportOpenFailed(
@@ -257,6 +283,16 @@ internal sealed interface SessionEffect {
         val attemptId: ConnectionAttemptId,
         val channelId: ControlChannelId
     ) : SessionEffect
+
+    data class PublishIncomingConfirmation(
+        val prompt: IncomingConfirmationPrompt
+    ) : SessionEffect
+
+    data class CancelIncomingConfirmation(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val actionNonce: String
+    ) : SessionEffect
 }
 
 internal data class SessionTransition(
@@ -326,7 +362,10 @@ internal fun reduceIntercomState(
     is SessionEvent.SignalingMessageSent,
     is SessionEvent.SignalingSendFailed,
     is SessionEvent.ChannelClosed,
-    is SessionEvent.ProtocolViolation -> null
+    is SessionEvent.ProtocolViolation,
+    is SessionEvent.ConfirmationAvailabilityChanged,
+    is SessionEvent.IncomingDecisionTimedOut,
+    is SessionEvent.ConfirmationSurfaceUnavailable -> null
 
     is SessionEvent.TargetedTransportOpenFailed ->
         current.connectionAttemptOrNull()

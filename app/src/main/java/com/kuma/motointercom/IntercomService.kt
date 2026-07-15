@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -33,6 +35,13 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class IntercomService : Service() {
 
+    private data class IncomingActionIdentity(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val actionNonce: String
+    )
+
     internal interface Listener {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
@@ -42,6 +51,8 @@ class IntercomService : Service() {
         fun onLog(message: String)
         fun onToast(message: String) = Unit
         fun onRemoteRiderIdentified(name: String) = Unit
+        fun onIncomingConfirmation(prompt: IncomingConfirmationPrompt) = Unit
+        fun onIncomingConfirmationCanceled(actionNonce: String) = Unit
         fun onError(message: String)
     }
 
@@ -69,6 +80,22 @@ class IntercomService : Service() {
             )
         }
     )
+    private val incomingConfirmationScheduler = IncomingConfirmationDeadlineScheduler(
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        onTimedOut = { prompt ->
+            orchestrator.dispatch(
+                SessionEvent.IncomingDecisionTimedOut(
+                    runtimeSessionId = prompt.runtimeSessionId,
+                    attemptId = prompt.attemptId,
+                    channelId = prompt.channelId,
+                    actionNonce = prompt.actionNonce,
+                    occurredAtElapsedMs = SystemClock.elapsedRealtime()
+                )
+            )
+        }
+    )
 
     private var listener: Listener? = null
     private var audioRouteController: AudioRouteController? = null
@@ -88,6 +115,8 @@ class IntercomService : Service() {
     private var audioSourceBluetooth = false
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
+    private var appInForeground = false
+    private var activeIncomingPrompt: IncomingConfirmationPrompt? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var localDeviceId = ""
@@ -144,6 +173,14 @@ class IntercomService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_ACCEPT_INCOMING -> {
+                handleIncomingConfirmationAction(intent, accepted = true)
+                return START_NOT_STICKY
+            }
+            ACTION_REJECT_INCOMING -> {
+                handleIncomingConfirmationAction(intent, accepted = false)
+                return START_NOT_STICKY
+            }
         }
         return START_NOT_STICKY
     }
@@ -162,6 +199,32 @@ class IntercomService : Service() {
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
+    }
+
+    internal fun setAppForeground(foreground: Boolean) {
+        dispatchOnMain {
+            appInForeground = foreground
+            publishConfirmationAvailability()
+        }
+    }
+
+    internal fun refreshConfirmationAvailability() {
+        dispatchOnMain(::publishConfirmationAvailability)
+    }
+
+    internal fun respondToIncomingConfirmation(
+        prompt: IncomingConfirmationPrompt,
+        accepted: Boolean
+    ) {
+        dispatchOnMain {
+            dispatchIncomingConfirmationAction(
+                runtimeSessionId = prompt.runtimeSessionId,
+                attemptId = prompt.attemptId,
+                channelId = prompt.channelId,
+                actionNonce = prompt.actionNonce,
+                accepted = accepted
+            )
+        }
     }
 
     fun requestStart(riderName: String = "") {
@@ -226,6 +289,7 @@ class IntercomService : Service() {
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
         orchestrator.dispatch(SessionEvent.RuntimeStarted(runtimeSessionId))
+        publishConfirmationAvailability(runtimeSessionId)
 
         serviceScope.launch {
             try {
@@ -457,14 +521,17 @@ class IntercomService : Service() {
         val runtimeSessionId = session.pinnedIdentity.localSessionId
         val channelId = session.channel.channelId
         val event = when (val message = envelope.message) {
-            is SignalingMessageV2.ConnectRequest -> SessionEvent.IncomingConnectRequest(
-                runtimeSessionId = runtimeSessionId,
-                channelId = channelId,
-                wireRequestKey = session.wireRequestKey,
-                trigger = message.trigger,
-                preferredTransportHint = message.preferredTransportHint,
-                occurredAtElapsedMs = SystemClock.elapsedRealtime()
-            )
+            is SignalingMessageV2.ConnectRequest -> {
+                publishConfirmationAvailability(runtimeSessionId)
+                SessionEvent.IncomingConnectRequest(
+                    runtimeSessionId = runtimeSessionId,
+                    channelId = channelId,
+                    wireRequestKey = session.wireRequestKey,
+                    trigger = message.trigger,
+                    preferredTransportHint = message.preferredTransportHint,
+                    occurredAtElapsedMs = SystemClock.elapsedRealtime()
+                )
+            }
             is SignalingMessageV2.ConnectAccept -> SessionEvent.RemoteConnectAccepted(
                 runtimeSessionId,
                 envelope.attemptId,
@@ -721,6 +788,7 @@ class IntercomService : Service() {
     ) {
         val token = activeSession ?: return
         if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
+        cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         val generation = ++recoveryGeneration
@@ -795,6 +863,7 @@ class IntercomService : Service() {
         }
         recoveryGeneration++
         attemptDeadlineScheduler.cancel()
+        cancelAllIncomingConfirmationSurfaces()
         sessions.invalidate()
         activeSession = null
         activeRuntimeSessionId = null
@@ -914,7 +983,157 @@ class IntercomService : Service() {
             }
             is SessionEffect.StartWebRtc -> startWebRtc(effect)
             is SessionEffect.CloseControlChannel -> closeControlChannel(effect.channelId)
+            is SessionEffect.PublishIncomingConfirmation ->
+                publishIncomingConfirmation(effect.prompt)
+            is SessionEffect.CancelIncomingConfirmation -> cancelIncomingConfirmation(effect)
         }
+    }
+
+    private fun publishConfirmationAvailability(
+        runtimeSessionId: RuntimeSessionId? = activeRuntimeSessionId
+    ) {
+        val runtime = runtimeSessionId ?: return
+        orchestrator.dispatch(
+            SessionEvent.ConfirmationAvailabilityChanged(
+                runtime,
+                ConfirmationAvailability(
+                    appForeground = appInForeground,
+                    notificationAvailable = isIncomingNotificationAvailable()
+                )
+            )
+        )
+    }
+
+    private fun publishIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
+        activeIncomingPrompt = prompt
+        incomingConfirmationScheduler.schedule(prompt)
+        when (prompt.surface) {
+            ConfirmationSurface.IN_APP -> {
+                val currentListener = listener
+                if (!appInForeground || currentListener == null) {
+                    reportConfirmationSurfaceUnavailable(prompt)
+                    return
+                }
+                try {
+                    currentListener.onIncomingConfirmation(prompt)
+                } catch (t: Throwable) {
+                    handleError(t)
+                    reportConfirmationSurfaceUnavailable(prompt)
+                }
+            }
+            ConfirmationSurface.NOTIFICATION -> {
+                if (!isIncomingNotificationAvailable()) {
+                    reportConfirmationSurfaceUnavailable(prompt)
+                    return
+                }
+                try {
+                    val manager = getSystemService(NotificationManager::class.java)
+                        ?: throw IllegalStateException("NotificationManager is unavailable")
+                    manager.notify(
+                        INCOMING_NOTIFICATION_ID,
+                        buildIncomingConfirmationNotification(prompt)
+                    )
+                } catch (t: Throwable) {
+                    handleError(t)
+                    reportConfirmationSurfaceUnavailable(prompt)
+                }
+            }
+        }
+    }
+
+    private fun cancelIncomingConfirmation(effect: SessionEffect.CancelIncomingConfirmation) {
+        incomingConfirmationScheduler.cancel(
+            effect.runtimeSessionId,
+            effect.attemptId,
+            effect.actionNonce
+        )
+        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
+        if (activeIncomingPrompt?.actionNonce == effect.actionNonce) {
+            activeIncomingPrompt = null
+        }
+        listener?.onIncomingConfirmationCanceled(effect.actionNonce)
+    }
+
+    private fun cancelAllIncomingConfirmationSurfaces() {
+        val nonce = activeIncomingPrompt?.actionNonce
+        incomingConfirmationScheduler.cancel()
+        activeIncomingPrompt = null
+        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
+        if (nonce != null) listener?.onIncomingConfirmationCanceled(nonce)
+    }
+
+    private fun reportConfirmationSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
+        orchestrator.dispatch(
+            SessionEvent.ConfirmationSurfaceUnavailable(
+                prompt.runtimeSessionId,
+                prompt.attemptId,
+                prompt.channelId,
+                prompt.actionNonce
+            )
+        )
+    }
+
+    private fun dispatchIncomingConfirmationAction(
+        runtimeSessionId: RuntimeSessionId,
+        attemptId: ConnectionAttemptId,
+        channelId: ControlChannelId,
+        actionNonce: String,
+        accepted: Boolean
+    ) {
+        val occurredAtElapsedMs = SystemClock.elapsedRealtime()
+        val event = if (accepted) {
+            SessionEvent.IncomingAccepted(
+                runtimeSessionId,
+                attemptId,
+                channelId,
+                actionNonce,
+                occurredAtElapsedMs
+            )
+        } else {
+            SessionEvent.IncomingRejected(
+                runtimeSessionId,
+                attemptId,
+                channelId,
+                actionNonce,
+                occurredAtElapsedMs
+            )
+        }
+        orchestrator.dispatch(event)
+    }
+
+    private fun handleIncomingConfirmationAction(intent: Intent, accepted: Boolean) {
+        val action = runCatching {
+            val runtimeValue = requireNotNull(intent.getStringExtra(EXTRA_RUNTIME_SESSION_ID))
+            val attemptValue = requireNotNull(intent.getStringExtra(EXTRA_ATTEMPT_ID))
+            val channelValue = requireNotNull(intent.getStringExtra(EXTRA_CHANNEL_ID))
+            val nonce = requireNotNull(intent.getStringExtra(EXTRA_ACTION_NONCE))
+            requireCanonicalUuid(runtimeValue, "runtimeSessionId")
+            requireCanonicalUuid(attemptValue, "attemptId")
+            require(nonce.isNotBlank()) { "action nonce is missing" }
+            require(intent.data?.pathSegments?.firstOrNull() == nonce) {
+                "action nonce does not match Intent data"
+            }
+            require(
+                intent.data?.pathSegments?.getOrNull(1) ==
+                    if (accepted) ACTION_PATH_ACCEPT else ACTION_PATH_REJECT
+            ) { "action type does not match Intent data" }
+            IncomingActionIdentity(
+                RuntimeSessionId(runtimeValue),
+                ConnectionAttemptId(attemptValue),
+                ControlChannelId.parse(channelValue),
+                nonce
+            )
+        }.getOrElse {
+            publishLog("Ignored invalid incoming confirmation action: ${it.message}")
+            return
+        }
+        dispatchIncomingConfirmationAction(
+            action.runtimeSessionId,
+            action.attemptId,
+            action.channelId,
+            action.actionNonce,
+            accepted
+        )
     }
 
     private fun sendControlMessage(
@@ -1082,6 +1301,27 @@ class IntercomService : Service() {
         }
     }
 
+    private fun isIncomingNotificationAvailable(): Boolean {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        val manager = getSystemService(NotificationManager::class.java) ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !manager.areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = manager.getNotificationChannel(INCOMING_CHANNEL_ID)
+            if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
+                return false
+            }
+        }
+        return true
+    }
+
     private fun updateNotification() {
         val manager = getSystemService(NotificationManager::class.java) ?: return
         manager.notify(NOTIFICATION_ID, buildNotification())
@@ -1112,6 +1352,57 @@ class IntercomService : Service() {
             .build()
     }
 
+    private fun buildIncomingConfirmationNotification(
+        prompt: IncomingConfirmationPrompt
+    ): Notification {
+        ensureIncomingNotificationChannel()
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val acceptIntent = incomingConfirmationPendingIntent(prompt, accepted = true)
+        val rejectIntent = incomingConfirmationPendingIntent(prompt, accepted = false)
+        val riderName = prompt.peer.nickname.ifBlank { "附近车友" }
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, INCOMING_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        return builder
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("$riderName 请求加入对讲")
+            .setContentText("请在 15 秒内接受或拒绝")
+            .setStyle(
+                Notification.BigTextStyle().bigText(
+                    "${prompt.peer.deviceName.ifBlank { "MotoCom" }} · 当前 Socket 身份已验证"
+                )
+            )
+            .setCategory(Notification.CATEGORY_CALL)
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOngoing(false)
+            .setAutoCancel(false)
+            .setContentIntent(contentIntent)
+            .addAction(0, "拒绝本次", rejectIntent)
+            .addAction(0, "接受", acceptIntent)
+            .build()
+    }
+
+    private fun incomingConfirmationPendingIntent(
+        prompt: IncomingConfirmationPrompt,
+        accepted: Boolean
+    ): PendingIntent {
+        return PendingIntent.getService(
+            this,
+            0,
+            incomingConfirmationActionIntent(this, prompt, accepted),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
@@ -1124,6 +1415,22 @@ class IntercomService : Service() {
                 "对讲状态提示",
                 NotificationManager.IMPORTANCE_LOW
             )
+        )
+    }
+
+    private fun ensureIncomingNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(INCOMING_CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                INCOMING_CHANNEL_ID,
+                "车友连接请求",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "陌生车友的接受与拒绝操作"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
         )
     }
 
@@ -1142,9 +1449,21 @@ class IntercomService : Service() {
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
+        const val ACTION_ACCEPT_INCOMING = "com.kuma.motointercom.action.ACCEPT_INCOMING"
+        const val ACTION_REJECT_INCOMING = "com.kuma.motointercom.action.REJECT_INCOMING"
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
+        private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
+        private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
+        private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
+        private const val EXTRA_ACTION_NONCE = "com.kuma.motointercom.extra.ACTION_NONCE"
+        private const val ACTION_URI_SCHEME = "motointercom"
+        private const val ACTION_URI_AUTHORITY = "incoming"
+        private const val ACTION_PATH_ACCEPT = "accept"
+        private const val ACTION_PATH_REJECT = "reject"
         private const val CHANNEL_ID = "intercom_status"
+        private const val INCOMING_CHANNEL_ID = "incoming_confirmation"
         private const val NOTIFICATION_ID = 2601
+        private const val INCOMING_NOTIFICATION_ID = 2602
         private const val AUDIO_STANDBY_STATUS = "当前音频源：待机"
         private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放（无蓝牙）"
         private const val READY_STATUS = "请点击下方启动对讲"
@@ -1164,6 +1483,29 @@ class IntercomService : Service() {
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)
+
+        internal fun incomingConfirmationActionIntent(
+            context: Context,
+            prompt: IncomingConfirmationPrompt,
+            accepted: Boolean
+        ): Intent {
+            val action = if (accepted) ACTION_ACCEPT_INCOMING else ACTION_REJECT_INCOMING
+            val actionPath = if (accepted) ACTION_PATH_ACCEPT else ACTION_PATH_REJECT
+            return Intent(context, IntercomService::class.java)
+                .setAction(action)
+                .setData(
+                    Uri.Builder()
+                        .scheme(ACTION_URI_SCHEME)
+                        .authority(ACTION_URI_AUTHORITY)
+                        .appendPath(prompt.actionNonce)
+                        .appendPath(actionPath)
+                        .build()
+                )
+                .putExtra(EXTRA_RUNTIME_SESSION_ID, prompt.runtimeSessionId.value)
+                .putExtra(EXTRA_ATTEMPT_ID, prompt.attemptId.value)
+                .putExtra(EXTRA_CHANNEL_ID, prompt.channelId.value)
+                .putExtra(EXTRA_ACTION_NONCE, prompt.actionNonce)
+        }
     }
 }
 

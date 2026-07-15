@@ -70,6 +70,9 @@ internal data class AttemptChannelSet(
     val channelIds: Set<ControlChannelId>,
     val phase: SignalingAttemptPhase,
     val confirmationChannelId: ControlChannelId? = null,
+    val confirmationSurface: ConfirmationSurface? = null,
+    val confirmationActionNonce: String? = null,
+    val decisionDeadlineElapsedMs: Long? = null,
     val mediaOwnerChannelId: ControlChannelId? = null,
     val selectionCohort: SelectionCohort? = null,
     val terminalOutcome: AttemptOutcome? = null,
@@ -81,6 +84,18 @@ internal data class AttemptChannelSet(
         }
         require(confirmationChannelId == null || confirmationChannelId in channelIds) {
             "Confirmation channel must belong to the attempt"
+        }
+        val confirmationFields = listOf(
+            confirmationChannelId,
+            confirmationSurface,
+            confirmationActionNonce,
+            decisionDeadlineElapsedMs
+        )
+        require(confirmationFields.all { it == null } || confirmationFields.all { it != null }) {
+            "Confirmation ownership, surface, nonce and deadline must be set together"
+        }
+        require(decisionDeadlineElapsedMs == null || decisionDeadlineElapsedMs >= 0L) {
+            "Confirmation decision deadline must not be negative"
         }
         require(mediaOwnerChannelId == null || mediaOwnerChannelId in channelIds) {
             "Media owner must belong to the attempt"

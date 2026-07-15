@@ -1,5 +1,7 @@
 package com.kuma.motointercom
 
+import java.util.UUID
+
 internal data class SignalingControlDecision(
     val accepted: Boolean,
     val state: IntercomState? = null,
@@ -8,10 +10,13 @@ internal data class SignalingControlDecision(
 
 internal class SignalingControlCoordinator(
     private val elapsedRealtime: () -> Long,
-    private val attemptTimeoutMs: Long
+    private val attemptTimeoutMs: Long,
+    private val confirmationTimeoutMs: Long = 15_000L,
+    private val actionNonce: () -> String = { UUID.randomUUID().toString() }
 ) {
     init {
         require(attemptTimeoutMs > 0L) { "Attempt timeout must be positive" }
+        require(confirmationTimeoutMs > 0L) { "Confirmation timeout must be positive" }
     }
     private val channels = linkedMapOf<ControlChannelId, VerifiedControlChannel>()
     private val completedAttempts = linkedMapOf<WireRequestKey, CompletedWireAttempt>()
@@ -21,11 +26,19 @@ internal class SignalingControlCoordinator(
     internal val activeAttempt: AttemptChannelSet?
         get() = active
 
-    fun handle(current: IntercomState, event: SessionEvent): SignalingControlDecision? {
+    fun handle(
+        current: IntercomState,
+        event: SessionEvent,
+        incomingPolicy: IncomingRequestPolicy? = null
+    ): SignalingControlDecision? {
         pruneCompleted()
         return when (event) {
             is SessionEvent.ControlChannelVerified -> controlChannelVerified(current, event)
-            is SessionEvent.IncomingConnectRequest -> incomingConnectRequest(current, event)
+            is SessionEvent.IncomingConnectRequest -> incomingConnectRequest(
+                current,
+                event,
+                requireNotNull(incomingPolicy) { "Incoming request policy is required" }
+            )
             is SessionEvent.RemoteConnectAccepted -> remoteConnectAccepted(current, event)
             is SessionEvent.RemoteConnectRejected -> remoteConnectRejected(current, event)
             is SessionEvent.RemoteBusy -> remoteBusy(current, event)
@@ -37,6 +50,15 @@ internal class SignalingControlCoordinator(
             is SessionEvent.ProtocolViolation -> protocolViolation(current, event)
             is SessionEvent.IncomingAccepted -> incomingAccepted(current, event)
             is SessionEvent.IncomingRejected -> incomingRejected(current, event)
+            is SessionEvent.ConfirmationAvailabilityChanged -> confirmationAvailabilityChanged(
+                current,
+                event
+            )
+            is SessionEvent.IncomingDecisionTimedOut -> incomingDecisionTimedOut(current, event)
+            is SessionEvent.ConfirmationSurfaceUnavailable -> confirmationSurfaceUnavailable(
+                current,
+                event
+            )
             is SessionEvent.DisconnectRequested -> disconnectRequested(current, event)
             else -> null
         }
@@ -156,7 +178,8 @@ internal class SignalingControlCoordinator(
 
     private fun incomingConnectRequest(
         current: IntercomState,
-        event: SessionEvent.IncomingConnectRequest
+        event: SessionEvent.IncomingConnectRequest,
+        policy: IncomingRequestPolicy
     ): SignalingControlDecision {
         val channel = channels[event.channelId]
             ?.takeIf {
@@ -183,7 +206,20 @@ internal class SignalingControlCoordinator(
             return acceptGlareWinner(current, channel, event.occurredAtElapsedMs)
         }
         if (current is IntercomState.Discovering) {
-            return beginInboundConfirmation(current, channel)
+            return when {
+                policy.paired -> beginPairedInboundConnection(current, channel)
+                policy.confirmationAvailability.preferredSurface() != null ->
+                    beginInboundConfirmation(
+                        current,
+                        channel,
+                        requireNotNull(policy.confirmationAvailability.preferredSurface())
+                    )
+                else -> rejectInboundWithoutConfirmation(
+                    current,
+                    channel,
+                    RejectReason.CONFIRMATION_UNAVAILABLE
+                )
+            }
         }
         return busyRequest(event.runtimeSessionId, event.wireRequestKey)
     }
@@ -225,7 +261,8 @@ internal class SignalingControlCoordinator(
 
     private fun beginInboundConfirmation(
         current: IntercomState.Discovering,
-        channel: VerifiedControlChannel
+        channel: VerifiedControlChannel,
+        surface: ConfirmationSurface
     ): SignalingControlDecision {
         val attempt = inboundAttempt(
             runtimeSessionId = current.runtimeSessionId,
@@ -233,15 +270,74 @@ internal class SignalingControlCoordinator(
             deadlineElapsedRealtimeMs = Long.MAX_VALUE
         )
         val channelIds = eligibleChannels(channel.wireRequestKey, channel.transport)
-        active = AttemptChannelSet(
+        val context = AttemptChannelSet(
             wireRequestKey = channel.wireRequestKey,
             attempt = attempt,
             peer = channel.peer,
             channelIds = channelIds,
             phase = SignalingAttemptPhase.WAITING_LOCAL_DECISION,
-            confirmationChannelId = channel.channelId
+            confirmationChannelId = channel.channelId,
+            confirmationSurface = surface,
+            confirmationActionNonce = actionNonce(),
+            decisionDeadlineElapsedMs = elapsedRealtime() + confirmationTimeoutMs
         )
-        return accepted(state = IntercomState.IncomingConfirmation(attempt, channel.peer))
+        active = context
+        return accepted(
+            state = IntercomState.IncomingConfirmation(attempt, channel.peer),
+            effects = listOf(SessionEffect.PublishIncomingConfirmation(context.confirmationPrompt()))
+        )
+    }
+
+    private fun beginPairedInboundConnection(
+        current: IntercomState.Discovering,
+        channel: VerifiedControlChannel
+    ): SignalingControlDecision {
+        val attempt = inboundAttempt(
+            runtimeSessionId = current.runtimeSessionId,
+            channel = channel,
+            deadlineElapsedRealtimeMs = elapsedRealtime() + attemptTimeoutMs
+        )
+        val eligible = eligibleChannels(channel.wireRequestKey, channel.transport)
+        if (eligible.isEmpty()) return terminateAttempt(attempt)
+        val cohort = SelectionCohort(channel.wireRequestKey, eligible, elapsedRealtime())
+        active = AttemptChannelSet(
+            wireRequestKey = channel.wireRequestKey,
+            attempt = attempt,
+            peer = channel.peer,
+            channelIds = eligible,
+            phase = SignalingAttemptPhase.SELECTING_MEDIA,
+            selectionCohort = cohort
+        )
+        return accepted(
+            state = IntercomState.Connecting(attempt, channel.peer),
+            effects = listOf(selectEffect(attempt, cohort))
+        )
+    }
+
+    private fun rejectInboundWithoutConfirmation(
+        current: IntercomState.Discovering,
+        channel: VerifiedControlChannel,
+        reason: RejectReason
+    ): SignalingControlDecision {
+        val attempt = inboundAttempt(
+            runtimeSessionId = current.runtimeSessionId,
+            channel = channel,
+            deadlineElapsedRealtimeMs = Long.MAX_VALUE
+        )
+        val context = AttemptChannelSet(
+            wireRequestKey = channel.wireRequestKey,
+            attempt = attempt,
+            peer = channel.peer,
+            channelIds = eligibleChannels(channel.wireRequestKey, channel.transport),
+            phase = SignalingAttemptPhase.WAITING_LOCAL_DECISION
+        )
+        active = context
+        return beginTerminalBroadcast(
+            current = current,
+            context = context,
+            outcome = AttemptOutcome.REJECTED,
+            response = SignalingMessageV2.ConnectReject(reason, retryable = false)
+        )
     }
 
     private fun acceptGlareWinner(
@@ -321,15 +417,16 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.IncomingAccepted
     ): SignalingControlDecision {
-        val context = active
-            ?.takeIf {
-                it.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION &&
-                    it.attempt.runtimeSessionId == event.runtimeSessionId &&
-                    it.attempt.id == event.attemptId
-            }
-            ?: return rejected()
-        if (current !is IntercomState.IncomingConfirmation || current.attempt != context.attempt) {
-            return rejected()
+        val context = matchingConfirmation(
+            current,
+            event.runtimeSessionId,
+            event.attemptId,
+            event.channelId,
+            event.actionNonce
+        ) ?: return rejected()
+        val decisionDeadline = requireNotNull(context.decisionDeadlineElapsedMs)
+        if (event.occurredAtElapsedMs > decisionDeadline) {
+            return timeoutIncomingConfirmation(current, context)
         }
         val acceptedAttempt = if (context.attempt.deadlineElapsedRealtimeMs == Long.MAX_VALUE) {
             context.attempt.copy(
@@ -348,11 +445,17 @@ internal class SignalingControlCoordinator(
             channelIds = eligible,
             phase = SignalingAttemptPhase.SELECTING_MEDIA,
             confirmationChannelId = null,
+            confirmationSurface = null,
+            confirmationActionNonce = null,
+            decisionDeadlineElapsedMs = null,
             selectionCohort = cohort
         )
         return accepted(
             state = IntercomState.Connecting(acceptedAttempt, context.peer),
-            effects = listOf(selectEffect(acceptedAttempt, cohort))
+            effects = listOf(
+                cancelConfirmationEffect(context),
+                selectEffect(acceptedAttempt, cohort)
+            )
         )
     }
 
@@ -360,15 +463,15 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.IncomingRejected
     ): SignalingControlDecision {
-        val context = active
-            ?.takeIf {
-                it.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION &&
-                    it.attempt.runtimeSessionId == event.runtimeSessionId &&
-                    it.attempt.id == event.attemptId
-            }
-            ?: return rejected()
-        if (current !is IntercomState.IncomingConfirmation || current.attempt != context.attempt) {
-            return rejected()
+        val context = matchingConfirmation(
+            current,
+            event.runtimeSessionId,
+            event.attemptId,
+            event.channelId,
+            event.actionNonce
+        ) ?: return rejected()
+        if (event.occurredAtElapsedMs > requireNotNull(context.decisionDeadlineElapsedMs)) {
+            return timeoutIncomingConfirmation(current, context)
         }
         return beginTerminalBroadcast(
             current = current,
@@ -380,6 +483,104 @@ internal class SignalingControlCoordinator(
             )
         )
     }
+
+    private fun incomingDecisionTimedOut(
+        current: IntercomState,
+        event: SessionEvent.IncomingDecisionTimedOut
+    ): SignalingControlDecision {
+        val context = matchingConfirmation(
+            current,
+            event.runtimeSessionId,
+            event.attemptId,
+            event.channelId,
+            event.actionNonce
+        ) ?: return rejected()
+        if (event.occurredAtElapsedMs < requireNotNull(context.decisionDeadlineElapsedMs)) {
+            return rejected()
+        }
+        return timeoutIncomingConfirmation(current, context)
+    }
+
+    private fun confirmationSurfaceUnavailable(
+        current: IntercomState,
+        event: SessionEvent.ConfirmationSurfaceUnavailable
+    ): SignalingControlDecision {
+        val context = matchingConfirmation(
+            current,
+            event.runtimeSessionId,
+            event.attemptId,
+            event.channelId,
+            event.actionNonce
+        ) ?: return rejected()
+        return beginTerminalBroadcast(
+            current = current,
+            context = context,
+            outcome = AttemptOutcome.REJECTED,
+            response = SignalingMessageV2.ConnectReject(
+                RejectReason.CONFIRMATION_UNAVAILABLE,
+                retryable = false
+            )
+        )
+    }
+
+    private fun confirmationAvailabilityChanged(
+        current: IntercomState,
+        event: SessionEvent.ConfirmationAvailabilityChanged
+    ): SignalingControlDecision {
+        val context = active
+            ?.takeIf {
+                it.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION &&
+                    it.attempt.runtimeSessionId == event.runtimeSessionId
+            }
+            ?: return accepted(state = current)
+        if (current !is IntercomState.IncomingConfirmation || current.attempt != context.attempt) {
+            return accepted(state = current)
+        }
+        val desiredSurface = event.availability.preferredSurface()
+            ?: return beginTerminalBroadcast(
+                current = current,
+                context = context,
+                outcome = AttemptOutcome.REJECTED,
+                response = SignalingMessageV2.ConnectReject(
+                    RejectReason.CONFIRMATION_UNAVAILABLE,
+                    retryable = false
+                )
+            )
+        if (context.confirmationSurface == desiredSurface) {
+            return accepted(state = current)
+        }
+
+        val previousNonce = requireNotNull(context.confirmationActionNonce)
+        val migrated = context.copy(
+            confirmationSurface = desiredSurface,
+            confirmationActionNonce = actionNonce()
+        )
+        active = migrated
+        return accepted(
+            state = current,
+            effects = listOf(
+                SessionEffect.CancelIncomingConfirmation(
+                    context.attempt.runtimeSessionId,
+                    context.attempt.id,
+                    previousNonce
+                ),
+                SessionEffect.PublishIncomingConfirmation(migrated.confirmationPrompt())
+            )
+        )
+    }
+
+    private fun timeoutIncomingConfirmation(
+        current: IntercomState,
+        context: AttemptChannelSet
+    ): SignalingControlDecision = beginTerminalBroadcast(
+        current = current,
+        context = context,
+        outcome = AttemptOutcome.TIMED_OUT,
+        response = SignalingMessageV2.ConnectReject(
+            RejectReason.TIMEOUT,
+            retryable = false
+        )
+    )
 
     private fun mediaChannelSelected(
         current: IntercomState,
@@ -703,25 +904,26 @@ internal class SignalingControlCoordinator(
 
         val remaining = context.channelIds - event.channelId
         if (remaining.isEmpty()) return finishAttemptImmediately(current, context)
-        val replacementConfirmation = if (context.confirmationChannelId == event.channelId) {
-            remaining.minOrNull()
-        } else {
-            context.confirmationChannelId
-        }
+        val (withoutChannel, confirmationEffects) = removeConfirmationChannel(
+            context,
+            event.channelId,
+            remaining
+        )
         val cohort = context.selectionCohort?.let {
             val cohortRemaining = it.channelIds - event.channelId
             if (cohortRemaining.isEmpty()) null else it.copy(channelIds = cohortRemaining)
         }
-        active = context.copy(
-            channelIds = remaining,
-            confirmationChannelId = replacementConfirmation,
+        active = withoutChannel.copy(
             selectionCohort = cohort,
             pendingTerminalChannels = context.pendingTerminalChannels - event.channelId
         )
         if (context.phase == SignalingAttemptPhase.SELECTING_MEDIA && cohort != null) {
-            return accepted(state = current, effects = listOf(selectEffect(context.attempt, cohort)))
+            return accepted(
+                state = current,
+                effects = confirmationEffects + selectEffect(context.attempt, cohort)
+            )
         }
-        return accepted(state = current)
+        return accepted(state = current, effects = confirmationEffects)
     }
 
     private fun protocolViolation(
@@ -761,12 +963,23 @@ internal class SignalingControlCoordinator(
         val pending = context.channelIds.filterTo(linkedSetOf()) { it in channels }
         remember(context.wireRequestKey, outcome, response)
         if (pending.isEmpty()) return finishAttemptImmediately(current, context)
+        val cancelConfirmation = context.confirmationActionNonce?.let {
+            SessionEffect.CancelIncomingConfirmation(
+                context.attempt.runtimeSessionId,
+                context.attempt.id,
+                it
+            )
+        }
         active = context.copy(
             phase = SignalingAttemptPhase.TERMINATING,
+            confirmationChannelId = null,
+            confirmationSurface = null,
+            confirmationActionNonce = null,
+            decisionDeadlineElapsedMs = null,
             terminalOutcome = outcome,
             pendingTerminalChannels = pending
         )
-        val effects = pending.map { channelId ->
+        val effects = listOfNotNull(cancelConfirmation) + pending.map { channelId ->
             responseEffect(
                 runtimeSessionId = context.attempt.runtimeSessionId,
                 attemptId = context.attempt.id,
@@ -840,20 +1053,44 @@ internal class SignalingControlCoordinator(
         if (remaining.isEmpty() || context.mediaOwnerChannelId == channelId) {
             return finishAttemptImmediately(current, context)
         }
-        active = context.copy(
-            channelIds = remaining,
-            confirmationChannelId = if (context.confirmationChannelId == channelId) {
-                remaining.minOrNull()
-            } else {
-                context.confirmationChannelId
-            },
+        val (withoutChannel, confirmationEffects) = removeConfirmationChannel(
+            context,
+            channelId,
+            remaining
+        )
+        active = withoutChannel.copy(
             pendingTerminalChannels = context.pendingTerminalChannels - channelId
         )
         return accepted(
             state = current,
             effects = listOf(
                 closeEffect(context.attempt.runtimeSessionId, context.attempt.id, channelId)
-            )
+            ) + confirmationEffects
+        )
+    }
+
+    private fun removeConfirmationChannel(
+        context: AttemptChannelSet,
+        removedChannelId: ControlChannelId,
+        remainingChannelIds: Set<ControlChannelId>
+    ): Pair<AttemptChannelSet, List<SessionEffect>> {
+        if (context.confirmationChannelId != removedChannelId) {
+            return context.copy(channelIds = remainingChannelIds) to emptyList()
+        }
+
+        val previousNonce = requireNotNull(context.confirmationActionNonce)
+        val migrated = context.copy(
+            channelIds = remainingChannelIds,
+            confirmationChannelId = requireNotNull(remainingChannelIds.minOrNull()),
+            confirmationActionNonce = actionNonce()
+        )
+        return migrated to listOf(
+            SessionEffect.CancelIncomingConfirmation(
+                context.attempt.runtimeSessionId,
+                context.attempt.id,
+                previousNonce
+            ),
+            SessionEffect.PublishIncomingConfirmation(migrated.confirmationPrompt())
         )
     }
 
@@ -863,6 +1100,13 @@ internal class SignalingControlCoordinator(
         prefixEffects: List<SessionEffect> = emptyList()
     ): SignalingControlDecision {
         rememberDisconnectedIfAccepted(context)
+        val cancelConfirmation = context.confirmationActionNonce?.let {
+            SessionEffect.CancelIncomingConfirmation(
+                context.attempt.runtimeSessionId,
+                context.attempt.id,
+                it
+            )
+        }
         val channelIds = context.channelIds
         channelIds.forEach(channels::remove)
         active = null
@@ -871,7 +1115,8 @@ internal class SignalingControlCoordinator(
         }
         return accepted(
             state = IntercomState.Discovering(context.attempt.runtimeSessionId),
-            effects = prefixEffects + closeEffects + SessionEffect.AbortAttemptAndResumeDiscovery(
+            effects = listOfNotNull(cancelConfirmation) + prefixEffects + closeEffects +
+                SessionEffect.AbortAttemptAndResumeDiscovery(
                 context.attempt.runtimeSessionId,
                 context.attempt.id
             )
@@ -924,6 +1169,43 @@ internal class SignalingControlCoordinator(
             )
         }
     }
+
+    private fun matchingConfirmation(
+        current: IntercomState,
+        runtimeSessionId: RuntimeSessionId,
+        attemptId: ConnectionAttemptId,
+        channelId: ControlChannelId,
+        actionNonce: String
+    ): AttemptChannelSet? {
+        val confirmation = current as? IntercomState.IncomingConfirmation ?: return null
+        return active?.takeIf {
+            it.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION &&
+                it.attempt == confirmation.attempt &&
+                it.attempt.runtimeSessionId == runtimeSessionId &&
+                it.attempt.id == attemptId &&
+                it.confirmationChannelId == channelId &&
+                it.confirmationActionNonce == actionNonce
+        }
+    }
+
+    private fun AttemptChannelSet.confirmationPrompt(): IncomingConfirmationPrompt =
+        IncomingConfirmationPrompt(
+            runtimeSessionId = attempt.runtimeSessionId,
+            attemptId = attempt.id,
+            channelId = requireNotNull(confirmationChannelId),
+            actionNonce = requireNotNull(confirmationActionNonce),
+            peer = peer,
+            decisionDeadlineElapsedMs = requireNotNull(decisionDeadlineElapsedMs),
+            surface = requireNotNull(confirmationSurface)
+        )
+
+    private fun cancelConfirmationEffect(
+        context: AttemptChannelSet
+    ): SessionEffect.CancelIncomingConfirmation = SessionEffect.CancelIncomingConfirmation(
+        context.attempt.runtimeSessionId,
+        context.attempt.id,
+        requireNotNull(context.confirmationActionNonce)
+    )
 
     private fun matchingActive(
         runtimeSessionId: RuntimeSessionId,

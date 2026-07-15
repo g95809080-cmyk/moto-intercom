@@ -35,6 +35,7 @@ internal class SessionOrchestrator(
     private val effectChannel = Channel<SessionEffect>(Channel.UNLIMITED)
     private val mutableState = MutableStateFlow<IntercomState>(IntercomState.Offline)
     private val signalingControl = SignalingControlCoordinator(elapsedRealtime, attemptTimeoutMs)
+    private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
 
     val state: StateFlow<IntercomState> = mutableState.asStateFlow()
     val effects: Flow<SessionEffect> = effectChannel.receiveAsFlow()
@@ -77,12 +78,22 @@ internal class SessionOrchestrator(
 
     private suspend fun handle(event: SessionEvent): Boolean {
         val previous = mutableState.value
-        val controlDecision = signalingControl.handle(previous, event)
+        if (event is SessionEvent.ConfirmationAvailabilityChanged) {
+            if (previous.runtimeSessionId != event.runtimeSessionId) return false
+            confirmationAvailability = event.availability
+        }
+        val incomingPolicy = if (event is SessionEvent.IncomingConnectRequest) {
+            resolveIncomingRequestPolicy(event)
+        } else {
+            null
+        }
+        val controlDecision = signalingControl.handle(previous, event, incomingPolicy)
         if (controlDecision != null) {
             if (!controlDecision.accepted) return false
             val next = controlDecision.state ?: previous
             mutableState.value = next
             signalingControl.onProductTransition(previous, next, event)
+            resetConfirmationAvailabilityIfNeeded(event, next)
             maybePersistConnectedPeer(next)
             controlDecision.effects.forEach { effectChannel.send(it) }
             return true
@@ -91,9 +102,31 @@ internal class SessionOrchestrator(
         val transition = reduceIntercomState(previous, event) ?: return false
         mutableState.value = transition.state
         signalingControl.onProductTransition(previous, transition.state, event)
+        resetConfirmationAvailabilityIfNeeded(event, transition.state)
         maybePersistConnectedPeer(transition.state)
         transition.effects.forEach { effectChannel.send(it) }
         return true
+    }
+
+    private suspend fun resolveIncomingRequestPolicy(
+        event: SessionEvent.IncomingConnectRequest
+    ): IncomingRequestPolicy {
+        val paired = try {
+            pairingRepository.getByDeviceId(event.wireRequestKey.requesterDeviceId.value) != null
+        } catch (t: Throwable) {
+            onError(t)
+            false
+        }
+        return IncomingRequestPolicy(paired, confirmationAvailability)
+    }
+
+    private fun resetConfirmationAvailabilityIfNeeded(
+        event: SessionEvent,
+        next: IntercomState
+    ) {
+        if (event is SessionEvent.RuntimeStarted || next == IntercomState.Offline) {
+            confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
+        }
     }
 
     private suspend fun maybePersistConnectedPeer(state: IntercomState) {

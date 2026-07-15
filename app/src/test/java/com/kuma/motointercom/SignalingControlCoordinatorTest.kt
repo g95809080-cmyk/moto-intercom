@@ -59,11 +59,7 @@ class SignalingControlCoordinatorTest {
 
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
             assertEquals(Long.MAX_VALUE, attempt.deadlineElapsedRealtimeMs)
-            assertTrue(
-                harness.orchestrator.dispatchAndAwait(
-                    SessionEvent.IncomingAccepted(RUNTIME_B, attempt.id)
-                )
-            )
+            assertTrue(acceptIncoming(harness))
             assertEquals(10_100L, harness.orchestrator.currentAttempt?.deadlineElapsedRealtimeMs)
             val select = harness.nextEffect() as SessionEffect.SelectMediaChannel
             assertEquals(setOf(channel.channelId), select.cohort.channelIds)
@@ -119,7 +115,7 @@ class SignalingControlCoordinatorTest {
                 )
             )
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
-            harness.orchestrator.dispatchAndAwait(SessionEvent.IncomingAccepted(RUNTIME_B, attempt.id))
+            acceptIncoming(harness)
             harness.nextEffect()
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.MediaChannelSelected(
@@ -159,7 +155,7 @@ class SignalingControlCoordinatorTest {
             harness.startRuntime()
             registerIncomingRequest(harness, channel)
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
-            harness.orchestrator.dispatchAndAwait(SessionEvent.IncomingAccepted(RUNTIME_B, attempt.id))
+            acceptIncoming(harness)
             harness.nextEffect()
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.MediaChannelSelected(
@@ -349,7 +345,7 @@ class SignalingControlCoordinatorTest {
                 )
             )
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
-            harness.orchestrator.dispatchAndAwait(SessionEvent.IncomingAccepted(RUNTIME_B, attempt.id))
+            acceptIncoming(harness)
             harness.nextEffect()
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.MediaChannelSelected(
@@ -635,11 +631,7 @@ class SignalingControlCoordinatorTest {
             )
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
 
-            assertTrue(
-                harness.orchestrator.dispatchAndAwait(
-                    SessionEvent.IncomingRejected(RUNTIME_B, attempt.id)
-                )
-            )
+            assertTrue(rejectIncoming(harness))
             val sends = listOf(harness.nextEffect(), harness.nextEffect())
             assertTrue(sends.all { it is SessionEffect.SendConnectReject })
             assertTrue(harness.orchestrator.state.value is IntercomState.IncomingConfirmation)
@@ -686,7 +678,7 @@ class SignalingControlCoordinatorTest {
             val first = responderChannel(CHANNEL_A)
             val second = responderChannel(CHANNEL_B)
             harness.startRuntime()
-            registerIncomingRequest(harness, first)
+            val originalPrompt = registerIncomingRequest(harness, first)
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.ControlChannelVerified(RUNTIME_B, second)
             )
@@ -715,6 +707,27 @@ class SignalingControlCoordinatorTest {
             assertEquals(
                 second.channelId,
                 harness.orchestrator.activeControlAttempt?.confirmationChannelId
+            )
+            val cancel = harness.nextEffect() as SessionEffect.CancelIncomingConfirmation
+            val publish = harness.nextEffect() as SessionEffect.PublishIncomingConfirmation
+            val migratedPrompt = publish.prompt
+            assertEquals(originalPrompt.actionNonce, cancel.actionNonce)
+            assertEquals(second.channelId, migratedPrompt.channelId)
+            assertEquals(
+                originalPrompt.decisionDeadlineElapsedMs,
+                migratedPrompt.decisionDeadlineElapsedMs
+            )
+            assertFalse(originalPrompt.actionNonce == migratedPrompt.actionNonce)
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingAccepted(
+                        originalPrompt.runtimeSessionId,
+                        originalPrompt.attemptId,
+                        originalPrompt.channelId,
+                        originalPrompt.actionNonce,
+                        100L
+                    )
+                )
             )
             assertTrue(harness.orchestrator.state.value is IntercomState.IncomingConfirmation)
         }
@@ -846,7 +859,7 @@ class SignalingControlCoordinatorTest {
             harness.startRuntime()
             registerIncomingRequest(harness, owner)
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
-            harness.orchestrator.dispatchAndAwait(SessionEvent.IncomingAccepted(RUNTIME_B, attempt.id))
+            acceptIncoming(harness)
             harness.nextEffect()
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.MediaChannelSelected(
@@ -910,9 +923,7 @@ class SignalingControlCoordinatorTest {
             harness.startRuntime()
             registerIncomingRequest(harness, first)
             val attempt = requireNotNull(harness.orchestrator.currentAttempt)
-            harness.orchestrator.dispatchAndAwait(
-                SessionEvent.IncomingRejected(RUNTIME_B, attempt.id)
-            )
+            rejectIncoming(harness)
             harness.nextEffect()
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.SignalingMessageSent(
@@ -948,10 +959,238 @@ class SignalingControlCoordinatorTest {
         }
     }
 
+    @Test
+    fun pairedInboundRequestAutoAcceptsWithoutConfirmationSurface() = runBlocking {
+        harness(setOf(DEVICE_A)).use { harness ->
+            val channel = responderChannel(CHANNEL_A)
+            harness.startRuntime()
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_B, channel)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        channel.channelId,
+                        channel.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+
+            val select = harness.nextEffect() as SessionEffect.SelectMediaChannel
+            assertEquals(setOf(channel.channelId), select.cohort.channelIds)
+            assertTrue(harness.orchestrator.state.value is IntercomState.Connecting)
+            assertEquals(10_100L, harness.orchestrator.currentAttempt?.deadlineElapsedRealtimeMs)
+        }
+    }
+
+    @Test
+    fun backgroundRequestUsesNotificationWhenAvailable() = runBlocking {
+        harness().use { harness ->
+            val channel = responderChannel(CHANNEL_A)
+            harness.startRuntime(
+                ConfirmationAvailability(
+                    appForeground = false,
+                    notificationAvailable = true
+                )
+            )
+
+            val prompt = registerIncomingRequest(
+                harness,
+                channel,
+                expectedSurface = ConfirmationSurface.NOTIFICATION
+            )
+
+            assertEquals(channel.channelId, prompt.channelId)
+            assertTrue(harness.orchestrator.state.value is IntercomState.IncomingConfirmation)
+        }
+    }
+
+    @Test
+    fun backgroundRequestWithoutNotificationPermissionFailsClosed() = runBlocking {
+        harness().use { harness ->
+            val channel = responderChannel(CHANNEL_A)
+            harness.startRuntime(ConfirmationAvailability.UNAVAILABLE)
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.ControlChannelVerified(RUNTIME_B, channel)
+            )
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        channel.channelId,
+                        channel.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+
+            val reject = harness.nextEffect() as SessionEffect.SendConnectReject
+            assertEquals(RejectReason.CONFIRMATION_UNAVAILABLE, reject.reason)
+            assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+            assertEquals(SignalingAttemptPhase.TERMINATING, activePhase(harness))
+        }
+    }
+
+    @Test
+    fun acceptQueuedBeforeTimeoutWinsWhenItsLocalTimestampMeetsDeadline() = runBlocking {
+        harness().use { harness ->
+            harness.startRuntime()
+            val prompt = registerIncomingRequest(harness, responderChannel(CHANNEL_A))
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingAccepted(
+                        prompt.runtimeSessionId,
+                        prompt.attemptId,
+                        prompt.channelId,
+                        prompt.actionNonce,
+                        prompt.decisionDeadlineElapsedMs
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.CancelIncomingConfirmation)
+            assertTrue(harness.nextEffect() is SessionEffect.SelectMediaChannel)
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingDecisionTimedOut(
+                        prompt.runtimeSessionId,
+                        prompt.attemptId,
+                        prompt.channelId,
+                        prompt.actionNonce,
+                        prompt.decisionDeadlineElapsedMs
+                    )
+                )
+            )
+            assertTrue(harness.orchestrator.state.value is IntercomState.Connecting)
+        }
+    }
+
+    @Test
+    fun timeoutQueuedBeforeAcceptWinsAndLateAcceptCannotReplaceIt() = runBlocking {
+        harness().use { harness ->
+            harness.startRuntime()
+            val prompt = registerIncomingRequest(harness, responderChannel(CHANNEL_A))
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingDecisionTimedOut(
+                        prompt.runtimeSessionId,
+                        prompt.attemptId,
+                        prompt.channelId,
+                        prompt.actionNonce,
+                        prompt.decisionDeadlineElapsedMs
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.CancelIncomingConfirmation)
+            val reject = harness.nextEffect() as SessionEffect.SendConnectReject
+            assertEquals(RejectReason.TIMEOUT, reject.reason)
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingAccepted(
+                        prompt.runtimeSessionId,
+                        prompt.attemptId,
+                        prompt.channelId,
+                        prompt.actionNonce,
+                        prompt.decisionDeadlineElapsedMs - 1L
+                    )
+                )
+            )
+            assertEquals(AttemptOutcome.TIMED_OUT, harness.orchestrator.activeControlAttempt?.terminalOutcome)
+        }
+    }
+
+    @Test
+    fun acceptCreatedAfterDeadlineFinalizesTimeout() = runBlocking {
+        harness().use { harness ->
+            harness.startRuntime()
+            val prompt = registerIncomingRequest(harness, responderChannel(CHANNEL_A))
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingAccepted(
+                        prompt.runtimeSessionId,
+                        prompt.attemptId,
+                        prompt.channelId,
+                        prompt.actionNonce,
+                        prompt.decisionDeadlineElapsedMs + 1L
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.CancelIncomingConfirmation)
+            val reject = harness.nextEffect() as SessionEffect.SendConnectReject
+            assertEquals(RejectReason.TIMEOUT, reject.reason)
+            assertEquals(AttemptOutcome.TIMED_OUT, harness.orchestrator.activeControlAttempt?.terminalOutcome)
+        }
+    }
+
+    @Test
+    fun foregroundToBackgroundMigrationRotatesNonceWithoutExtendingDeadline() = runBlocking {
+        harness().use { harness ->
+            harness.startRuntime()
+            val original = registerIncomingRequest(harness, responderChannel(CHANNEL_A))
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        RUNTIME_B,
+                        ConfirmationAvailability(
+                            appForeground = false,
+                            notificationAvailable = true
+                        )
+                    )
+                )
+            )
+            val cancel = harness.nextEffect() as SessionEffect.CancelIncomingConfirmation
+            val publish = harness.nextEffect() as SessionEffect.PublishIncomingConfirmation
+            val migrated = publish.prompt
+            assertEquals(original.actionNonce, cancel.actionNonce)
+            assertEquals(ConfirmationSurface.NOTIFICATION, migrated.surface)
+            assertEquals(original.decisionDeadlineElapsedMs, migrated.decisionDeadlineElapsedMs)
+            assertFalse(original.actionNonce == migrated.actionNonce)
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingRejected(
+                        original.runtimeSessionId,
+                        original.attemptId,
+                        original.channelId,
+                        original.actionNonce,
+                        100L
+                    )
+                )
+            )
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        RUNTIME_B,
+                        ConfirmationAvailability.UNAVAILABLE
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.CancelIncomingConfirmation)
+            val reject = harness.nextEffect() as SessionEffect.SendConnectReject
+            assertEquals(RejectReason.CONFIRMATION_UNAVAILABLE, reject.reason)
+        }
+    }
+
     private suspend fun registerIncomingRequest(
         harness: Harness,
-        channel: VerifiedControlChannel
-    ) {
+        channel: VerifiedControlChannel,
+        expectedSurface: ConfirmationSurface = ConfirmationSurface.IN_APP
+    ): IncomingConfirmationPrompt {
         assertTrue(
             harness.orchestrator.dispatchAndAwait(
                 SessionEvent.ControlChannelVerified(RUNTIME_B, channel)
@@ -970,6 +1209,45 @@ class SignalingControlCoordinatorTest {
             )
         )
         assertTrue(harness.orchestrator.state.value is IntercomState.IncomingConfirmation)
+        val prompt = (harness.nextEffect() as SessionEffect.PublishIncomingConfirmation).prompt
+        assertEquals(expectedSurface, prompt.surface)
+        assertEquals(15_100L, prompt.decisionDeadlineElapsedMs)
+        harness.currentPrompt = prompt
+        return prompt
+    }
+
+    private suspend fun acceptIncoming(harness: Harness): Boolean {
+        val prompt = requireNotNull(harness.currentPrompt)
+        val accepted = harness.orchestrator.dispatchAndAwait(
+            SessionEvent.IncomingAccepted(
+                prompt.runtimeSessionId,
+                prompt.attemptId,
+                prompt.channelId,
+                prompt.actionNonce,
+                occurredAtElapsedMs = 100L
+            )
+        )
+        val cancel = harness.nextEffect() as SessionEffect.CancelIncomingConfirmation
+        assertEquals(prompt.actionNonce, cancel.actionNonce)
+        harness.currentPrompt = null
+        return accepted
+    }
+
+    private suspend fun rejectIncoming(harness: Harness): Boolean {
+        val prompt = requireNotNull(harness.currentPrompt)
+        val accepted = harness.orchestrator.dispatchAndAwait(
+            SessionEvent.IncomingRejected(
+                prompt.runtimeSessionId,
+                prompt.attemptId,
+                prompt.channelId,
+                prompt.actionNonce,
+                occurredAtElapsedMs = 100L
+            )
+        )
+        val cancel = harness.nextEffect() as SessionEffect.CancelIncomingConfirmation
+        assertEquals(prompt.actionNonce, cancel.actionNonce)
+        harness.currentPrompt = null
+        return accepted
     }
 
     private fun activePhase(harness: Harness): SignalingAttemptPhase =
@@ -1037,13 +1315,14 @@ class SignalingControlCoordinatorTest {
         20_000L
     )
 
-    private fun harness() = Harness()
+    private fun harness(pairedDeviceIds: Set<String> = emptySet()) = Harness(pairedDeviceIds)
 
-    private class Harness : AutoCloseable {
+    private class Harness(pairedDeviceIds: Set<String>) : AutoCloseable {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         private val effectQueue = Channel<SessionEffect>(Channel.UNLIMITED)
+        var currentPrompt: IncomingConfirmationPrompt? = null
         val orchestrator = SessionOrchestrator(
-            pairingRepository = NoOpPairingRepository(),
+            pairingRepository = NoOpPairingRepository(pairedDeviceIds),
             dispatcher = Dispatchers.Unconfined,
             elapsedRealtime = { 100L }
         )
@@ -1054,8 +1333,21 @@ class SignalingControlCoordinatorTest {
             }
         }
 
-        suspend fun startRuntime() {
+        suspend fun startRuntime(
+            availability: ConfirmationAvailability = ConfirmationAvailability(
+                appForeground = true,
+                notificationAvailable = true
+            )
+        ) {
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(RUNTIME_B)))
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        RUNTIME_B,
+                        availability
+                    )
+                )
+            )
         }
 
         suspend fun start(attempt: ConnectionAttempt) {
@@ -1071,10 +1363,26 @@ class SignalingControlCoordinatorTest {
         }
     }
 
-    private class NoOpPairingRepository : PairingRepository {
+    private class NoOpPairingRepository(
+        private val pairedDeviceIds: Set<String> = emptySet()
+    ) : PairingRepository {
         override fun observeAll(): Flow<List<PairingRecord>> = flowOf(emptyList())
         override suspend fun getAll(): List<PairingRecord> = emptyList()
-        override suspend fun getByDeviceId(deviceId: String): PairingRecord? = null
+        override suspend fun getByDeviceId(deviceId: String): PairingRecord? =
+            deviceId.takeIf(pairedDeviceIds::contains)?.let {
+                PairingRecord(
+                    remoteDeviceId = it,
+                    remoteNickname = "Paired Rider",
+                    deviceName = "Phone",
+                    localAlias = "",
+                    shortCode = "0000",
+                    pairedAt = 1L,
+                    lastConnectedAt = 1L,
+                    isPreferred = false,
+                    lastTransport = Transport.LAN.name,
+                    failureCount = 0
+                )
+            }
         override suspend fun saveConnectedPeer(record: PairingRecord) = Unit
         override suspend fun setPreferred(deviceId: String): Boolean = false
         override suspend fun clearPreferred() = Unit
