@@ -917,6 +917,92 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun connectedThirdPartyRequestReceivesBusyWithoutReplacingMediaOwner() = runBlocking {
+        harness().use { harness ->
+            val owner = responderChannel(CHANNEL_A)
+            harness.startRuntime()
+            registerIncomingRequest(harness, owner)
+            val attempt = requireNotNull(harness.orchestrator.currentAttempt)
+            acceptIncoming(harness)
+            harness.nextEffect()
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.MediaChannelSelected(
+                    RUNTIME_B,
+                    attempt.id,
+                    owner.wireRequestKey,
+                    owner.channelId
+                )
+            )
+            harness.nextEffect()
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.SignalingMessageSent(
+                    RUNTIME_B,
+                    attempt.id,
+                    owner.channelId,
+                    SignalingMessageTypeV2.CONNECT_ACCEPT
+                )
+            )
+            harness.nextEffect()
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    RUNTIME_B,
+                    attempt.id,
+                    WebRtcConnectionState.CONNECTED,
+                    500L,
+                    recovery()
+                )
+            )
+            val connectedAttempt = requireNotNull(harness.orchestrator.currentAttempt)
+
+            val thirdParty = responderChannel(
+                channelId = CHANNEL_C,
+                requesterDeviceId = DEVICE_C,
+                requesterRuntime = RUNTIME_C,
+                responderDeviceId = DEVICE_B,
+                attemptId = ATTEMPT_C
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_B, thirdParty)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        thirdParty.channelId,
+                        thirdParty.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        600L
+                    )
+                )
+            )
+
+            val busy = harness.nextEffect() as SessionEffect.SendBusy
+            assertEquals(thirdParty.channelId, busy.channelId)
+            assertEquals(ConnectionAttemptId(ATTEMPT_C), busy.attemptId)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_B,
+                        busy.attemptId,
+                        busy.channelId,
+                        SignalingMessageTypeV2.BUSY
+                    )
+                )
+            )
+
+            val close = harness.nextEffect() as SessionEffect.CloseControlChannel
+            assertEquals(thirdParty.channelId, close.channelId)
+            assertTrue(harness.orchestrator.state.value is IntercomState.Connected)
+            assertEquals(connectedAttempt, harness.orchestrator.currentAttempt)
+            assertEquals(owner.wireRequestKey, harness.orchestrator.activeControlAttempt?.wireRequestKey)
+            assertEquals(owner.channelId, harness.orchestrator.activeControlAttempt?.mediaOwnerChannelId)
+        }
+    }
+
+    @Test
     fun rejectedRequestReplayUsesTombstoneWithoutAnotherConfirmation() = runBlocking {
         harness().use { harness ->
             val first = responderChannel(CHANNEL_A)
