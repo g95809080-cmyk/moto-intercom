@@ -138,6 +138,61 @@ class SignalingSessionV2Test {
     }
 
     @Test
+    fun emptyHelloIdentityFieldsFailClosedWithoutVerifiedChannelHandoff() {
+        val validFields = linkedMapOf(
+            "attemptId" to ATTEMPT_A,
+            "sourceDeviceId" to DEVICE_A,
+            "targetDeviceId" to DEVICE_B,
+            "sourceSessionId" to SESSION_A
+        )
+
+        validFields.keys.forEach { emptyField ->
+            socketPair().use { sockets ->
+                var establishedSession: SignalingSessionV2? = null
+                val responder = CompletableFuture.supplyAsync {
+                    establish(
+                        socket = sockets.acceptor,
+                        physicalRole = PhysicalSocketRole.ACCEPTOR,
+                        localDeviceId = DEVICE_B,
+                        localSessionId = SESSION_B,
+                        originatingAttempt = null,
+                        expectedRemoteTargetLock = TargetLock(
+                            DEVICE_A,
+                            RuntimeSessionId(SESSION_A)
+                        )
+                    ).also { establishedSession = it }
+                }
+                val fields = validFields.toMutableMap().apply {
+                    this[emptyField] = ""
+                }
+                val rawHello = """
+                    {
+                      "protocolVersion": 2,
+                      "type": "HELLO",
+                      "attemptId": "${fields.getValue("attemptId")}",
+                      "sourceDeviceId": "${fields.getValue("sourceDeviceId")}",
+                      "targetDeviceId": "${fields.getValue("targetDeviceId")}",
+                      "sourceSessionId": "${fields.getValue("sourceSessionId")}",
+                      "payload": {
+                        "requestRole": "REQUESTER",
+                        "capabilities": []
+                      }
+                    }
+                """.trimIndent().toByteArray(Charsets.UTF_8)
+
+                SignalingV2Framing.write(
+                    java.io.DataOutputStream(sockets.opener.getOutputStream()),
+                    rawHello
+                )
+
+                assertSignalingFailure(responder)
+                assertTrue("$emptyField must close the current Socket", sockets.acceptor.isClosed)
+                assertEquals("$emptyField must not create a verified session", null, establishedSession)
+            }
+        }
+    }
+
+    @Test
     fun wrongTargetFailsClosedOnBothEndpoints() {
         socketPair().use { sockets ->
             val requester = CompletableFuture.supplyAsync {
