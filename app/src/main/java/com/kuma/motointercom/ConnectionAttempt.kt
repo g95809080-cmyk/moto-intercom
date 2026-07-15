@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 enum class ConnectionTrigger {
     USER,
+    AUTO_PAIRED,
     INBOUND,
     RECOVERY
 }

@@ -4,6 +4,8 @@ import java.io.Closeable
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.Socket
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class SignalingSessionV2 private constructor(
@@ -12,9 +14,16 @@ internal class SignalingSessionV2 private constructor(
     val peer: PeerIdentity,
     val originatingAttempt: ConnectionAttempt?,
     private val socket: Socket,
-    private val phaseMachine: SignalingPhaseMachine
+    private val phaseMachine: SignalingPhaseMachine,
+    private val codec: SignalingV2Codec,
+    private val input: DataInputStream,
+    private val output: DataOutputStream
 ) : Closeable {
     private val closed = AtomicBoolean(false)
+    private val readerStarted = AtomicBoolean(false)
+    private val failureNotified = AtomicBoolean(false)
+    private val reader: ExecutorService = Executors.newSingleThreadExecutor()
+    private val writer: ExecutorService = Executors.newSingleThreadExecutor()
 
     val requestRole: RequestRole
         get() = requireNotNull(channel.requestRole)
@@ -34,10 +43,88 @@ internal class SignalingSessionV2 private constructor(
     val isClosed: Boolean
         get() = closed.get() || socket.isClosed
 
+    fun startReader(
+        onMessage: (SignalingEnvelopeV2) -> Unit,
+        onFailure: (Throwable) -> Unit
+    ) {
+        if (isClosed || !readerStarted.compareAndSet(false, true)) return
+        try {
+            reader.execute {
+                try {
+                    while (!isClosed) {
+                        val envelope = codec.decode(SignalingV2Framing.read(input))
+                        pinnedIdentity.requireIncoming(envelope)
+                        phaseMachine.onFrame(FrameDirection.INBOUND, envelope.message)
+                        onMessage(envelope)
+                    }
+                } catch (t: Throwable) {
+                    if (!isClosed && failureNotified.compareAndSet(false, true)) {
+                        close()
+                        onFailure(t.asSignalingFailure("signaling reader failed"))
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            if (failureNotified.compareAndSet(false, true)) {
+                close()
+                onFailure(t.asSignalingFailure("signaling reader unavailable"))
+            }
+        }
+    }
+
+    fun send(
+        message: SignalingMessageV2,
+        onComplete: (Result<Unit>) -> Unit = {}
+    ) {
+        if (isClosed || writer.isShutdown) {
+            onComplete(Result.failure(SignalingV2Exception("control channel is closed")))
+            return
+        }
+        try {
+            writer.execute {
+                try {
+                    val envelope = outgoingEnvelope(message)
+                    pinnedIdentity.requireOutgoing(envelope)
+                    val frame = codec.encode(envelope)
+                    phaseMachine.onFrame(FrameDirection.OUTBOUND, message)
+                    SignalingV2Framing.write(output, frame)
+                    onComplete(Result.success(Unit))
+                } catch (t: Throwable) {
+                    val failure = t.asSignalingFailure("signaling send failed")
+                    close()
+                    onComplete(Result.failure(failure))
+                }
+            }
+        } catch (t: Throwable) {
+            val failure = t.asSignalingFailure("signaling writer unavailable")
+            close()
+            onComplete(Result.failure(failure))
+        }
+    }
+
+    fun markMediaConnected() {
+        phaseMachine.markConnected()
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         phaseMachine.close()
         runCatching { socket.close() }
+        reader.shutdownNow()
+        writer.shutdownNow()
+    }
+
+    private fun outgoingEnvelope(message: SignalingMessageV2) = SignalingEnvelopeV2(
+        attemptId = wireRequestKey.attemptId,
+        sourceDeviceId = pinnedIdentity.localDeviceId,
+        targetDeviceId = pinnedIdentity.remoteDeviceId,
+        sourceSessionId = pinnedIdentity.localSessionId,
+        message = message
+    )
+
+    private fun Throwable.asSignalingFailure(message: String): SignalingV2Exception = when (this) {
+        is SignalingV2Exception -> this
+        else -> SignalingV2Exception(message, this)
     }
 
     companion object {
@@ -121,7 +208,10 @@ internal class SignalingSessionV2 private constructor(
                     peer = result.toVerifiedPeer(),
                     originatingAttempt = originatingAttempt,
                     socket = socket,
-                    phaseMachine = phaseMachine
+                    phaseMachine = phaseMachine,
+                    codec = codec,
+                    input = input,
+                    output = output
                 )
             } catch (t: Throwable) {
                 runCatching { socket.close() }

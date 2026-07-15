@@ -15,7 +15,10 @@ internal value class DeviceId private constructor(val value: String) {
 }
 
 @JvmInline
-internal value class ControlChannelId private constructor(val value: String) {
+internal value class ControlChannelId private constructor(val value: String) :
+    Comparable<ControlChannelId> {
+    override fun compareTo(other: ControlChannelId): Int = compareUuid(value, other.value)
+
     companion object {
         fun create(): ControlChannelId = ControlChannelId(UUID.randomUUID().toString())
         fun parse(value: String): ControlChannelId =
@@ -197,7 +200,7 @@ internal fun requireCanonicalUuid(raw: String, field: String) {
     require(parsed.toString() == raw) { "$field must be a canonical lowercase RFC 4122 UUID" }
 }
 
-private fun compareUuid(left: String, right: String): Int {
+internal fun compareUuid(left: String, right: String): Int {
     val leftUuid = UUID.fromString(left)
     val rightUuid = UUID.fromString(right)
     val high = java.lang.Long.compareUnsigned(

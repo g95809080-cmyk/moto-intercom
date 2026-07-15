@@ -7,37 +7,18 @@ import android.util.Log
 import com.google.gson.JsonParser
 import org.webrtc.PeerConnection
 import java.io.Closeable
-import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.io.IOException
-import java.net.Socket
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Wi-Fi Direct TCP 信令层 + WebRTC 音频层的胶水。
- *
- * 帧格式固定为：
- *   4 字节大端长度 Int + UTF-8 JSON
- *
- * TCP 会粘包/半包，永远不要直接按 read(buffer) 当作一条 JSON。
+ * Accept 后的 WebRTC 音频生命周期。Socket、framing 和协议顺序由 SignalingSessionV2 独占。
  */
-class IntercomManager(
+internal class IntercomManager(
     context: Context,
-    private val signalingSocket: Socket,
-    private val isServer: Boolean,
-    private val localRiderName: String,
-    private val localDeviceId: String,
-    private val localDeviceName: String,
-    private val localRuntimeSessionId: RuntimeSessionId,
-    private val expectedRemoteDeviceId: String?,
-    private val expectedRemoteRuntimeSessionId: RuntimeSessionId?,
-    private val requireClaimedRemoteDeviceId: Boolean,
-    private val identityAlreadyExchanged: Boolean = false,
+    private val signalingSession: SignalingSessionV2,
+    private val webRtcRole: WebRtcRole,
     private val onIntercomDisconnected: (IOException) -> Unit,
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
-    private val onRemoteIdentity: (PeerIdentity) -> Unit = {},
     private val onAudioLevelChanged: (Float) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
     private val isSessionCurrent: () -> Boolean
@@ -45,18 +26,10 @@ class IntercomManager(
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val reader: ExecutorService = Executors.newSingleThreadExecutor()
-    private val writer: ExecutorService = Executors.newSingleThreadExecutor()
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private val disconnectedNotified = AtomicBoolean(false)
-    private val protocol = SignalingProtocol(
-        if (isServer) SignalingProtocol.SdpKind.OFFER else SignalingProtocol.SdpKind.ANSWER,
-        identityAlreadySeen = identityAlreadyExchanged
-    )
 
-    private var input: DataInputStream? = null
-    private var output: DataOutputStream? = null
     private var audioEngine: RiderAudioEngine? = null
 
     fun start() {
@@ -67,8 +40,6 @@ class IntercomManager(
             require(RiderAudioEngine.hasRequiredPermissions(appContext)) {
                 "缺少 RECORD_AUDIO 运行时权限"
             }
-            input = DataInputStream(signalingSocket.getInputStream())
-            output = DataOutputStream(signalingSocket.getOutputStream())
             audioEngine = RiderAudioEngine(
                 context = appContext,
                 onLocalSdpGenerated = ::sendLocalSdp,
@@ -86,12 +57,28 @@ class IntercomManager(
             return
         }
 
-        startReader()
-        if (!identityAlreadyExchanged) sendIdentity()
-
-        // Wi-Fi Direct 组员主动发起 Offer；组长只等 Offer，避免双方同时 offer 冲突。
-        if (!isServer) {
+        if (webRtcRole == WebRtcRole.OFFERER) {
             audioEngine?.createOffer()
+        }
+    }
+
+    fun handleRemoteSignaling(message: SignalingMessageV2) {
+        if (closed.get()) return
+        try {
+            Log.d(TAG, "RX signaling frame: type=${message.type}")
+            when (message) {
+                is SignalingMessageV2.Offer ->
+                    audioEngineOrThrow().createAnswer(message.sdpJson)
+                is SignalingMessageV2.Answer ->
+                    audioEngineOrThrow().setRemoteAnswer(message.sdpJson)
+                is SignalingMessageV2.Candidate ->
+                    audioEngineOrThrow().addRemoteIceCandidate(message.candidateJson)
+                else -> throw SignalingV2Exception(
+                    "unexpected media signaling message: ${message.type}"
+                )
+            }
+        } catch (t: Throwable) {
+            onMediaFailure(t)
         }
     }
 
@@ -103,68 +90,16 @@ class IntercomManager(
         } catch (t: Throwable) {
             postError(t)
         }
-        try {
-            signalingSocket.close()
-        } catch (_: Throwable) {
-        }
-
-        reader.shutdownNow()
-        writer.shutdownNow()
+        signalingSession.close()
         audioEngine = null
-        input = null
-        output = null
-    }
-
-    private fun startReader() {
-        reader.execute {
-            try {
-                while (!closed.get()) {
-                    dispatch(protocol.decode(readFrame()))
-                }
-            } catch (t: Throwable) {
-                val failure = t as? IOException ?: IOException("invalid signaling message", t)
-                if (!closed.get()) notifyDisconnected(failure)
-            }
-        }
-    }
-
-    private fun readFrame(): ByteArray {
-        val stream = input ?: throw IOException("信令输入流未初始化")
-        val length = stream.readInt()
-        if (length !in 1..SignalingProtocol.MAX_FRAME_BYTES) {
-            throw IOException("非法信令帧长度: $length")
-        }
-
-        return ByteArray(length).also(stream::readFully)
-    }
-
-    private fun dispatch(message: SignalingProtocol.Message) {
-        Log.d(TAG, "RX signaling frame: type=${message.javaClass.simpleName}")
-        when (message) {
-            is SignalingProtocol.Message.Identity -> {
-                val identity = resolveRemoteIdentity(
-                    message,
-                    expectedRemoteDeviceId,
-                    requireClaimedRemoteDeviceId,
-                    expectedRemoteRuntimeSessionId
-                )
-                postMain { onRemoteIdentity(identity) }
-            }
-            is SignalingProtocol.Message.Offer ->
-                audioEngineOrThrow().createAnswer(message.sdpJson)
-            is SignalingProtocol.Message.Answer ->
-                audioEngineOrThrow().setRemoteAnswer(message.sdpJson)
-            is SignalingProtocol.Message.Candidate ->
-                audioEngineOrThrow().addRemoteIceCandidate(message.candidateJson)
-        }
     }
 
     private fun sendLocalSdp(sdpJson: String) {
         try {
             val type = JsonParser.parseString(sdpJson).asJsonObject.get("type")?.asString
             val message = when (type?.uppercase()) {
-                "OFFER" -> SignalingProtocol.Message.Offer(sdpJson)
-                "ANSWER" -> SignalingProtocol.Message.Answer(sdpJson)
+                "OFFER" -> SignalingMessageV2.Offer(sdpJson)
+                "ANSWER" -> SignalingMessageV2.Answer(sdpJson)
                 else -> throw IOException("未知本地 SDP 类型: $type")
             }
             sendFrame(message)
@@ -173,49 +108,24 @@ class IntercomManager(
         }
     }
 
-    private fun sendIdentity() {
-        try {
-            sendFrame(
-                SignalingProtocol.Message.Identity(
-                    name = localRiderName.trim(),
-                    deviceId = localDeviceId,
-                    runtimeSessionId = localRuntimeSessionId.value,
-                    deviceName = localDeviceName
-                )
-            )
-        } catch (t: Throwable) {
-            postError(t)
-        }
-    }
-
     private fun sendLocalIceCandidate(candidateJson: String) {
         try {
-            sendFrame(SignalingProtocol.Message.Candidate(candidateJson))
+            sendFrame(SignalingMessageV2.Candidate(candidateJson))
         } catch (t: Throwable) {
             postError(t)
         }
     }
 
-    private fun sendFrame(message: SignalingProtocol.Message) {
-        if (closed.get() || writer.isShutdown) return
-        val bytes = protocol.encode(message)
-
-        try {
-            writer.execute {
-                try {
-                    val stream = output ?: throw IOException("信令输出流未初始化")
-                    stream.writeInt(bytes.size)
-                    stream.write(bytes)
-                    stream.flush()
-                    Log.d(TAG, "TX signaling frame: type=${message.javaClass.simpleName} bytes=${bytes.size}")
-                } catch (e: IOException) {
-                    if (!closed.get()) notifyDisconnected(e)
-                } catch (t: Throwable) {
-                    if (!closed.get()) postError(t)
+    private fun sendFrame(message: SignalingMessageV2) {
+        if (closed.get()) return
+        signalingSession.send(message) { result ->
+            result.exceptionOrNull()?.let { failure ->
+                if (!closed.get()) {
+                    notifyDisconnected(
+                        failure as? IOException ?: IOException("signaling send failed", failure)
+                    )
                 }
             }
-        } catch (t: Throwable) {
-            if (!closed.get()) postError(t)
         }
     }
 

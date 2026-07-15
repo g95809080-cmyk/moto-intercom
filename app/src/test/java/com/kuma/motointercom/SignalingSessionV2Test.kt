@@ -98,6 +98,79 @@ class SignalingSessionV2Test {
     }
 
     @Test
+    fun establishedSessionCarriesRequestAcceptAndMediaFramesOnTheSameSocket() {
+        socketPair().use { sockets ->
+            val attempt = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
+            val requesterFuture = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.opener,
+                    physicalRole = PhysicalSocketRole.OPENER,
+                    localDeviceId = DEVICE_A,
+                    localSessionId = SESSION_A,
+                    originatingAttempt = attempt
+                )
+            }
+            val responderFuture = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.acceptor,
+                    physicalRole = PhysicalSocketRole.ACCEPTOR,
+                    localDeviceId = DEVICE_B,
+                    localSessionId = SESSION_B,
+                    originatingAttempt = null,
+                    expectedRemoteTargetLock = attempt.targetLock.copy(
+                        targetDeviceId = DEVICE_A,
+                        expectedRemoteSessionId = RuntimeSessionId(SESSION_A)
+                    )
+                )
+            }
+            val requester = requesterFuture.get(2, TimeUnit.SECONDS)
+            val responder = responderFuture.get(2, TimeUnit.SECONDS)
+            val requesterMessages = java.util.concurrent.LinkedBlockingQueue<SignalingEnvelopeV2>()
+            val responderMessages = java.util.concurrent.LinkedBlockingQueue<SignalingEnvelopeV2>()
+            val failures = java.util.concurrent.LinkedBlockingQueue<Throwable>()
+            try {
+                requester.startReader(requesterMessages::add, failures::add)
+                responder.startReader(responderMessages::add, failures::add)
+
+                assertSendSucceeds(
+                    requester,
+                    SignalingMessageV2.ConnectRequest(RequestTrigger.USER, Transport.LAN)
+                )
+                assertTrue(
+                    responderMessages.poll(2, TimeUnit.SECONDS).message
+                        is SignalingMessageV2.ConnectRequest
+                )
+                assertEquals(SignalingPhase.AWAITING_LOCAL_DECISION, responder.phase)
+
+                assertSendSucceeds(
+                    responder,
+                    SignalingMessageV2.ConnectAccept("Rider B", "Phone B")
+                )
+                assertTrue(
+                    requesterMessages.poll(2, TimeUnit.SECONDS).message
+                        is SignalingMessageV2.ConnectAccept
+                )
+                assertEquals(SignalingPhase.ACCEPTED, requester.phase)
+                assertEquals(SignalingPhase.ACCEPTED, responder.phase)
+
+                assertSendSucceeds(
+                    requester,
+                    SignalingMessageV2.Offer("{\"type\":\"offer\",\"sdp\":\"v=0\"}")
+                )
+                assertTrue(
+                    responderMessages.poll(2, TimeUnit.SECONDS).message
+                        is SignalingMessageV2.Offer
+                )
+                assertEquals(SignalingPhase.READY_TO_SEND_ANSWER, responder.phase)
+                assertTrue(failures.isEmpty())
+            } finally {
+                requester.close()
+                responder.close()
+            }
+        }
+    }
+
+    @Test
     fun simultaneousRequesterHelloChoosesOneWireRequestWithoutUsingSocketRole() {
         socketPair().use { sockets ->
             val attemptA = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
@@ -410,6 +483,15 @@ class SignalingSessionV2Test {
             future.get(2, TimeUnit.SECONDS)
         }
         assertTrue(error.cause is SignalingV2Exception)
+    }
+
+    private fun assertSendSucceeds(
+        session: SignalingSessionV2,
+        message: SignalingMessageV2
+    ) {
+        val result = CompletableFuture<Throwable?>()
+        session.send(message) { result.complete(it.exceptionOrNull()) }
+        assertEquals(null, result.get(2, TimeUnit.SECONDS))
     }
 
     private fun socketPair(): SocketPair = ServerSocket(0).use { server ->

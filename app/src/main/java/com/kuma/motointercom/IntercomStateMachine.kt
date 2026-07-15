@@ -8,7 +8,7 @@ enum class WebRtcConnectionState {
     OTHER
 }
 
-sealed interface SessionEvent {
+internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
     data class IncomingRequest(
@@ -43,6 +43,92 @@ sealed interface SessionEvent {
         val attempt: ConnectionAttempt,
         val peer: PeerIdentity,
         val transport: Transport
+    ) : SessionEvent
+
+    data class ControlChannelVerified(
+        val runtimeSessionId: RuntimeSessionId,
+        val channel: VerifiedControlChannel
+    ) : SessionEvent
+
+    data class IncomingConnectRequest(
+        val runtimeSessionId: RuntimeSessionId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey,
+        val trigger: RequestTrigger,
+        val preferredTransportHint: Transport?,
+        val occurredAtElapsedMs: Long
+    ) : SessionEvent
+
+    data class RemoteConnectAccepted(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey
+    ) : SessionEvent
+
+    data class RemoteConnectRejected(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey,
+        val reason: RejectReason,
+        val retryable: Boolean
+    ) : SessionEvent
+
+    data class RemoteBusy(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey,
+        val reason: BusyReason,
+        val retryAfterMs: Long?
+    ) : SessionEvent
+
+    data class RemoteDisconnect(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey,
+        val reason: DisconnectReason,
+        val recovery: RecoveryAttemptSpec
+    ) : SessionEvent
+
+    data class MediaChannelSelected(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val wireRequestKey: WireRequestKey,
+        val channelId: ControlChannelId?
+    ) : SessionEvent
+
+    data class SignalingMessageSent(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val type: SignalingMessageTypeV2
+    ) : SessionEvent
+
+    data class SignalingSendFailed(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val type: SignalingMessageTypeV2,
+        val reason: String
+    ) : SessionEvent
+
+    data class ChannelClosed(
+        val runtimeSessionId: RuntimeSessionId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey,
+        val recovery: RecoveryAttemptSpec,
+        val reason: String
+    ) : SessionEvent
+
+    data class ProtocolViolation(
+        val runtimeSessionId: RuntimeSessionId,
+        val channelId: ControlChannelId,
+        val wireRequestKey: WireRequestKey,
+        val recovery: RecoveryAttemptSpec,
+        val reason: String
     ) : SessionEvent
 
     data class TargetedTransportOpenFailed(
@@ -98,7 +184,7 @@ sealed interface SessionEvent {
     data class RuntimeStopped(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 }
 
-sealed interface SessionEffect {
+internal sealed interface SessionEffect {
     data class OpenTargetedTransport(
         val attempt: ConnectionAttempt
     ) : SessionEffect
@@ -111,6 +197,65 @@ sealed interface SessionEffect {
     data class RestartDiscovery(
         val runtimeSessionId: RuntimeSessionId,
         val attempt: ConnectionAttempt
+    ) : SessionEffect
+
+    data class SendConnectRequest(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val trigger: RequestTrigger,
+        val preferredTransportHint: Transport?
+    ) : SessionEffect
+
+    data class SendConnectAccept(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId
+    ) : SessionEffect
+
+    data class SendConnectReject(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val reason: RejectReason,
+        val retryable: Boolean
+    ) : SessionEffect
+
+    data class SendBusy(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val reason: BusyReason,
+        val retryAfterMs: Long?
+    ) : SessionEffect
+
+    data class SendDisconnect(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val reason: DisconnectReason
+    ) : SessionEffect
+
+    data class SelectMediaChannel(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val wireRequestKey: WireRequestKey,
+        val cohort: SelectionCohort,
+        val preferredTransport: Transport?
+    ) : SessionEffect
+
+    data class StartWebRtc(
+        val runtimeSessionId: RuntimeSessionId,
+        val attempt: ConnectionAttempt,
+        val channelId: ControlChannelId,
+        val role: WebRtcRole,
+        val peer: PeerIdentity
+    ) : SessionEffect
+
+    data class CloseControlChannel(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId
     ) : SessionEffect
 }
 
@@ -170,6 +315,18 @@ internal fun reduceIntercomState(
     is SessionEvent.AttemptReplaced -> replaceAttempt(current, event.attempt)
 
     is SessionEvent.TunnelReady -> reduceTunnelReady(current, event)
+
+    is SessionEvent.ControlChannelVerified,
+    is SessionEvent.IncomingConnectRequest,
+    is SessionEvent.RemoteConnectAccepted,
+    is SessionEvent.RemoteConnectRejected,
+    is SessionEvent.RemoteBusy,
+    is SessionEvent.RemoteDisconnect,
+    is SessionEvent.MediaChannelSelected,
+    is SessionEvent.SignalingMessageSent,
+    is SessionEvent.SignalingSendFailed,
+    is SessionEvent.ChannelClosed,
+    is SessionEvent.ProtocolViolation -> null
 
     is SessionEvent.TargetedTransportOpenFailed ->
         current.connectionAttemptOrNull()

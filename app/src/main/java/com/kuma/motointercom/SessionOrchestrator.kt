@@ -16,11 +16,13 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 /** A single instance is owned by the foreground service and is the only product-state writer. */
-class SessionOrchestrator(
+internal class SessionOrchestrator(
     private val pairingRepository: PairingRepository,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val onLog: (String) -> Unit = {},
-    private val onError: (Throwable) -> Unit = {}
+    private val onError: (Throwable) -> Unit = {},
+    elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
+    attemptTimeoutMs: Long = 10_000L
 ) : Closeable {
     private data class QueuedEvent(
         val event: SessionEvent,
@@ -32,6 +34,7 @@ class SessionOrchestrator(
     private val events = Channel<QueuedEvent>(Channel.UNLIMITED)
     private val effectChannel = Channel<SessionEffect>(Channel.UNLIMITED)
     private val mutableState = MutableStateFlow<IntercomState>(IntercomState.Offline)
+    private val signalingControl = SignalingControlCoordinator(elapsedRealtime, attemptTimeoutMs)
 
     val state: StateFlow<IntercomState> = mutableState.asStateFlow()
     val effects: Flow<SessionEffect> = effectChannel.receiveAsFlow()
@@ -69,9 +72,25 @@ class SessionOrchestrator(
     internal val currentAttempt: ConnectionAttempt?
         get() = mutableState.value.connectionAttemptOrNull()
 
+    internal val activeControlAttempt: AttemptChannelSet?
+        get() = signalingControl.activeAttempt
+
     private suspend fun handle(event: SessionEvent): Boolean {
-        val transition = reduceIntercomState(mutableState.value, event) ?: return false
+        val previous = mutableState.value
+        val controlDecision = signalingControl.handle(previous, event)
+        if (controlDecision != null) {
+            if (!controlDecision.accepted) return false
+            val next = controlDecision.state ?: previous
+            mutableState.value = next
+            signalingControl.onProductTransition(previous, next, event)
+            maybePersistConnectedPeer(next)
+            controlDecision.effects.forEach { effectChannel.send(it) }
+            return true
+        }
+
+        val transition = reduceIntercomState(previous, event) ?: return false
         mutableState.value = transition.state
+        signalingControl.onProductTransition(previous, transition.state, event)
         maybePersistConnectedPeer(transition.state)
         transition.effects.forEach { effectChannel.send(it) }
         return true

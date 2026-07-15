@@ -512,6 +512,7 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
     var requestRole: RequestRole? = initialRequestRole
         private set
 
+    @Volatile
     var phase: SignalingPhase = if (initialRequestRole == RequestRole.REQUESTER) {
         SignalingPhase.READY_TO_SEND_REQUESTER_HELLO
     } else {
