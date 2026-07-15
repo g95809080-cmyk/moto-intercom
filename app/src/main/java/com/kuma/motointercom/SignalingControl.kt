@@ -73,6 +73,7 @@ internal data class AttemptChannelSet(
     val confirmationSurface: ConfirmationSurface? = null,
     val confirmationActionNonce: String? = null,
     val decisionDeadlineElapsedMs: Long? = null,
+    val remoteDecisionDeadlineElapsedMs: Long? = null,
     val mediaOwnerChannelId: ControlChannelId? = null,
     val selectionCohort: SelectionCohort? = null,
     val terminalOutcome: AttemptOutcome? = null,
@@ -96,6 +97,9 @@ internal data class AttemptChannelSet(
         }
         require(decisionDeadlineElapsedMs == null || decisionDeadlineElapsedMs >= 0L) {
             "Confirmation decision deadline must not be negative"
+        }
+        require(remoteDecisionDeadlineElapsedMs == null || remoteDecisionDeadlineElapsedMs >= 0L) {
+            "Remote decision deadline must not be negative"
         }
         require(mediaOwnerChannelId == null || mediaOwnerChannelId in channelIds) {
             "Media owner must belong to the attempt"

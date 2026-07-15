@@ -36,6 +36,31 @@ class AttemptDeadlineSchedulerTest {
     }
 
     @Test
+    fun sameAttemptCanMoveFromTransportToDecisionDeadline() {
+        var now = 1_000L
+        val posted = mutableListOf<Pair<Runnable, Long>>()
+        val timedOut = mutableListOf<ConnectionAttempt>()
+        val scheduler = AttemptDeadlineScheduler(
+            elapsedRealtime = { now },
+            postDelayed = { callback, delay -> posted += callback to delay },
+            removeCallbacks = {},
+            onTimedOut = timedOut::add
+        )
+        val transportAttempt = attempt("attempt-a", 11_000L)
+        val decisionAttempt = transportAttempt.copy(deadlineElapsedRealtimeMs = 26_000L)
+
+        scheduler.schedule(transportAttempt)
+        now = 2_000L
+        scheduler.schedule(decisionAttempt)
+
+        assertEquals(listOf(10_000L, 24_000L), posted.map { it.second })
+        posted[0].first.run()
+        assertTrue(timedOut.isEmpty())
+        posted[1].first.run()
+        assertEquals(listOf(decisionAttempt), timedOut)
+    }
+
+    @Test
     fun recoveryOpensOnlyItsSinglePlannedTransport() {
         val recovery = attempt("recovery", 5_000L).copy(trigger = ConnectionTrigger.RECOVERY)
         var lanOpened = false

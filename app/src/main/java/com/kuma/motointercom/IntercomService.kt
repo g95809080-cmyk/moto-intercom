@@ -673,9 +673,7 @@ class IntercomService : Service() {
 
         activeMediaChannelId = effect.channelId
         tunnelChosen.set(token.value)
-        if (effect.attempt.trigger == ConnectionTrigger.INBOUND) {
-            attemptDeadlineScheduler.schedule(effect.attempt)
-        }
+        attemptDeadlineScheduler.schedule(effect.attempt)
         lanDiscovery?.close()
         lanDiscovery = null
         if (effect.attempt.channelPlan.transport == Transport.LAN) {
@@ -929,6 +927,11 @@ class IntercomService : Service() {
             }
             is SessionEffect.RestartDiscovery -> {
                 abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
+            }
+            is SessionEffect.RescheduleAttemptDeadline -> {
+                if (orchestrator.currentAttempt == effect.attempt) {
+                    attemptDeadlineScheduler.schedule(effect.attempt)
+                }
             }
             is SessionEffect.SendConnectRequest -> sendControlMessage(
                 effect.runtimeSessionId,

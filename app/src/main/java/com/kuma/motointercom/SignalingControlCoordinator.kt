@@ -654,9 +654,20 @@ internal class SignalingControlCoordinator(
                 event.channelId
             )
         }
+        val acceptedAttempt = context.attempt.copy(
+            deadlineElapsedRealtimeMs = elapsedRealtime() + attemptTimeoutMs
+        )
+        val acceptedState = current.withRebasedAttempt(context.attempt, acceptedAttempt)
+            ?: return closeConflictingChannel(
+                current,
+                event.runtimeSessionId,
+                event.attemptId,
+                event.channelId
+            )
         val losing = context.channelIds - event.channelId
         losing.forEach(channels::remove)
         active = context.copy(
+            attempt = acceptedAttempt,
             channelIds = setOf(event.channelId),
             phase = SignalingAttemptPhase.ACCEPTED,
             mediaOwnerChannelId = event.channelId,
@@ -669,13 +680,13 @@ internal class SignalingControlCoordinator(
                 channelId = it
             )
         } + SessionEffect.StartWebRtc(
-            runtimeSessionId = context.attempt.runtimeSessionId,
-            attempt = context.attempt,
+            runtimeSessionId = acceptedAttempt.runtimeSessionId,
+            attempt = acceptedAttempt,
             channelId = event.channelId,
             role = WebRtcRole.OFFERER,
             peer = context.peer
         )
-        return accepted(state = current, effects = effects)
+        return accepted(state = acceptedState, effects = effects)
     }
 
     private fun remoteConnectRejected(
@@ -815,6 +826,31 @@ internal class SignalingControlCoordinator(
         event: SessionEvent.SignalingMessageSent
     ): SignalingControlDecision {
         val context = active
+        if (
+            event.type == SignalingMessageTypeV2.CONNECT_REQUEST &&
+            context?.phase == SignalingAttemptPhase.WAITING_REMOTE_DECISION &&
+            context.attempt.runtimeSessionId == event.runtimeSessionId &&
+            context.attempt.id == event.attemptId &&
+            event.channelId in context.channelIds &&
+            context.remoteDecisionDeadlineElapsedMs == null
+        ) {
+            // Preserve the receiver's full decision window and one control-path delivery budget.
+            val remoteDecisionDeadline =
+                elapsedRealtime() + confirmationTimeoutMs + attemptTimeoutMs
+            val waitingAttempt = context.attempt.copy(
+                deadlineElapsedRealtimeMs = remoteDecisionDeadline
+            )
+            val waitingState = current.withRebasedAttempt(context.attempt, waitingAttempt)
+                ?: return accepted(state = current)
+            active = context.copy(
+                attempt = waitingAttempt,
+                remoteDecisionDeadlineElapsedMs = remoteDecisionDeadline
+            )
+            return accepted(
+                state = waitingState,
+                effects = listOf(SessionEffect.RescheduleAttemptDeadline(waitingAttempt))
+            )
+        }
         if (
             event.type == SignalingMessageTypeV2.CONNECT_ACCEPT &&
             context?.phase == SignalingAttemptPhase.ACCEPTING &&
@@ -1322,6 +1358,16 @@ internal class SignalingControlCoordinator(
         attemptId,
         channelId
     )
+
+    private fun IntercomState.withRebasedAttempt(
+        previous: ConnectionAttempt,
+        rebased: ConnectionAttempt
+    ): IntercomState? = when (this) {
+        is IntercomState.Connecting -> takeIf { attempt == previous }?.copy(attempt = rebased)
+        is IntercomState.Optimizing -> takeIf { attempt == previous }?.copy(attempt = rebased)
+        is IntercomState.Recovering -> takeIf { attempt == previous }?.copy(attempt = rebased)
+        else -> null
+    }
 
     private fun remember(
         key: WireRequestKey,

@@ -46,7 +46,65 @@ class SignalingControlCoordinatorTest {
             val start = harness.nextEffect() as SessionEffect.StartWebRtc
             assertEquals(channel.channelId, start.channelId)
             assertEquals(WebRtcRole.OFFERER, start.role)
+            assertEquals(10_100L, start.attempt.deadlineElapsedRealtimeMs)
+            assertEquals(start.attempt, harness.orchestrator.currentAttempt)
             assertEquals(AttemptOutcome.ACCEPTED, harness.orchestrator.activeControlAttempt?.terminalOutcome)
+        }
+    }
+
+    @Test
+    fun requesterDecisionWindowDoesNotConsumeMediaDeadline() = runBlocking {
+        harness().use { harness ->
+            val attempt = outboundAttempt()
+            harness.start(attempt)
+            val channel = requesterChannel(CHANNEL_A, attempt)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, channel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_A,
+                        attempt.id,
+                        channel.channelId,
+                        SignalingMessageTypeV2.CONNECT_REQUEST
+                    )
+                )
+            )
+
+            val waiting = harness.nextEffect() as SessionEffect.RescheduleAttemptDeadline
+            assertEquals(25_100L, waiting.attempt.deadlineElapsedRealtimeMs)
+            assertEquals(waiting.attempt, harness.orchestrator.currentAttempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_A,
+                        attempt.id,
+                        channel.channelId,
+                        SignalingMessageTypeV2.CONNECT_REQUEST
+                    )
+                )
+            )
+            assertEquals(waiting.attempt, harness.orchestrator.currentAttempt)
+            assertFalse(harness.hasPendingEffect())
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        channel.channelId,
+                        channel.wireRequestKey
+                    )
+                )
+            )
+            val start = harness.nextEffect() as SessionEffect.StartWebRtc
+            assertEquals(10_100L, start.attempt.deadlineElapsedRealtimeMs)
+            assertEquals(start.attempt, harness.orchestrator.currentAttempt)
         }
     }
 
@@ -1442,6 +1500,8 @@ class SignalingControlCoordinatorTest {
         }
 
         suspend fun nextEffect(): SessionEffect = withTimeout(1_000L) { effectQueue.receive() }
+
+        fun hasPendingEffect(): Boolean = effectQueue.tryReceive().isSuccess
 
         override fun close() {
             orchestrator.close()

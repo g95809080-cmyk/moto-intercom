@@ -225,6 +225,10 @@ internal sealed interface SessionEffect {
         val attempt: ConnectionAttempt
     ) : SessionEffect
 
+    data class RescheduleAttemptDeadline(
+        val attempt: ConnectionAttempt
+    ) : SessionEffect
+
     data class SendConnectRequest(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
