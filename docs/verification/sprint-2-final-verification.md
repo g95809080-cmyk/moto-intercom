@@ -98,7 +98,8 @@ Both databases returned `integrity=ok` during that harness smoke.
 Both installed `base.apk` files matched the local debug APK SHA-256
 `FEDAD7427C51BC2B33FB1EFE058C49B4CDD38BD8001E82F221157E2BFAD92824`.
 The final harness records sanitized database summaries before and after each
-scenario and rejects any change to either installation-stable identity.
+scenario and rejects any change to either installed APK or installation-stable
+identity.
 
 Previously verified checkpoints retained as historical evidence:
 

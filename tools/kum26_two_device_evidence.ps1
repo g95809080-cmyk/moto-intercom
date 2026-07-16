@@ -305,6 +305,12 @@ Get-Content (Join-Path $RunDirectory "database-a-check.txt"),
     Set-Content -Path (Join-Path $RunDirectory "database-check.txt") -Encoding UTF8
 
 $manifestPath = Join-Path $RunDirectory "manifest.txt"
+$expectedApkHash = Get-ManifestValue $manifestPath "apk_sha256"
+$deviceAApkHashAfter = Get-InstalledApkHash $DeviceA
+$deviceBApkHashAfter = Get-InstalledApkHash $DeviceB
+if ($deviceAApkHashAfter -ne $expectedApkHash -or $deviceBApkHashAfter -ne $expectedApkHash) {
+    throw "Installed APK changed during the evidence scenario"
+}
 $deviceAIdentityAfter = Get-InstalledIdentity $DeviceA
 $deviceBIdentityAfter = Get-InstalledIdentity $DeviceB
 if (
@@ -317,6 +323,9 @@ if (
 $resultLines = @(
     "result=$Result",
     "stopped_at=$([DateTimeOffset]::Now.ToString('o'))",
+    "device_a_apk_sha256_after=$deviceAApkHashAfter",
+    "device_b_apk_sha256_after=$deviceBApkHashAfter",
+    "apk_match=true",
     "device_a_identity_after=$deviceAIdentityAfter",
     "device_b_identity_after=$deviceBIdentityAfter",
     "identity_match=true",
