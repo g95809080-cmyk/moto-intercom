@@ -41,7 +41,7 @@ internal class LanDiscoveryCoordinator(
     private val lifecycleLock = Any()
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
-    private val targetAttempt = AtomicReference<ConnectionAttempt?>()
+    private val targetAttempt = LanAttemptLease()
     private val clientConnecting = AtomicBoolean(false)
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
 
@@ -66,13 +66,19 @@ internal class LanDiscoveryCoordinator(
 
     fun connect(attempt: ConnectionAttempt): Boolean {
         if (!isActive() || attempt.channelPlan.transport != Transport.LAN) return false
-        targetAttempt.set(attempt)
+        targetAttempt.bind(attempt)
         connectTargetIfAvailable()
         return true
     }
 
+    fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
+        if (targetAttempt.release(completedAttempt)) {
+            clientConnecting.set(false)
+        }
+    }
+
     private fun connectTargetIfAvailable() {
-        val attempt = targetAttempt.get() ?: return
+        val attempt = targetAttempt.current ?: return
         val device = deviceRegistry.find(attempt.targetLock) ?: return
         if (!clientConnecting.compareAndSet(false, true)) return
         log("正在点名连接车友：${device.name} / ${device.ip}")
@@ -205,7 +211,7 @@ internal class LanDiscoveryCoordinator(
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
-                val attempt = targetAttempt.get()
+                val attempt = targetAttempt.current
                 val session = try {
                     SignalingSessionV2.establish(
                         socket = socket,
@@ -224,14 +230,14 @@ internal class LanDiscoveryCoordinator(
                     acceptedSocket = null
                     continue
                 }
-                if (targetAttempt.get() != attempt) {
+                if (targetAttempt.current != attempt) {
                     session.close()
                     acceptedSocket = null
                     continue
                 }
                 if (handoff(session, attempt)) {
                     acceptedSocket = null
-                    return
+                    continue
                 }
                 acceptedSocket = null
             }
@@ -316,7 +322,7 @@ internal class LanDiscoveryCoordinator(
     ) {
         var socket: Socket? = null
         try {
-            if (!isActive() || targetAttempt.get() != attempt) return
+            if (!isActive() || targetAttempt.current != attempt) return
             socket = Socket()
             socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
             val connected = socket
@@ -331,7 +337,7 @@ internal class LanDiscoveryCoordinator(
                 localDeviceName = deviceName,
                 originatingAttempt = attempt
             )
-            if (targetAttempt.get() != attempt) {
+            if (targetAttempt.current != attempt) {
                 clientConnecting.set(false)
                 session.close()
                 return
@@ -392,7 +398,7 @@ internal class LanDiscoveryCoordinator(
     ): Boolean {
         if (
             !isActive() ||
-            targetAttempt.get() != expectedAttempt ||
+            targetAttempt.current != expectedAttempt ||
             !session.peer.isVerifiedFor(session.targetLock)
         ) {
             session.close()
@@ -424,7 +430,7 @@ internal class LanDiscoveryCoordinator(
         }
         stopNsdDiscovery()
         executor.shutdownNow()
-        targetAttempt.set(null)
+        targetAttempt.clear()
         deviceRegistry.clear()
         onDevicesChanged(emptyList())
     }
@@ -493,5 +499,28 @@ internal class LanDiscoveryCoordinator(
         private const val LAN_BROADCAST_INTERVAL_MS = 1_000L
         private const val NSD_SERVICE_TYPE = "_motocom._tcp."
 
+    }
+}
+
+internal class LanAttemptLease {
+    private val attempt = AtomicReference<ConnectionAttempt?>()
+
+    val current: ConnectionAttempt?
+        get() = attempt.get()
+
+    fun bind(value: ConnectionAttempt) {
+        attempt.set(value)
+    }
+
+    fun release(expected: ConnectionAttempt): Boolean {
+        while (true) {
+            val current = attempt.get() ?: return false
+            if (current != expected) return false
+            if (attempt.compareAndSet(current, null)) return true
+        }
+    }
+
+    fun clear() {
+        attempt.set(null)
     }
 }

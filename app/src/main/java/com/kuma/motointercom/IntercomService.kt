@@ -678,8 +678,7 @@ class IntercomService : Service() {
         activeMediaChannelId = effect.channelId
         tunnelChosen.set(token.value)
         attemptDeadlineScheduler.schedule(effect.attempt)
-        lanDiscovery?.close()
-        lanDiscovery = null
+        lanDiscovery?.retainPassiveIngress(effect.attempt)
         if (effect.attempt.channelPlan.transport == Transport.LAN) {
             val closingTunnel = wifiTunnel
             try {
