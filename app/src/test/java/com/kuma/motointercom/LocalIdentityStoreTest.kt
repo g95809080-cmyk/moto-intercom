@@ -8,7 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -55,12 +55,13 @@ class LocalIdentityStoreTest {
         file: File,
         block: suspend (LocalIdentityStore) -> T
     ): T {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val job = SupervisorJob()
+        val scope = CoroutineScope(job + Dispatchers.IO)
         val dataStore = PreferenceDataStoreFactory.create(scope = scope) { file }
         return try {
             block(DataStoreLocalIdentityStore(dataStore))
         } finally {
-            scope.cancel()
+            job.cancelAndJoin()
         }
     }
 }
