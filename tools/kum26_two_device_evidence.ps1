@@ -172,6 +172,16 @@ function Get-KeyLogLines {
         ForEach-Object { $_.Line } | Select-Object -Last 250)
 }
 
+function Get-ManifestValue {
+    param([string]$Path, [string]$Name)
+    $prefix = "$Name="
+    $line = Get-Content -LiteralPath $Path -Encoding UTF8 |
+        Where-Object { $_.StartsWith($prefix) } |
+        Select-Object -First 1
+    if ($null -eq $line) { throw "Manifest value missing: $Name" }
+    return $line.Substring($prefix.Length)
+}
+
 function New-Manifest {
     param([string]$Directory)
     $worktree = @(git -C $Repository status --porcelain)
@@ -186,6 +196,11 @@ function New-Manifest {
     if ($deviceAApkHash -ne $apkHash -or $deviceBApkHash -ne $apkHash) {
         throw "Installed APK hash does not match the local APK"
     }
+    $deviceAIdentity = Get-InstalledIdentity $DeviceA
+    $deviceBIdentity = Get-InstalledIdentity $DeviceB
+    if ($deviceAIdentity -eq "unavailable" -or $deviceBIdentity -eq "unavailable") {
+        throw "Installed identity unavailable"
+    }
     $lines = @(
         "evidence_type=two physical Android devices",
         "scenario=$Scenario",
@@ -199,12 +214,12 @@ function New-Manifest {
         "device_a_model=$(Get-Prop $DeviceA 'ro.product.model')",
         "device_a_android=$(Get-Prop $DeviceA 'ro.build.version.release')",
         "device_a_sdk=$(Get-Prop $DeviceA 'ro.build.version.sdk')",
-        "device_a_identity=$(Get-InstalledIdentity $DeviceA)",
+        "device_a_identity=$deviceAIdentity",
         "device_b_serial=$DeviceB",
         "device_b_model=$(Get-Prop $DeviceB 'ro.product.model')",
         "device_b_android=$(Get-Prop $DeviceB 'ro.build.version.release')",
         "device_b_sdk=$(Get-Prop $DeviceB 'ro.build.version.sdk')",
-        "device_b_identity=$(Get-InstalledIdentity $DeviceB)",
+        "device_b_identity=$deviceBIdentity",
         "deferred_physical_validation=three simultaneous physical Android devices in one LAN/P2P topology"
     )
     $lines | Set-Content -Path (Join-Path $Directory "manifest.txt") -Encoding UTF8
@@ -229,6 +244,11 @@ if ($Mode -eq "Start") {
     }
     New-Item -ItemType Directory -Force -Path $RunDirectory | Out-Null
     New-Manifest $RunDirectory
+    Write-DatabaseCheck $DeviceA (Join-Path $RunDirectory "database-a-before.txt")
+    Write-DatabaseCheck $DeviceB (Join-Path $RunDirectory "database-b-before.txt")
+    Get-Content (Join-Path $RunDirectory "database-a-before.txt"),
+        (Join-Path $RunDirectory "database-b-before.txt") |
+        Set-Content -Path (Join-Path $RunDirectory "database-before-check.txt") -Encoding UTF8
     (Get-ScenarioInstructions $Scenario) |
         Set-Content -Path (Join-Path $RunDirectory "scenario-instructions.txt") -Encoding UTF8
     "result=NotRun`nnotes=Capture started; Stop has not been called." |
@@ -284,9 +304,22 @@ Get-Content (Join-Path $RunDirectory "database-a-check.txt"),
     (Join-Path $RunDirectory "database-b-check.txt") |
     Set-Content -Path (Join-Path $RunDirectory "database-check.txt") -Encoding UTF8
 
+$manifestPath = Join-Path $RunDirectory "manifest.txt"
+$deviceAIdentityAfter = Get-InstalledIdentity $DeviceA
+$deviceBIdentityAfter = Get-InstalledIdentity $DeviceB
+if (
+    $deviceAIdentityAfter -ne (Get-ManifestValue $manifestPath "device_a_identity") -or
+    $deviceBIdentityAfter -ne (Get-ManifestValue $manifestPath "device_b_identity")
+) {
+    throw "Installed identity changed during the evidence scenario"
+}
+
 $resultLines = @(
     "result=$Result",
     "stopped_at=$([DateTimeOffset]::Now.ToString('o'))",
+    "device_a_identity_after=$deviceAIdentityAfter",
+    "device_b_identity_after=$deviceBIdentityAfter",
+    "identity_match=true",
     "notes=$Notes"
 )
 $resultLines | Set-Content -Path (Join-Path $RunDirectory "scenario-result.txt") -Encoding UTF8

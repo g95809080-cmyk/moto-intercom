@@ -45,7 +45,7 @@ Sprint 4 recovery policy.
 | KUM-26 logical acceptance class | uncommitted candidate | PASS | 6 tests from `M:\` |
 | PC endpoint self-test | working tree | PASS | 4 tests |
 | Working-tree Android unit gate | acceptance working tree | PASS | 168 tests; 0 failures, 0 errors, 0 skipped |
-| Working-tree Lint | acceptance working tree | PASS | 0 errors, 27 warnings |
+| Working-tree Lint | acceptance working tree | PASS | 0 errors, 28 warnings |
 | Working-tree debug assemble | acceptance working tree | PASS | APK SHA-256 `FEDAD7427C51BC2B33FB1EFE058C49B4CDD38BD8001E82F221157E2BFAD92824` |
 | Final committed unit/Lint/assemble gate | final acceptance commit | PENDING | Must bind the committed SHA |
 | Final PR CI | final report commit | PENDING | Must bind the final commit and run ID |
@@ -97,6 +97,8 @@ and database checks while explicitly recording a smoke capture as `NotRun`.
 Both databases returned `integrity=ok` during that harness smoke.
 Both installed `base.apk` files matched the local debug APK SHA-256
 `FEDAD7427C51BC2B33FB1EFE058C49B4CDD38BD8001E82F221157E2BFAD92824`.
+The final harness records sanitized database summaries before and after each
+scenario and rejects any change to either installation-stable identity.
 
 Previously verified checkpoints retained as historical evidence:
 
