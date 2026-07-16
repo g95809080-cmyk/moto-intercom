@@ -166,7 +166,8 @@ internal sealed interface SessionEvent {
 
     data class AttemptTimedOut(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId
+        val attemptId: ConnectionAttemptId,
+        val scheduledDeadlineElapsedRealtimeMs: Long
     ) : SessionEvent
 
     data class TransportOptimizing(
@@ -381,7 +382,13 @@ internal fun reduceIntercomState(
             ?.let { terminateAttempt(current, event.runtimeSessionId, event.attemptId) }
 
     is SessionEvent.AttemptTimedOut ->
-        terminateAttempt(current, event.runtimeSessionId, event.attemptId)
+        current.connectionAttemptOrNull()
+            ?.takeIf {
+                it.runtimeSessionId == event.runtimeSessionId &&
+                    it.id == event.attemptId &&
+                    it.deadlineElapsedRealtimeMs == event.scheduledDeadlineElapsedRealtimeMs
+            }
+            ?.let { terminateAttempt(current, event.runtimeSessionId, event.attemptId) }
 
     is SessionEvent.TransportOptimizing ->
         (current as? IntercomState.Connecting)

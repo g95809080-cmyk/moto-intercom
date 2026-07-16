@@ -315,14 +315,22 @@ class IntercomStateMachineTest {
         val timeout = requireNotNull(
             reduceIntercomState(
                 connecting,
-                SessionEvent.AttemptTimedOut(runtime, attempt.id)
+                SessionEvent.AttemptTimedOut(
+                    runtime,
+                    attempt.id,
+                    attempt.deadlineElapsedRealtimeMs
+                )
             )
         )
         assertTrue(timeout.state is IntercomState.Discovering)
         assertNull(
             reduceIntercomState(
                 connecting,
-                SessionEvent.AttemptTimedOut(runtime, ConnectionAttemptId("attempt-old"))
+                SessionEvent.AttemptTimedOut(
+                    runtime,
+                    ConnectionAttemptId("attempt-old"),
+                    attempt.deadlineElapsedRealtimeMs
+                )
             )
         )
         assertNull(
@@ -385,7 +393,11 @@ class IntercomStateMachineTest {
         assertNull(
             reduceIntercomState(
                 state,
-                SessionEvent.AttemptTimedOut(runtime, attempt.id)
+                SessionEvent.AttemptTimedOut(
+                    runtime,
+                    attempt.id,
+                    attempt.deadlineElapsedRealtimeMs
+                )
             )
         )
         assertEquals(replacement.id, (state as IntercomState.Connecting).attemptId)

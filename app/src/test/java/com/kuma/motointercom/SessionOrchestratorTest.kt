@@ -176,7 +176,11 @@ class SessionOrchestratorTest {
             assertTrue(tunnelAccepted)
 
             val timeoutAccepted = orchestrator.dispatchAndAwait(
-                SessionEvent.AttemptTimedOut(runtime, attempt.id)
+                SessionEvent.AttemptTimedOut(
+                    runtime,
+                    attempt.id,
+                    attempt.deadlineElapsedRealtimeMs
+                )
             )
             assertTrue(timeoutAccepted)
             assertTrue(orchestrator.state.value is IntercomState.Discovering)

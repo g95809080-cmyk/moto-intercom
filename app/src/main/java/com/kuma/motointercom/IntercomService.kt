@@ -76,7 +76,11 @@ class IntercomService : Service() {
         onTimedOut = { attempt ->
             publishLog("Connection attempt timed out: ${attempt.id.value}")
             orchestrator.dispatch(
-                SessionEvent.AttemptTimedOut(attempt.runtimeSessionId, attempt.id)
+                SessionEvent.AttemptTimedOut(
+                    attempt.runtimeSessionId,
+                    attempt.id,
+                    attempt.deadlineElapsedRealtimeMs
+                )
             )
         }
     )

@@ -109,6 +109,77 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun queuedTimeoutCannotTerminateAttemptAfterDeadlineRebase() = runBlocking {
+        harness().use { harness ->
+            val attempt = outboundAttempt()
+            harness.start(attempt)
+            val channel = requesterChannel(CHANNEL_A, attempt)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, channel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_A,
+                        attempt.id,
+                        channel.channelId,
+                        SignalingMessageTypeV2.CONNECT_REQUEST
+                    )
+                )
+            )
+            val waiting = harness.nextEffect() as SessionEffect.RescheduleAttemptDeadline
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AttemptTimedOut(
+                        RUNTIME_A,
+                        attempt.id,
+                        attempt.deadlineElapsedRealtimeMs
+                    )
+                )
+            )
+            assertEquals(waiting.attempt, harness.orchestrator.currentAttempt)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        channel.channelId,
+                        channel.wireRequestKey
+                    )
+                )
+            )
+            val start = harness.nextEffect() as SessionEffect.StartWebRtc
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AttemptTimedOut(
+                        RUNTIME_A,
+                        attempt.id,
+                        waiting.attempt.deadlineElapsedRealtimeMs
+                    )
+                )
+            )
+            assertEquals(start.attempt, harness.orchestrator.currentAttempt)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AttemptTimedOut(
+                        RUNTIME_A,
+                        attempt.id,
+                        start.attempt.deadlineElapsedRealtimeMs
+                    )
+                )
+            )
+            assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+        }
+    }
+
+    @Test
     fun responderAcceptMustBeSentBeforeWebRtcStarts() = runBlocking {
         harness().use { harness ->
             val channel = responderChannel(CHANNEL_A)

@@ -88,7 +88,9 @@ internal class SignalingControlCoordinator(
                 }
                 is SessionEvent.AttemptTimedOut -> if (
                     context.attempt.runtimeSessionId == event.runtimeSessionId &&
-                    context.attempt.id == event.attemptId
+                    context.attempt.id == event.attemptId &&
+                    context.attempt.deadlineElapsedRealtimeMs ==
+                    event.scheduledDeadlineElapsedRealtimeMs
                 ) {
                     remember(
                         context.wireRequestKey,
