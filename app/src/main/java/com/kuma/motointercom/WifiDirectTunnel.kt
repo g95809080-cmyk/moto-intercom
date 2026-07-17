@@ -81,6 +81,7 @@ internal class WifiDirectTunnel(
     private val peerRegistry = WifiDirectPeerRegistry()
     private val peerSessionTracker = DiscoverySessionTracker()
     private val groupValidationGate = WifiDirectGroupValidationGate(SystemClock::elapsedRealtime)
+    private val setupRecoveryGate = WifiDirectSetupRecoveryGate()
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private val peerClaims = linkedMapOf<String, DiscoveryIdentityClaim>()
     @Volatile private var targetAttempt: ConnectionAttempt? = null
@@ -97,9 +98,15 @@ internal class WifiDirectTunnel(
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
-                    val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
-                    if (state != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
+                    val enabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) ==
+                        WifiP2pManager.WIFI_P2P_STATE_ENABLED
+                    val shouldRestartSetup = setupRecoveryGate.updateP2pEnabled(enabled)
+                    if (!enabled) {
+                        resetDiscoveryCandidates()
                         postError(IllegalStateException("Wi-Fi Direct 未开启"))
+                    } else if (shouldRestartSetup && running) {
+                        Log.d(TAG, "Wi-Fi Direct 已恢复，重新初始化服务发现")
+                        setupServiceDiscovery()
                     }
                 }
 
@@ -140,7 +147,7 @@ internal class WifiDirectTunnel(
 
     @SuppressLint("MissingPermission")
     fun discoverPeers() {
-        if (!running) return
+        if (!running || !setupRecoveryGate.isEnabled) return
         if (!serviceDiscoveryReady) {
             Log.d(TAG, "discoverServices skipped: service request not ready")
             return
@@ -255,6 +262,7 @@ internal class WifiDirectTunnel(
         targetAttempt = null
         targetAddress = null
         peerSessionTracker.clear()
+        setupRecoveryGate.cancel()
         resetTunnelOnly()
         cancelPendingRetry()
         cancelConnectWatchdog()
@@ -412,6 +420,7 @@ internal class WifiDirectTunnel(
         channel = p2pManager.initialize(appContext, Looper.getMainLooper()) {
             channel = null
             if (running) {
+                setupRecoveryGate.cancel()
                 initP2p()
                 clearUntrustedGroupBeforeDiscovery()
             }
@@ -463,7 +472,7 @@ internal class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     private fun setupServiceDiscovery() {
         if (!running) return
-        val generation = lifecycleGeneration
+        val setup = setupRecoveryGate.beginSetup() ?: return
         val m = manager ?: return
         val c = channel ?: return
         resetDiscoveryCandidates()
@@ -493,11 +502,11 @@ internal class WifiDirectTunnel(
         serviceRequest = request
 
         try {
-            m.clearLocalServices(c, setupAction(generation, "清理本机 P2P 服务失败", onSuccess = {
-                m.addLocalService(c, serviceInfo, setupAction(generation, "发布 MotoCom P2P 服务失败", onSuccess = {
+            m.clearLocalServices(c, setupAction(setup, "清理本机 P2P 服务失败", onSuccess = {
+                m.addLocalService(c, serviceInfo, setupAction(setup, "发布 MotoCom P2P 服务失败", onSuccess = {
                     Log.d(TAG, "local service publish success: $record")
-                    m.clearServiceRequests(c, setupAction(generation, "清理 P2P 服务请求失败", onSuccess = {
-                        m.addServiceRequest(c, request, setupAction(generation, "添加 MotoCom 服务请求失败", onSuccess = {
+                    m.clearServiceRequests(c, setupAction(setup, "清理 P2P 服务请求失败", onSuccess = {
+                        m.addServiceRequest(c, request, setupAction(setup, "添加 MotoCom 服务请求失败", onSuccess = {
                             serviceDiscoveryReady = true
                             Log.d(TAG, "service request add success type=$SERVICE_TYPE")
                             discoverPeers()
@@ -1120,7 +1129,7 @@ internal class WifiDirectTunnel(
     }
 
     private fun setupAction(
-        generation: Int,
+        setup: WifiDirectSetupRecoveryGate.Session,
         message: String,
         onFailed: () -> Unit = {},
         onSuccess: () -> Unit = {}
@@ -1129,18 +1138,21 @@ internal class WifiDirectTunnel(
         onFailed = onFailed,
         onSuccess = onSuccess,
         onBusy = {
-            Log.w(TAG, "setup BUSY retry setupServiceDiscovery")
-            resetTunnelOnly()
-            mainHandler.postDelayed(
-                { if (isSetupCurrent(generation)) setupServiceDiscovery() },
-                BUSY_RETRY_DELAY_MS
-            )
+            if (setupRecoveryGate.scheduleRetry(setup)) {
+                Log.w(TAG, "setup BUSY retry setupServiceDiscovery")
+                resetTunnelOnly()
+                mainHandler.postDelayed({
+                    if (setupRecoveryGate.takeRetry(setup) && running) {
+                        setupServiceDiscovery()
+                    }
+                }, BUSY_RETRY_DELAY_MS)
+            }
         },
-        isCurrent = { isSetupCurrent(generation) }
+        isCurrent = { isSetupCurrent(setup) }
     )
 
-    private fun isSetupCurrent(generation: Int): Boolean =
-        running && generation == lifecycleGeneration
+    private fun isSetupCurrent(setup: WifiDirectSetupRecoveryGate.Session): Boolean =
+        running && setupRecoveryGate.isCurrent(setup)
 
     private fun discoverAction(
         message: String,
@@ -1154,7 +1166,8 @@ internal class WifiDirectTunnel(
             Log.w(TAG, "discover BUSY retry discoverServices")
             resetTunnelOnly()
             mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
-        }
+        },
+        isCurrent = { running && setupRecoveryGate.isEnabled }
     )
 
     private fun action(
