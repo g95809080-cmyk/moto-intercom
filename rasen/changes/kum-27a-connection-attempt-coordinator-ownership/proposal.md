@@ -7,6 +7,7 @@ KUM-27 cannot safely migrate to one immutable 10-second connection-attempt budge
 - Inventory every creator, scheduler, consumer, canceller, terminal decision, stale guard, and cleanup path associated with a `ConnectionAttempt`.
 - Define the target boundary in which `SessionOrchestrator` remains the only product-state writer and one `ConnectionAttemptCoordinator` owns the logical attempt, immutable total deadline, transport candidates, and winner selection.
 - Define the migration sequence, compatibility phases, old-owner removal points, rollback boundaries, and required tests for KUM-27B.
+- Define unpaired human confirmation as a Coordinator-owned `PendingInboundRequest` outside `ConnectionAttempt`, with atomic accept-to-attempt creation, fail-closed timeout/channel-loss cleanup, and no pending/attempt creation for immediate unavailable or busy responses.
 - Record callback validation requirements for LAN, Wi-Fi Direct, DNS-SD, HELLO, Signaling v2, SDP/ICE, PeerConnection, timeout, notification, recovery, and Service restart paths.
 - Freeze KUM-27A as documentation-only. It does not add the Coordinator, change Android behavior, start a second transport, or implement KUM-28.
 
