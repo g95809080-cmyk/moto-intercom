@@ -1,25 +1,30 @@
 # Sprint 2 Final Verification
 
-Status: **IN PROGRESS — NOT READY TO MERGE**
+Status: **KUM-26 ACCEPTANCE PASSED - PR REMAINS DRAFT**
+
+Evidence state: 2026-07-17
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
 - Branch: `feat/sprint2-signaling-v2`
 - Base: `fb01c3c42f0ba294462532be5ac2b12a0252e62c`
-- Verified production-code baseline: `5825a8fece4772df5c726314e7789450a299b86c`
-- Final report commit: **PENDING**
-- Final GitHub Actions run: **PENDING**
-- Pull request: [#2](https://github.com/g95809080-cmyk/moto-intercom/pull/2) (Draft)
-- Linear: [KUM-26](https://linear.app/kuma999/issue/KUM-26/s26-完成三逻辑节点与两真机-target-lock-协议验收) (In Progress)
+- Verified production-code baseline: `be17580219c1584805ee95450f71740e9e80e33c`
+- Verified APK SHA-256: `8B2E3F5F41415EBE694BAE150169BDEE5ADC14A5ADCAD4E9531C93974597B16A`
+- GitHub Actions: [run 29553954882](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29553954882) - success
+- Pull request: [#2](https://github.com/g95809080-cmyk/moto-intercom/pull/2) - Draft
+- Linear: [KUM-26](https://linear.app/kuma999/issue/KUM-26/s26-完成三逻辑节点与两真机-target-lock-协议验收)
 
-This report is the single evidence index for Sprint 2. PR and Linear updates must
-summarize and link here instead of maintaining separate test totals.
+This report is the single Sprint 2 evidence index. PR and Linear updates must
+link here and must not maintain independent test totals. The report-only commit
+that contains this final index does not change the production-code baseline.
 
 ## Approved evidence boundary
 
-- Device A: MI 6, Android 9.
-- Device B: 2211133C, Android 16.
+- Device A: MI 6 (`9688fa60`), Android 9 / SDK 28.
+- Device B: 2211133C (`efcb9031`), Android 16 / SDK 36.
+- Device A stable identity: `7deb6ceb-323a-473e-9a77-f79e67a4d460`.
+- Device B stable identity: `a74a4aa6-9011-4c38-99fe-aaa993d4c7a5`.
 - Logical node C: deterministic non-target protocol/state/resource test node.
 - PC endpoint: controlled Signaling v2 software endpoint only.
 - A PC, emulator, fake adapter, or JVM node is not a third physical phone.
@@ -30,123 +35,179 @@ Deferred physical validation / Accepted residual risk:
 > while A locks B and C participates in real LAN or Wi-Fi Direct discovery and
 > group formation.
 
-This deferred topology is not claimed as passed and is not a hard dependency for
-the current one-to-one product. It does not authorize KUM-27, Transport Race, or
-Sprint 4 recovery policy.
+This topology was not executed and is not claimed as passed. The approved KUM-26
+gate records it as accepted residual risk for the current one-to-one product. It
+does not authorize KUM-27, Transport Race, or Sprint 4 recovery policy.
 
 ## Automated evidence
 
 | Check | Revision | Result | Evidence |
 | --- | --- | --- | --- |
-| Existing Android unit gate | `5825a8f` | PASS | 162 tests; 0 failures, 0 errors, 0 skipped |
-| Lint | `5825a8f` | PASS | 0 errors, 28 warnings |
-| Debug assemble | `5825a8f` | PASS | `assembleDebug` completed |
-| GitHub Actions | `5825a8f` | PASS | [run 29477315103](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29477315103) |
-| KUM-26 logical acceptance class | uncommitted candidate | PASS | 6 tests from `M:\` |
-| PC endpoint self-test | working tree | PASS | 4 tests |
-| Working-tree Android unit gate | acceptance working tree | PASS | 168 tests; 0 failures, 0 errors, 0 skipped |
-| Working-tree Lint | acceptance working tree | PASS | 0 errors, 28 warnings |
-| Working-tree debug assemble | acceptance working tree | PASS | APK SHA-256 `FEDAD7427C51BC2B33FB1EFE058C49B4CDD38BD8001E82F221157E2BFAD92824` |
-| Final committed unit/Lint/assemble gate | final acceptance commit | PENDING | Must bind the committed SHA |
-| Final PR CI | final report commit | PENDING | Must bind the final commit and run ID |
+| Android unit gate | `be17580` | PASS | 169 tests; 0 failures, 0 errors, 0 skipped; 29 suites |
+| Lint | `be17580` | PASS | 0 errors, 28 warnings |
+| Debug assemble | `be17580` | PASS | APK hash matches both installed devices |
+| GitHub Actions | `be17580` | PASS | [run 29553954882](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29553954882) |
+| KUM-26 logical A/B/C acceptance | `be17580` | PASS | `Kum26LogicalNodeAcceptanceTest` retained in the full gate |
+| Wi-Fi Direct setup recovery | `be17580` | PASS | `WifiDirectSetupRecoveryGateTest` retained in the full gate |
+| Controlled PC Signaling v2 endpoint | `be17580` | PASS | 11 tests in `tools/kum26_peer_test.py` |
 
-The first attempt to run the KUM-26 class from the Unicode checkout failed before
-test execution. The same class passed from the existing `M:\` mapping. This is the
-known AGP/KSP/Kotlin SourceSets path-portability issue, not a product-test failure.
+The final local gate was rerun from the clean detached `be17580` evidence
+worktree with explicit JDK and Android SDK paths:
+
+```text
+testDebugUnitTest: 169 tests, 0 failures / 0 errors / 0 skipped
+lintDebug: 0 errors / 28 warnings
+assembleDebug: PASS
+APK SHA-256: 8B2E3F5F41415EBE694BAE150169BDEE5ADC14A5ADCAD4E9531C93974597B16A
+PC Signaling v2: 11 tests, OK
+```
 
 ## Logical A/B/C and resource evidence
 
-The final automated gate must retain coverage for all of the following:
+The committed automated gate proves all of the following:
 
 - non-target C cannot satisfy A's TargetLock for B;
 - wrong device, wrong runtime, missing identity, empty identity, and malformed
   identity fail closed;
 - a superseded runtime cannot register a control channel as the current Service
   session;
-- a stale accepted activation cannot start WebRTC, retain its Socket, or retain a
-  tunnel claim after the attempt ends;
-- transport-open failure, timeout ordering, and replaced-attempt callbacks cannot
-  leave CONNECTING stuck or take over a newer attempt;
+- stale activation cannot start WebRTC, retain its Socket, or retain a tunnel
+  claim after its attempt ends;
+- transport-open failure, timeout ordering, and replaced-attempt callbacks
+  cannot leave CONNECTING stuck or take over a newer attempt;
 - recovery retains the original TargetLock and single-transport ChannelPlan;
 - rejected paths do not create pre-accept WebRTC or write PairingRepository;
-- a third-party request receives channel-scoped BUSY without replacing the active
-  attempt, wire key, or media owner.
+- a third-party request receives channel-scoped BUSY without replacing the
+  active attempt, wire key, or media owner;
+- P2P-disabled setup does not retry-loop, disabled-to-enabled starts one fresh
+  setup generation, BUSY is deduplicated, and stale setup callbacks cannot
+  control the current generation.
 
-Current status: **TARGETED AND FULL WORKING-TREE TESTS PASS; COMMIT/CI BINDING PENDING**.
+Current status: **PASS**.
 
 ## PC protocol evidence
 
-`tools/kum26_peer_test.py` currently passes four self-tests:
+`tools/kum26_peer_test.py` passes 11 controlled endpoint tests covering framing,
+oversized and truncated frames, identity pinning, exact v2 envelope fields,
+malformed identity, delayed/duplicate responses, timeout, half-close, and Socket
+disconnect behavior.
 
-- frame round trip;
-- oversized-frame rejection before body read;
-- responder runtime identity pinned across frames;
-- exact Signaling v2 envelope keys.
+This is protocol software evidence only. It is not physical-device acceptance.
 
-Prior controlled-device evidence at `5825a8f` showed a real current-Socket HELLO
-and channel-scoped response. Final evidence must continue to label this as a PC
-protocol endpoint, not physical-device acceptance.
-
-Current status: **SELF-TEST PASS; COMMIT/CI BINDING PENDING**.
+Current status: **11/11 PASS**.
 
 ## Two-device physical evidence
 
-Live precheck on 2026-07-16 found both authorized phones online. The evidence
-harness successfully produced manifests, device logs, service/audio snapshots,
-and database checks while explicitly recording a smoke capture as `NotRun`.
-Both databases returned `integrity=ok` during that harness smoke.
-Both installed `base.apk` files matched the local debug APK SHA-256
-`FEDAD7427C51BC2B33FB1EFE058C49B4CDD38BD8001E82F221157E2BFAD92824`.
-The final harness records sanitized database summaries before and after each
-scenario and rejects any change to either installed APK or installation-stable
-identity.
+Raw two-device captures are retained outside Git under:
 
-Previously verified checkpoints retained as historical evidence:
+```text
+C:\Users\kuma\AppData\Local\Temp\motointercom-kum26
+```
 
-- two-device Wi-Fi Direct discovery and current-Socket HELLO;
-- one accepted attempt and one PeerConnection per phone;
-- CONNECTED and disconnect cleanup;
-- delayed high-importance Android 16 notification Reject action with no
-  RiderAudioEngine, WebRTC, or PeerConnection creation;
-- controlled BUSY behavior without replacing the active A/B call;
-- identity restoration and pairing-database integrity after controlled tests.
+Each accepted harness run binds its source commit, APK hash, two device serials,
+installation-stable identities, pre/post database checks, device logs, and
+service/audio state. Raw device logs and databases are not committed.
 
-These checkpoints do not replace the final commit-bound matrix below.
+| Scenario | Accepted capture | Revision | Result |
+| --- | --- | --- | --- |
+| LAN, A requester / B responder | `artifacts\lan-a-requester` | `5825a8f` | PASS |
+| LAN, B requester / A responder | `artifacts\lan-b-requester` | `5825a8f` | PASS |
+| Wi-Fi Direct, A requester / B responder | `physical-20260717-094757-p2p-a-requester-retry` | `1438cb2` | PASS |
+| Wi-Fi Direct, B requester / A responder | `artifacts\20260717-102458-p2p-b-requester` | `1438cb2` | PASS |
+| Restart A | `artifacts\restart-a` | `5825a8f` | PASS |
+| Restart B | `artifacts\20260717-105651-restart-b` | `1438cb2` | PASS |
+| Disconnect initiated by A | LAN A and P2P A accepted captures | mixed | PASS |
+| Disconnect initiated by B | LAN B and P2P B accepted captures | mixed | PASS |
+| Background/lock-screen delayed Reject | [PR evidence comment 4988211942](https://github.com/g95809080-cmyk/moto-intercom/pull/2#issuecomment-4988211942) and KUM-26 attachments | fixed build | PASS |
+| Planned-transport recovery | `artifacts\20260717-121512-network-recovery` | `be17580` | PASS |
+| Database, APK, and identity integrity | all accepted captures; final recovery capture | `be17580` final | PASS |
 
-| Scenario | Required result | Status |
-| --- | --- | --- |
-| LAN, A requester / B responder | Verified identity, CONNECTED, audio, clean disconnect | PENDING |
-| LAN, B requester / A responder | Verified identity, CONNECTED, audio, clean disconnect | PENDING |
-| Wi-Fi Direct, A requester / B responder | Verified identity, CONNECTED, audio, clean disconnect | PENDING |
-| Wi-Fi Direct, B requester / A responder | Verified identity, CONNECTED, audio, clean disconnect | PENDING |
-| Restart A | Runtime rollover; reconnect only to original target | PENDING |
-| Restart B | Old runtime rejected; refreshed target reconnects | PENDING |
-| Disconnect initiated by A | Both sides reach expected terminal/discovery states | PENDING |
-| Disconnect initiated by B | Both sides reach expected terminal/discovery states | PENDING |
-| Background/lock-screen | Current notification action only; no stale action takeover | PENDING |
-| Planned-transport recovery | Original target and plan retained; deterministic exit | PENDING |
-| Database integrity | Both databases `ok`; expected peer records retained | PENDING |
+Only the Wi-Fi Direct setup/recovery production path changed after the earlier
+LAN/P2P/restart captures: `WifiDirectTunnel.kt` and the new
+`WifiDirectSetupRecoveryGate.kt`. The current `be17580` recovery capture
+revalidated initial Wi-Fi Direct discovery, verified
+current-Socket identity, one accepted attempt, one PeerConnection on each phone,
+WebRTC CONNECTED, transport loss cleanup, radio restoration, one fresh setup
+generation, successful service request/discovery, and rediscovery of the same
+stable peer. The full automated gate then passed at `be17580`.
 
-Human listening must be recorded as human evidence. ADB audio-state output alone
-must not be represented as proof that both riders heard intelligible audio.
+The recovery capture closed as `Pass` at 2026-07-17T12:44:22+08:00. Its final
+checks recorded:
+
+```text
+apk_match=true
+identity_match=true
+Device A database integrity=ok
+Device B database integrity=ok
+```
+
+The Android 16 test-only setting `wifi_display_certification_on` was restored to
+`1` after the final capture.
+
+### Human audio evidence
+
+- The accepted P2P A-requester retry records explicit bidirectional human
+  listening confirmation and a call stable for more than 75 seconds.
+- During final recovery closure, the user again confirmed the objective gate
+  passed and intelligible bidirectional listening was heard.
+- ADB recording/playback and VOX state are retained as objective pipeline
+  evidence, but are not used as a substitute for the human listening result.
+
+Current status: **PASS**.
+
+## Superseded and non-passing captures
+
+Failure and NotRun artifacts remain preserved and are not counted as passes:
+
+- `physical-20260717-093621-p2p-a-requester`: failed because one peer left
+  Connected before the requested stable interval;
+- `artifacts\20260717-100358-p2p-b-requester`: NotRun because no attempt started;
+- `artifacts\restart-b`: NotRun because the final reconnect was not completed;
+- `artifacts\20260717-112221-network-recovery`: failed at `1438cb2` and exposed
+  the radio-restore setup defect fixed by `be17580`;
+- harness/commit smoke captures marked NotRun executed no product scenario.
+
+Each required scenario has a later accepted capture listed in the passing matrix.
 
 ## Review evidence
 
-- Review at `5825a8f`: APPROVED, P0 = 0, P1 = 0.
-- Final independent review at the final report commit: **PENDING**.
-- Review base must remain `fb01c3c42f0ba294462532be5ac2b12a0252e62c`.
+Independent architecture review was fixed to:
+
+```text
+Base SHA: fb01c3c42f0ba294462532be5ac2b12a0252e62c
+Head SHA: be17580219c1584805ee95450f71740e9e80e33c
+Result: APPROVED
+P0: 0
+P1: 0
+```
+
+Verified boundaries include current-attempt/current-runtime checks, fail-closed
+Socket identity handling, single product-state ownership, Accept-gated WebRTC,
+P2P setup generation ownership, and cleanup after stale callbacks. This report
+update changes no runtime behavior and does not require another architecture
+review.
 
 ## Gate decision
 
-- KUM-26 may close: **NO**.
-- Sprint 2 may close: **NO**.
-- PR #2 may become Ready: **NO**.
-- PR #2 may merge: **NO**.
-- KUM-27 may start: **NO**.
+| Gate | Decision |
+| --- | --- |
+| KUM-26 Exit Criteria | PASS |
+| Known P0 / P1 | 0 / 0 |
+| KUM-26 may close | YES after this report-only commit's PR CI succeeds |
+| Sprint 2 implementation/evidence gate | PASS |
+| Sprint 2 may close | NO - PR merge and post-merge `main` CI are still required |
+| PR #2 may become Ready | Eligible after report CI, but explicit user approval is required |
+| PR #2 may merge | NO without explicit user approval and final merge gate |
+| KUM-27 may start | NO - Sprint 2 PR must merge and `main` CI must pass first |
+| Production deployment | NO - independent Release Gate and explicit user approval are required |
 
-Blocking evidence:
+PR #2 remains Draft. KUM-27 remains Todo. No merge, release, deployment, branch
+deletion, signing, or production action is authorized by this report.
 
-1. Acceptance assets and this report are not committed or pushed.
-2. The passing 168-test/Lint/assemble gate is not yet bound to a committed and pushed SHA.
-3. The complete two-device matrix has not been captured at the final commit.
-4. Final PR CI and independent review have not run at the final commit.
+## Residual risk and trust boundary
+
+- Accepted residual risk: the deferred three-simultaneous-physical-phone wireless
+  topology described above.
+- Current-Socket identity verification proves channel/target consistency but is
+  not cryptographic authentication against an active same-network attacker.
+- Neither limitation is represented as tested or eliminated.
