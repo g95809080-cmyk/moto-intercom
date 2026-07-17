@@ -17,7 +17,7 @@ internal class WifiDirectSignalingSocket(
     private val connectTimeoutMillis: Int,
     private val retryDelayMillis: Long,
     private val isSessionCurrent: () -> Boolean,
-    private val onReady: (String, Boolean, Socket) -> Unit,
+    private val onReady: (String, PhysicalSocketRole, Socket) -> Unit,
     private val onFailure: (IOException) -> Unit
 ) : Closeable {
     private val closed = AtomicBoolean(false)
@@ -43,7 +43,7 @@ internal class WifiDirectSignalingSocket(
                     try {
                         val socket = server.accept()
                         if (isUsable() && remoteAllowed(socket.inetAddress)) {
-                            handoff(socket, isServer = true)
+                            handoff(socket, PhysicalSocketRole.ACCEPTOR)
                             return@execute
                         }
                         socket.close()
@@ -76,7 +76,7 @@ internal class WifiDirectSignalingSocket(
                     connectingSocket.compareAndSet(candidate, null)
                     val connected = candidate
                     socket = null
-                    handoff(connected, isServer = false)
+                    handoff(connected, PhysicalSocketRole.OPENER)
                     return@execute
                 } catch (t: Throwable) {
                     last = t.asIo("signaling client failed")
@@ -125,7 +125,7 @@ internal class WifiDirectSignalingSocket(
         return true
     }
 
-    private fun handoff(socket: Socket, isServer: Boolean) {
+    private fun handoff(socket: Socket, physicalRole: PhysicalSocketRole) {
         synchronized(lifecycleLock) {
             if (!isUsable() || !socket.isConnected || socket.isClosed ||
                 !terminal.compareAndSet(false, true) || !isUsable()
@@ -134,7 +134,7 @@ internal class WifiDirectSignalingSocket(
                 return
             }
             try {
-                onReady(socket.inetAddress.hostAddress.orEmpty(), isServer, socket)
+                onReady(socket.inetAddress.hostAddress.orEmpty(), physicalRole, socket)
             } catch (t: Throwable) {
                 socket.close()
                 if (isUsable()) onFailure(t.asIo("signaling handoff failed"))

@@ -1,6 +1,7 @@
 package com.kuma.motointercom
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -24,6 +25,8 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     private var intercomState: IntercomState = IntercomState.Offline
     private var lastToggleElapsed = 0L
     private var optionalPermissionRequested = false
+    private var incomingConfirmationDialog: AlertDialog? = null
+    private var incomingConfirmationNonce: String? = null
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 
     private val serviceConnection = object : ServiceConnection {
@@ -33,12 +36,14 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             intercomService = local.service()
             serviceConnected = true
             intercomService?.setListener(this@MainActivity)
+            intercomService?.setAppForeground(true)
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             Log.d(TAG, "service disconnected")
             serviceConnected = false
             intercomService = null
+            dismissIncomingConfirmation()
             setIntercomState(IntercomState.Offline)
             screen.setStatus("后台服务已断开")
         }
@@ -64,8 +69,8 @@ internal class MainActivity : Activity(), IntercomService.Listener {
                     }
                 }
             },
-            onConnectDevice = { device ->
-                intercomService?.connectToLanDevice(device)
+            onConnectPresence = { presence ->
+                intercomService?.connectToPresence(presence)
                     ?: Toast.makeText(this, "后台服务未就绪", Toast.LENGTH_SHORT).show()
             }
         )
@@ -82,11 +87,13 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     }
 
     override fun onStop() {
+        intercomService?.setAppForeground(false)
         intercomService?.setListener(null)
         if (bindingRegistered) unbindService(serviceConnection)
         bindingRegistered = false
         serviceConnected = false
         intercomService = null
+        dismissIncomingConfirmation()
         screen.stopAnimations()
         super.onStop()
     }
@@ -110,6 +117,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
                 if (permissions.indices.any { grantResults.getOrNull(it) != PackageManager.PERMISSION_GRANTED }) {
                     screen.appendLog("通知权限未授予；不影响对讲启动")
                 }
+                intercomService?.refreshConfirmationAvailability()
                 screen.setIntercomState(intercomState, hasCorePermissions())
             }
         }
@@ -135,9 +143,9 @@ internal class MainActivity : Activity(), IntercomService.Listener {
         }
     }
 
-    override fun onLanDevicesChanged(devices: List<LanRiderDevice>) {
+    override fun onPresencesChanged(presences: List<RiderPresence>) {
         runOnUiThread {
-            if (serviceConnected) screen.setLanDevices(devices)
+            if (serviceConnected) screen.setPresences(presences)
         }
     }
 
@@ -164,6 +172,21 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             if (!serviceConnected) return@runOnUiThread
             screen.setRemoteRider(name)
             screen.appendLog("远端骑士昵称：$name")
+        }
+    }
+
+    override fun onIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            showIncomingConfirmation(prompt)
+        }
+    }
+
+    override fun onIncomingConfirmationCanceled(actionNonce: String) {
+        runOnUiThread {
+            if (incomingConfirmationNonce == actionNonce) {
+                dismissIncomingConfirmation()
+            }
         }
     }
 
@@ -243,6 +266,35 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     private fun stopIntercom() {
         screen.setStatus(STOPPING_STATUS)
         intercomService?.requestStop() ?: startService(IntercomService.stopIntent(this))
+    }
+
+    private fun showIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
+        dismissIncomingConfirmation()
+        incomingConfirmationNonce = prompt.actionNonce
+        val riderName = prompt.peer.nickname.ifBlank { "附近车友" }
+        val deviceName = prompt.peer.deviceName.ifBlank { "MotoCom" }
+        incomingConfirmationDialog = AlertDialog.Builder(this)
+            .setTitle("$riderName 请求连接")
+            .setMessage("$deviceName 已通过当前 Socket 身份校验。是否接受本次对讲？")
+            .setNegativeButton("拒绝本次") { _, _ ->
+                incomingConfirmationNonce = null
+                incomingConfirmationDialog = null
+                intercomService?.respondToIncomingConfirmation(prompt, accepted = false)
+            }
+            .setPositiveButton("接受") { _, _ ->
+                incomingConfirmationNonce = null
+                incomingConfirmationDialog = null
+                intercomService?.respondToIncomingConfirmation(prompt, accepted = true)
+            }
+            .setCancelable(false)
+            .create()
+            .also(AlertDialog::show)
+    }
+
+    private fun dismissIncomingConfirmation() {
+        incomingConfirmationDialog?.dismiss()
+        incomingConfirmationDialog = null
+        incomingConfirmationNonce = null
     }
 
     private fun bindIntercomService(

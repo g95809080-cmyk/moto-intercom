@@ -20,6 +20,11 @@ data class PeerIdentity(
     val isDeviceIdVerified: Boolean = false
 )
 
+internal fun PeerIdentity.isVerifiedFor(targetLock: TargetLock): Boolean =
+    isDeviceIdVerified &&
+        deviceId == targetLock.targetDeviceId &&
+        runtimeSessionId == targetLock.expectedRemoteSessionId
+
 sealed interface IntercomState {
     val kind: SessionState
     val runtimeSessionId: RuntimeSessionId?
@@ -51,7 +56,7 @@ sealed interface IntercomState {
         override val kind = SessionState.CONNECTING
         override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
         val attemptId: ConnectionAttemptId = attempt.id
-        val targetDeviceId: String? = attempt.targetDeviceId
+        val targetDeviceId: String = attempt.targetDeviceId
     }
 
     data class Optimizing(
@@ -61,7 +66,7 @@ sealed interface IntercomState {
         override val kind = SessionState.OPTIMIZING
         override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
         val attemptId: ConnectionAttemptId = attempt.id
-        val targetDeviceId: String? = attempt.targetDeviceId
+        val targetDeviceId: String = attempt.targetDeviceId
     }
 
     data class Connected(
@@ -72,7 +77,7 @@ sealed interface IntercomState {
         override val kind = SessionState.CONNECTED
         override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
         val attemptId: ConnectionAttemptId = attempt.id
-        val transport: Transport? = attempt.preferredTransport
+        val transport: Transport = attempt.channelPlan.transport
     }
 
     data class Recovering(
@@ -82,12 +87,12 @@ sealed interface IntercomState {
         override val kind = SessionState.RECOVERING
         override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
         val attemptId: ConnectionAttemptId = attempt.id
-        val targetDeviceId: String? = attempt.targetDeviceId
+        val targetDeviceId: String = attempt.targetDeviceId
     }
 
     data class Resetting(
         override val runtimeSessionId: RuntimeSessionId,
-        val targetDeviceId: String?
+        val targetDeviceId: String
     ) : IntercomState {
         override val kind = SessionState.RESETTING
     }

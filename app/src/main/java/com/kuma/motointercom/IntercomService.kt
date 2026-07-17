@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -22,7 +24,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import org.webrtc.PeerConnection
 import java.io.IOException
-import java.net.Socket
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -33,15 +35,24 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class IntercomService : Service() {
 
+    private data class IncomingActionIdentity(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val channelId: ControlChannelId,
+        val actionNonce: String
+    )
+
     internal interface Listener {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
-        fun onLanDevicesChanged(devices: List<LanRiderDevice>) = Unit
+        fun onPresencesChanged(presences: List<RiderPresence>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
         fun onLog(message: String)
         fun onToast(message: String) = Unit
         fun onRemoteRiderIdentified(name: String) = Unit
+        fun onIncomingConfirmation(prompt: IncomingConfirmationPrompt) = Unit
+        fun onIncomingConfirmationCanceled(actionNonce: String) = Unit
         fun onError(message: String)
     }
 
@@ -53,16 +64,51 @@ class IntercomService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = SessionGeneration()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val presenceAggregator = PresenceAggregator(SystemClock::elapsedRealtime)
 
     private lateinit var identityStore: LocalIdentityStore
     private lateinit var pairingRepository: PairingRepository
     private lateinit var orchestrator: SessionOrchestrator
+    private val attemptDeadlineScheduler = AttemptDeadlineScheduler(
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        onTimedOut = { attempt ->
+            publishLog("Connection attempt timed out: ${attempt.id.value}")
+            orchestrator.dispatch(
+                SessionEvent.AttemptTimedOut(
+                    attempt.runtimeSessionId,
+                    attempt.id,
+                    attempt.deadlineElapsedRealtimeMs
+                )
+            )
+        }
+    )
+    private val incomingConfirmationScheduler = IncomingConfirmationDeadlineScheduler(
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        onTimedOut = { prompt ->
+            orchestrator.dispatch(
+                SessionEvent.IncomingDecisionTimedOut(
+                    runtimeSessionId = prompt.runtimeSessionId,
+                    attemptId = prompt.attemptId,
+                    channelId = prompt.channelId,
+                    actionNonce = prompt.actionNonce,
+                    occurredAtElapsedMs = SystemClock.elapsedRealtime()
+                )
+            )
+        }
+    )
 
     private var listener: Listener? = null
     private var audioRouteController: AudioRouteController? = null
     private var wifiTunnel: WifiDirectTunnel? = null
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
+    private val signalingSessions = linkedMapOf<ControlChannelId, SignalingSessionV2>()
+    private val pendingMediaMessages = linkedMapOf<ControlChannelId, MutableList<SignalingMessageV2>>()
+    private var activeMediaChannelId: ControlChannelId? = null
 
     private var bluetoothReady = false
     private var physicalLinkReady = false
@@ -72,12 +118,14 @@ class IntercomService : Service() {
     private var audioSourceStatus = AUDIO_STANDBY_STATUS
     private var audioSourceBluetooth = false
     private var requestedRiderName = ""
-    private var localRiderName = ""
     private var remoteRiderName: String? = null
+    private var appInForeground = false
+    private var activeIncomingPrompt: IncomingConfirmationPrompt? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var localDeviceId = ""
     private var recoveryGeneration = 0
+    private var presenceExpiryGeneration = 0
     private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
 
     override fun onCreate() {
@@ -87,7 +135,8 @@ class IntercomService : Service() {
         orchestrator = SessionOrchestrator(
             pairingRepository,
             onLog = ::publishLog,
-            onError = ::handleError
+            onError = ::handleError,
+            elapsedRealtime = SystemClock::elapsedRealtime
         )
         serviceScope.launch {
             orchestrator.state.collect { state ->
@@ -97,6 +146,13 @@ class IntercomService : Service() {
         serviceScope.launch {
             orchestrator.effects.collect { effect ->
                 dispatchOnMain { handleSessionEffect(effect) }
+            }
+        }
+        serviceScope.launch {
+            pairingRepository.observeAll().collect { records ->
+                dispatchOnMain {
+                    publishPresenceSnapshot(presenceAggregator.updatePairings(records))
+                }
             }
         }
     }
@@ -121,6 +177,14 @@ class IntercomService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_ACCEPT_INCOMING -> {
+                handleIncomingConfirmationAction(intent, accepted = true)
+                return START_NOT_STICKY
+            }
+            ACTION_REJECT_INCOMING -> {
+                handleIncomingConfirmationAction(intent, accepted = false)
+                return START_NOT_STICKY
+            }
         }
         return START_NOT_STICKY
     }
@@ -137,8 +201,34 @@ class IntercomService : Service() {
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
-        listener?.onLanDevicesChanged(lanDiscovery?.devicesSnapshot().orEmpty())
+        listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
+    }
+
+    internal fun setAppForeground(foreground: Boolean) {
+        dispatchOnMain {
+            appInForeground = foreground
+            publishConfirmationAvailability()
+        }
+    }
+
+    internal fun refreshConfirmationAvailability() {
+        dispatchOnMain(::publishConfirmationAvailability)
+    }
+
+    internal fun respondToIncomingConfirmation(
+        prompt: IncomingConfirmationPrompt,
+        accepted: Boolean
+    ) {
+        dispatchOnMain {
+            dispatchIncomingConfirmationAction(
+                runtimeSessionId = prompt.runtimeSessionId,
+                attemptId = prompt.attemptId,
+                channelId = prompt.channelId,
+                actionNonce = prompt.actionNonce,
+                accepted = accepted
+            )
+        }
     }
 
     fun requestStart(riderName: String = "") {
@@ -155,23 +245,30 @@ class IntercomService : Service() {
         }
     }
 
-    internal fun connectToLanDevice(device: LanRiderDevice) {
+    internal fun connectToPresence(selectedPresence: RiderPresence) {
         mainHandler.post {
             if (activeSession == null || tunnelChosen.get() != NO_SESSION_TOKEN) return@post
             val runtimeSessionId = activeRuntimeSessionId ?: return@post
-            val attempt = createAttempt(
-                runtimeSessionId = runtimeSessionId,
-                targetDeviceId = device.id,
-                trigger = ConnectionTrigger.USER,
-                preferredTransport = Transport.LAN
-            )
+            val presence = presenceAggregator.snapshot().resolveCurrentSelection(selectedPresence)
+            if (presence == null) {
+                publishLog("Ignored stale or unavailable Presence selection")
+                return@post
+            }
+            val targetDeviceId = requireNotNull(presence.deviceId)
+            val targetSessionId = requireNotNull(presence.sessionId)
             orchestrator.dispatch(
-                SessionEvent.ConnectRequested(attempt)
+                SessionEvent.ConnectPresenceRequested(
+                    runtimeSessionId = runtimeSessionId,
+                    attemptId = ConnectionAttemptId.create(),
+                    targetDeviceId = targetDeviceId,
+                    targetSessionId = targetSessionId,
+                    availableTransports = presence.availableTransports,
+                    deadlineElapsedRealtimeMs =
+                        SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
+                )
             ) { accepted ->
-                dispatchOnMain {
-                    if (!accepted || activeRuntimeSessionId != runtimeSessionId) return@dispatchOnMain
-                    publishStatus(PEER_FOUND_STATUS)
-                    lanDiscovery?.connect(device, attempt)
+                if (!accepted) {
+                    dispatchOnMain { publishLog("Presence connection request was rejected") }
                 }
             }
         }
@@ -191,11 +288,12 @@ class IntercomService : Service() {
         bluetoothReady = false
         physicalLinkReady = false
         remoteRiderName = null
-        localRiderName = ""
         tunnelChosen.set(NO_SESSION_TOKEN)
+        publishPresenceSnapshot(presenceAggregator.clear())
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
         orchestrator.dispatch(SessionEvent.RuntimeStarted(runtimeSessionId))
+        publishConfirmationAvailability(runtimeSessionId)
 
         serviceScope.launch {
             try {
@@ -254,29 +352,39 @@ class IntercomService : Service() {
         token: SessionGeneration.Token,
         deviceId: String,
         runtimeSessionId: RuntimeSessionId,
-        attempt: ConnectionAttempt? = null
+        targetAttempt: ConnectionAttempt? = null
     ) {
         publishStatus(SEARCHING_STATUS)
+        val plannedTransports = plannedDiscoveryTransports(targetAttempt)
+        if (Transport.WIFI_DIRECT in plannedTransports) {
         wifiTunnel = WifiDirectTunnel(
             context = this,
-            onTunnelReady = { targetIp, isServer, socket ->
-                onTunnelReady(
-                    token,
-                    targetIp,
-                    isServer,
-                    remoteDeviceId = null,
-                    identityVerificationSource = IdentityVerificationSource.NONE,
-                    attempt = attempt,
-                    transport = Transport.WIFI_DIRECT,
-                    signalingSocket = socket
-                )
+            onControlChannelReady = { session ->
+                registerControlChannel(token, session)
             },
+            localDeviceId = deviceId,
             localNickname = requestedRiderName.ifBlank { "骑士" },
-            sessionId = runtimeSessionId.value,
-            onPeersChanged = {
+            localDeviceName = Build.MODEL.orEmpty(),
+            sessionId = runtimeSessionId,
+            onPeersChanged = { peers ->
                 postForSession(token) {
-                    publishLog("发现附近设备：${it.size}")
-                    if (it.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
+                    publishPresenceSnapshot(
+                        presenceAggregator.replaceCandidates(
+                            Transport.WIFI_DIRECT,
+                            peers.map { peer ->
+                                val address = peer.device.deviceAddress.trim()
+                                DiscoveryCandidate(
+                                    transport = Transport.WIFI_DIRECT,
+                                    endpointId = address.lowercase(Locale.ROOT),
+                                    address = address,
+                                    port = null,
+                                    identity = peer.identity
+                                )
+                            }
+                        )
+                    )
+                    publishLog("发现附近设备：${peers.size}")
+                    if (peers.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
                 }
             },
             onDiscoveryStatus = {
@@ -290,147 +398,288 @@ class IntercomService : Service() {
             },
             onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.start() }
+        }
+        if (Transport.LAN in plannedTransports) {
         lanDiscovery = LanDiscoveryCoordinator(
             context = this,
             token = token,
             isSessionCurrent = ::isSessionCurrent,
             nodeId = deviceId,
+            runtimeSessionId = runtimeSessionId,
             riderName = requestedRiderName.ifBlank { "骑士" },
+            deviceName = Build.MODEL.orEmpty(),
+            protocolVersion = SignalingV2Codec.PROTOCOL_VERSION,
             onDevicesChanged = { devices ->
                 postForSession(token) {
+                    publishPresenceSnapshot(
+                        presenceAggregator.replaceCandidates(
+                            Transport.LAN,
+                            devices.map { device ->
+                                DiscoveryCandidate(
+                                    transport = Transport.LAN,
+                                    endpointId = device.discoveryEndpointId,
+                                    address = device.ip,
+                                    port = device.port,
+                                    identity = DiscoveryIdentityClaim(
+                                        claimedDeviceId = device.deviceId,
+                                        sourceSessionId = device.sessionId,
+                                        nickname = device.name,
+                                        deviceName = device.deviceName,
+                                        protocolVersion = device.protocolVersion
+                                    )
+                                )
+                            }
+                        )
+                    )
                     if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
-                    listener?.onLanDevicesChanged(devices)
                 }
             },
-            onTunnelReady = { ip, server, remoteDeviceId, verificationSource, transportAttempt, socket ->
-                acceptTunnel(
-                    token,
-                    ip,
-                    server,
-                    remoteDeviceId,
-                    verificationSource,
-                    transportAttempt ?: attempt,
-                    Transport.LAN,
-                    socket,
-                    closeWifiDirect = true
-                )
+            onControlChannelReady = { session ->
+                registerControlChannel(token, session)
             },
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.start() }
-    }
-
-    private fun onTunnelReady(
-        token: SessionGeneration.Token,
-        targetIp: String,
-        isServer: Boolean,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
-        attempt: ConnectionAttempt?,
-        transport: Transport,
-        signalingSocket: Socket
-    ) {
-        acceptTunnel(
-            token,
-            targetIp,
-            isServer,
-            remoteDeviceId,
-            identityVerificationSource,
-            attempt,
-            transport,
-            signalingSocket,
-            closeWifiDirect = false
-        )
-    }
-
-    private fun acceptTunnel(
-        token: SessionGeneration.Token,
-        targetIp: String,
-        isServer: Boolean,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
-        suppliedAttempt: ConnectionAttempt?,
-        transport: Transport,
-        signalingSocket: Socket,
-        closeWifiDirect: Boolean
-    ): Boolean {
-        if (!sessions.claimIfCurrent(token) {
-                tunnelChosen.compareAndSet(NO_SESSION_TOKEN, token.value)
-            }
-        ) {
-            return closeStaleSocket(signalingSocket)
         }
-        mainHandler.post {
-            if (!isSessionCurrent(token) || tunnelChosen.get() != token.value) {
-                tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
-                closeStaleSocket(signalingSocket)
-                return@post
+        targetAttempt?.let(::beginTargetedTransport)
+    }
+
+    private fun registerControlChannel(
+        token: SessionGeneration.Token,
+        session: SignalingSessionV2
+    ) {
+        dispatchOnMain {
+            if (
+                !canRegisterControlChannel(
+                    sessionCurrent = isSessionCurrent(token),
+                    currentAttempt = orchestrator.currentAttempt,
+                    session = session
+                )
+            ) {
+                session.close()
+                return@dispatchOnMain
             }
-            val runtimeSessionId = activeRuntimeSessionId
-            if (runtimeSessionId == null) {
-                tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
-                closeStaleSocket(signalingSocket)
-                return@post
-            }
-            val attempt = createTunnelAttempt(
-                runtimeSessionId,
-                suppliedAttempt,
-                remoteDeviceId,
-                identityVerificationSource,
-                transport,
-                isServer
-            )
-            val queued = orchestrator.dispatch(
-                SessionEvent.TunnelReady(
-                    attempt,
-                    remoteDeviceId,
-                    transport,
-                    identityVerificationSource
+
+            signalingSessions.put(session.channel.channelId, session)?.close()
+            val runtimeSessionId = session.pinnedIdentity.localSessionId
+            orchestrator.dispatch(
+                SessionEvent.ControlChannelVerified(
+                    runtimeSessionId = runtimeSessionId,
+                    channel = VerifiedControlChannel(
+                        channelId = session.channel.channelId,
+                        transport = session.channel.transport,
+                        requestRole = session.requestRole,
+                        wireRequestKey = session.wireRequestKey,
+                        targetLock = session.targetLock,
+                        peer = session.peer,
+                        originatingAttempt = session.originatingAttempt
+                    )
                 )
             ) { accepted ->
                 dispatchOnMain {
                     if (
                         !accepted ||
                         !isSessionCurrent(token) ||
-                        tunnelChosen.get() != token.value
+                        signalingSessions[session.channel.channelId] !== session
                     ) {
-                        tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
-                        closeStaleSocket(signalingSocket)
+                        removeSignalingSession(session.channel.channelId, session)
+                        session.close()
                         return@dispatchOnMain
                     }
-                    activateTunnel(
-                        token,
-                        targetIp,
-                        isServer,
-                        remoteDeviceId,
-                        identityVerificationSource,
-                        attempt,
-                        signalingSocket,
-                        closeWifiDirect
+                    publishLog(
+                        "Verified v2 control channel ${session.channel.channelId.value}: " +
+                            "transport=${session.channel.transport} " +
+                            "physicalRole=${session.channel.physicalRole} " +
+                            "requestRole=${session.requestRole} " +
+                            "remote=${session.peer.deviceId}/${session.peer.runtimeSessionId?.value}"
+                    )
+                    session.startReader(
+                        onMessage = { envelope ->
+                            dispatchOnMain {
+                                handleSignalingMessage(token, session, envelope)
+                            }
+                        },
+                        onFailure = { failure ->
+                            dispatchOnMain {
+                                handleSignalingFailure(token, session, failure)
+                            }
+                        }
                     )
                 }
             }
-            if (!queued) {
-                tunnelChosen.compareAndSet(token.value, NO_SESSION_TOKEN)
-                closeStaleSocket(signalingSocket)
-            }
         }
-        return true
     }
 
-    private fun activateTunnel(
+    private fun handleSignalingMessage(
         token: SessionGeneration.Token,
-        targetIp: String,
-        isServer: Boolean,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
-        attempt: ConnectionAttempt,
-        signalingSocket: Socket,
-        closeWifiDirect: Boolean
+        session: SignalingSessionV2,
+        envelope: SignalingEnvelopeV2
     ) {
-        lanDiscovery?.close()
-        lanDiscovery = null
-        if (closeWifiDirect) {
+        if (
+            !isSessionCurrent(token) ||
+            signalingSessions[session.channel.channelId] !== session
+        ) {
+            closeControlChannel(session.channel.channelId)
+            return
+        }
+        val runtimeSessionId = session.pinnedIdentity.localSessionId
+        val channelId = session.channel.channelId
+        val event = when (val message = envelope.message) {
+            is SignalingMessageV2.ConnectRequest -> {
+                publishConfirmationAvailability(runtimeSessionId)
+                SessionEvent.IncomingConnectRequest(
+                    runtimeSessionId = runtimeSessionId,
+                    channelId = channelId,
+                    wireRequestKey = session.wireRequestKey,
+                    trigger = message.trigger,
+                    preferredTransportHint = message.preferredTransportHint,
+                    occurredAtElapsedMs = SystemClock.elapsedRealtime()
+                )
+            }
+            is SignalingMessageV2.ConnectAccept -> SessionEvent.RemoteConnectAccepted(
+                runtimeSessionId,
+                envelope.attemptId,
+                channelId,
+                session.wireRequestKey
+            )
+            is SignalingMessageV2.ConnectReject -> SessionEvent.RemoteConnectRejected(
+                runtimeSessionId,
+                envelope.attemptId,
+                channelId,
+                session.wireRequestKey,
+                message.reason,
+                message.retryable
+            )
+            is SignalingMessageV2.Busy -> SessionEvent.RemoteBusy(
+                runtimeSessionId,
+                envelope.attemptId,
+                channelId,
+                session.wireRequestKey,
+                message.reason,
+                message.retryAfterMs
+            )
+            is SignalingMessageV2.Disconnect -> SessionEvent.RemoteDisconnect(
+                runtimeSessionId,
+                envelope.attemptId,
+                channelId,
+                session.wireRequestKey,
+                message.reason,
+                createRecoverySpec()
+            )
+            is SignalingMessageV2.Offer,
+            is SignalingMessageV2.Answer,
+            is SignalingMessageV2.Candidate -> {
+                val manager = intercomManager
+                    ?.takeIf { activeMediaChannelId == channelId }
+                if (manager == null) {
+                    pendingMediaMessages.getOrPut(channelId, ::mutableListOf) += message
+                } else {
+                    manager.handleRemoteSignaling(message)
+                }
+                return
+            }
+            is SignalingMessageV2.Hello -> SessionEvent.ProtocolViolation(
+                runtimeSessionId,
+                channelId,
+                session.wireRequestKey,
+                createRecoverySpec(),
+                "HELLO is not allowed after channel identity is pinned"
+            )
+        }
+        dispatchControlEvent(session, event)
+    }
+
+    private fun handleSignalingFailure(
+        token: SessionGeneration.Token,
+        session: SignalingSessionV2,
+        failure: Throwable
+    ) {
+        removeSignalingSession(session.channel.channelId, session)
+        pendingMediaMessages.remove(session.channel.channelId)
+        if (!isSessionCurrent(token)) return
+        val runtimeSessionId = session.pinnedIdentity.localSessionId
+        val event = if (failure is SignalingV2Exception) {
+            SessionEvent.ProtocolViolation(
+                runtimeSessionId,
+                session.channel.channelId,
+                session.wireRequestKey,
+                createRecoverySpec(),
+                failure.message.orEmpty()
+            )
+        } else {
+            SessionEvent.ChannelClosed(
+                runtimeSessionId,
+                session.channel.channelId,
+                session.wireRequestKey,
+                createRecoverySpec(),
+                failure.message.orEmpty()
+            )
+        }
+        orchestrator.dispatch(event)
+    }
+
+    private fun dispatchControlEvent(
+        session: SignalingSessionV2,
+        event: SessionEvent
+    ) {
+        orchestrator.dispatch(event) { accepted ->
+            if (!accepted) {
+                dispatchOnMain { closeControlChannel(session.channel.channelId) }
+            }
+        }
+    }
+
+    private fun closeControlChannel(channelId: ControlChannelId) {
+        pendingMediaMessages.remove(channelId)
+        signalingSessions.remove(channelId)?.close()
+    }
+
+    private fun removeSignalingSession(
+        channelId: ControlChannelId,
+        expected: SignalingSessionV2
+    ) {
+        if (signalingSessions[channelId] === expected) {
+            signalingSessions.remove(channelId)
+        }
+    }
+
+    private fun startWebRtc(effect: SessionEffect.StartWebRtc) {
+        val token = activeSession ?: return
+        val controlAttempt = orchestrator.activeControlAttempt
+        if (
+            controlAttempt?.attempt != effect.attempt ||
+            controlAttempt.mediaOwnerChannelId != effect.channelId ||
+            controlAttempt.phase != SignalingAttemptPhase.ACCEPTED ||
+            controlAttempt.terminalOutcome != AttemptOutcome.ACCEPTED
+        ) {
+            return
+        }
+        val session = signalingSessions[effect.channelId]
+        if (
+            session == null ||
+            !canStartWebRtc(
+                sessionCurrent = isSessionCurrent(token),
+                currentAttempt = orchestrator.currentAttempt,
+                expectedAttempt = effect.attempt,
+                session = session,
+                expectedRole = effect.role
+            )
+        ) {
+            closeControlChannel(effect.channelId)
+            return
+        }
+        val existingOwner = activeMediaChannelId
+        if (existingOwner != null && existingOwner != effect.channelId) {
+            closeControlChannel(effect.channelId)
+            return
+        }
+        if (intercomManager != null && existingOwner == effect.channelId) return
+
+        activeMediaChannelId = effect.channelId
+        tunnelChosen.set(token.value)
+        attemptDeadlineScheduler.schedule(effect.attempt)
+        lanDiscovery?.retainPassiveIngress(effect.attempt)
+        if (effect.attempt.channelPlan.transport == Transport.LAN) {
             val closingTunnel = wifiTunnel
             try {
                 closingTunnel?.close {
@@ -446,35 +695,35 @@ class IntercomService : Service() {
 
         physicalLinkReady = true
         mediaConnected = false
+        remoteRiderName = effect.peer.nickname
         publishStatus(SIGNALING_CONNECTED_STATUS)
-        localRiderName = requestedRiderName.ifBlank { if (isServer) "骑士A" else "骑士B" }
-        publishLog("本机骑士昵称：$localRiderName")
 
         val recoverySpec = createRecoverySpec()
         intercomManager = IntercomManager(
             context = this,
-            signalingSocket = signalingSocket,
-            isServer = isServer,
-            localRiderName = localRiderName,
-            localDeviceId = localDeviceId,
-            localRuntimeSessionId = attempt.runtimeSessionId,
-            expectedRemoteDeviceId = attempt.targetDeviceId ?: remoteDeviceId,
-            requireClaimedRemoteDeviceId =
-                !identityVerificationSource.verifiesStableDeviceId,
+            signalingSession = session,
+            webRtcRole = effect.role,
             onIntercomDisconnected = {
-                onIntercomDisconnected(token, attempt, recoverySpec, it)
+                onIntercomDisconnected(token, effect.attempt, recoverySpec, it)
             },
             onConnectionStateChanged = {
-                onConnectionStateChanged(token, attempt, recoverySpec, it)
+                onConnectionStateChanged(token, effect.attempt, recoverySpec, it)
             },
-            onRemoteIdentity = { onRemoteIdentity(token, attempt, it) },
             onAudioLevelChanged = { onAudioLevelChanged(token, it) },
             onError = { error -> postForSession(token) { handleError(error) } },
             isSessionCurrent = { isSessionCurrent(token) }
         ).also {
+            publishLog(
+                "Starting WebRTC after CONNECT_ACCEPT: role=${effect.role} " +
+                    "remote=${effect.peer.deviceId}/${effect.peer.runtimeSessionId?.value}"
+            )
+            listener?.onRemoteRiderIdentified(effect.peer.nickname)
             publishStatus(MEDIA_INITIALIZING_STATUS)
             it.start()
         }
+        pendingMediaMessages.remove(effect.channelId)
+            .orEmpty()
+            .forEach { intercomManager?.handleRemoteSignaling(it) }
 
         updateStageStatus()
     }
@@ -498,6 +747,10 @@ class IntercomService : Service() {
             )
             when (state) {
                 PeerConnection.PeerConnectionState.CONNECTED -> {
+                    activeMediaChannelId
+                        ?.let(signalingSessions::get)
+                        ?.let { runCatching(it::markMediaConnected).onFailure(::handleError) }
+                    attemptDeadlineScheduler.cancel(attempt)
                     mediaConnected = true
                     publishStatus(VOICE_CONNECTED_STATUS)
                 }
@@ -536,14 +789,18 @@ class IntercomService : Service() {
     ) {
         val token = activeSession ?: return
         if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
+        cancelAllIncomingConfirmationSurfaces()
+        attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         val generation = ++recoveryGeneration
+        markDiscoveryUnavailable()
         sessions.invalidate()
         activeSession = null
         val managerToClose = intercomManager
         val lanToClose = lanDiscovery
         val wifiToClose = wifiTunnel
         val audioToClose = audioRouteController
+        val signalingToClose = drainSignalingSessions()
         intercomManager = null
         lanDiscovery = null
         wifiTunnel = null
@@ -551,7 +808,10 @@ class IntercomService : Service() {
 
         AttemptResourceController(
             runtimeSessionId = runtimeSessionId,
-            closeIntercomAndSocket = { managerToClose?.close() },
+            closeIntercomAndSocket = {
+                managerToClose?.close()
+                signalingToClose.forEach(SignalingSessionV2::close)
+            },
             closeLanDiscovery = { lanToClose?.close() },
             closeWifiDirect = { onClosed ->
                 if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
@@ -562,7 +822,6 @@ class IntercomService : Service() {
                 bluetoothReady = false
                 physicalLinkReady = false
                 mediaConnected = false
-                localRiderName = ""
                 remoteRiderName = null
                 publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
                 publishStatus(SIGNAL_LOST_STATUS)
@@ -594,30 +853,6 @@ class IntercomService : Service() {
         ).abortAndResumeDiscovery()
     }
 
-    private fun onRemoteIdentity(
-        token: SessionGeneration.Token,
-        attempt: ConnectionAttempt,
-        peer: PeerIdentity
-    ) {
-        postForSession(token) {
-            val name = peer.nickname
-            remoteRiderName = name
-            orchestrator.dispatch(
-                SessionEvent.RemoteIdentityReceived(
-                    runtimeSessionId = attempt.runtimeSessionId,
-                    attemptId = attempt.id,
-                    peer = peer
-                )
-            )
-            if (peer.deviceId == null) {
-                publishLog("Remote identity has no stable deviceId; pairing will be skipped")
-            }
-            publishLog("已识别远端骑士：$name")
-            listener?.onRemoteRiderIdentified(name)
-            updateStageStatus()
-        }
-    }
-
     private fun onAudioLevelChanged(token: SessionGeneration.Token, level: Float) {
         postForSession(token) { listener?.onAudioLevelChanged(level) }
     }
@@ -628,12 +863,16 @@ class IntercomService : Service() {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
         recoveryGeneration++
+        attemptDeadlineScheduler.cancel()
+        cancelAllIncomingConfirmationSurfaces()
         sessions.invalidate()
         activeSession = null
         activeRuntimeSessionId = null
         localDeviceId = ""
         running = false
         tunnelChosen.set(NO_SESSION_TOKEN)
+        publishPresenceSnapshot(presenceAggregator.clear())
+        drainSignalingSessions().forEach(SignalingSessionV2::close)
         lanDiscovery?.close()
         lanDiscovery = null
 
@@ -658,7 +897,6 @@ class IntercomService : Service() {
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false
-        localRiderName = ""
         remoteRiderName = null
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(ENDED_STATUS)
@@ -683,6 +921,9 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.OpenTargetedTransport -> {
+                beginTargetedTransport(effect.attempt)
+            }
             is SessionEffect.AbortAttemptAndResumeDiscovery -> {
                 publishLog("连接尝试已中止：${effect.attemptId.value}")
                 abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
@@ -690,46 +931,296 @@ class IntercomService : Service() {
             is SessionEffect.RestartDiscovery -> {
                 abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
             }
+            is SessionEffect.RescheduleAttemptDeadline -> {
+                if (orchestrator.currentAttempt == effect.attempt) {
+                    attemptDeadlineScheduler.schedule(effect.attempt)
+                }
+            }
+            is SessionEffect.SendConnectRequest -> sendControlMessage(
+                effect.runtimeSessionId,
+                effect.attemptId,
+                effect.channelId,
+                SignalingMessageV2.ConnectRequest(
+                    effect.trigger,
+                    effect.preferredTransportHint
+                )
+            )
+            is SessionEffect.SendConnectAccept -> sendControlMessage(
+                effect.runtimeSessionId,
+                effect.attemptId,
+                effect.channelId,
+                SignalingMessageV2.ConnectAccept(
+                    nickname = requestedRiderName.ifBlank { "Rider" },
+                    deviceName = Build.MODEL.orEmpty()
+                )
+            )
+            is SessionEffect.SendConnectReject -> sendControlMessage(
+                effect.runtimeSessionId,
+                effect.attemptId,
+                effect.channelId,
+                SignalingMessageV2.ConnectReject(effect.reason, effect.retryable)
+            )
+            is SessionEffect.SendBusy -> sendControlMessage(
+                effect.runtimeSessionId,
+                effect.attemptId,
+                effect.channelId,
+                SignalingMessageV2.Busy(effect.reason, effect.retryAfterMs)
+            )
+            is SessionEffect.SendDisconnect -> sendControlMessage(
+                effect.runtimeSessionId,
+                effect.attemptId,
+                effect.channelId,
+                SignalingMessageV2.Disconnect(effect.reason)
+            )
+            is SessionEffect.SelectMediaChannel -> {
+                val candidates = effect.cohort.channelIds.mapNotNull { channelId ->
+                    signalingSessions[channelId]
+                        ?.takeUnless(SignalingSessionV2::isClosed)
+                        ?.let { MediaChannelCandidate(channelId, it.channel.transport) }
+                }
+                orchestrator.dispatch(
+                    SessionEvent.MediaChannelSelected(
+                        effect.runtimeSessionId,
+                        effect.attemptId,
+                        effect.wireRequestKey,
+                        selectMediaChannel(candidates, effect.preferredTransport)
+                    )
+                )
+            }
+            is SessionEffect.StartWebRtc -> startWebRtc(effect)
+            is SessionEffect.CloseControlChannel -> closeControlChannel(effect.channelId)
+            is SessionEffect.PublishIncomingConfirmation ->
+                publishIncomingConfirmation(effect.prompt)
+            is SessionEffect.CancelIncomingConfirmation -> cancelIncomingConfirmation(effect)
         }
     }
 
-    private fun createAttempt(
-        runtimeSessionId: RuntimeSessionId,
-        targetDeviceId: String?,
-        trigger: ConnectionTrigger,
-        preferredTransport: Transport?
-    ): ConnectionAttempt = ConnectionAttempt(
-        id = ConnectionAttemptId.create(),
-        runtimeSessionId = runtimeSessionId,
-        targetDeviceId = targetDeviceId,
-        trigger = trigger,
-        preferredTransport = preferredTransport,
-        deadlineElapsedRealtimeMs = SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
-    )
+    private fun publishConfirmationAvailability(
+        runtimeSessionId: RuntimeSessionId? = activeRuntimeSessionId
+    ) {
+        val runtime = runtimeSessionId ?: return
+        orchestrator.dispatch(
+            SessionEvent.ConfirmationAvailabilityChanged(
+                runtime,
+                ConfirmationAvailability(
+                    appForeground = appInForeground,
+                    notificationAvailable = isIncomingNotificationAvailable()
+                )
+            )
+        )
+    }
 
-    private fun createTunnelAttempt(
+    private fun publishIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
+        activeIncomingPrompt = prompt
+        incomingConfirmationScheduler.schedule(prompt)
+        when (prompt.surface) {
+            ConfirmationSurface.IN_APP -> {
+                val currentListener = listener
+                if (!appInForeground || currentListener == null) {
+                    reportConfirmationSurfaceUnavailable(prompt)
+                    return
+                }
+                try {
+                    currentListener.onIncomingConfirmation(prompt)
+                } catch (t: Throwable) {
+                    handleError(t)
+                    reportConfirmationSurfaceUnavailable(prompt)
+                }
+            }
+            ConfirmationSurface.NOTIFICATION -> {
+                if (!isIncomingNotificationAvailable()) {
+                    reportConfirmationSurfaceUnavailable(prompt)
+                    return
+                }
+                try {
+                    val manager = getSystemService(NotificationManager::class.java)
+                        ?: throw IllegalStateException("NotificationManager is unavailable")
+                    manager.notify(
+                        INCOMING_NOTIFICATION_ID,
+                        buildIncomingConfirmationNotification(prompt)
+                    )
+                } catch (t: Throwable) {
+                    handleError(t)
+                    reportConfirmationSurfaceUnavailable(prompt)
+                }
+            }
+        }
+    }
+
+    private fun cancelIncomingConfirmation(effect: SessionEffect.CancelIncomingConfirmation) {
+        incomingConfirmationScheduler.cancel(
+            effect.runtimeSessionId,
+            effect.attemptId,
+            effect.actionNonce
+        )
+        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
+        if (activeIncomingPrompt?.actionNonce == effect.actionNonce) {
+            activeIncomingPrompt = null
+        }
+        listener?.onIncomingConfirmationCanceled(effect.actionNonce)
+    }
+
+    private fun cancelAllIncomingConfirmationSurfaces() {
+        val nonce = activeIncomingPrompt?.actionNonce
+        incomingConfirmationScheduler.cancel()
+        activeIncomingPrompt = null
+        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
+        if (nonce != null) listener?.onIncomingConfirmationCanceled(nonce)
+    }
+
+    private fun reportConfirmationSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
+        orchestrator.dispatch(
+            SessionEvent.ConfirmationSurfaceUnavailable(
+                prompt.runtimeSessionId,
+                prompt.attemptId,
+                prompt.channelId,
+                prompt.actionNonce
+            )
+        )
+    }
+
+    private fun dispatchIncomingConfirmationAction(
         runtimeSessionId: RuntimeSessionId,
-        suppliedAttempt: ConnectionAttempt?,
-        remoteDeviceId: String?,
-        identityVerificationSource: IdentityVerificationSource,
-        transport: Transport,
-        isServer: Boolean
-    ): ConnectionAttempt {
-        val verifiedRemoteDeviceId = remoteDeviceId
-            ?.takeIf { identityVerificationSource.verifiesStableDeviceId }
-        if (suppliedAttempt != null) {
-            val target = suppliedAttempt.targetDeviceId ?: verifiedRemoteDeviceId
-            return suppliedAttempt.copy(
-                targetDeviceId = target,
-                preferredTransport = transport
+        attemptId: ConnectionAttemptId,
+        channelId: ControlChannelId,
+        actionNonce: String,
+        accepted: Boolean
+    ) {
+        val occurredAtElapsedMs = SystemClock.elapsedRealtime()
+        val event = if (accepted) {
+            SessionEvent.IncomingAccepted(
+                runtimeSessionId,
+                attemptId,
+                channelId,
+                actionNonce,
+                occurredAtElapsedMs
+            )
+        } else {
+            SessionEvent.IncomingRejected(
+                runtimeSessionId,
+                attemptId,
+                channelId,
+                actionNonce,
+                occurredAtElapsedMs
             )
         }
-        val trigger = when {
-            verifiedRemoteDeviceId == null -> ConnectionTrigger.LEGACY_PROVISIONAL
-            isServer -> ConnectionTrigger.INBOUND
-            else -> ConnectionTrigger.AUTO_DISCOVERY
+        orchestrator.dispatch(event)
+    }
+
+    private fun handleIncomingConfirmationAction(intent: Intent, accepted: Boolean) {
+        val action = runCatching {
+            val runtimeValue = requireNotNull(intent.getStringExtra(EXTRA_RUNTIME_SESSION_ID))
+            val attemptValue = requireNotNull(intent.getStringExtra(EXTRA_ATTEMPT_ID))
+            val channelValue = requireNotNull(intent.getStringExtra(EXTRA_CHANNEL_ID))
+            val nonce = requireNotNull(intent.getStringExtra(EXTRA_ACTION_NONCE))
+            requireCanonicalUuid(runtimeValue, "runtimeSessionId")
+            requireCanonicalUuid(attemptValue, "attemptId")
+            require(nonce.isNotBlank()) { "action nonce is missing" }
+            require(intent.data?.pathSegments?.firstOrNull() == nonce) {
+                "action nonce does not match Intent data"
+            }
+            require(
+                intent.data?.pathSegments?.getOrNull(1) ==
+                    if (accepted) ACTION_PATH_ACCEPT else ACTION_PATH_REJECT
+            ) { "action type does not match Intent data" }
+            IncomingActionIdentity(
+                RuntimeSessionId(runtimeValue),
+                ConnectionAttemptId(attemptValue),
+                ControlChannelId.parse(channelValue),
+                nonce
+            )
+        }.getOrElse {
+            publishLog("Ignored invalid incoming confirmation action: ${it.message}")
+            return
         }
-        return createAttempt(runtimeSessionId, verifiedRemoteDeviceId, trigger, transport)
+        dispatchIncomingConfirmationAction(
+            action.runtimeSessionId,
+            action.attemptId,
+            action.channelId,
+            action.actionNonce,
+            accepted
+        )
+    }
+
+    private fun sendControlMessage(
+        runtimeSessionId: RuntimeSessionId,
+        attemptId: ConnectionAttemptId,
+        channelId: ControlChannelId,
+        message: SignalingMessageV2
+    ) {
+        val session = signalingSessions[channelId]
+        if (
+            session == null ||
+            session.pinnedIdentity.localSessionId != runtimeSessionId ||
+            session.wireRequestKey.attemptId != attemptId
+        ) {
+            orchestrator.dispatch(
+                SessionEvent.SignalingSendFailed(
+                    runtimeSessionId,
+                    attemptId,
+                    channelId,
+                    message.type,
+                    "control channel is unavailable"
+                )
+            )
+            return
+        }
+        session.send(message) { result ->
+            dispatchOnMain {
+                val failure = result.exceptionOrNull()
+                if (failure == null) {
+                    orchestrator.dispatch(
+                        SessionEvent.SignalingMessageSent(
+                            runtimeSessionId,
+                            attemptId,
+                            channelId,
+                            message.type
+                        )
+                    )
+                } else {
+                    removeSignalingSession(channelId, session)
+                    pendingMediaMessages.remove(channelId)
+                    orchestrator.dispatch(
+                        SessionEvent.SignalingSendFailed(
+                            runtimeSessionId,
+                            attemptId,
+                            channelId,
+                            message.type,
+                            failure.message.orEmpty()
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun openTargetedTransport(attempt: ConnectionAttempt): Boolean {
+        if (activeRuntimeSessionId != attempt.runtimeSessionId) return false
+        return openPlannedTransport(
+            attempt,
+            openLan = { lanDiscovery?.connect(it) == true },
+            openWifiDirect = { wifiTunnel?.connect(it) == true }
+        )
+    }
+
+    private fun beginTargetedTransport(attempt: ConnectionAttempt) {
+        attemptDeadlineScheduler.schedule(attempt)
+        val result = runCatching { openTargetedTransport(attempt) }
+        if (result.getOrDefault(false)) {
+            publishStatus(PEER_FOUND_STATUS)
+            return
+        }
+        attemptDeadlineScheduler.cancel(attempt)
+        val reason = result.exceptionOrNull()?.message ?: "transport adapter unavailable"
+        publishLog("Targeted transport open failed for ${attempt.id.value}: $reason")
+        orchestrator.dispatch(
+            SessionEvent.TargetedTransportOpenFailed(
+                runtimeSessionId = attempt.runtimeSessionId,
+                attemptId = attempt.id,
+                transport = attempt.channelPlan.transport,
+                reason = reason
+            )
+        )
     }
 
     private fun createRecoverySpec(): RecoveryAttemptSpec = RecoveryAttemptSpec(
@@ -746,14 +1237,12 @@ class IntercomService : Service() {
             else -> WebRtcConnectionState.OTHER
         }
 
-    private fun closeStaleSocket(socket: Socket): Boolean {
-        return try {
-            socket.close()
-            false
-        } catch (_: IOException) {
-            false
+    private fun drainSignalingSessions(): List<SignalingSessionV2> =
+        signalingSessions.values.toList().also {
+            signalingSessions.clear()
+            pendingMediaMessages.clear()
+            activeMediaChannelId = null
         }
-    }
 
     private fun updateStageStatus() {
         when {
@@ -762,6 +1251,24 @@ class IntercomService : Service() {
             bluetoothReady -> publishStatus(SEARCHING_STATUS)
             running -> publishStatus(SEARCHING_STATUS)
         }
+    }
+
+    private fun publishPresenceSnapshot(snapshot: PresenceSnapshot) {
+        listener?.onPresencesChanged(snapshot.presences)
+        val generation = ++presenceExpiryGeneration
+        val expiry = snapshot.nextExpiryElapsedRealtimeMs ?: return
+        val delayMs = (expiry - SystemClock.elapsedRealtime()).coerceAtLeast(1L)
+        mainHandler.postDelayed({
+            if (generation != presenceExpiryGeneration) return@postDelayed
+            publishPresenceSnapshot(presenceAggregator.expire())
+        }, delayMs)
+    }
+
+    private fun markDiscoveryUnavailable() {
+        presenceAggregator.replaceCandidates(Transport.LAN, emptyList())
+        publishPresenceSnapshot(
+            presenceAggregator.replaceCandidates(Transport.WIFI_DIRECT, emptyList())
+        )
     }
 
     private fun publishStatus(status: String) {
@@ -800,6 +1307,27 @@ class IntercomService : Service() {
         }
     }
 
+    private fun isIncomingNotificationAvailable(): Boolean {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        val manager = getSystemService(NotificationManager::class.java) ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !manager.areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = manager.getNotificationChannel(INCOMING_CHANNEL_ID)
+            if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
+                return false
+            }
+        }
+        return true
+    }
+
     private fun updateNotification() {
         val manager = getSystemService(NotificationManager::class.java) ?: return
         manager.notify(NOTIFICATION_ID, buildNotification())
@@ -830,6 +1358,57 @@ class IntercomService : Service() {
             .build()
     }
 
+    private fun buildIncomingConfirmationNotification(
+        prompt: IncomingConfirmationPrompt
+    ): Notification {
+        ensureIncomingNotificationChannel()
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val acceptIntent = incomingConfirmationPendingIntent(prompt, accepted = true)
+        val rejectIntent = incomingConfirmationPendingIntent(prompt, accepted = false)
+        val riderName = prompt.peer.nickname.ifBlank { "附近车友" }
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, INCOMING_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        return builder
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("$riderName 请求加入对讲")
+            .setContentText("请在 15 秒内接受或拒绝")
+            .setStyle(
+                Notification.BigTextStyle().bigText(
+                    "${prompt.peer.deviceName.ifBlank { "MotoCom" }} · 当前 Socket 身份已验证"
+                )
+            )
+            .setCategory(Notification.CATEGORY_CALL)
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOngoing(false)
+            .setAutoCancel(false)
+            .setContentIntent(contentIntent)
+            .addAction(0, "拒绝本次", rejectIntent)
+            .addAction(0, "接受", acceptIntent)
+            .build()
+    }
+
+    private fun incomingConfirmationPendingIntent(
+        prompt: IncomingConfirmationPrompt,
+        accepted: Boolean
+    ): PendingIntent {
+        return PendingIntent.getService(
+            this,
+            0,
+            incomingConfirmationActionIntent(this, prompt, accepted),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
@@ -842,6 +1421,22 @@ class IntercomService : Service() {
                 "对讲状态提示",
                 NotificationManager.IMPORTANCE_LOW
             )
+        )
+    }
+
+    private fun ensureIncomingNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(INCOMING_CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                INCOMING_CHANNEL_ID,
+                "车友连接请求",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "陌生车友的接受与拒绝操作"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
         )
     }
 
@@ -860,9 +1455,21 @@ class IntercomService : Service() {
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
+        const val ACTION_ACCEPT_INCOMING = "com.kuma.motointercom.action.ACCEPT_INCOMING"
+        const val ACTION_REJECT_INCOMING = "com.kuma.motointercom.action.REJECT_INCOMING"
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
+        private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
+        private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
+        private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
+        private const val EXTRA_ACTION_NONCE = "com.kuma.motointercom.extra.ACTION_NONCE"
+        private const val ACTION_URI_SCHEME = "motointercom"
+        private const val ACTION_URI_AUTHORITY = "incoming"
+        private const val ACTION_PATH_ACCEPT = "accept"
+        private const val ACTION_PATH_REJECT = "reject"
         private const val CHANNEL_ID = "intercom_status"
+        private const val INCOMING_CHANNEL_ID = "incoming_confirmation"
         private const val NOTIFICATION_ID = 2601
+        private const val INCOMING_NOTIFICATION_ID = 2602
         private const val AUDIO_STANDBY_STATUS = "当前音频源：待机"
         private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放（无蓝牙）"
         private const val READY_STATUS = "请点击下方启动对讲"
@@ -882,5 +1489,66 @@ class IntercomService : Service() {
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)
+
+        internal fun incomingConfirmationActionIntent(
+            context: Context,
+            prompt: IncomingConfirmationPrompt,
+            accepted: Boolean
+        ): Intent {
+            val action = if (accepted) ACTION_ACCEPT_INCOMING else ACTION_REJECT_INCOMING
+            val actionPath = if (accepted) ACTION_PATH_ACCEPT else ACTION_PATH_REJECT
+            return Intent(context, IntercomService::class.java)
+                .setAction(action)
+                .setData(
+                    Uri.Builder()
+                        .scheme(ACTION_URI_SCHEME)
+                        .authority(ACTION_URI_AUTHORITY)
+                        .appendPath(prompt.actionNonce)
+                        .appendPath(actionPath)
+                        .build()
+                )
+                .putExtra(EXTRA_RUNTIME_SESSION_ID, prompt.runtimeSessionId.value)
+                .putExtra(EXTRA_ATTEMPT_ID, prompt.attemptId.value)
+                .putExtra(EXTRA_CHANNEL_ID, prompt.channelId.value)
+                .putExtra(EXTRA_ACTION_NONCE, prompt.actionNonce)
+        }
     }
 }
+
+internal fun canActivateTunnel(
+    accepted: Boolean,
+    sessionCurrent: Boolean,
+    tunnelClaimed: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    expectedAttempt: ConnectionAttempt
+): Boolean = accepted && sessionCurrent && tunnelClaimed && currentAttempt == expectedAttempt
+
+internal fun canRegisterControlChannel(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    session: SignalingSessionV2
+): Boolean {
+    val attempt = session.originatingAttempt
+    return !session.isClosed &&
+        sessionCurrent &&
+        (attempt == null || currentAttempt == attempt) &&
+        (attempt == null || attempt.channelPlan.transport == session.channel.transport) &&
+        (attempt == null || attempt.targetLock == session.targetLock) &&
+        session.peer.isVerifiedFor(session.targetLock)
+}
+
+internal fun canStartWebRtc(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    expectedAttempt: ConnectionAttempt,
+    session: SignalingSessionV2,
+    expectedRole: WebRtcRole
+): Boolean = !session.isClosed &&
+    sessionCurrent &&
+    currentAttempt == expectedAttempt &&
+    session.wireRequestKey.attemptId == expectedAttempt.id &&
+    session.channel.transport == expectedAttempt.channelPlan.transport &&
+    session.targetLock == expectedAttempt.targetLock &&
+    session.peer.isVerifiedFor(expectedAttempt.targetLock) &&
+    session.requestRole.webRtcRole == expectedRole &&
+    session.phase in setOf(SignalingPhase.ACCEPTED, SignalingPhase.READY_TO_SEND_ANSWER)

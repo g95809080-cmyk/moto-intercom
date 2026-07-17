@@ -5,19 +5,16 @@ internal class WifiDirectPeerRegistry {
 
     data class Snapshot(
         val pending: Set<String>,
-        val accepted: Set<String>,
-        val selected: String?
+        val accepted: Set<String>
     )
 
     private val pending = linkedSetOf<String>()
     private val accepted = linkedSetOf<String>()
-    private var selected: String? = null
 
     @Synchronized
     fun reconcile(current: Set<String>): Snapshot {
         pending.retainAll(current)
         accepted.retainAll(current)
-        if (selected !in accepted) selected = accepted.firstOrNull()
         return snapshot()
     }
 
@@ -31,7 +28,6 @@ internal class WifiDirectPeerRegistry {
     fun accept(address: String): Snapshot {
         pending -= address
         accepted += address
-        if (selected == null) selected = address
         return snapshot()
     }
 
@@ -39,11 +35,26 @@ internal class WifiDirectPeerRegistry {
     fun isAccepted(address: String): Boolean = address in accepted
 
     @Synchronized
-    fun matchGroup(isGroupOwner: Boolean, owner: String?, clients: List<String>): GroupMatch {
+    fun findAcceptedAddress(
+        claims: Map<String, DiscoveryIdentityClaim>,
+        targetLock: TargetLock
+    ): String? = accepted.asSequence()
+        .filter { claims[it]?.matches(targetLock) == true }
+        .minOrNull()
+
+    @Synchronized
+    fun matchGroup(
+        expectedRemoteAddress: String?,
+        isGroupOwner: Boolean,
+        owner: String?,
+        clients: List<String>
+    ): GroupMatch {
+        val expected = expectedRemoteAddress ?: return GroupMatch.REJECTED
         val remote = (if (isGroupOwner) clients.singleOrNull() else owner)
             ?: return GroupMatch.REJECTED
+        if (!expected.equals(remote, ignoreCase = true)) return GroupMatch.REJECTED
         return when {
-            selected?.equals(remote, ignoreCase = true) == true -> GroupMatch.MATCHED
+            accepted.any { it.equals(remote, ignoreCase = true) } -> GroupMatch.MATCHED
             pending.any { it.equals(remote, ignoreCase = true) } -> GroupMatch.PENDING
             else -> GroupMatch.REJECTED
         }
@@ -53,9 +64,8 @@ internal class WifiDirectPeerRegistry {
     fun reset() {
         pending.clear()
         accepted.clear()
-        selected = null
     }
 
     @Synchronized
-    fun snapshot(): Snapshot = Snapshot(pending.toSet(), accepted.toSet(), selected)
+    fun snapshot(): Snapshot = Snapshot(pending.toSet(), accepted.toSet())
 }
