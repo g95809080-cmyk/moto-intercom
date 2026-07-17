@@ -21,17 +21,22 @@ data class TargetLock(
     }
 }
 
-data class ChannelPlan(
-    val plannedTransports: Set<Transport>
-) {
+class ChannelPlan(plannedTransports: Set<Transport>) {
     init {
         require(plannedTransports.size == 1) {
             "Sprint 2 connection attempts must plan exactly one transport"
         }
     }
 
-    val transport: Transport
-        get() = plannedTransports.single()
+    val transport: Transport = plannedTransports.single()
+    val plannedTransports: Set<Transport> = setOf(transport)
+
+    override fun equals(other: Any?): Boolean =
+        this === other || other is ChannelPlan && transport == other.transport
+
+    override fun hashCode(): Int = transport.hashCode()
+
+    override fun toString(): String = "ChannelPlan(plannedTransports=$plannedTransports)"
 
     companion object {
         fun single(transport: Transport): ChannelPlan = ChannelPlan(setOf(transport))

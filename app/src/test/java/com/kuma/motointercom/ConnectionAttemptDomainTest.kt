@@ -135,6 +135,19 @@ class ConnectionAttemptDomainTest {
     }
 
     @Test
+    fun channelPlanSnapshotsMutableInput() {
+        val source = mutableSetOf(Transport.LAN)
+        val plan = ChannelPlan(source)
+
+        source.clear()
+        source += Transport.WIFI_DIRECT
+
+        assertEquals(Transport.LAN, plan.transport)
+        assertEquals(setOf(Transport.LAN), plan.plannedTransports)
+        assertEquals(ChannelPlan.single(Transport.LAN), plan)
+    }
+
+    @Test
     fun cancelHasDistinctTerminalOutcome() {
         assertEquals(
             ConnectionAttemptTerminalOutcome.CANCELED,
