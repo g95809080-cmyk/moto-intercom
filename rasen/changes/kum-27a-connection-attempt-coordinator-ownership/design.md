@@ -78,7 +78,7 @@ Paired inbound auto-accept creates the inbound attempt immediately because no hu
 - [x] KUM-27A Rasen artifacts validate strictly.
 - [x] Full Android test, lint, and assemble gate passes on the artifact head.
 - [x] Draft PR CI passes.
-- [ ] Independent architecture review returns APPROVED, P0=0, P1=0.
+- [x] Independent architecture review returns APPROVED, P0=0, P1=0.
 
 Every checklist item must be complete before KUM-27B may open.
 
