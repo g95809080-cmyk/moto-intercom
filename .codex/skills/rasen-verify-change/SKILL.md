@@ -1,0 +1,196 @@
+---
+name: rasen-verify-change
+description: Verify implementation matches change artifacts. Use when the user wants to validate that implementation is complete, correct, and coherent before archiving.
+license: MIT
+compatibility: Requires rasen CLI.
+metadata:
+  author: rasen
+  version: "1.0"
+  generatedBy: "0.1.3"
+---
+
+Verify that an implementation matches the change artifacts (specs, tasks, design).
+
+**Store selection:** If the user names a store (a store is a standalone Rasen repo registered on this machine) or the work lives in one, run `rasen store list --json` to discover registered store ids and project ids (the `type` field on each entry), then pass `--store <id>` (or `--project <id>` for a project registered via `store add-project`) on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, and the top-level `context`). The `rasen pipeline` inspection group (`pipeline list`, `pipeline show`, `pipeline agents`, `pipeline classify`, `pipeline resume`) also accepts `--store <id>`/`--project <id>` and resolves its root exactly like `validate` — in a store- or project-scoped run you MUST thread the SAME flag onto `pipeline resume <change>` so it reads the change's run-state from that root's change directory, not the cwd. `--store` and `--project` are mutually exclusive on one invocation — pass only one. A store and a project may share the same id (they are separate namespaces); a bare id with neither flag always means the store namespace. Commands outside those two groups do not take either flag — in particular `rasen agent context` (the agent-runtime probe) is NOT the same command as the top-level `rasen context` and does NOT accept `--store`/`--project`; do not paste either flag onto it. Hints printed by commands already carry the right flag; keep it on follow-ups. Without a store or project flag, commands act on the nearest local `rasen/` root.
+
+**Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
+
+**Steps**
+
+1. **If no change name provided, prompt for selection**
+
+   Run `rasen list --json` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+
+   Show changes that have implementation tasks (tasks artifact exists).
+   Include the schema used for each change if available.
+   Mark changes with incomplete tasks as "(In Progress)".
+
+   **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+
+2. **Check status to understand the schema**
+   ```bash
+   rasen status --change "<name>" --json
+   ```
+   Parse the JSON to understand:
+   - `schemaName`: The workflow being used (e.g., "spec-driven")
+   - `planningHome`, `changeRoot`, `artifactPaths`, and `actionContext`: path and scope context
+   - Which artifacts exist for this change
+
+3. **Get planning context and load artifacts**
+
+   ```bash
+   rasen instructions apply --change "<name>" --json
+   ```
+
+   This returns the change directory and `contextFiles` (artifact ID -> array of concrete file paths). Read all available artifacts from `contextFiles`.
+
+4. **Initialize verification report structure**
+
+   Create a report structure with three dimensions:
+   - **Completeness**: Track tasks and spec coverage
+   - **Correctness**: Track requirement implementation and scenario coverage
+   - **Coherence**: Track design adherence and pattern consistency
+
+   Each dimension can have CRITICAL, WARNING, or SUGGESTION issues.
+
+5. **Verify Completeness**
+
+   **Task Completion**:
+   - If `contextFiles.tasks` exists, read every file path in it
+   - Parse checkboxes: `- [ ]` (incomplete) vs `- [x]` (complete)
+   - Count complete vs total tasks
+   - If incomplete tasks exist:
+     - Add CRITICAL issue for each incomplete task
+     - Recommendation: "Complete task: <description>" or "Mark as done if already implemented"
+
+   **Spec Coverage**:
+   - If delta specs exist in `contextFiles.specs`:
+     - Extract all requirements (marked with "### Requirement:")
+     - For each requirement:
+       - Search codebase for keywords related to the requirement
+       - Assess if implementation likely exists
+     - If requirements appear unimplemented:
+       - Add CRITICAL issue: "Requirement not found: <requirement name>"
+       - Recommendation: "Implement requirement X: <description>"
+
+6. **Verify Correctness**
+
+   **Requirement Implementation Mapping**:
+   - For each requirement from delta specs:
+     - Search codebase for implementation evidence
+     - If found, note file paths and line ranges
+     - Assess if implementation matches requirement intent
+     - If divergence detected:
+       - Add WARNING: "Implementation may diverge from spec: <details>"
+       - Recommendation: "Review <file>:<lines> against requirement X"
+
+   **Scenario Coverage**:
+   - For each scenario in delta specs (marked with "#### Scenario:"):
+     - Check if conditions are handled in code
+     - Check if tests exist covering the scenario
+     - If scenario appears uncovered:
+       - Add WARNING: "Scenario not covered: <scenario name>"
+       - Recommendation: "Add test or implementation for scenario: <description>"
+
+7. **Verify Coherence**
+
+   **Design Adherence**:
+   - If `contextFiles.design` exists:
+     - Extract key decisions (look for sections like "Decision:", "Approach:", "Architecture:")
+     - Verify implementation follows those decisions
+     - If contradiction detected:
+       - Add WARNING: "Design decision not followed: <decision>"
+       - Recommendation: "Update implementation or revise design.md to match reality"
+   - If no design.md: Skip design adherence check, note "No design.md to verify against"
+
+   **Code Pattern Consistency**:
+   - Review new code for consistency with project patterns
+   - Check file naming, directory structure, coding style
+   - If significant deviations found:
+     - Add SUGGESTION: "Code pattern deviation: <details>"
+     - Recommendation: "Consider following project pattern: <example>"
+
+8. **Generate Verification Report**
+
+   **Summary Scorecard**:
+   ```
+   ## Verification Report: <change-name>
+
+   ### Summary
+   | Dimension    | Status           |
+   |--------------|------------------|
+   | Completeness | X/Y tasks, N reqs|
+   | Correctness  | M/N reqs covered |
+   | Coherence    | Followed/Issues  |
+   ```
+
+   **Issues by Priority**:
+
+   1. **CRITICAL** (Must fix before archive):
+      - Incomplete tasks
+      - Missing requirement implementations
+      - Each with specific, actionable recommendation
+
+   2. **WARNING** (Should fix):
+      - Spec/design divergences
+      - Missing scenario coverage
+      - Each with specific recommendation
+
+   3. **SUGGESTION** (Nice to fix):
+      - Pattern inconsistencies
+      - Minor improvements
+      - Each with specific recommendation
+
+   **Final Assessment**:
+   - If CRITICAL issues: "X critical issue(s) found. Fix before archiving."
+   - If only warnings: "No critical issues. Y warning(s) to consider. Ready for archive (with noted improvements)."
+   - If all clear: "All checks passed. Ready for archive."
+
+   **Canonical verdict (machine contract)**: Map the issues above onto the canonical Blocker/Major/Minor/Trivial scale defined by the `canonical-severity-vocabulary` in the expert PREAMBLE (reference it; do NOT re-define the scale): CRITICAL (incomplete tasks, missing requirement implementation) → **Blocker**; WARNING (spec/design divergence, missing scenario coverage) → **Major**; SUGGESTION (pattern inconsistency, minor improvement) → **Minor**, or **Trivial** for pure cosmetics. Finding content overrides the label (a divergence that causes data loss maps to Blocker).
+
+   Emit ONE machine-checkable status line, into both the report and the conversation:
+
+   ```
+   VERIFY VERDICT: <CLEAN|BLOCKED> — Blocker:<n> Major:<n> Minor:<n> Trivial:<n>
+   ```
+
+   The verdict is **CLEAN if and only if no Blocker and no Major is open**, matching the review-cycle termination invariant; otherwise **BLOCKED**. The "Ready for archive" / "Fix before archiving" prose above is human narration — this status line is the machine contract. (This standardizes the vocabulary and the pass rule only; it does not by itself enforce an archive refusal.)
+
+9. **Save Report**
+
+   Write the full verification result to `verification-report.md` in the change's work directory (resolve `workDir` from `rasen status --change <name> --json`; fall back to the change directory when it is absent or the file already lives there) — the summary scorecard, the `VERIFY VERDICT:` status line, and the grouped findings (Blocker/Major/Minor/Trivial, each with its recommendation). This is verify-change's canonical evidence artifact that `/rasen:ship`'s pre-flight looks for. Emitting the result only to the conversation is NOT sufficient.
+
+   **Test-evidence block (only when you ran tests/gates)**: if this verification executed the project's test or gate command(s), append a fingerprinted test-evidence block so `/rasen:ship`'s evidence-based test-skip gate can honor it — the same schema `review-cycle-report.md` records:
+
+   ```
+   TEST EVIDENCE
+   - command: <exact command(s) run>
+   - result: pass | fail
+   - tree: <git rev-parse HEAD^{tree}>
+   ```
+
+   If this verification did NOT run tests, write no test-evidence block — ship then correctly re-runs (it skips on proof, never on hope).
+
+**Verification Heuristics**
+
+- **Completeness**: Focus on objective checklist items (checkboxes, requirements list)
+- **Correctness**: Use keyword search, file path analysis, reasonable inference - don't require perfect certainty
+- **Coherence**: Look for glaring inconsistencies, don't nitpick style
+- **False Positives**: When uncertain, prefer SUGGESTION over WARNING, WARNING over CRITICAL
+- **Actionability**: Every issue must have a specific recommendation with file/line references where applicable
+
+**Graceful Degradation**
+
+- If only tasks.md exists: verify task completion only, skip spec/design checks
+- If tasks + specs exist: verify completeness and correctness, skip design
+- If full artifacts: verify all three dimensions
+- Always note which checks were skipped and why
+
+**Output Format**
+
+Use clear markdown with:
+- Table for summary scorecard
+- Grouped lists for issues (CRITICAL/WARNING/SUGGESTION)
+- Code references in format: `file.ts:123`
+- Specific, actionable recommendations
+- No vague suggestions like "consider reviewing"

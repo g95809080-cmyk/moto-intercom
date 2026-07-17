@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-17
+goal: Freeze current and target attempt, deadline, callback, state, winner, and
+  cleanup ownership before KUM-27B.
