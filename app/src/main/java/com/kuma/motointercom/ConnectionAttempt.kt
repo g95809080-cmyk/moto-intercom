@@ -54,6 +54,22 @@ data class ConnectionAttempt(
 
     val targetDeviceId: String
         get() = targetLock.targetDeviceId
+
+    val preferredTransport: Transport
+        get() = channelPlan.transport
+
+    val deadlineAt: MonotonicTimestamp
+        get() = MonotonicTimestamp(deadlineElapsedRealtimeMs)
+
+    fun isExpiredAt(now: MonotonicTimestamp): Boolean =
+        now.elapsedRealtimeMs >= deadlineElapsedRealtimeMs
+
+    fun accepts(event: ConnectionAttemptEventContext): Boolean =
+        event.attemptId == id &&
+            event.targetDeviceId == targetDeviceId &&
+            !isExpiredAt(event.observedAt)
+
+    fun isStale(event: ConnectionAttemptEventContext): Boolean = !accepts(event)
 }
 
 data class RecoveryAttemptSpec(
