@@ -31,7 +31,7 @@ pipeline delivery gates, not additional implementation tasks.
 - [x] 2.5 Add deterministic JVM coverage for one creation owner, duplicate
   intent rejection, recovery identity/target/plan retention, and
   first-terminal-wins ordering.
-- [ ] 2.6 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
+- [x] 2.6 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
   `assembleDebug`, GitHub CI, and fixed-SHA read-only architecture review.
 - [x] 2.7 Remediate the first review P0 by latching local terminal cleanup
   ahead of queued WebRTC, signaling, and owner-channel recovery callbacks.
@@ -40,18 +40,31 @@ Delivery gate after apply: deliver B2 as one atomic commit on Draft PR #4,
 complete fixed-SHA review with P0=0/P1=0, and synchronize Linear evidence while
 keeping KUM-27 In Progress. B3 may start only after this gate passes.
 
+### B2 Gate Record
+
+- Implementation Head `8b3a35eea4e0d949693ae5d166c3f155958557ab`:
+  Review Round 1 REQUEST CHANGES, P0=1, P1=0.
+- Remediation Head `aeb3926cf50b9b0f6345f6883111468ea1a971e1`:
+  local terminal cleanup blocks queued WebRTC, signaling, and owner-channel
+  recovery callbacks without consuming a recovery ID.
+- Review Round 2: APPROVED, P0=0, P1=0, B2 complete YES, B3 allowed YES.
+- Verification: 193 JVM tests passed; Lint 0 Fatal/0 Error/34 warnings;
+  `assembleDebug` passed; Rasen strict validation 1/1.
+- GitHub CI `29643472892`: success at the remediation Head.
+
 ## 3. B3: Immutable Total Deadline Ownership
 
-Deferred. Not authorized and contains no executable tasks in this checkpoint.
+Authorized after the B2 gate; not started and contains no executable tasks
+until the B3 scope is frozen.
 
 ## 4. B4: Callback, Candidate And Cleanup Lifecycle
 
-Deferred. Not authorized and contains no executable tasks in this checkpoint.
+Deferred until the B3 gate and contains no executable tasks in this checkpoint.
 
 ## 5. B5: Adapter Remaining-Time Contract
 
-Deferred. Not authorized and contains no executable tasks in this checkpoint.
+Deferred until the B4 gate and contains no executable tasks in this checkpoint.
 
 ## 6. B6: Full Regression And Physical Verification
 
-Deferred. Not authorized and contains no executable tasks in this checkpoint.
+Deferred until the B5 gate and contains no executable tasks in this checkpoint.
