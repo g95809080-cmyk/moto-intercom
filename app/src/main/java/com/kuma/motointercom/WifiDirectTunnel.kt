@@ -50,8 +50,19 @@ internal class WifiDirectTunnel(
     private val onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {},
     private val onDiscoveryStatus: (String) -> Unit = {},
     private val onDisconnected: () -> Unit = {},
-    private val onError: (Throwable) -> Unit = {}
+    private val onError: (Throwable) -> Unit = {},
+    private val monotonicClock: MonotonicClock = MonotonicClock {
+        MonotonicTimestamp(SystemClock.elapsedRealtime())
+    }
 ) : Closeable {
+
+    private data class TargetedTaskContext(
+        val attemptContext: AttemptTaskContext,
+        val targetAddress: String?
+    ) {
+        val attempt: ConnectionAttempt
+            get() = attemptContext.attempt
+    }
 
     private enum class State {
         DISCOVERING,
@@ -80,16 +91,20 @@ internal class WifiDirectTunnel(
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
     private val peerRegistry = WifiDirectPeerRegistry()
     private val peerSessionTracker = DiscoverySessionTracker()
-    private val groupValidationGate = WifiDirectGroupValidationGate(SystemClock::elapsedRealtime)
+    private val groupValidationGate = WifiDirectGroupValidationGate {
+        monotonicClock.now().elapsedRealtimeMs
+    }
     private val setupRecoveryGate = WifiDirectSetupRecoveryGate()
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private val peerClaims = linkedMapOf<String, DiscoveryIdentityClaim>()
     @Volatile private var targetAttempt: ConnectionAttempt? = null
     @Volatile private var targetAddress: String? = null
+    private var targetAttemptGeneration = 0
     private var pendingRetryAttempt = 0
     private var pendingRetryGeneration = 0
     private var pendingRetryScheduled = false
     private var connectWatchdogGeneration = 0
+    private var groupRemovalGeneration = 0
     private var lifecycleGeneration = 0
     private var serviceDiscoveryReady = false
     private val closeLock = Any()
@@ -122,10 +137,19 @@ internal class WifiDirectTunnel(
                     } else if (state == State.P2P_CONNECTING) {
                         Log.d(TAG, "ignore disconnected broadcast while connecting: $connectingAddress")
                     } else {
-                        resetTunnelOnly()
+                        val taskContext = currentTargetContext()
+                        if (
+                            taskContext != null &&
+                            !isTargetedContextIdentityCurrent(taskContext)
+                        ) return
+                        resetTunnelOnly(taskContext)
                         state = State.DISCOVERING
-                        if (running) mainHandler.post { onDisconnected() }
-                        if (running && !removingGroup) discoverPeers()
+                        if (isCapturedTaskCurrent(taskContext)) {
+                            mainHandler.post {
+                                if (isCapturedTaskCurrent(taskContext)) onDisconnected()
+                            }
+                        }
+                        if (isCapturedTaskCurrent(taskContext) && !removingGroup) discoverPeers()
                     }
                 }
             }
@@ -158,12 +182,14 @@ internal class WifiDirectTunnel(
         try {
             val peers = peerRegistry.snapshot()
             Log.d(TAG, "discoverServices start pending=${peers.pending.size} accepted=${peers.accepted.size}")
+            val taskContext = currentTargetContext()
             m.discoverServices(
                 c,
                 discoverAction(
                     "开始搜索 MotoCom 服务失败",
                     onFailed = { Log.w(TAG, "discoverServices failure") },
-                    onSuccess = { Log.d(TAG, "discoverServices success") }
+                    onSuccess = { Log.d(TAG, "discoverServices success") },
+                    taskContext = taskContext
                 )
             )
         } catch (t: Throwable) {
@@ -172,7 +198,15 @@ internal class WifiDirectTunnel(
     }
 
     fun connect(attempt: ConnectionAttempt): Boolean {
-        if (!running || attempt.channelPlan.transport != Transport.WIFI_DIRECT) return false
+        if (
+            !running ||
+            attempt.channelPlan.transport != Transport.WIFI_DIRECT ||
+            attempt.remainingMillis(monotonicClock) <= 0L
+        ) return false
+        groupValidationGate.cancel()
+        validatingGroup = false
+        cancelConnectWatchdog()
+        targetAttemptGeneration++
         targetAttempt = attempt
         targetAddress = null
         connectTargetIfAvailable()
@@ -181,7 +215,7 @@ internal class WifiDirectTunnel(
 
     @SuppressLint("MissingPermission")
     private fun connectTarget(device: WifiP2pDevice, attempt: ConnectionAttempt) {
-        if (!running || targetAttempt != attempt) return
+        if (!isTargetedAttemptCurrent(attempt)) return
         val address = normalizedAddress(device.deviceAddress)
         if (!peerRegistry.isAccepted(address)) {
             logPeer(device, accepted = false, reason = "未发布 MotoCom DNS-SD 身份")
@@ -195,7 +229,8 @@ internal class WifiDirectTunnel(
         val c = channel ?: return
         targetAddress = address
         connectingAddress = address
-        startConnectWatchdog(address)
+        val taskContext = currentTargetContext(address) ?: return
+        startConnectWatchdog(taskContext)
 
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
@@ -210,12 +245,23 @@ internal class WifiDirectTunnel(
                 c,
                 config,
                 action("连接 ${device.deviceName} 失败", onFailed = {
+                    if (!isTargetedContextCurrent(taskContext)) return@action
                     cancelConnectWatchdog()
                     connectingAddress = null
                     state = State.DISCOVERING
-                })
+                }, onBusy = {
+                    if (!isTargetedContextCurrent(taskContext)) return@action
+                    resetTunnelOnly(taskContext)
+                    val delay = boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS)
+                        ?: return@action
+                    mainHandler.postDelayed(
+                        { if (isTargetedContextCurrent(taskContext)) discoverPeers() },
+                        delay
+                    )
+                }, isCurrent = { isTargetedContextCurrent(taskContext) })
             )
         } catch (t: Throwable) {
+            if (!isTargetedContextCurrent(taskContext)) return
             cancelConnectWatchdog()
             connectingAddress = null
             state = State.DISCOVERING
@@ -225,6 +271,7 @@ internal class WifiDirectTunnel(
 
     private fun connectTargetIfAvailable() {
         val attempt = targetAttempt ?: return
+        if (!isTargetedAttemptCurrent(attempt)) return
         val address = peerRegistry.findAcceptedAddress(peerClaims, attempt.targetLock) ?: run {
             targetAddress = null
             return
@@ -233,6 +280,29 @@ internal class WifiDirectTunnel(
         targetAddress = address
         if (device.status == WifiP2pDevice.AVAILABLE) connectTarget(device, attempt)
     }
+
+    private fun currentTargetContext(address: String? = targetAddress): TargetedTaskContext? {
+        val attempt = targetAttempt ?: return null
+        return TargetedTaskContext(
+            attemptContext = AttemptTaskContext(attempt, targetAttemptGeneration),
+            targetAddress = address
+        )
+    }
+
+    private fun isTargetedAttemptCurrent(attempt: ConnectionAttempt): Boolean =
+        running &&
+            attempt.remainingMillis(monotonicClock) > 0L &&
+            targetAttempt?.hasSameImmutableIdentity(attempt) == true
+
+    private fun isTargetedContextIdentityCurrent(context: TargetedTaskContext): Boolean =
+        running &&
+            context.attemptContext.generation == targetAttemptGeneration &&
+            context.attemptContext.matchesAttempt(targetAttempt) &&
+            (context.targetAddress == null || targetAddress == context.targetAddress)
+
+    private fun isTargetedContextCurrent(context: TargetedTaskContext): Boolean =
+        isTargetedContextIdentityCurrent(context) &&
+            context.attempt.remainingMillis(monotonicClock) > 0L
 
     override fun close() = close {}
 
@@ -259,6 +329,8 @@ internal class WifiDirectTunnel(
         val cleanupGeneration = ++lifecycleGeneration
         Log.d(TAG, "close cleanup start generation=$cleanupGeneration")
         running = false
+        groupRemovalGeneration++
+        targetAttemptGeneration++
         targetAttempt = null
         targetAddress = null
         peerSessionTracker.clear()
@@ -431,41 +503,59 @@ internal class WifiDirectTunnel(
     private fun clearUntrustedGroupBeforeDiscovery() {
         val m = manager ?: return
         val c = channel ?: return
+        val taskContext = currentTargetContext()
         try {
             m.requestGroupInfo(c) { group ->
-                if (!running) return@requestGroupInfo
+                if (!isCapturedTaskCurrent(taskContext)) return@requestGroupInfo
                 if (group == null) {
-                    cancelPendingConnectThenDiscover()
+                    cancelPendingConnectThenDiscover(taskContext)
                 } else {
                     Log.w(TAG, "启动时发现未验证 P2P group，主动清理: ${groupSummary(group)}")
-                    removeGroupAndRediscover("启动时存在未验证 P2P group")
+                    removeGroupAndRediscover(
+                        "启动时存在未验证 P2P group",
+                        taskContext = taskContext
+                    )
                 }
             }
         } catch (t: Throwable) {
-            postError(t)
+            if (isCapturedTaskCurrent(taskContext)) postError(t)
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun cancelPendingConnectThenDiscover() {
+    private fun cancelPendingConnectThenDiscover(taskContext: TargetedTaskContext? = null) {
         val m = manager ?: return
         val c = channel ?: return
+        val removalGeneration = ++groupRemovalGeneration
         removingGroup = true
-        val finish: () -> Unit = {
+        val finish: () -> Unit = finish@{
+            if (removalGeneration != groupRemovalGeneration) return@finish
             removingGroup = false
-            mainHandler.postDelayed(
-                { if (running) setupServiceDiscovery() },
-                GROUP_REMOVAL_SETTLE_MS
-            )
+            val delay = boundedTaskDelay(taskContext, GROUP_REMOVAL_SETTLE_MS)
+            if (delay != null && isCapturedTaskCurrent(taskContext)) {
+                mainHandler.postDelayed(
+                    { if (isCapturedTaskCurrent(taskContext)) setupServiceDiscovery() },
+                    delay
+                )
+            }
             Unit
         }
         try {
             m.cancelConnect(c, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = finish()
-                override fun onFailure(reason: Int) = finish()
+                override fun onSuccess() {
+                    if (removalGeneration != groupRemovalGeneration) return
+                    if (isCapturedTaskCurrent(taskContext)) finish() else removingGroup = false
+                }
+
+                override fun onFailure(reason: Int) {
+                    if (removalGeneration != groupRemovalGeneration) return
+                    if (isCapturedTaskCurrent(taskContext)) finish() else removingGroup = false
+                }
             })
         } catch (_: Throwable) {
-            finish()
+            if (removalGeneration == groupRemovalGeneration) {
+                if (isCapturedTaskCurrent(taskContext)) finish() else removingGroup = false
+            }
         }
     }
 
@@ -726,61 +816,96 @@ internal class WifiDirectTunnel(
         if (!running) return
         val m = manager ?: return
         val c = channel ?: return
+        val taskContext = currentTargetContext()
+        if (taskContext != null && !isTargetedContextCurrent(taskContext)) return
 
         try {
-            m.requestConnectionInfo(c) { info -> handleConnectionInfo(info) }
+            m.requestConnectionInfo(c) { info -> handleConnectionInfo(info, taskContext) }
         } catch (t: Throwable) {
-            postError(t)
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
         }
     }
 
-    private fun handleConnectionInfo(info: WifiP2pInfo) {
+    private fun handleConnectionInfo(
+        info: WifiP2pInfo,
+        taskContext: TargetedTaskContext?
+    ) {
         if (!running) return
+        if (
+            (taskContext == null && targetAttempt != null) ||
+            (taskContext != null && !isTargetedContextCurrent(taskContext))
+        ) {
+            if (taskContext != null) {
+                removeGroupAndRediscover(
+                    "stale P2P connection-info callback",
+                    taskContext = taskContext
+                )
+            }
+            return
+        }
         if (!info.groupFormed) {
-            resetTunnelOnly()
+            resetTunnelOnly(taskContext)
             state = State.DISCOVERING
             mainHandler.post { onDisconnected() }
-            discoverPeers()
+            if (isCapturedTaskCurrent(taskContext)) discoverPeers()
             return
         }
         if (tunnelStarted || validatingGroup) return
 
         cancelConnectWatchdog()
         validatingGroup = true
-        val validation = groupValidationGate.start(GROUP_IDENTITY_VALIDATION_TIMEOUT_MS)
-        scheduleGroupValidationDeadline(validation)
-        requestValidatedGroup(info, attempt = 0, validation)
+        val validation = groupValidationGate.start(
+            GROUP_IDENTITY_VALIDATION_TIMEOUT_MS,
+            taskContext?.attemptContext
+        )
+        scheduleGroupValidationDeadline(validation, taskContext)
+        requestValidatedGroup(info, attempt = 0, validation, taskContext)
     }
 
     @SuppressLint("MissingPermission")
     private fun requestValidatedGroup(
         info: WifiP2pInfo,
         attempt: Int,
-        validation: WifiDirectGroupValidationGate.Session
+        validation: WifiDirectGroupValidationGate.Session,
+        taskContext: TargetedTaskContext?
     ) {
-        if (!groupValidationGate.isCurrent(validation)) return
+        if (!isValidationCurrent(validation, taskContext)) {
+            abandonExpiredValidation(validation, taskContext)
+            return
+        }
         val m = manager ?: return
         val c = channel ?: return
         try {
             m.requestGroupInfo(c) { group ->
-                if (!running || !groupValidationGate.isCurrent(validation)) return@requestGroupInfo
+                if (!isValidationCurrent(validation, taskContext)) {
+                    abandonExpiredValidation(validation, taskContext)
+                    return@requestGroupInfo
+                }
                 if (group == null) {
                     if (attempt < GROUP_VALIDATION_RETRIES) {
+                        val delay = boundedTaskDelay(taskContext, GROUP_VALIDATION_RETRY_MS)
+                            ?: run {
+                                abandonExpiredValidation(validation, taskContext)
+                                return@requestGroupInfo
+                            }
                         mainHandler.postDelayed(
-                            { requestValidatedGroup(info, attempt + 1, validation) },
-                            GROUP_VALIDATION_RETRY_MS
+                            { requestValidatedGroup(info, attempt + 1, validation, taskContext) },
+                            delay
                         )
                     } else {
                         groupValidationGate.cancel()
                         validatingGroup = false
-                        rejectCurrentGroup("groupFormed=true 但 requestGroupInfo 为空")
+                        rejectCurrentGroup(
+                            "groupFormed=true 但 requestGroupInfo 为空",
+                            taskContext
+                        )
                     }
                     return@requestGroupInfo
                 }
-                validateGroup(info, group, attempt, validation)
+                validateGroup(info, group, attempt, validation, taskContext)
             }
         } catch (t: Throwable) {
-            postError(t)
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
         }
     }
 
@@ -788,10 +913,14 @@ internal class WifiDirectTunnel(
         info: WifiP2pInfo,
         group: WifiP2pGroup,
         attempt: Int,
-        validation: WifiDirectGroupValidationGate.Session
+        validation: WifiDirectGroupValidationGate.Session,
+        taskContext: TargetedTaskContext?
     ) {
-        if (!groupValidationGate.isCurrent(validation)) return
-        val connectionAttempt = targetAttempt
+        if (!isValidationCurrent(validation, taskContext)) {
+            abandonExpiredValidation(validation, taskContext)
+            return
+        }
+        val connectionAttempt = taskContext?.attempt
         val ownerDeviceAddress = group.owner?.deviceAddress
         val clientAddresses = group.clientList.map { it.deviceAddress }
         val groupRemoteAddress = if (info.isGroupOwner) {
@@ -799,7 +928,8 @@ internal class WifiDirectTunnel(
         } else {
             ownerDeviceAddress
         }
-        val expectedAddress = targetAddress
+        val expectedAddress = taskContext?.targetAddress
+            ?: targetAddress
             ?: groupRemoteAddress?.let(::normalizedAddress)
         val target = expectedAddress?.let(peerDevices::get)
         val claim = expectedAddress?.let(peerClaims::get)
@@ -835,9 +965,14 @@ internal class WifiDirectTunnel(
             0
         }
         if (!targetMatches && attempt < retryLimit) {
+            val delay = boundedTaskDelay(taskContext, GROUP_VALIDATION_RETRY_MS)
+                ?: run {
+                    abandonExpiredValidation(validation, taskContext)
+                    return
+                }
             mainHandler.postDelayed(
-                { requestValidatedGroup(info, attempt + 1, validation) },
-                GROUP_VALIDATION_RETRY_MS
+                { requestValidatedGroup(info, attempt + 1, validation, taskContext) },
+                delay
             )
             return
         }
@@ -846,25 +981,42 @@ internal class WifiDirectTunnel(
             validatingGroup = false
             rejectCurrentGroup(
                 "group owner/client 与 Target Lock 不匹配: owner=$ownerDeviceAddress " +
-                    "clients=$clientAddresses target=$expectedAddress networkName=${group.networkName}"
+                    "clients=$clientAddresses target=$expectedAddress networkName=${group.networkName}",
+                taskContext
             )
             return
         }
 
         val ownerAddress = info.groupOwnerAddress
         if (ownerAddress == null) {
-            postError(IllegalStateException("未获取到组长 IP"))
-            removeGroupAndRediscover("P2P group 没有组长 IP")
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                postError(IllegalStateException("未获取到组长 IP"))
+            }
+            removeGroupAndRediscover("P2P group 没有组长 IP", taskContext = taskContext)
             return
         }
 
         val localAddress = localP2pAddress(group.`interface`)
         if (localAddress == null) {
-            postError(IllegalStateException("未获取到本机 P2P 接口 IP"))
-            removeGroupAndRediscover("P2P 接口没有可用 IPv4 地址")
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                postError(IllegalStateException("未获取到本机 P2P 接口 IP"))
+            }
+            removeGroupAndRediscover("P2P 接口没有可用 IPv4 地址", taskContext = taskContext)
             return
         }
 
+        val resolvedTaskContext = taskContext?.copy(targetAddress = expectedAddress)
+        if (resolvedTaskContext != null) {
+            if (!isTargetedContextIdentityCurrent(taskContext)) return
+            targetAddress = expectedAddress
+            if (!isTargetedContextCurrent(resolvedTaskContext)) {
+                removeGroupAndRediscover(
+                    "P2P attempt budget expired before group became ready",
+                    taskContext = taskContext
+                )
+                return
+            }
+        }
         groupValidationGate.cancel()
         validatingGroup = false
         tunnelStarted = true
@@ -880,7 +1032,7 @@ internal class WifiDirectTunnel(
             group,
             localAddress,
             ownerAddress,
-            connectionAttempt,
+            resolvedTaskContext,
             requireNotNull(expectedAddress),
             requireNotNull(expectedTargetLock)
         )
@@ -892,106 +1044,222 @@ internal class WifiDirectTunnel(
         return TargetLock(deviceId, remoteSessionId)
     }
 
-    private fun rejectCurrentGroup(reason: String) {
+    private fun isValidationCurrent(
+        validation: WifiDirectGroupValidationGate.Session,
+        taskContext: TargetedTaskContext?
+    ): Boolean =
+        running &&
+            groupValidationGate.isCurrent(validation) &&
+            validation.taskContext == taskContext?.attemptContext &&
+            (taskContext == null || isTargetedContextCurrent(taskContext))
+
+    private fun abandonExpiredValidation(
+        validation: WifiDirectGroupValidationGate.Session,
+        taskContext: TargetedTaskContext?
+    ) {
+        if (
+            taskContext != null &&
+            groupValidationGate.isCurrent(validation) &&
+            validation.taskContext == taskContext.attemptContext &&
+            isTargetedContextIdentityCurrent(taskContext) &&
+            !isTargetedContextCurrent(taskContext)
+        ) {
+            groupValidationGate.cancel()
+            validatingGroup = false
+            removeGroupAndRediscover(
+                "P2P attempt budget expired during group validation",
+                taskContext = taskContext
+            )
+        }
+    }
+
+    private fun boundedTaskDelay(
+        taskContext: TargetedTaskContext?,
+        localDelayMillis: Long
+    ): Long? {
+        val delay = taskContext?.attempt?.boundedTimeoutMillis(monotonicClock, localDelayMillis)
+            ?: localDelayMillis
+        return delay.takeIf { it > 0L }
+    }
+
+    private fun rejectCurrentGroup(
+        reason: String,
+        taskContext: TargetedTaskContext? = null
+    ) {
+        if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         Log.w(TAG, "检测到外部/错误 P2P group，禁止启动 TCP 并清理: $reason")
-        postDiscoveryStatus("检测到非 MotoCom P2P 组，正在清理并重新搜索")
-        removeGroupAndRediscover(reason)
+        if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+            postDiscoveryStatus("检测到非 MotoCom P2P 组，正在清理并重新搜索")
+        }
+        removeGroupAndRediscover(reason, taskContext = taskContext)
     }
 
     @SuppressLint("MissingPermission")
-    private fun removeGroupAndRediscover(reason: String) {
-        removeGroupAndRediscover(reason, attempt = 1)
+    private fun removeGroupAndRediscover(
+        reason: String,
+        taskContext: TargetedTaskContext? = null
+    ) {
+        removeGroupAndRediscover(reason, attempt = 1, taskContext = taskContext)
     }
 
     private fun scheduleGroupValidationDeadline(
-        validation: WifiDirectGroupValidationGate.Session
+        validation: WifiDirectGroupValidationGate.Session,
+        taskContext: TargetedTaskContext?
     ) {
         mainHandler.postDelayed({
-            if (!running || !groupValidationGate.isCurrent(validation)) return@postDelayed
+            if (!isValidationCurrent(validation, taskContext)) {
+                abandonExpiredValidation(validation, taskContext)
+                return@postDelayed
+            }
             if (!groupValidationGate.isExpired(validation)) {
-                scheduleGroupValidationDeadline(validation)
+                scheduleGroupValidationDeadline(validation, taskContext)
                 return@postDelayed
             }
             groupValidationGate.cancel()
             validatingGroup = false
-            rejectCurrentGroup("等待 P2P group MotoCom 身份超时")
+            rejectCurrentGroup("等待 P2P group MotoCom 身份超时", taskContext)
         }, groupValidationGate.remainingMillis(validation))
     }
 
     @SuppressLint("MissingPermission")
-    private fun removeGroupAndRediscover(reason: String, attempt: Int) {
+    private fun removeGroupAndRediscover(
+        reason: String,
+        attempt: Int,
+        taskContext: TargetedTaskContext?
+    ) {
+        if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         if (removingGroup) return
-        val m = manager ?: return recoverAfterGroupRemovalFailure()
-        val c = channel ?: return recoverAfterGroupRemovalFailure()
+        val removalGeneration = ++groupRemovalGeneration
+        val m = manager ?: return recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
+        val c = channel ?: return recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
         removingGroup = true
-        resetTunnelOnly()
+        resetTunnelOnly(taskContext)
         cancelConnectWatchdog()
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
+                    if (removalGeneration != groupRemovalGeneration) return
+                    if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) {
+                        removingGroup = false
+                        return
+                    }
                     Log.d(TAG, "已清理误连 P2P group: $reason")
-                    finishGroupRemoval()
+                    finishGroupRemoval(taskContext, removalGeneration)
                 }
 
                 override fun onFailure(code: Int) {
+                    if (removalGeneration != groupRemovalGeneration) return
+                    if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) {
+                        removingGroup = false
+                        return
+                    }
                     Log.w(TAG, "removeGroup 失败: reason=$reason code=${reasonText(code)}")
                     removingGroup = false
                     if (!running) return
+                    val mayRediscover = taskContext == null || isTargetedContextCurrent(taskContext)
                     if (code == WifiP2pManager.BUSY) {
-                        if (attempt < REMOVE_GROUP_BUSY_RETRY_COUNT) {
+                        if (attempt < REMOVE_GROUP_BUSY_RETRY_COUNT && mayRediscover) {
+                            val delay = boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS)
+                                ?: return
                             Log.w(
                                 TAG,
                                 "removeGroup BUSY retry attempt=${attempt + 1}/$REMOVE_GROUP_BUSY_RETRY_COUNT " +
                                     "reason=$reason"
                             )
                             mainHandler.postDelayed(
-                                { if (running) removeGroupAndRediscover(reason, attempt + 1) },
-                                BUSY_RETRY_DELAY_MS
+                                {
+                                    if (
+                                        taskContext == null ||
+                                            isTargetedContextCurrent(taskContext)
+                                    ) {
+                                        removeGroupAndRediscover(
+                                            reason,
+                                            attempt + 1,
+                                            taskContext
+                                        )
+                                    }
+                                },
+                                delay
                             )
-                        } else {
+                        } else if (mayRediscover) {
+                            val settleDelay = boundedTaskDelay(taskContext, GROUP_REMOVAL_SETTLE_MS)
+                                ?: return
                             Log.w(TAG, "removeGroup BUSY exhausted, rediscover anyway: reason=$reason")
-                            resetDiscoveryCandidates()
+                            resetDiscoveryCandidates(taskContext)
                             state = State.DISCOVERING
                             mainHandler.postDelayed(
-                                { if (running) setupServiceDiscovery() },
-                                GROUP_REMOVAL_SETTLE_MS
+                                {
+                                    if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                                        setupServiceDiscovery()
+                                    }
+                                },
+                                settleDelay
                             )
+                        } else {
+                            finishGroupRemoval(taskContext, removalGeneration)
                         }
                         return
                     }
 
-                    postError(IllegalStateException("清理错误 P2P group 失败: ${reasonText(code)}"))
-                    recoverAfterGroupRemovalFailure()
+                    if (mayRediscover) {
+                        postError(IllegalStateException("清理错误 P2P group 失败: ${reasonText(code)}"))
+                    }
+                    recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
                 }
             })
         } catch (t: Throwable) {
+            if (removalGeneration != groupRemovalGeneration) return
+            if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) {
+                removingGroup = false
+                return
+            }
             removingGroup = false
-            postError(t)
-            recoverAfterGroupRemovalFailure()
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
+            recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
         }
     }
 
-    private fun recoverAfterGroupRemovalFailure() {
+    private fun recoverAfterGroupRemovalFailure(
+        taskContext: TargetedTaskContext? = null,
+        removalGeneration: Int = groupRemovalGeneration
+    ) {
+        if (removalGeneration != groupRemovalGeneration) return
+        if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         removingGroup = false
         if (!running) return
         connectingAddress = null
-        resetDiscoveryCandidates()
+        resetDiscoveryCandidates(taskContext)
         state = State.DISCOVERING
+        if (taskContext != null && !isTargetedContextCurrent(taskContext)) return
         mainHandler.postDelayed(
-            { if (running) clearUntrustedGroupBeforeDiscovery() },
-            BUSY_RETRY_DELAY_MS
+            {
+                if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                    clearUntrustedGroupBeforeDiscovery()
+                }
+            },
+            boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS) ?: return
         )
     }
 
-    private fun finishGroupRemoval() {
+    private fun finishGroupRemoval(
+        taskContext: TargetedTaskContext? = null,
+        removalGeneration: Int = groupRemovalGeneration
+    ) {
+        if (removalGeneration != groupRemovalGeneration) return
+        if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         removingGroup = false
         if (!running) return
         connectingAddress = null
-        resetDiscoveryCandidates()
+        resetDiscoveryCandidates(taskContext)
         state = State.DISCOVERING
+        if (taskContext != null && !isTargetedContextCurrent(taskContext)) return
         mainHandler.postDelayed(
-            { if (running) setupServiceDiscovery() },
-            GROUP_REMOVAL_SETTLE_MS
+            {
+                if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                    setupServiceDiscovery()
+                }
+            },
+            boundedTaskDelay(taskContext, GROUP_REMOVAL_SETTLE_MS) ?: return
         )
     }
 
@@ -1000,7 +1268,7 @@ internal class WifiDirectTunnel(
         group: WifiP2pGroup,
         localAddress: InetAddress,
         ownerAddress: InetAddress,
-        attempt: ConnectionAttempt?,
+        taskContext: TargetedTaskContext?,
         expectedRemoteAddress: String,
         expectedTargetLock: TargetLock
     ) {
@@ -1011,19 +1279,25 @@ internal class WifiDirectTunnel(
             readyTimeoutMillis = CONNECT_WATCHDOG_MS,
             connectTimeoutMillis = SOCKET_CONNECT_TIMEOUT_MS,
             retryDelayMillis = SOCKET_RETRY_DELAY_MS,
+            clock = monotonicClock,
+            attemptContext = taskContext?.attemptContext,
             isSessionCurrent = {
-                running && generation == socketTransportGeneration && state == State.GROUP_READY
+                running &&
+                    generation == socketTransportGeneration &&
+                    state == State.GROUP_READY &&
+                    (taskContext == null || isTargetedContextCurrent(taskContext)) &&
+                    (taskContext != null || targetAttempt == null)
             },
             onReady = { _, physicalRole, socket ->
                 postTransportReady(
                     generation,
-                    attempt,
+                    taskContext,
                     expectedTargetLock,
                     physicalRole,
                     socket
                 )
             },
-            onFailure = { error -> postTransportFailure(generation, error) }
+            onFailure = { error -> postTransportFailure(generation, taskContext, error) }
         )
         socketTransport = transport
 
@@ -1042,7 +1316,8 @@ internal class WifiDirectTunnel(
         }
     }
 
-    private fun resetTunnelOnly() {
+    private fun resetTunnelOnly(taskContext: TargetedTaskContext? = null) {
+        if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         groupValidationGate.cancel()
         tunnelStarted = false
         validatingGroup = false
@@ -1053,10 +1328,12 @@ internal class WifiDirectTunnel(
         socketTransport = null
     }
 
-    private fun resetDiscoveryCandidates() {
+    private fun resetDiscoveryCandidates(taskContext: TargetedTaskContext? = null) {
         cancelPendingRetry()
         serviceDiscoveryReady = false
-        targetAddress = null
+        targetAddress = taskContext
+            ?.takeIf(::isTargetedContextCurrent)
+            ?.targetAddress
         peerRegistry.reset()
         peerDevices.clear()
         peerClaims.clear()
@@ -1104,24 +1381,40 @@ internal class WifiDirectTunnel(
         }, PENDING_DISCOVERY_RETRY_DELAY_MS)
     }
 
-    private fun startConnectWatchdog(peerAddress: String) {
+    private fun startConnectWatchdog(taskContext: TargetedTaskContext) {
         val generation = ++connectWatchdogGeneration
+        val delay = taskContext.attempt.boundedTimeoutMillis(
+            monotonicClock,
+            CONNECT_WATCHDOG_MS
+        )
+        if (delay <= 0L) return
         mainHandler.postDelayed({
-            if (!running || generation != connectWatchdogGeneration) return@postDelayed
-            if (state == State.SIGNALING_READY || connectingAddress != peerAddress) {
+            if (
+                !running ||
+                generation != connectWatchdogGeneration ||
+                !isTargetedContextIdentityCurrent(taskContext)
+            ) return@postDelayed
+            if (!isTargetedContextCurrent(taskContext)) {
+                removeGroupAndRediscover(
+                    "P2P attempt budget expired during connect watchdog",
+                    taskContext = taskContext
+                )
+                return@postDelayed
+            }
+            if (state == State.SIGNALING_READY || connectingAddress != taskContext.targetAddress) {
                 return@postDelayed
             }
 
-            Log.w(TAG, "P2P connect timeout: peer=$peerAddress")
+            Log.w(TAG, "P2P connect timeout: peer=${taskContext.targetAddress}")
             connectingAddress = null
             peerRegistry.reset()
             peerDevices.clear()
             serviceDiscoveryReady = false
             cancelPendingRetry()
-            Log.w(TAG, "P2P connect timeout cleanup: peer=$peerAddress")
+            Log.w(TAG, "P2P connect timeout cleanup: peer=${taskContext.targetAddress}")
             Log.d(TAG, "reset discovery candidates after connect timeout")
-            removeGroupAndRediscover("P2P connect timeout")
-        }, CONNECT_WATCHDOG_MS)
+            removeGroupAndRediscover("P2P connect timeout", taskContext = taskContext)
+        }, delay)
     }
 
     private fun cancelConnectWatchdog() {
@@ -1132,20 +1425,27 @@ internal class WifiDirectTunnel(
         setup: WifiDirectSetupRecoveryGate.Session,
         message: String,
         onFailed: () -> Unit = {},
-        onSuccess: () -> Unit = {}
+        onSuccess: () -> Unit = {},
+        taskContext: TargetedTaskContext? = currentTargetContext()
     ) = action(
         message = message,
         onFailed = onFailed,
         onSuccess = onSuccess,
         onBusy = {
+            if (!isCapturedTaskCurrent(taskContext)) return@action
             if (setupRecoveryGate.scheduleRetry(setup)) {
                 Log.w(TAG, "setup BUSY retry setupServiceDiscovery")
-                resetTunnelOnly()
+                resetTunnelOnly(taskContext)
+                val delay = boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS)
+                    ?: return@action
                 mainHandler.postDelayed({
-                    if (setupRecoveryGate.takeRetry(setup) && running) {
+                    if (
+                        setupRecoveryGate.takeRetry(setup) &&
+                        isCapturedTaskCurrent(taskContext)
+                    ) {
                         setupServiceDiscovery()
                     }
-                }, BUSY_RETRY_DELAY_MS)
+                }, delay)
             }
         },
         isCurrent = { isSetupCurrent(setup) }
@@ -1157,18 +1457,30 @@ internal class WifiDirectTunnel(
     private fun discoverAction(
         message: String,
         onFailed: () -> Unit = {},
-        onSuccess: () -> Unit = {}
+        onSuccess: () -> Unit = {},
+        taskContext: TargetedTaskContext? = currentTargetContext()
     ) = action(
         message = message,
         onFailed = onFailed,
         onSuccess = onSuccess,
         onBusy = {
+            if (!isCapturedTaskCurrent(taskContext)) return@action
             Log.w(TAG, "discover BUSY retry discoverServices")
-            resetTunnelOnly()
-            mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
+            resetTunnelOnly(taskContext)
+            val delay = boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS) ?: return@action
+            mainHandler.postDelayed(
+                { if (isCapturedTaskCurrent(taskContext)) discoverPeers() },
+                delay
+            )
         },
-        isCurrent = { running && setupRecoveryGate.isEnabled }
+        isCurrent = {
+            running && setupRecoveryGate.isEnabled && isCapturedTaskCurrent(taskContext)
+        }
     )
+
+    private fun isCapturedTaskCurrent(taskContext: TargetedTaskContext?): Boolean =
+        if (taskContext == null) targetAttempt == null
+        else isTargetedContextCurrent(taskContext)
 
     private fun action(
         message: String,
@@ -1199,27 +1511,47 @@ internal class WifiDirectTunnel(
 
     private fun postTransportReady(
         generation: Int,
-        attempt: ConnectionAttempt?,
+        taskContext: TargetedTaskContext?,
         expectedTargetLock: TargetLock,
         physicalRole: PhysicalSocketRole,
         socket: Socket
     ) {
-        val session = SignalingSessionV2.establish(
-            socket = socket,
-            transport = Transport.WIFI_DIRECT,
-            physicalRole = physicalRole,
-            openedAtElapsedMs = SystemClock.elapsedRealtime(),
-            localDeviceId = localDeviceId,
-            localRuntimeSessionId = sessionId,
-            localNickname = localNickname,
-            localDeviceName = localDeviceName,
-            originatingAttempt = attempt,
-            expectedRemoteTargetLock = expectedTargetLock
-        )
+        val session = try {
+            SignalingSessionV2.establish(
+                socket = socket,
+                transport = Transport.WIFI_DIRECT,
+                physicalRole = physicalRole,
+                openedAtElapsedMs = monotonicClock.now().elapsedRealtimeMs,
+                localDeviceId = localDeviceId,
+                localRuntimeSessionId = sessionId,
+                localNickname = localNickname,
+                localDeviceName = localDeviceName,
+                originatingAttempt = taskContext?.attempt,
+                expectedRemoteTargetLock = expectedTargetLock,
+                monotonicClock = monotonicClock
+            )
+        } catch (t: Throwable) {
+            runCatching { socket.close() }
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
+            return
+        }
         mainHandler.post {
             if (
+                taskContext != null &&
+                isTargetedContextIdentityCurrent(taskContext) &&
+                !isTargetedContextCurrent(taskContext)
+            ) {
+                session.close()
+                removeGroupAndRediscover(
+                    "P2P attempt budget expired before Socket handoff",
+                    taskContext = taskContext
+                )
+                return@post
+            }
+            if (
                 !isTransportCurrent(generation) ||
-                targetAttempt != attempt ||
+                (taskContext != null && !isTargetedContextCurrent(taskContext)) ||
+                (taskContext == null && targetAttempt != null) ||
                 session.isClosed
             ) {
                 session.close()
@@ -1233,17 +1565,41 @@ internal class WifiDirectTunnel(
                 onControlChannelReady(session)
             } catch (t: Throwable) {
                 session.close()
-                postError(t)
-                removeGroupAndRediscover("signaling socket handoff failure")
+                if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                    postError(t)
+                    removeGroupAndRediscover(
+                        "signaling socket handoff failure",
+                        taskContext = taskContext
+                    )
+                }
             }
         }
     }
 
-    private fun postTransportFailure(generation: Int, error: IOException) {
+    private fun postTransportFailure(
+        generation: Int,
+        taskContext: TargetedTaskContext?,
+        error: IOException
+    ) {
         mainHandler.post {
-            if (!isTransportCurrent(generation)) return@post
+            if (
+                taskContext != null &&
+                isTargetedContextIdentityCurrent(taskContext) &&
+                !isTargetedContextCurrent(taskContext)
+            ) {
+                removeGroupAndRediscover(
+                    "P2P attempt budget expired after Socket failure",
+                    taskContext = taskContext
+                )
+                return@post
+            }
+            if (
+                !isTransportCurrent(generation) ||
+                (taskContext != null && !isTargetedContextCurrent(taskContext)) ||
+                (taskContext == null && targetAttempt != null)
+            ) return@post
             postError(error)
-            removeGroupAndRediscover("signaling socket failure")
+            removeGroupAndRediscover("signaling socket failure", taskContext = taskContext)
         }
     }
 

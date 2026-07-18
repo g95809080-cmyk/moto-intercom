@@ -548,13 +548,73 @@ class SignalingSessionV2Test {
         }
     }
 
+    @Test
+    fun glareSecondReadCannotExtendAttemptDeadline() {
+        socketPair().use { sockets ->
+            val attemptA = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
+                .copy(deadlineElapsedRealtimeMs = 10L)
+            val attemptB = attempt(ATTEMPT_B, SESSION_B, DEVICE_A, SESSION_A)
+            var clockReads = 0
+            val sessionA = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.acceptor,
+                    physicalRole = PhysicalSocketRole.ACCEPTOR,
+                    localDeviceId = DEVICE_A,
+                    localSessionId = SESSION_A,
+                    originatingAttempt = attemptA,
+                    monotonicClock = MonotonicClock {
+                        MonotonicTimestamp(if (clockReads++ < 2) 0L else 10L)
+                    }
+                )
+            }
+            val sessionB = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.opener,
+                    physicalRole = PhysicalSocketRole.OPENER,
+                    localDeviceId = DEVICE_B,
+                    localSessionId = SESSION_B,
+                    originatingAttempt = attemptB
+                )
+            }
+
+            assertSignalingFailure(sessionA)
+            runCatching { sessionB.get(2, TimeUnit.SECONDS) }.getOrNull()?.close()
+            assertTrue(sockets.acceptor.isClosed)
+        }
+    }
+
+    @Test
+    fun expiredAttemptStartsNoHelloExchange() {
+        socketPair().use { sockets ->
+            val expired = attempt(
+                ATTEMPT_A,
+                SESSION_A,
+                DEVICE_B,
+                SESSION_B
+            ).copy(deadlineElapsedRealtimeMs = 1_000L)
+
+            assertThrows(SignalingV2Exception::class.java) {
+                establish(
+                    socket = sockets.opener,
+                    physicalRole = PhysicalSocketRole.OPENER,
+                    localDeviceId = DEVICE_A,
+                    localSessionId = SESSION_A,
+                    originatingAttempt = expired,
+                    monotonicClock = MonotonicClock { MonotonicTimestamp(1_000L) }
+                )
+            }
+            assertTrue(sockets.opener.isClosed)
+        }
+    }
+
     private fun establish(
         socket: Socket,
         physicalRole: PhysicalSocketRole,
         localDeviceId: String,
         localSessionId: String,
         originatingAttempt: ConnectionAttempt?,
-        expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock
+        expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
+        monotonicClock: MonotonicClock? = null
     ) = SignalingSessionV2.establish(
         socket = socket,
         transport = Transport.LAN,
@@ -565,7 +625,8 @@ class SignalingSessionV2Test {
         localNickname = "Rider-${localDeviceId.first()}",
         localDeviceName = "Phone-${localDeviceId.first()}",
         originatingAttempt = originatingAttempt,
-        expectedRemoteTargetLock = expectedRemoteTargetLock
+        expectedRemoteTargetLock = expectedRemoteTargetLock,
+        monotonicClock = monotonicClock
     )
 
     private fun attempt(

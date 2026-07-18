@@ -48,4 +48,26 @@ class WifiDirectGroupValidationGateTest {
         assertFalse(gate.isCurrent(oldSession))
         assertTrue(gate.isCurrent(newSession))
     }
+
+    @Test
+    fun targetedValidationUsesAttemptDeadlineInsteadOfLocalThirtySeconds() {
+        var now = 1_000L
+        val gate = WifiDirectGroupValidationGate { now }
+        val attempt = ConnectionAttemptFixture.create(
+            clock = FakeMonotonicClock(MonotonicTimestamp(now)),
+            preferredTransport = Transport.WIFI_DIRECT,
+            timeoutMs = 250L
+        )
+        val session = gate.start(
+            timeoutMillis = 30_000L,
+            taskContext = AttemptTaskContext(attempt, generation = 7)
+        )
+
+        assertTrue(gate.isCurrent(session))
+        assertTrue(gate.remainingMillis(session) == 250L)
+        now = 1_249L
+        assertFalse(gate.isExpired(session))
+        now = 1_250L
+        assertTrue(gate.isExpired(session))
+    }
 }

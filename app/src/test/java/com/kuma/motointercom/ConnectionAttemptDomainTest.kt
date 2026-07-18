@@ -66,6 +66,62 @@ class ConnectionAttemptDomainTest {
     }
 
     @Test
+    fun remainingBudgetClampsAtEveryBoundary() {
+        val attempt = ConnectionAttemptFixture.create(
+            clock = FakeMonotonicClock(MonotonicTimestamp(0L)),
+            timeoutMs = 10L
+        )
+        val clock = FakeMonotonicClock(MonotonicTimestamp(0L))
+
+        assertEquals(10L, attempt.remainingMillis(clock))
+        assertEquals(10L, attempt.boundedTimeoutMillis(clock, 10L))
+        assertEquals(10L, attempt.boundedTimeoutMillis(clock, 50L))
+        assertEquals(0L, attempt.boundedTimeoutMillis(clock, 0L))
+
+        clock.advanceBy(1L)
+        assertEquals(9L, attempt.boundedTimeoutMillis(clock, 10L))
+
+        clock.advanceBy(8L)
+        assertEquals(1L, attempt.boundedTimeoutMillis(clock, 10L))
+
+        clock.advanceBy(1L)
+        assertEquals(0L, attempt.boundedTimeoutMillis(clock, 10L))
+        assertEquals(0L, attempt.remainingMillis(clock))
+    }
+
+    @Test
+    fun taskContextRejectsReplacementAndExpiredAttempt() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(0L))
+        val attempt = ConnectionAttemptFixture.create(clock, timeoutMs = 10L)
+        val context = AttemptTaskContext(attempt, generation = 4)
+
+        assertTrue(context.isCurrent(attempt, 4, clock))
+        assertFalse(context.isCurrent(attempt.copy(id = ConnectionAttemptId("other")), 4, clock))
+        assertFalse(context.isCurrent(attempt, 5, clock))
+
+        clock.advanceBy(10L)
+        assertFalse(context.isCurrent(attempt, 4, clock))
+    }
+
+    @Test
+    fun recoveryRestartRequiresSameLiveAttempt() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(0L))
+        val attempt = ConnectionAttemptFixture.create(clock, timeoutMs = 10L)
+
+        assertTrue(canRestartRecoveryAttempt(attempt, attempt, MonotonicTimestamp(9L)))
+        assertFalse(
+            canRestartRecoveryAttempt(
+                attempt,
+                attempt.copy(id = ConnectionAttemptId("replacement")),
+                MonotonicTimestamp(9L)
+            )
+        )
+        assertFalse(canRestartRecoveryAttempt(attempt, attempt, MonotonicTimestamp(10L)))
+        assertTrue(canRestartRecoveryAttempt(null, null, MonotonicTimestamp(10L)))
+        assertFalse(canRestartRecoveryAttempt(null, attempt, MonotonicTimestamp(9L)))
+    }
+
+    @Test
     fun matchingEventBeforeDeadlineIsCurrent() {
         val clock = FakeMonotonicClock(MonotonicTimestamp(1_000L))
         val attempt = ConnectionAttemptFixture.create(clock)

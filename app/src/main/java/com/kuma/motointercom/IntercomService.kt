@@ -911,10 +911,33 @@ class IntercomService : Service() {
                     ) {
                         return@postDelayed
                     }
+                    if (
+                        !canRestartRecoveryAttempt(
+                            expectedAttempt = nextAttempt,
+                            currentAttempt = orchestrator.currentAttempt,
+                            now = MonotonicTimestamp(SystemClock.elapsedRealtime())
+                        )
+                    ) {
+                        publishLog("忽略已过期或已替换的恢复尝试")
+                        return@postDelayed
+                    }
                     val recoveryToken = sessions.start()
                     activeSession = recoveryToken
                     publishLog("重新启动车友发现")
                     startAudioRoute(recoveryToken)
+                    if (
+                        !canRestartRecoveryAttempt(
+                            expectedAttempt = nextAttempt,
+                            currentAttempt = orchestrator.currentAttempt,
+                            now = MonotonicTimestamp(SystemClock.elapsedRealtime())
+                        )
+                    ) {
+                        audioRouteController?.close()
+                        audioRouteController = null
+                        activeSession = null
+                        sessions.invalidate()
+                        return@postDelayed
+                    }
                     startDiscoveryTransports(
                         recoveryToken,
                         deviceId,
@@ -1708,6 +1731,17 @@ internal fun canExecuteRestartDiscoveryEffect(
     effect.runtimeSessionId == effect.attempt.runtimeSessionId &&
     currentState.attempt == effect.attempt &&
     currentAttempt == effect.attempt
+
+internal fun canRestartRecoveryAttempt(
+    expectedAttempt: ConnectionAttempt?,
+    currentAttempt: ConnectionAttempt?,
+    now: MonotonicTimestamp
+): Boolean = if (expectedAttempt == null) {
+    currentAttempt == null
+} else {
+    expectedAttempt.hasSameImmutableIdentity(currentAttempt) &&
+        expectedAttempt.remainingMillis(now) > 0L
+}
 
 internal fun SignalingSessionV2.toConnectionCandidateContext(
     attempt: ConnectionAttempt
