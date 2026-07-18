@@ -446,9 +446,10 @@ class IntercomService : Service() {
     ) {
         dispatchOnMain {
             if (
-                !canRegisterControlChannel(
+                !canInstallControlSession(
                     sessionCurrent = isSessionCurrent(token),
                     currentAttempt = orchestrator.currentAttempt,
+                    existingSession = signalingSessions[session.channel.channelId],
                     session = session
                 )
             ) {
@@ -456,11 +457,7 @@ class IntercomService : Service() {
                 return@dispatchOnMain
             }
 
-            signalingSessions.put(session.channel.channelId, session)?.let { replaced ->
-                removePendingMediaMessages(replaced)
-                closeMediaIfMatches(replaced)
-                replaced.close()
-            }
+            signalingSessions[session.channel.channelId] = session
             val runtimeSessionId = session.pinnedIdentity.localSessionId
             orchestrator.dispatch(
                 SessionEvent.ControlChannelVerified(
@@ -1028,14 +1025,35 @@ class IntercomService : Service() {
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
             is SessionEffect.OpenTargetedTransport -> {
-                beginTargetedTransport(effect.attempt)
+                if (orchestrator.currentAttempt == effect.attempt) {
+                    beginTargetedTransport(effect.attempt)
+                }
             }
             is SessionEffect.AbortAttemptAndResumeDiscovery -> {
-                publishLog("连接尝试已中止：${effect.attemptId.value}")
-                abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
+                if (
+                    canExecuteAbortAttemptEffect(
+                        effect = effect,
+                        currentState = orchestrator.state.value,
+                        currentAttempt = orchestrator.currentAttempt,
+                        activeAttempt = orchestrator.activeControlAttempt,
+                        pendingInbound = orchestrator.pendingInboundRequest,
+                        terminalOutcome = orchestrator.terminalOutcome(effect.attemptId)
+                    )
+                ) {
+                    publishLog("连接尝试已中止：${effect.attemptId.value}")
+                    abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
+                }
             }
             is SessionEffect.RestartDiscovery -> {
-                abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
+                if (
+                    canExecuteRestartDiscoveryEffect(
+                        effect,
+                        orchestrator.state.value,
+                        orchestrator.currentAttempt
+                    )
+                ) {
+                    abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
+                }
             }
             is SessionEffect.ScheduleAttemptDeadline -> {
                 if (orchestrator.currentAttempt == effect.attempt) {
@@ -1660,6 +1678,36 @@ internal fun canRegisterControlChannel(
         (attempt == null || attempt.targetLock == session.targetLock) &&
         session.peer.isVerifiedFor(session.targetLock)
 }
+
+internal fun canInstallControlSession(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    existingSession: SignalingSessionV2?,
+    session: SignalingSessionV2
+): Boolean = existingSession == null &&
+    canRegisterControlChannel(sessionCurrent, currentAttempt, session)
+
+internal fun canExecuteAbortAttemptEffect(
+    effect: SessionEffect.AbortAttemptAndResumeDiscovery,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?,
+    terminalOutcome: ConnectionAttemptTerminalOutcome?
+): Boolean = currentState == IntercomState.Discovering(effect.runtimeSessionId) &&
+    currentAttempt == null &&
+    activeAttempt == null &&
+    pendingInbound == null &&
+    terminalOutcome != null
+
+internal fun canExecuteRestartDiscoveryEffect(
+    effect: SessionEffect.RestartDiscovery,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?
+): Boolean = currentState is IntercomState.Recovering &&
+    effect.runtimeSessionId == effect.attempt.runtimeSessionId &&
+    currentState.attempt == effect.attempt &&
+    currentAttempt == effect.attempt
 
 internal fun SignalingSessionV2.toConnectionCandidateContext(
     attempt: ConnectionAttempt

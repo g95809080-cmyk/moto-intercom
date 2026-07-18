@@ -46,6 +46,22 @@ class SignalingSessionV2Test {
                     requester.toConnectionCandidateContext(attempt)
                 )
 
+                assertTrue(
+                    canInstallControlSession(
+                        sessionCurrent = true,
+                        currentAttempt = attempt,
+                        existingSession = null,
+                        session = requester
+                    )
+                )
+                assertFalse(
+                    canInstallControlSession(
+                        sessionCurrent = true,
+                        currentAttempt = attempt,
+                        existingSession = requester,
+                        session = requester
+                    )
+                )
                 assertTrue(requester.matchesCandidate(candidate))
                 assertTrue(
                     requester.matchesControlHandle(

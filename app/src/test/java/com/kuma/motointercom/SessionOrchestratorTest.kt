@@ -191,6 +191,34 @@ class SessionOrchestratorTest {
     }
 
     @Test
+    fun restartDiscoveryEffectRequiresItsExactRecoveryAttempt() {
+        val recovery = attempt("attempt-recovery", "peer-a", Transport.LAN)
+        val replacement = attempt("attempt-replacement", "peer-b", Transport.LAN)
+        val peer = PeerIdentity(
+            deviceId = "peer-a",
+            nickname = "Rider A",
+            runtimeSessionId = RuntimeSessionId("session-peer-a"),
+            isDeviceIdVerified = true
+        )
+        val effect = SessionEffect.RestartDiscovery(runtime, recovery)
+
+        assertTrue(
+            canExecuteRestartDiscoveryEffect(
+                effect,
+                IntercomState.Recovering(recovery, peer),
+                recovery
+            )
+        )
+        assertFalse(
+            canExecuteRestartDiscoveryEffect(
+                effect,
+                IntercomState.Connecting(replacement),
+                replacement
+            )
+        )
+    }
+
+    @Test
     fun p2pVerifiedIdentityIsPersistedOnlyAfterConnected() = runBlocking {
         val repository = RecordingPairingRepository()
         val orchestrator = orchestrator(repository, elapsedRealtime = { 0L })

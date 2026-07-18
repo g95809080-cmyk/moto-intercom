@@ -188,7 +188,7 @@ class Kum26LogicalNodeAcceptanceTest {
     }
 
     @Test
-    fun staleAcceptedActivationClosesOldSocketReleasesClaimAndKeepsCurrentAttempt() = runBlocking {
+    fun delayedCleanupCannotReleaseReplacementAttemptResources() = runBlocking {
         val oldAttempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B)
         val newAttempt = attempt(ATTEMPT_NEW, DEVICE_B, SESSION_B)
         val repository = RecordingPairingRepository()
@@ -220,9 +220,29 @@ class Kum26LogicalNodeAcceptanceTest {
                         )
                     )
                 )
-                assertTrue(harness.nextEffect() is SessionEffect.AbortAttemptAndResumeDiscovery)
-                resources.abort(oldPair.requester)
+                val cleanup =
+                    harness.nextEffect() as SessionEffect.AbortAttemptAndResumeDiscovery
+                assertTrue(
+                    canExecuteAbortAttemptEffect(
+                        cleanup,
+                        harness.orchestrator.state.value,
+                        harness.orchestrator.currentAttempt,
+                        harness.orchestrator.activeControlAttempt,
+                        harness.orchestrator.pendingInboundRequest,
+                        harness.orchestrator.terminalOutcome(oldAttempt.id)
+                    )
+                )
                 assertTrue(harness.orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(newAttempt)))
+                val cleanupStillCurrent = canExecuteAbortAttemptEffect(
+                    cleanup,
+                    harness.orchestrator.state.value,
+                    harness.orchestrator.currentAttempt,
+                    harness.orchestrator.activeControlAttempt,
+                    harness.orchestrator.pendingInboundRequest,
+                    harness.orchestrator.terminalOutcome(oldAttempt.id)
+                )
+                assertFalse(cleanupStillCurrent)
+                if (cleanupStillCurrent) resources.abort(oldPair.requester)
 
                 assertFalse(
                     canStartWebRtc(
@@ -236,7 +256,7 @@ class Kum26LogicalNodeAcceptanceTest {
                 oldPair.requester.close()
 
                 assertTrue(oldPair.requester.isClosed)
-                assertFalse(resources.mediaLocated)
+                assertTrue(resources.mediaLocated)
                 assertEquals(newAttempt, harness.orchestrator.currentAttempt)
                 assertTrue(repository.saved.isEmpty())
             } finally {

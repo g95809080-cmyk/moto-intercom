@@ -119,7 +119,9 @@ keeping KUM-27 In Progress. B4 may start only after this gate passes.
 - [x] 4.7 Add deterministic JVM coverage for wrong runtime, attempt, channel,
   wire request, target, stale close/send/SDP/ICE/WebRTC callbacks, duplicate
   start, and newer-handle preservation.
-- [ ] 4.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+- [x] 4.8 Remediate the first review P1 findings by attempt-scoping delayed
+  cleanup effects and refusing pre-authorization physical session replacement.
+- [ ] 4.9 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
   strict Rasen validation, GitHub CI, and fixed-SHA read-only architecture
   review.
 
