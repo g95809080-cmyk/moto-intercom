@@ -36,28 +36,28 @@ class AttemptDeadlineSchedulerTest {
     }
 
     @Test
-    fun sameAttemptCanMoveFromTransportToDecisionDeadline() {
+    fun duplicateScheduleCannotMoveSameAttemptDeadline() {
         var now = 1_000L
         val posted = mutableListOf<Pair<Runnable, Long>>()
+        val removed = mutableListOf<Runnable>()
         val timedOut = mutableListOf<ConnectionAttempt>()
         val scheduler = AttemptDeadlineScheduler(
             elapsedRealtime = { now },
             postDelayed = { callback, delay -> posted += callback to delay },
-            removeCallbacks = {},
+            removeCallbacks = removed::add,
             onTimedOut = timedOut::add
         )
         val transportAttempt = attempt("attempt-a", 11_000L)
-        val decisionAttempt = transportAttempt.copy(deadlineElapsedRealtimeMs = 26_000L)
+        val rebasedCopy = transportAttempt.copy(deadlineElapsedRealtimeMs = 26_000L)
 
         scheduler.schedule(transportAttempt)
         now = 2_000L
-        scheduler.schedule(decisionAttempt)
+        scheduler.schedule(rebasedCopy)
 
-        assertEquals(listOf(10_000L, 24_000L), posted.map { it.second })
+        assertEquals(listOf(10_000L), posted.map { it.second })
+        assertTrue(removed.isEmpty())
         posted[0].first.run()
-        assertTrue(timedOut.isEmpty())
-        posted[1].first.run()
-        assertEquals(listOf(decisionAttempt), timedOut)
+        assertEquals(listOf(transportAttempt), timedOut)
     }
 
     @Test

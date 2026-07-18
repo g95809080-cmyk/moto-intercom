@@ -375,14 +375,13 @@ class Kum26LogicalNodeAcceptanceTest {
                         RUNTIME_A,
                         attempt.id,
                         WebRtcConnectionState.CONNECTED,
-                        1L,
-                        20_000L
+                        1L
                     )
                 )
             )
             assertTrue(
                 harness.orchestrator.dispatchAndAwait(
-                    SessionEvent.SignalingDisconnected(RUNTIME_A, attempt.id, 20_000L)
+                    SessionEvent.SignalingDisconnected(RUNTIME_A, attempt.id)
                 )
             )
             val recovering = harness.orchestrator.state.value as IntercomState.Recovering
@@ -393,14 +392,14 @@ class Kum26LogicalNodeAcceptanceTest {
             assertEquals(attempt.channelPlan, recoveryAttempt.channelPlan)
             assertEquals(setOf(Transport.LAN), plannedDiscoveryTransports(recoveryAttempt))
             assertTrue(harness.nextEffect() is SessionEffect.RestartDiscovery)
+            assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
             assertFalse(
                 harness.orchestrator.dispatchAndAwait(
                     SessionEvent.ConnectPresenceRequested(
                         runtimeSessionId = RUNTIME_A,
                         targetDeviceId = DEVICE_C,
                         targetSessionId = RuntimeSessionId(SESSION_C),
-                        availableTransports = setOf(Transport.LAN),
-                        deadlineElapsedRealtimeMs = 30_000L
+                        availableTransports = setOf(Transport.LAN)
                     )
                 )
             )

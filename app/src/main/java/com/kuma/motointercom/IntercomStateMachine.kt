@@ -11,11 +11,6 @@ enum class WebRtcConnectionState {
 internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
-    data class IncomingRequest(
-        val attempt: ConnectionAttempt,
-        val peer: PeerIdentity
-    ) : SessionEvent
-
     data class IncomingAccepted(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -38,8 +33,7 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val targetDeviceId: String,
         val targetSessionId: RuntimeSessionId,
-        val availableTransports: Set<Transport>,
-        val deadlineElapsedRealtimeMs: Long
+        val availableTransports: Set<Transport>
     ) : SessionEvent
 
     data class AttemptReplaced(val attempt: ConnectionAttempt) : SessionEvent
@@ -94,8 +88,7 @@ internal sealed interface SessionEvent {
         val attemptId: ConnectionAttemptId,
         val channelId: ControlChannelId,
         val wireRequestKey: WireRequestKey,
-        val reason: DisconnectReason,
-        val recoveryDeadlineElapsedRealtimeMs: Long
+        val reason: DisconnectReason
     ) : SessionEvent
 
     data class MediaChannelSelected(
@@ -124,7 +117,6 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val channelId: ControlChannelId,
         val wireRequestKey: WireRequestKey,
-        val recoveryDeadlineElapsedRealtimeMs: Long,
         val reason: String
     ) : SessionEvent
 
@@ -132,7 +124,6 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val channelId: ControlChannelId,
         val wireRequestKey: WireRequestKey,
-        val recoveryDeadlineElapsedRealtimeMs: Long,
         val reason: String
     ) : SessionEvent
 
@@ -184,14 +175,12 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
         val state: WebRtcConnectionState,
-        val occurredAt: Long,
-        val recoveryDeadlineElapsedRealtimeMs: Long
+        val occurredAt: Long
     ) : SessionEvent
 
     data class SignalingDisconnected(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
-        val recoveryDeadlineElapsedRealtimeMs: Long
+        val attemptId: ConnectionAttemptId
     ) : SessionEvent
 
     data class RecoveryExhausted(
@@ -225,7 +214,7 @@ internal sealed interface SessionEffect {
         val attempt: ConnectionAttempt
     ) : SessionEffect
 
-    data class RescheduleAttemptDeadline(
+    data class ScheduleAttemptDeadline(
         val attempt: ConnectionAttempt
     ) : SessionEffect
 
@@ -317,23 +306,6 @@ internal fun reduceIntercomState(
         transition(IntercomState.Discovering(event.runtimeSessionId))
             .takeIf { current == IntercomState.Offline }
 
-    is SessionEvent.IncomingRequest ->
-        transition(IntercomState.IncomingConfirmation(event.attempt, event.peer))
-            .takeIf {
-                current is IntercomState.Discovering &&
-                    current.matches(event.attempt.runtimeSessionId)
-            }
-
-    is SessionEvent.IncomingAccepted ->
-        (current as? IntercomState.IncomingConfirmation)
-            ?.takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let { transition(IntercomState.Connecting(it.attempt, it.peer)) }
-
-    is SessionEvent.IncomingRejected ->
-        (current as? IntercomState.IncomingConfirmation)
-            ?.takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let { transition(IntercomState.Discovering(event.runtimeSessionId)) }
-
     is SessionEvent.ConnectRequested ->
         transition(IntercomState.Connecting(event.attempt))
             .takeIf {
@@ -356,6 +328,8 @@ internal fun reduceIntercomState(
     is SessionEvent.SignalingSendFailed,
     is SessionEvent.ChannelClosed,
     is SessionEvent.ProtocolViolation,
+    is SessionEvent.IncomingAccepted,
+    is SessionEvent.IncomingRejected,
     is SessionEvent.ConfirmationAvailabilityChanged,
     is SessionEvent.IncomingDecisionTimedOut,
     is SessionEvent.ConfirmationSurfaceUnavailable,
@@ -399,7 +373,6 @@ private fun replaceAttempt(
     if (!current.matches(attempt.runtimeSessionId)) return null
     return when (current) {
         is IntercomState.Discovering,
-        is IntercomState.IncomingConfirmation,
         is IntercomState.Connecting,
         is IntercomState.Optimizing ->
             transition(IntercomState.Connecting(attempt))
@@ -455,18 +428,6 @@ private fun reduceRemoteIdentity(
         event.peer.isVerifiedFor(attempt.targetLock)
 
     return when (current) {
-        is IntercomState.IncomingConfirmation -> current
-            .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let {
-                if (!matchesTarget(it.attempt)) return null
-                transition(
-                    IntercomState.IncomingConfirmation(
-                        it.attempt,
-                        mergePeer(it.peer, event.peer) ?: event.peer
-                    )
-                )
-            }
-
         is IntercomState.Connecting -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
@@ -527,11 +488,6 @@ private fun transition(
 
 private fun IntercomState.matches(runtimeSessionId: RuntimeSessionId): Boolean =
     this.runtimeSessionId == runtimeSessionId
-
-private fun IntercomState.IncomingConfirmation.matches(
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId
-): Boolean = this.runtimeSessionId == runtimeSessionId && this.attemptId == attemptId
 
 private fun IntercomState.Connecting.matches(
     runtimeSessionId: RuntimeSessionId,

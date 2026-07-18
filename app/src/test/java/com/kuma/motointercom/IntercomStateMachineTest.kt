@@ -16,7 +16,6 @@ class IntercomStateMachineTest {
         isDeviceIdVerified = true
     )
     private val attempt = attempt("attempt-current")
-    private val recovery = 20_000L
 
     @Test
     fun exposesTheNineProductStates() {
@@ -55,8 +54,7 @@ class IntercomStateMachineTest {
                     runtimeSessionId = runtime,
                     targetDeviceId = "peer-b",
                     targetSessionId = RuntimeSessionId("peer-b-session"),
-                    availableTransports = setOf(Transport.WIFI_DIRECT, Transport.LAN),
-                    deadlineElapsedRealtimeMs = 10_000L
+                    availableTransports = setOf(Transport.WIFI_DIRECT, Transport.LAN)
                 )
             )
         )
@@ -73,8 +71,7 @@ class IntercomStateMachineTest {
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.CONNECTED,
-                    1L,
-                    recovery
+                    1L
                 )
             )
         )
@@ -85,8 +82,7 @@ class IntercomStateMachineTest {
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.DISCONNECTED,
-                    2L,
-                    recovery
+                    2L
                 )
             )
         )
@@ -104,7 +100,7 @@ class IntercomStateMachineTest {
         assertNull(
             reduceIntercomState(
                 connected,
-                SessionEvent.SignalingDisconnected(runtime, attempt.id, recovery)
+                SessionEvent.SignalingDisconnected(runtime, attempt.id)
             )
         )
     }
@@ -130,8 +126,7 @@ class IntercomStateMachineTest {
                             runtime,
                             attempt.id,
                             terminalState,
-                            1L,
-                            recovery
+                            1L
                         )
                     )
                 )
@@ -142,7 +137,7 @@ class IntercomStateMachineTest {
         assertNull(
             reduceIntercomState(
                 IntercomState.Connecting(attempt, peer),
-                SessionEvent.SignalingDisconnected(runtime, attempt.id, recovery)
+                SessionEvent.SignalingDisconnected(runtime, attempt.id)
             )
         )
     }
@@ -153,8 +148,7 @@ class IntercomStateMachineTest {
             runtime,
             attempt.id,
             WebRtcConnectionState.CONNECTED,
-            1L,
-            recovery
+            1L
         )
         assertNull(nextIntercomState(IntercomState.Offline, connected))
         assertNull(nextIntercomState(IntercomState.Offline, SessionEvent.StopRequested(runtime)))
@@ -307,8 +301,7 @@ class IntercomStateMachineTest {
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.CONNECTED,
-                    1L,
-                    recovery
+                    1L
                 )
             )
         )

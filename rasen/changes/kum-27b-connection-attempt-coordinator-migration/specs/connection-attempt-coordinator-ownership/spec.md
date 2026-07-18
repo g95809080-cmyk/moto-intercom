@@ -99,3 +99,83 @@ behavior.
 #### Scenario: B2 review
 - **WHEN** the fixed B2 diff is reviewed
 - **THEN** no second transport scheduler or KUM-28 product behavior exists
+
+### Requirement: Coordinator owns immutable total deadlines
+In B3 the existing Coordinator SHALL use `MonotonicClock` as the only
+production source of total attempt deadlines. Outbound and recovery event
+inputs MUST NOT carry caller-created deadlines. Request delivery, remote
+acceptance, glare handling, media selection, and media start MUST NOT replace
+or extend an existing attempt deadline. An attempt is expired when monotonic
+time is equal to or greater than its deadline.
+
+#### Scenario: Outbound attempt creation
+- **WHEN** a valid Presence selection creates an outbound attempt
+- **THEN** its deadline is Coordinator clock time plus exactly 10 seconds
+
+#### Scenario: Recovery attempt creation
+- **WHEN** a connected attempt loses its owned channel or media path
+- **THEN** the Coordinator creates one recovery attempt with a fresh deadline
+  and no Service-supplied deadline value
+
+#### Scenario: Request delivery and remote acceptance
+- **WHEN** CONNECT_REQUEST delivery and CONNECT_ACCEPT occur
+- **THEN** the attempt keeps its originally created deadline
+
+#### Scenario: Glare changes request role
+- **WHEN** glare selects the inbound wire request for the current target
+- **THEN** the replacement request role preserves the existing total deadline
+
+### Requirement: One physical deadline schedule per attempt
+The Coordinator SHALL emit one explicit `ScheduleAttemptDeadline` effect when
+it creates an attempt. Service SHALL execute that effect but MUST NOT schedule
+from transport-open or WebRTC-start paths. A duplicate schedule for the same
+current attempt MUST NOT move the physical timer.
+
+#### Scenario: Outbound attempt starts
+- **WHEN** the Coordinator creates the outbound attempt
+- **THEN** it emits one schedule effect before the targeted transport effect
+
+#### Scenario: Attempt progresses
+- **WHEN** signaling is delivered, accepted, or starts media
+- **THEN** no second schedule effect is emitted
+
+### Requirement: Pending inbound confirmation is not a connection attempt
+An unpaired inbound request awaiting human confirmation SHALL be represented by
+a Coordinator-owned `PendingInboundRequest`, not `ConnectionAttempt`.
+`IntercomState.IncomingConfirmation` SHALL be a projection without an attempt,
+and `connectionAttemptOrNull()` SHALL return null in that state.
+
+#### Scenario: Confirmation is published
+- **WHEN** an eligible unpaired request has an available confirmation surface
+- **THEN** the Coordinator owns one pending request, exposes no current attempt,
+  and emits no attempt deadline schedule
+
+#### Scenario: Local accept is current
+- **WHEN** runtime, wire attempt ID, target/channel, nonce, and occurrence time
+  match before the decision deadline
+- **THEN** the Coordinator creates exactly one inbound attempt whose immutable
+  deadline is the accepted occurrence time plus 10 seconds
+
+#### Scenario: Local accept at the decision deadline
+- **WHEN** acceptance occurs exactly at the decision deadline
+- **THEN** the pending request is expired and no attempt is created
+
+#### Scenario: Pending request terminates without acceptance
+- **WHEN** the user rejects, confirmation times out, its final channel closes,
+  or no confirmation surface is available
+- **THEN** no attempt is created and no attempt timer is scheduled or canceled
+
+#### Scenario: Paired inbound request
+- **WHEN** a verified paired request is accepted automatically
+- **THEN** its attempt deadline is the request occurrence time plus 10 seconds
+
+### Requirement: B4 and B5 remain deferred
+B3 SHALL NOT claim or implement the complete callback/candidate cleanup
+migration reserved for B4 or adapter remaining-time contracts reserved for B5.
+It MUST preserve the single-transport plan and MUST NOT add KUM-28 fallback or
+race behavior.
+
+#### Scenario: B3 review
+- **WHEN** the fixed B3 diff is reviewed
+- **THEN** it contains only deadline and pending-inbound ownership changes plus
+  their direct tests and artifacts

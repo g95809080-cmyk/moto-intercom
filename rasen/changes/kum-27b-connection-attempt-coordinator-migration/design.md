@@ -3,13 +3,12 @@
 KUM-27A approved one future Coordinator owner while preserving
 `SessionOrchestrator` as the only product-state writer. B1 completed the
 framework-free `ConnectionAttempt` domain model and deterministic clock seam.
-B2 now moves production attempt creation and first-terminal ownership into the
+B2 moved production attempt creation and first-terminal ownership into the
 existing `SignalingControlCoordinator` without creating another Coordinator.
 
-The current runtime intentionally still rebases copied attempts and sources
-absolute deadlines from Service and Coordinator clock lambdas. Removing those
-paths, the `Long.MAX_VALUE` inbound sentinel, and external deadline inputs is
-the atomic B3 cutover, not B2.
+B3 performs the previously reserved atomic cutover: the Coordinator owns every
+total attempt deadline, attempts are scheduled once, and an unpaired inbound
+request awaiting confirmation is no longer represented by a sentinel attempt.
 
 ## Goals / Non-Goals
 
@@ -26,13 +25,20 @@ the atomic B3 cutover, not B2.
 - Make it own the current logical attempt and the first terminal outcome.
 - Remove live reducer and Service authority to mint IDs, construct production
   attempts, or independently end an attempt.
+- Wire `MonotonicClock` into the Coordinator and create each total deadline
+  exactly once without external deadline inputs or later rebasing.
+- Replace the unpaired inbound sentinel with a Coordinator-owned pending-request
+  model and create the real inbound attempt only on valid local acceptance.
+- Schedule each created attempt once through an explicit Service effect.
 
 **Non-Goals:**
 
-- No deadline source, scheduler, rebase, sentinel, or 10-second behavior change.
-- No callback, candidate, winner, Service, adapter, signaling, WebRTC, Target
-  Lock, persistence, notification, UI, Gradle, or dependency change.
-- No second live Coordinator, B3 implementation, or KUM-28 behavior.
+- No change to the 10-second attempt budget or 15-second human decision window.
+- No callback/candidate cleanup migration beyond the B3 deadline and pending
+  confirmation boundary; that remains B4.
+- No adapter remaining-time contract change; that remains B5.
+- No second live Coordinator, transport race, fallback scheduler, optimization
+  window, or other KUM-28 behavior.
 
 ## Decisions
 
@@ -133,21 +139,66 @@ inbound representation.
 
 ### 9. Bounded pipeline
 
-This checkpoint follows an equivalent deterministic full-feature subset:
+This change follows an equivalent deterministic full-feature subset:
 proposal, specs/design/tasks, one writer apply, targeted and full verification,
 one read-only architecture review loop, Draft PR update, and evidence sync.
-B3, archive, merge, deployment, and KUM-28 are outside this checkpoint.
+Archive, deployment, and KUM-28 remain outside B3.
 
 Execution is fixed to Rasen 0.1.3 with `DO_NOT_TRACK=1` and
 `RASEN_TELEMETRY=0`. Maximum concurrent write workers is one; the reviewer is
 read-only; leaf workers do not delegate; no browser/chrome-use, Greptile,
 auto-decompose, automatic merge, or automatic deployment is permitted.
 
+### 10. B3 has one monotonic deadline source
+
+The existing Coordinator receives the B1 `MonotonicClock`. Outbound and
+recovery attempts use `clock.now() + 10 seconds`. A paired inbound request uses
+its verified request occurrence time plus 10 seconds. A locally accepted
+unpaired request uses the accepted event occurrence time plus 10 seconds.
+Glare preserves the already-created attempt deadline. Validity is strict:
+`now >= deadlineAt` is expired.
+
+`ConnectPresenceRequested`, channel-loss events, signaling-loss events, and
+WebRTC terminal events no longer carry caller-created recovery or attempt
+deadlines. Service therefore cannot create or reset a logical attempt budget.
+
+### 11. Pending inbound confirmation is not an attempt
+
+`PendingInboundRequest` is owned by the Coordinator and contains the verified
+wire request key, target, peer, single transport, eligible channel set,
+confirmation surface/nonce, and monotonic human-decision deadline. It is not
+stored in `ownedAttempt`, is not exposed as `currentAttempt`, and never causes
+an attempt timer to be scheduled.
+
+`IntercomState.IncomingConfirmation` is only a product-state projection of the
+pending request identity and peer. Immediate unavailable/busy responses create
+neither a pending request nor an attempt. Reject, timeout, confirmation-surface
+loss, and final channel loss terminate the pending request without creating or
+cancelling an attempt timer. A valid local accept creates exactly one inbound
+attempt from the verified remote attempt ID and target.
+
+### 12. One explicit attempt-deadline schedule effect
+
+The Coordinator emits `ScheduleAttemptDeadline` exactly once alongside the
+first effects for every newly created attempt. Service executes that physical
+timer effect. `beginTargetedTransport()` and `startWebRtc()` do not schedule or
+rebase timers. Request delivery, remote acceptance, media selection, and media
+start preserve the original deadline. The scheduler ignores a duplicate
+schedule for the same current attempt so a late duplicate effect cannot move
+its timer.
+
+### 13. B3 remains below callback and adapter migration
+
+B3 validates the events it directly changes by runtime, attempt, target/wire
+identity, and strict deadline. It does not claim that all Socket, P2P, SDP/ICE,
+or delayed adapter callbacks have completed the B4 migration, and it does not
+change adapter retry/remaining-budget APIs reserved for B5.
+
 ## Risks / Trade-offs
 
-- [The legacy data-class `copy` paths can still create a new instance with a
-  later raw deadline] -> B2 does not call or expand those paths. Their atomic
-  removal remains in B3.
+- [The legacy data-class `copy` paths can create a later deadline] -> B3 removes
+  every production deadline rebase and tests that request delivery, remote
+  acceptance, glare, and media start preserve the original value.
 - [Raw deadline and typed deadline could diverge] -> `deadlineAt` is derived
   from the existing raw value and introduces no second stored field.
 - [A pure event predicate could be mistaken for completed callback migration]
@@ -155,10 +206,12 @@ auto-decompose, automatic merge, or automatic deployment is permitted.
   deferred.
 - [A test fake could leak into production] -> Keep it under `app/src/test` and
   verify release assembly plus source imports.
-- [Moving creation before moving deadline source can create two deadline
-  owners] -> Treat the absolute deadline as an opaque compatibility input in
-  B2; only its existing caller computes it and the Coordinator never modifies
-  it until the atomic B3 cutover.
+- [A pending inbound request can accidentally become a live attempt] -> Store it
+  separately, expose no `currentAttempt`, emit no attempt schedule, and test all
+  reject/timeout/channel-loss exits.
+- [A delayed duplicate schedule can rebase the physical timer] -> Emit one
+  schedule effect at creation and make same-attempt duplicate scheduling a
+  no-op.
 - [Protocol tombstones can be mistaken for logical terminal ownership] -> Keep
   protocol `AttemptOutcome` separate and prove that only the Coordinator's
   logical mailbox decides first-terminal product behavior.
@@ -166,15 +219,13 @@ auto-decompose, automatic merge, or automatic deployment is permitted.
 ## Migration Plan
 
 1. B1: add the pure domain foundation and deterministic tests. Complete.
-2. B2: inject deterministic ID creation into the existing Coordinator, move
-   outbound/recovery construction to it, and remove Service/reducer ID and
-   attempt construction authority.
-3. B2: route attempt-ending events through one first-terminal mailbox while
-   preserving `SessionOrchestrator` as the product-state writer.
-4. Run targeted and full gates, deliver one atomic B2 commit, and perform a
-   fixed-SHA read-only architecture review.
-5. B3 later performs the atomic deadline/pending-inbound cutover described
-   above. B4-B6 and KUM-28 remain deferred.
+2. B2: move production creation and first-terminal ownership into the existing
+   Coordinator. Complete and approved.
+3. B3: add failing deadline/pending-inbound boundary tests.
+4. B3: atomically remove external deadline inputs, all rebases, the sentinel
+   attempt, and implicit Service scheduling; add one explicit schedule effect.
+5. Run targeted/full gates and fixed-SHA read-only review, then record evidence.
+6. B4-B6 remain deferred until their preceding gates; KUM-28 remains absent.
 
 Rollback is commit-level to the approved B1 head. B2 changes no schema,
 protocol, dependency, identity, pairing, database, permission, or persisted
@@ -182,5 +233,6 @@ data, and restoring B1 restores the previous production ownership paths.
 
 ## Open Questions
 
-None for B2. The fixed B2/B3 boundary above is mandatory; implementation must
-stop rather than partially move the inbound sentinel or deadline rebases.
+None for B3. The deadline/pending-inbound cutover is atomic; implementation
+must not leave an external deadline source, rebase, sentinel attempt, or second
+schedule path.

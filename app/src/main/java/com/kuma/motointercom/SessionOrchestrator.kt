@@ -36,7 +36,7 @@ internal class SessionOrchestrator(
     private val effectChannel = Channel<SessionEffect>(Channel.UNLIMITED)
     private val mutableState = MutableStateFlow<IntercomState>(IntercomState.Offline)
     private val signalingControl = SignalingControlCoordinator(
-        elapsedRealtime = elapsedRealtime,
+        clock = MonotonicClock { MonotonicTimestamp(elapsedRealtime()) },
         attemptTimeoutMs = attemptTimeoutMs,
         attemptIdFactory = attemptIdFactory
     )
@@ -84,6 +84,9 @@ internal class SessionOrchestrator(
 
     internal val activeControlAttempt: AttemptChannelSet?
         get() = signalingControl.activeAttempt
+
+    internal val pendingInboundRequest: PendingInboundRequest?
+        get() = signalingControl.pendingInboundRequest
 
     private suspend fun handle(event: SessionEvent): Boolean {
         val previous = mutableState.value

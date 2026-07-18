@@ -37,7 +37,6 @@ internal data class SelectionCohort(
 
 internal enum class SignalingAttemptPhase {
     WAITING_REMOTE_DECISION,
-    WAITING_LOCAL_DECISION,
     SELECTING_MEDIA,
     ACCEPTING,
     ACCEPTED,
@@ -69,11 +68,6 @@ internal data class AttemptChannelSet(
     val peer: PeerIdentity,
     val channelIds: Set<ControlChannelId>,
     val phase: SignalingAttemptPhase,
-    val confirmationChannelId: ControlChannelId? = null,
-    val confirmationSurface: ConfirmationSurface? = null,
-    val confirmationActionNonce: String? = null,
-    val decisionDeadlineElapsedMs: Long? = null,
-    val remoteDecisionDeadlineElapsedMs: Long? = null,
     val mediaOwnerChannelId: ControlChannelId? = null,
     val selectionCohort: SelectionCohort? = null,
     val terminalOutcome: AttemptOutcome? = null,
@@ -83,24 +77,6 @@ internal data class AttemptChannelSet(
         require(peer.isVerifiedFor(attempt.targetLock)) {
             "Attempt channel set peer must match the attempt TargetLock"
         }
-        require(confirmationChannelId == null || confirmationChannelId in channelIds) {
-            "Confirmation channel must belong to the attempt"
-        }
-        val confirmationFields = listOf(
-            confirmationChannelId,
-            confirmationSurface,
-            confirmationActionNonce,
-            decisionDeadlineElapsedMs
-        )
-        require(confirmationFields.all { it == null } || confirmationFields.all { it != null }) {
-            "Confirmation ownership, surface, nonce and deadline must be set together"
-        }
-        require(decisionDeadlineElapsedMs == null || decisionDeadlineElapsedMs >= 0L) {
-            "Confirmation decision deadline must not be negative"
-        }
-        require(remoteDecisionDeadlineElapsedMs == null || remoteDecisionDeadlineElapsedMs >= 0L) {
-            "Remote decision deadline must not be negative"
-        }
         require(mediaOwnerChannelId == null || mediaOwnerChannelId in channelIds) {
             "Media owner must belong to the attempt"
         }
@@ -108,6 +84,48 @@ internal data class AttemptChannelSet(
             "Selection cohort must belong to the same wire request"
         }
     }
+}
+
+internal enum class PendingInboundPhase {
+    WAITING_LOCAL_DECISION,
+    TERMINATING
+}
+
+internal data class PendingInboundRequest(
+    val runtimeSessionId: RuntimeSessionId,
+    val wireRequestKey: WireRequestKey,
+    val targetLock: TargetLock,
+    val peer: PeerIdentity,
+    val transport: Transport,
+    val channelIds: Set<ControlChannelId>,
+    val phase: PendingInboundPhase,
+    val confirmationChannelId: ControlChannelId? = null,
+    val confirmationSurface: ConfirmationSurface? = null,
+    val confirmationActionNonce: String? = null,
+    val decisionDeadlineAt: MonotonicTimestamp,
+    val terminalOutcome: AttemptOutcome? = null,
+    val pendingTerminalChannels: Set<ControlChannelId> = emptySet()
+) {
+    init {
+        require(peer.isVerifiedFor(targetLock)) {
+            "Pending inbound peer must match its TargetLock"
+        }
+        require(channelIds.isNotEmpty()) { "Pending inbound channels must not be empty" }
+        require(confirmationChannelId == null || confirmationChannelId in channelIds) {
+            "Confirmation channel must belong to the pending request"
+        }
+        val confirmationFields = listOf(
+            confirmationChannelId,
+            confirmationSurface,
+            confirmationActionNonce
+        )
+        require(confirmationFields.all { it == null } || confirmationFields.all { it != null }) {
+            "Confirmation ownership, surface and nonce must be set together"
+        }
+    }
+
+    val attemptId: ConnectionAttemptId
+        get() = wireRequestKey.attemptId
 }
 
 internal data class MediaChannelCandidate(

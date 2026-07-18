@@ -261,9 +261,7 @@ class IntercomService : Service() {
                     runtimeSessionId = runtimeSessionId,
                     targetDeviceId = targetDeviceId,
                     targetSessionId = targetSessionId,
-                    availableTransports = presence.availableTransports,
-                    deadlineElapsedRealtimeMs =
-                        SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
+                    availableTransports = presence.availableTransports
                 )
             ) { accepted ->
                 if (!accepted) {
@@ -562,8 +560,7 @@ class IntercomService : Service() {
                 envelope.attemptId,
                 channelId,
                 session.wireRequestKey,
-                message.reason,
-                createRecoveryDeadline()
+                message.reason
             )
             is SignalingMessageV2.Offer,
             is SignalingMessageV2.Answer,
@@ -581,7 +578,6 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 channelId,
                 session.wireRequestKey,
-                createRecoveryDeadline(),
                 "HELLO is not allowed after channel identity is pinned"
             )
         }
@@ -602,7 +598,6 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 session.channel.channelId,
                 session.wireRequestKey,
-                createRecoveryDeadline(),
                 failure.message.orEmpty()
             )
         } else {
@@ -610,7 +605,6 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 session.channel.channelId,
                 session.wireRequestKey,
-                createRecoveryDeadline(),
                 failure.message.orEmpty()
             )
         }
@@ -676,7 +670,6 @@ class IntercomService : Service() {
 
         activeMediaChannelId = effect.channelId
         tunnelChosen.set(token.value)
-        attemptDeadlineScheduler.schedule(effect.attempt)
         lanDiscovery?.retainPassiveIngress(effect.attempt)
         if (effect.attempt.channelPlan.transport == Transport.LAN) {
             val closingTunnel = wifiTunnel
@@ -697,26 +690,15 @@ class IntercomService : Service() {
         remoteRiderName = effect.peer.nickname
         publishStatus(SIGNALING_CONNECTED_STATUS)
 
-        val recoveryDeadlineElapsedRealtimeMs = createRecoveryDeadline()
         intercomManager = IntercomManager(
             context = this,
             signalingSession = session,
             webRtcRole = effect.role,
             onIntercomDisconnected = {
-                onIntercomDisconnected(
-                    token,
-                    effect.attempt,
-                    recoveryDeadlineElapsedRealtimeMs,
-                    it
-                )
+                onIntercomDisconnected(token, effect.attempt, it)
             },
             onConnectionStateChanged = {
-                onConnectionStateChanged(
-                    token,
-                    effect.attempt,
-                    recoveryDeadlineElapsedRealtimeMs,
-                    it
-                )
+                onConnectionStateChanged(token, effect.attempt, it)
             },
             onAudioLevelChanged = { onAudioLevelChanged(token, it) },
             onError = { error -> postForSession(token) { handleError(error) } },
@@ -740,7 +722,6 @@ class IntercomService : Service() {
     private fun onConnectionStateChanged(
         token: SessionGeneration.Token,
         attempt: ConnectionAttempt,
-        recoveryDeadlineElapsedRealtimeMs: Long,
         state: PeerConnection.PeerConnectionState
     ) {
         postForSession(token) {
@@ -750,8 +731,7 @@ class IntercomService : Service() {
                     runtimeSessionId = attempt.runtimeSessionId,
                     attemptId = attempt.id,
                     state = state.toProductState(),
-                    occurredAt = System.currentTimeMillis(),
-                    recoveryDeadlineElapsedRealtimeMs = recoveryDeadlineElapsedRealtimeMs
+                    occurredAt = System.currentTimeMillis()
                 )
             )
             when (state) {
@@ -777,7 +757,6 @@ class IntercomService : Service() {
     private fun onIntercomDisconnected(
         token: SessionGeneration.Token,
         attempt: ConnectionAttempt,
-        recoveryDeadlineElapsedRealtimeMs: Long,
         error: IOException
     ) {
         postForSession(token) {
@@ -785,8 +764,7 @@ class IntercomService : Service() {
             orchestrator.dispatch(
                 SessionEvent.SignalingDisconnected(
                     runtimeSessionId = attempt.runtimeSessionId,
-                    attemptId = attempt.id,
-                    recoveryDeadlineElapsedRealtimeMs = recoveryDeadlineElapsedRealtimeMs
+                    attemptId = attempt.id
                 )
             )
         }
@@ -940,7 +918,7 @@ class IntercomService : Service() {
             is SessionEffect.RestartDiscovery -> {
                 abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
             }
-            is SessionEffect.RescheduleAttemptDeadline -> {
+            is SessionEffect.ScheduleAttemptDeadline -> {
                 if (orchestrator.currentAttempt == effect.attempt) {
                     attemptDeadlineScheduler.schedule(effect.attempt)
                 }
@@ -1213,13 +1191,11 @@ class IntercomService : Service() {
     }
 
     private fun beginTargetedTransport(attempt: ConnectionAttempt) {
-        attemptDeadlineScheduler.schedule(attempt)
         val result = runCatching { openTargetedTransport(attempt) }
         if (result.getOrDefault(false)) {
             publishStatus(PEER_FOUND_STATUS)
             return
         }
-        attemptDeadlineScheduler.cancel(attempt)
         val reason = result.exceptionOrNull()?.message ?: "transport adapter unavailable"
         publishLog("Targeted transport open failed for ${attempt.id.value}: $reason")
         orchestrator.dispatch(
@@ -1231,9 +1207,6 @@ class IntercomService : Service() {
             )
         )
     }
-
-    private fun createRecoveryDeadline(): Long =
-        SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
 
     private fun PeerConnection.PeerConnectionState.toProductState(): WebRtcConnectionState =
         when (this) {
@@ -1458,7 +1431,6 @@ class IntercomService : Service() {
 
     companion object {
         private const val NO_SESSION_TOKEN = 0L
-        private const val CONNECTION_ATTEMPT_TIMEOUT_MS = 10_000L
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"

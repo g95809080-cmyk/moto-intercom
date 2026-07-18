@@ -18,7 +18,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
 
         val decision = coordinator.handle(
             IntercomState.Discovering(runtime),
-            outboundIntent(deadlineElapsedRealtimeMs = 10_500L)
+            outboundIntent()
         )
 
         assertTrue(requireNotNull(decision).accepted)
@@ -32,7 +32,10 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(connecting.attempt, coordinator.currentAttempt)
         assertEquals(listOf(ConnectionAttemptId("attempt-outbound")), ids.created)
         assertEquals(
-            listOf(SessionEffect.OpenTargetedTransport(connecting.attempt)),
+            listOf(
+                SessionEffect.ScheduleAttemptDeadline(connecting.attempt),
+                SessionEffect.OpenTargetedTransport(connecting.attempt)
+            ),
             decision.effects
         )
     }
@@ -60,11 +63,13 @@ class ConnectionAttemptCoordinatorOwnershipTest {
     @Test
     fun coordinatorCreatesRecoveryWithFreshIdentityAndPreservedTargetPlan() {
         val ids = RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery")
-        val coordinator = coordinator(ids)
+        val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
+        val coordinator = coordinator(ids, clock)
         val first = requireNotNull(
             coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
         ).state as IntercomState.Connecting
         val connected = IntercomState.Connected(first.attempt, verifiedPeer(), connectedAt = 5L)
+        clock.advanceBy(2_000L)
 
         val decision = requireNotNull(
             coordinator.handle(
@@ -73,8 +78,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
                     runtimeSessionId = runtime,
                     attemptId = first.attempt.id,
                     state = WebRtcConnectionState.DISCONNECTED,
-                    occurredAt = 6L,
-                    recoveryDeadlineElapsedRealtimeMs = 20_000L
+                    occurredAt = 6L
                 )
             )
         )
@@ -86,8 +90,12 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(first.attempt.targetLock, recovering.attempt.targetLock)
         assertEquals(first.attempt.channelPlan, recovering.attempt.channelPlan)
         assertEquals(ConnectionTrigger.RECOVERY, recovering.attempt.trigger)
-        assertEquals(20_000L, recovering.attempt.deadlineElapsedRealtimeMs)
+        assertEquals(12_500L, recovering.attempt.deadlineElapsedRealtimeMs)
         assertEquals(recovering.attempt, coordinator.currentAttempt)
+        assertEquals(
+            listOf(SessionEffect.ScheduleAttemptDeadline(recovering.attempt)),
+            decision.effects
+        )
         assertEquals(
             ConnectionAttemptTerminalOutcome.DISCONNECTED,
             coordinator.terminalOutcome(first.attempt.id)
@@ -95,11 +103,44 @@ class ConnectionAttemptCoordinatorOwnershipTest {
     }
 
     @Test
-    fun timeoutWinsOverLateTransportFailure() {
-        val coordinator = coordinator(RecordingAttemptIdFactory("attempt-timeout"))
+    fun signalingRecoveryClearsOldResourcesBeforeSchedulingNewDeadline() {
+        val coordinator = coordinator(
+            RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery")
+        )
         val connecting = requireNotNull(
             coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
         ).state as IntercomState.Connecting
+        val connected = IntercomState.Connected(
+            connecting.attempt,
+            verifiedPeer(),
+            connectedAt = 5L
+        )
+
+        val decision = requireNotNull(
+            coordinator.handle(
+                connected,
+                SessionEvent.SignalingDisconnected(runtime, connecting.attempt.id)
+            )
+        )
+
+        val recovery = (decision.state as IntercomState.Recovering).attempt
+        assertEquals(
+            listOf(
+                SessionEffect.RestartDiscovery(runtime, recovery),
+                SessionEffect.ScheduleAttemptDeadline(recovery)
+            ),
+            decision.effects
+        )
+    }
+
+    @Test
+    fun timeoutWinsOverLateTransportFailure() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
+        val coordinator = coordinator(RecordingAttemptIdFactory("attempt-timeout"), clock)
+        val connecting = requireNotNull(
+            coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
+        ).state as IntercomState.Connecting
+        clock.advanceBy(10_000L)
 
         val timeout = requireNotNull(
             coordinator.handle(
@@ -171,8 +212,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
                     runtimeSessionId = runtime,
                     attemptId = connecting.attempt.id,
                     state = WebRtcConnectionState.CONNECTED,
-                    occurredAt = 5L,
-                    recoveryDeadlineElapsedRealtimeMs = 20_000L
+                    occurredAt = 5L
                 )
             )
         )
@@ -192,20 +232,22 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(connecting.attempt, coordinator.currentAttempt)
     }
 
-    private fun coordinator(ids: RecordingAttemptIdFactory) =
+    private fun coordinator(
+        ids: RecordingAttemptIdFactory,
+        clock: MonotonicClock = FakeMonotonicClock(MonotonicTimestamp(500L))
+    ) =
         SignalingControlCoordinator(
-            elapsedRealtime = { 500L },
+            clock = clock,
             attemptTimeoutMs = 10_000L,
             attemptIdFactory = ids::create
         )
 
-    private fun outboundIntent(deadlineElapsedRealtimeMs: Long = 10_500L) =
+    private fun outboundIntent() =
         SessionEvent.ConnectPresenceRequested(
             runtimeSessionId = runtime,
             targetDeviceId = "peer-a",
             targetSessionId = remoteRuntime,
-            availableTransports = setOf(Transport.LAN, Transport.WIFI_DIRECT),
-            deadlineElapsedRealtimeMs = deadlineElapsedRealtimeMs
+            availableTransports = setOf(Transport.LAN, Transport.WIFI_DIRECT)
         )
 
     private fun verifiedPeer() = PeerIdentity(

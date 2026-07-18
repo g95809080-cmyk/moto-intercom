@@ -9,7 +9,7 @@ internal data class SignalingControlDecision(
 )
 
 internal class SignalingControlCoordinator(
-    private val elapsedRealtime: () -> Long,
+    private val clock: MonotonicClock,
     private val attemptTimeoutMs: Long,
     private val confirmationTimeoutMs: Long = 15_000L,
     private val actionNonce: () -> String = { UUID.randomUUID().toString() },
@@ -27,12 +27,17 @@ internal class SignalingControlCoordinator(
     private var ownedAttempt: ConnectionAttempt? = null
     @Volatile
     private var active: AttemptChannelSet? = null
+    @Volatile
+    private var pendingInbound: PendingInboundRequest? = null
 
     internal val currentAttempt: ConnectionAttempt?
         get() = ownedAttempt
 
     internal val activeAttempt: AttemptChannelSet?
         get() = active
+
+    internal val pendingInboundRequest: PendingInboundRequest?
+        get() = pendingInbound
 
     internal fun terminalOutcome(
         attemptId: ConnectionAttemptId
@@ -45,7 +50,6 @@ internal class SignalingControlCoordinator(
     ): SignalingControlDecision? {
         pruneCompleted()
         return when (event) {
-            is SessionEvent.IncomingRequest -> adoptIncomingAttempt(current, event)
             is SessionEvent.ConnectRequested -> adoptOutboundAttempt(current, event)
             is SessionEvent.ConnectPresenceRequested -> connectPresenceRequested(current, event)
             is SessionEvent.AttemptReplaced -> replaceOwnedAttempt(current, event)
@@ -136,20 +140,11 @@ internal class SignalingControlCoordinator(
         if (next == IntercomState.Offline) {
             channels.clear()
             active = null
+            pendingInbound = null
             ownedAttempt = null
             completedAttempts.clear()
             terminalAttemptOutcomes.clear()
         }
-    }
-
-    private fun adoptIncomingAttempt(
-        current: IntercomState,
-        event: SessionEvent.IncomingRequest
-    ): SignalingControlDecision {
-        if (ownedAttempt != null || terminalOutcome(event.attempt.id) != null) return rejected()
-        val transition = reduceIntercomState(current, event) ?: return rejected()
-        ownedAttempt = event.attempt
-        return accepted(transition.state, transition.effects)
     }
 
     private fun adoptOutboundAttempt(
@@ -170,8 +165,8 @@ internal class SignalingControlCoordinator(
             current !is IntercomState.Discovering ||
             current.runtimeSessionId != event.runtimeSessionId ||
             ownedAttempt != null ||
-            event.targetDeviceId.isBlank() ||
-            event.deadlineElapsedRealtimeMs <= 0L
+            pendingInbound != null ||
+            event.targetDeviceId.isBlank()
         ) {
             return rejected()
         }
@@ -188,12 +183,15 @@ internal class SignalingControlCoordinator(
             targetLock = TargetLock(event.targetDeviceId, event.targetSessionId),
             trigger = ConnectionTrigger.USER,
             channelPlan = ChannelPlan.single(transport),
-            deadlineElapsedRealtimeMs = event.deadlineElapsedRealtimeMs
+            deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
         )
         ownedAttempt = attempt
         return accepted(
             state = IntercomState.Connecting(attempt),
-            effects = listOf(SessionEffect.OpenTargetedTransport(attempt))
+            effects = listOf(
+                SessionEffect.ScheduleAttemptDeadline(attempt),
+                SessionEffect.OpenTargetedTransport(attempt)
+            )
         )
     }
 
@@ -235,7 +233,8 @@ internal class SignalingControlCoordinator(
         val attempt = matchingOwnedAttempt(event.runtimeSessionId, event.attemptId)
             ?.takeIf {
                 current.connectionAttemptOrNull() == it &&
-                    it.deadlineElapsedRealtimeMs == event.scheduledDeadlineElapsedRealtimeMs
+                    it.deadlineElapsedRealtimeMs == event.scheduledDeadlineElapsedRealtimeMs &&
+                    it.isExpiredAt(clock.now())
             }
             ?: return rejected()
         if (terminalOutcome(attempt.id) != null) return rejected()
@@ -261,7 +260,6 @@ internal class SignalingControlCoordinator(
             WebRtcConnectionState.DISCONNECTED -> connectionLost(
                 current,
                 attempt,
-                event.recoveryDeadlineElapsedRealtimeMs,
                 ConnectionAttemptTerminalOutcome.DISCONNECTED,
                 restartConnectedDiscovery = false
             )
@@ -269,7 +267,6 @@ internal class SignalingControlCoordinator(
             WebRtcConnectionState.CLOSED -> connectionLost(
                 current,
                 attempt,
-                event.recoveryDeadlineElapsedRealtimeMs,
                 ConnectionAttemptTerminalOutcome.FAILED,
                 restartConnectedDiscovery = false
             )
@@ -306,7 +303,6 @@ internal class SignalingControlCoordinator(
         return connectionLost(
             current,
             attempt,
-            event.recoveryDeadlineElapsedRealtimeMs,
             ConnectionAttemptTerminalOutcome.DISCONNECTED,
             restartConnectedDiscovery = true
         )
@@ -315,13 +311,11 @@ internal class SignalingControlCoordinator(
     private fun connectionLost(
         current: IntercomState,
         attempt: ConnectionAttempt,
-        recoveryDeadlineElapsedRealtimeMs: Long,
         outcome: ConnectionAttemptTerminalOutcome,
         restartConnectedDiscovery: Boolean
     ): SignalingControlDecision = when (current) {
         is IntercomState.Connected -> recoverConnectedAttempt(
             current,
-            recoveryDeadlineElapsedRealtimeMs,
             outcome,
             restartConnectedDiscovery
         )
@@ -340,7 +334,6 @@ internal class SignalingControlCoordinator(
 
     private fun recoverConnectedAttempt(
         current: IntercomState.Connected,
-        recoveryDeadlineElapsedRealtimeMs: Long,
         outcome: ConnectionAttemptTerminalOutcome,
         restartConnectedDiscovery: Boolean
     ): SignalingControlDecision {
@@ -348,7 +341,6 @@ internal class SignalingControlCoordinator(
             it.attempt.id == current.attempt.id &&
                 it.phase == SignalingAttemptPhase.TERMINATING
         }?.let { return finishAttemptImmediately(current, it) }
-        if (recoveryDeadlineElapsedRealtimeMs <= 0L) return rejected()
         val existingOutcome = terminalOutcome(current.attempt.id)
         if (
             existingOutcome != null &&
@@ -364,7 +356,7 @@ internal class SignalingControlCoordinator(
             targetLock = current.attempt.targetLock,
             trigger = ConnectionTrigger.RECOVERY,
             channelPlan = current.attempt.channelPlan,
-            deadlineElapsedRealtimeMs = recoveryDeadlineElapsedRealtimeMs
+            deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
         )
         if (existingOutcome == null) recordTerminal(current.attempt, outcome)
         ownedAttempt = recoveryAttempt
@@ -375,10 +367,11 @@ internal class SignalingControlCoordinator(
                     SessionEffect.RestartDiscovery(
                         recoveryAttempt.runtimeSessionId,
                         recoveryAttempt
-                    )
+                    ),
+                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt)
                 )
             } else {
-                emptyList()
+                listOf(SessionEffect.ScheduleAttemptDeadline(recoveryAttempt))
             }
         )
     }
@@ -404,6 +397,28 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.StopRequested
     ): SignalingControlDecision? {
+        pendingInbound?.let { pending ->
+            if (
+                pending.runtimeSessionId != event.runtimeSessionId ||
+                current.runtimeSessionId != event.runtimeSessionId
+            ) {
+                return rejected()
+            }
+            val effects = listOfNotNull(
+                pending.confirmationActionNonce?.let {
+                    SessionEffect.CancelIncomingConfirmation(
+                        pending.runtimeSessionId,
+                        pending.attemptId,
+                        it
+                    )
+                }
+            ) + pending.channelIds.map {
+                closeEffect(pending.runtimeSessionId, pending.attemptId, it)
+            }
+            pending.channelIds.forEach(channels::remove)
+            pendingInbound = null
+            return accepted(IntercomState.Stopping(event.runtimeSessionId), effects)
+        }
         val attempt = ownedAttempt ?: return null
         if (attempt.runtimeSessionId != event.runtimeSessionId) return rejected()
         if (current.runtimeSessionId != event.runtimeSessionId) return rejected()
@@ -495,6 +510,10 @@ internal class SignalingControlCoordinator(
         if (activeContext?.wireRequestKey == event.wireRequestKey) {
             return handleDuplicateActiveRequest(current, channel, activeContext)
         }
+        val pendingContext = pendingInbound
+        if (pendingContext?.wireRequestKey == event.wireRequestKey) {
+            return handleDuplicatePendingRequest(current, channel, pendingContext)
+        }
         completedAttempts[event.wireRequestKey]?.let { completed ->
             return replayCompleted(event.runtimeSessionId, channel.channelId, completed)
         }
@@ -509,7 +528,11 @@ internal class SignalingControlCoordinator(
         }
         if (current is IntercomState.Discovering) {
             return when {
-                policy.paired -> beginPairedInboundConnection(current, channel)
+                policy.paired -> beginPairedInboundConnection(
+                    current,
+                    channel,
+                    event.occurredAtElapsedMs
+                )
                 policy.confirmationAvailability.preferredSurface() != null ->
                     beginInboundConfirmation(
                         current,
@@ -544,10 +567,6 @@ internal class SignalingControlCoordinator(
                 )
             )
         }
-        if (context.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION) {
-            active = context.copy(channelIds = context.channelIds + channel.channelId)
-            return accepted(state = current)
-        }
         return accepted(
             effects = listOf(
                 rejectEffect(
@@ -566,43 +585,48 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         surface: ConfirmationSurface
     ): SignalingControlDecision {
-        val attempt = inboundAttempt(
-            runtimeSessionId = current.runtimeSessionId,
-            channel = channel,
-            deadlineElapsedRealtimeMs = Long.MAX_VALUE
-        )
         val channelIds = eligibleChannels(channel.wireRequestKey, channel.transport)
-        val context = AttemptChannelSet(
+        val pending = PendingInboundRequest(
+            runtimeSessionId = current.runtimeSessionId,
             wireRequestKey = channel.wireRequestKey,
-            attempt = attempt,
+            targetLock = channel.targetLock,
             peer = channel.peer,
+            transport = channel.transport,
             channelIds = channelIds,
-            phase = SignalingAttemptPhase.WAITING_LOCAL_DECISION,
+            phase = PendingInboundPhase.WAITING_LOCAL_DECISION,
             confirmationChannelId = channel.channelId,
             confirmationSurface = surface,
             confirmationActionNonce = actionNonce(),
-            decisionDeadlineElapsedMs = elapsedRealtime() + confirmationTimeoutMs
+            decisionDeadlineAt = deadlineAfter(clock.now(), confirmationTimeoutMs)
         )
-        ownedAttempt = attempt
-        active = context
+        pendingInbound = pending
         return accepted(
-            state = IntercomState.IncomingConfirmation(attempt, channel.peer),
-            effects = listOf(SessionEffect.PublishIncomingConfirmation(context.confirmationPrompt()))
+            state = IntercomState.IncomingConfirmation(
+                current.runtimeSessionId,
+                pending.attemptId,
+                channel.peer
+            ),
+            effects = listOf(SessionEffect.PublishIncomingConfirmation(pending.confirmationPrompt()))
         )
     }
 
     private fun beginPairedInboundConnection(
         current: IntercomState.Discovering,
-        channel: VerifiedControlChannel
+        channel: VerifiedControlChannel,
+        occurredAtElapsedMs: Long
     ): SignalingControlDecision {
+        val deadlineAt = deadlineAfter(occurredAtElapsedMs, attemptTimeoutMs)
+        if (clock.now().elapsedRealtimeMs >= deadlineAt.elapsedRealtimeMs) {
+            return rejectInboundWithoutConfirmation(current, channel, RejectReason.TIMEOUT)
+        }
+        val eligible = eligibleChannels(channel.wireRequestKey, channel.transport)
+        if (eligible.isEmpty()) return rejected()
         val attempt = inboundAttempt(
             runtimeSessionId = current.runtimeSessionId,
             channel = channel,
-            deadlineElapsedRealtimeMs = elapsedRealtime() + attemptTimeoutMs
+            deadlineAt = deadlineAt
         )
-        val eligible = eligibleChannels(channel.wireRequestKey, channel.transport)
-        if (eligible.isEmpty()) return terminateAttempt(attempt)
-        val cohort = SelectionCohort(channel.wireRequestKey, eligible, elapsedRealtime())
+        val cohort = SelectionCohort(channel.wireRequestKey, eligible, nowElapsedRealtimeMs())
         ownedAttempt = attempt
         active = AttemptChannelSet(
             wireRequestKey = channel.wireRequestKey,
@@ -614,7 +638,10 @@ internal class SignalingControlCoordinator(
         )
         return accepted(
             state = IntercomState.Connecting(attempt, channel.peer),
-            effects = listOf(selectEffect(attempt, cohort))
+            effects = listOf(
+                SessionEffect.ScheduleAttemptDeadline(attempt),
+                selectEffect(attempt, cohort)
+            )
         )
     }
 
@@ -623,25 +650,18 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         reason: RejectReason
     ): SignalingControlDecision {
-        val attempt = inboundAttempt(
-            runtimeSessionId = current.runtimeSessionId,
-            channel = channel,
-            deadlineElapsedRealtimeMs = Long.MAX_VALUE
-        )
-        val context = AttemptChannelSet(
-            wireRequestKey = channel.wireRequestKey,
-            attempt = attempt,
-            peer = channel.peer,
-            channelIds = eligibleChannels(channel.wireRequestKey, channel.transport),
-            phase = SignalingAttemptPhase.WAITING_LOCAL_DECISION
-        )
-        ownedAttempt = attempt
-        active = context
-        return beginTerminalBroadcast(
-            current = current,
-            context = context,
-            outcome = AttemptOutcome.REJECTED,
-            response = SignalingMessageV2.ConnectReject(reason, retryable = false)
+        val response = SignalingMessageV2.ConnectReject(reason, retryable = false)
+        remember(channel.wireRequestKey, AttemptOutcome.REJECTED, response)
+        return accepted(
+            state = current,
+            effects = eligibleChannels(channel.wireRequestKey, channel.transport).map {
+                responseEffect(
+                    current.runtimeSessionId,
+                    channel.wireRequestKey.attemptId,
+                    it,
+                    response
+                )
+            }
         )
     }
 
@@ -687,16 +707,25 @@ internal class SignalingControlCoordinator(
         recordTerminal(current.attempt, ConnectionAttemptTerminalOutcome.GLARE_LOST)
         losingChannelIds.forEach(channels::remove)
 
-        val attempt = inboundAttempt(
-            runtimeSessionId = current.runtimeSessionId,
-            channel = channel,
-            deadlineElapsedRealtimeMs = current.attempt.deadlineElapsedRealtimeMs
-        )
         val eligible = eligibleChannels(channel.wireRequestKey, channel.transport)
         if (eligible.isEmpty()) {
             active = null
-            return terminateAttempt(attempt)
+            clearOwnedAttempt(current.attempt)
+            return accepted(
+                state = IntercomState.Discovering(current.runtimeSessionId),
+                effects = listOf(
+                    SessionEffect.AbortAttemptAndResumeDiscovery(
+                        current.runtimeSessionId,
+                        current.attempt.id
+                    )
+                )
+            )
         }
+        val attempt = inboundAttempt(
+            runtimeSessionId = current.runtimeSessionId,
+            channel = channel,
+            deadlineAt = current.attempt.deadlineAt
+        )
         val cohort = SelectionCohort(channel.wireRequestKey, eligible, occurredAtElapsedMs)
         ownedAttempt = attempt
         active = AttemptChannelSet(
@@ -713,7 +742,7 @@ internal class SignalingControlCoordinator(
                 attemptId = current.attempt.id,
                 channelId = it
             )
-        } + selectEffect(attempt, cohort)
+        } + SessionEffect.ScheduleAttemptDeadline(attempt) + selectEffect(attempt, cohort)
         return accepted(
             state = IntercomState.Connecting(attempt, channel.peer),
             effects = effects
@@ -724,44 +753,47 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.IncomingAccepted
     ): SignalingControlDecision {
-        val context = matchingConfirmation(
+        val pending = matchingConfirmation(
             current,
             event.runtimeSessionId,
             event.attemptId,
             event.channelId,
             event.actionNonce
         ) ?: return rejected()
-        val decisionDeadline = requireNotNull(context.decisionDeadlineElapsedMs)
-        if (event.occurredAtElapsedMs > decisionDeadline) {
-            return timeoutIncomingConfirmation(current, context)
+        if (event.occurredAtElapsedMs >= pending.decisionDeadlineAt.elapsedRealtimeMs) {
+            return timeoutIncomingConfirmation(current, pending)
         }
-        val acceptedAttempt = if (context.attempt.deadlineElapsedRealtimeMs == Long.MAX_VALUE) {
-            context.attempt.copy(
-                deadlineElapsedRealtimeMs = elapsedRealtime() + attemptTimeoutMs
-            )
-        } else {
-            context.attempt
+        val acceptedDeadline = deadlineAfter(event.occurredAtElapsedMs, attemptTimeoutMs)
+        if (clock.now().elapsedRealtimeMs >= acceptedDeadline.elapsedRealtimeMs) {
+            return timeoutIncomingConfirmation(current, pending)
         }
-        val eligible = context.channelIds.filterTo(linkedSetOf()) { channelId ->
-            channels[channelId]?.transport == context.attempt.channelPlan.transport
+        val eligible = pending.channelIds.filterTo(linkedSetOf()) { channelId ->
+            channels[channelId]?.transport == pending.transport
         }
-        if (eligible.isEmpty()) return finishAttemptImmediately(current, context)
-        val cohort = SelectionCohort(context.wireRequestKey, eligible, elapsedRealtime())
-        replaceOwnedAttempt(context.attempt, acceptedAttempt)
-        active = context.copy(
+        if (eligible.isEmpty()) return finishPendingImmediately(current, pending)
+        val confirmationChannel = channels[pending.confirmationChannelId]
+            ?: return finishPendingImmediately(current, pending)
+        val acceptedAttempt = inboundAttempt(
+            runtimeSessionId = pending.runtimeSessionId,
+            channel = confirmationChannel,
+            deadlineAt = acceptedDeadline
+        )
+        val cohort = SelectionCohort(pending.wireRequestKey, eligible, nowElapsedRealtimeMs())
+        ownedAttempt = acceptedAttempt
+        active = AttemptChannelSet(
+            wireRequestKey = pending.wireRequestKey,
             attempt = acceptedAttempt,
+            peer = pending.peer,
             channelIds = eligible,
             phase = SignalingAttemptPhase.SELECTING_MEDIA,
-            confirmationChannelId = null,
-            confirmationSurface = null,
-            confirmationActionNonce = null,
-            decisionDeadlineElapsedMs = null,
             selectionCohort = cohort
         )
+        pendingInbound = null
         return accepted(
-            state = IntercomState.Connecting(acceptedAttempt, context.peer),
+            state = IntercomState.Connecting(acceptedAttempt, pending.peer),
             effects = listOf(
-                cancelConfirmationEffect(context),
+                cancelConfirmationEffect(pending),
+                SessionEffect.ScheduleAttemptDeadline(acceptedAttempt),
                 selectEffect(acceptedAttempt, cohort)
             )
         )
@@ -771,19 +803,19 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.IncomingRejected
     ): SignalingControlDecision {
-        val context = matchingConfirmation(
+        val pending = matchingConfirmation(
             current,
             event.runtimeSessionId,
             event.attemptId,
             event.channelId,
             event.actionNonce
         ) ?: return rejected()
-        if (event.occurredAtElapsedMs > requireNotNull(context.decisionDeadlineElapsedMs)) {
-            return timeoutIncomingConfirmation(current, context)
+        if (event.occurredAtElapsedMs >= pending.decisionDeadlineAt.elapsedRealtimeMs) {
+            return timeoutIncomingConfirmation(current, pending)
         }
-        return beginTerminalBroadcast(
+        return beginPendingTerminalBroadcast(
             current = current,
-            context = context,
+            pending = pending,
             outcome = AttemptOutcome.REJECTED,
             response = SignalingMessageV2.ConnectReject(
                 RejectReason.USER_REJECTED,
@@ -796,33 +828,33 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.IncomingDecisionTimedOut
     ): SignalingControlDecision {
-        val context = matchingConfirmation(
+        val pending = matchingConfirmation(
             current,
             event.runtimeSessionId,
             event.attemptId,
             event.channelId,
             event.actionNonce
         ) ?: return rejected()
-        if (event.occurredAtElapsedMs < requireNotNull(context.decisionDeadlineElapsedMs)) {
+        if (event.occurredAtElapsedMs < pending.decisionDeadlineAt.elapsedRealtimeMs) {
             return rejected()
         }
-        return timeoutIncomingConfirmation(current, context)
+        return timeoutIncomingConfirmation(current, pending)
     }
 
     private fun confirmationSurfaceUnavailable(
         current: IntercomState,
         event: SessionEvent.ConfirmationSurfaceUnavailable
     ): SignalingControlDecision {
-        val context = matchingConfirmation(
+        val pending = matchingConfirmation(
             current,
             event.runtimeSessionId,
             event.attemptId,
             event.channelId,
             event.actionNonce
         ) ?: return rejected()
-        return beginTerminalBroadcast(
+        return beginPendingTerminalBroadcast(
             current = current,
-            context = context,
+            pending = pending,
             outcome = AttemptOutcome.REJECTED,
             response = SignalingMessageV2.ConnectReject(
                 RejectReason.CONFIRMATION_UNAVAILABLE,
@@ -835,41 +867,41 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.ConfirmationAvailabilityChanged
     ): SignalingControlDecision {
-        val context = active
+        val pending = pendingInbound
             ?.takeIf {
-                it.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION &&
-                    it.attempt.runtimeSessionId == event.runtimeSessionId
+                it.phase == PendingInboundPhase.WAITING_LOCAL_DECISION &&
+                    it.runtimeSessionId == event.runtimeSessionId
             }
             ?: return accepted(state = current)
-        if (current !is IntercomState.IncomingConfirmation || current.attempt != context.attempt) {
+        if (current !is IntercomState.IncomingConfirmation || current.attemptId != pending.attemptId) {
             return accepted(state = current)
         }
         val desiredSurface = event.availability.preferredSurface()
-            ?: return beginTerminalBroadcast(
+            ?: return beginPendingTerminalBroadcast(
                 current = current,
-                context = context,
+                pending = pending,
                 outcome = AttemptOutcome.REJECTED,
                 response = SignalingMessageV2.ConnectReject(
                     RejectReason.CONFIRMATION_UNAVAILABLE,
                     retryable = false
                 )
             )
-        if (context.confirmationSurface == desiredSurface) {
+        if (pending.confirmationSurface == desiredSurface) {
             return accepted(state = current)
         }
 
-        val previousNonce = requireNotNull(context.confirmationActionNonce)
-        val migrated = context.copy(
+        val previousNonce = requireNotNull(pending.confirmationActionNonce)
+        val migrated = pending.copy(
             confirmationSurface = desiredSurface,
             confirmationActionNonce = actionNonce()
         )
-        active = migrated
+        pendingInbound = migrated
         return accepted(
             state = current,
             effects = listOf(
                 SessionEffect.CancelIncomingConfirmation(
-                    context.attempt.runtimeSessionId,
-                    context.attempt.id,
+                    pending.runtimeSessionId,
+                    pending.attemptId,
                     previousNonce
                 ),
                 SessionEffect.PublishIncomingConfirmation(migrated.confirmationPrompt())
@@ -879,10 +911,10 @@ internal class SignalingControlCoordinator(
 
     private fun timeoutIncomingConfirmation(
         current: IntercomState,
-        context: AttemptChannelSet
-    ): SignalingControlDecision = beginTerminalBroadcast(
+        pending: PendingInboundRequest
+    ): SignalingControlDecision = beginPendingTerminalBroadcast(
         current = current,
-        context = context,
+        pending = pending,
         outcome = AttemptOutcome.TIMED_OUT,
         response = SignalingMessageV2.ConnectReject(
             RejectReason.TIMEOUT,
@@ -962,21 +994,24 @@ internal class SignalingControlCoordinator(
                 event.channelId
             )
         }
-        val acceptedAttempt = context.attempt.copy(
-            deadlineElapsedRealtimeMs = elapsedRealtime() + attemptTimeoutMs
-        )
-        val acceptedState = current.withRebasedAttempt(context.attempt, acceptedAttempt)
-            ?: return closeConflictingChannel(
+        if (current.connectionAttemptOrNull() != context.attempt) {
+            return closeConflictingChannel(
                 current,
                 event.runtimeSessionId,
                 event.attemptId,
                 event.channelId
             )
+        }
+        if (context.attempt.isExpiredAt(clock.now())) {
+            return terminateOwnedAttempt(
+                current,
+                context.attempt,
+                ConnectionAttemptTerminalOutcome.TIMED_OUT
+            )
+        }
         val losing = context.channelIds - event.channelId
         losing.forEach(channels::remove)
-        replaceOwnedAttempt(context.attempt, acceptedAttempt)
         active = context.copy(
-            attempt = acceptedAttempt,
             channelIds = setOf(event.channelId),
             phase = SignalingAttemptPhase.ACCEPTED,
             mediaOwnerChannelId = event.channelId,
@@ -989,13 +1024,13 @@ internal class SignalingControlCoordinator(
                 channelId = it
             )
         } + SessionEffect.StartWebRtc(
-            runtimeSessionId = acceptedAttempt.runtimeSessionId,
-            attempt = acceptedAttempt,
+            runtimeSessionId = context.attempt.runtimeSessionId,
+            attempt = context.attempt,
             channelId = event.channelId,
             role = WebRtcRole.OFFERER,
             peer = context.peer
         )
-        return accepted(state = acceptedState, effects = effects)
+        return accepted(state = current, effects = effects)
     }
 
     private fun remoteConnectRejected(
@@ -1151,7 +1186,6 @@ internal class SignalingControlCoordinator(
         active = context.copy(
             channelIds = setOf(owner),
             phase = SignalingAttemptPhase.TERMINATING,
-            confirmationChannelId = null,
             selectionCohort = null,
             terminalOutcome = AttemptOutcome.DISCONNECTED,
             pendingTerminalChannels = setOf(owner)
@@ -1171,33 +1205,13 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.SignalingMessageSent
     ): SignalingControlDecision {
+        pendingInbound?.takeIf {
+            it.phase == PendingInboundPhase.TERMINATING &&
+                it.runtimeSessionId == event.runtimeSessionId &&
+                it.attemptId == event.attemptId &&
+                event.channelId in it.pendingTerminalChannels
+        }?.let { return finishSentPendingTerminalChannel(current, it, event.channelId) }
         val context = active
-        if (
-            event.type == SignalingMessageTypeV2.CONNECT_REQUEST &&
-            context?.phase == SignalingAttemptPhase.WAITING_REMOTE_DECISION &&
-            context.attempt.runtimeSessionId == event.runtimeSessionId &&
-            context.attempt.id == event.attemptId &&
-            event.channelId in context.channelIds &&
-            context.remoteDecisionDeadlineElapsedMs == null
-        ) {
-            // Preserve the receiver's full decision window and one control-path delivery budget.
-            val remoteDecisionDeadline =
-                elapsedRealtime() + confirmationTimeoutMs + attemptTimeoutMs
-            val waitingAttempt = context.attempt.copy(
-                deadlineElapsedRealtimeMs = remoteDecisionDeadline
-            )
-            val waitingState = current.withRebasedAttempt(context.attempt, waitingAttempt)
-                ?: return accepted(state = current)
-            replaceOwnedAttempt(context.attempt, waitingAttempt)
-            active = context.copy(
-                attempt = waitingAttempt,
-                remoteDecisionDeadlineElapsedMs = remoteDecisionDeadline
-            )
-            return accepted(
-                state = waitingState,
-                effects = listOf(SessionEffect.RescheduleAttemptDeadline(waitingAttempt))
-            )
-        }
         if (
             event.type == SignalingMessageTypeV2.CONNECT_ACCEPT &&
             context?.phase == SignalingAttemptPhase.ACCEPTING &&
@@ -1236,6 +1250,9 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.SignalingSendFailed
     ): SignalingControlDecision {
+        pendingInbound?.takeIf { event.channelId in it.channelIds }?.let {
+            return removePendingChannel(current, it, event.channelId, closeRemoved = true)
+        }
         val context = active
         channels.remove(event.channelId)
         if (context == null || event.channelId !in context.channelIds) {
@@ -1264,6 +1281,11 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.ChannelClosed
     ): SignalingControlDecision {
+        pendingInbound?.takeIf {
+            it.wireRequestKey == event.wireRequestKey && event.channelId in it.channelIds
+        }?.let {
+            return removePendingChannel(current, it, event.channelId, closeRemoved = false)
+        }
         channels.remove(event.channelId)
         val context = active
             ?.takeIf { it.wireRequestKey == event.wireRequestKey && event.channelId in it.channelIds }
@@ -1273,7 +1295,6 @@ internal class SignalingControlCoordinator(
                 rememberDisconnectedIfAccepted(context)
                 val decision = recoverConnectedAttempt(
                     current,
-                    event.recoveryDeadlineElapsedRealtimeMs,
                     ConnectionAttemptTerminalOutcome.DISCONNECTED,
                     restartConnectedDiscovery = true
                 )
@@ -1286,32 +1307,33 @@ internal class SignalingControlCoordinator(
 
         val remaining = context.channelIds - event.channelId
         if (remaining.isEmpty()) return finishAttemptImmediately(current, context)
-        val (withoutChannel, confirmationEffects) = removeConfirmationChannel(
-            context,
-            event.channelId,
-            remaining
-        )
         val cohort = context.selectionCohort?.let {
             val cohortRemaining = it.channelIds - event.channelId
             if (cohortRemaining.isEmpty()) null else it.copy(channelIds = cohortRemaining)
         }
-        active = withoutChannel.copy(
+        active = context.copy(
+            channelIds = remaining,
             selectionCohort = cohort,
             pendingTerminalChannels = context.pendingTerminalChannels - event.channelId
         )
         if (context.phase == SignalingAttemptPhase.SELECTING_MEDIA && cohort != null) {
             return accepted(
                 state = current,
-                effects = confirmationEffects + selectEffect(context.attempt, cohort)
+                effects = listOf(selectEffect(context.attempt, cohort))
             )
         }
-        return accepted(state = current, effects = confirmationEffects)
+        return accepted(state = current)
     }
 
     private fun protocolViolation(
         current: IntercomState,
         event: SessionEvent.ProtocolViolation
     ): SignalingControlDecision {
+        pendingInbound?.takeIf {
+            it.wireRequestKey == event.wireRequestKey && event.channelId in it.channelIds
+        }?.let {
+            return removePendingChannel(current, it, event.channelId, closeRemoved = true)
+        }
         val context = active
         val isOwner = context?.wireRequestKey == event.wireRequestKey &&
             context.mediaOwnerChannelId == event.channelId
@@ -1336,36 +1358,28 @@ internal class SignalingControlCoordinator(
         }
     }
 
-    private fun beginTerminalBroadcast(
+    private fun beginPendingTerminalBroadcast(
         current: IntercomState,
-        context: AttemptChannelSet,
+        pending: PendingInboundRequest,
         outcome: AttemptOutcome,
         response: SignalingMessageV2
     ): SignalingControlDecision {
-        val pending = context.channelIds.filterTo(linkedSetOf()) { it in channels }
-        remember(context.wireRequestKey, outcome, response)
-        recordTerminal(context.attempt, outcome.toLogicalTerminalOutcome())
-        if (pending.isEmpty()) return finishAttemptImmediately(current, context)
-        val cancelConfirmation = context.confirmationActionNonce?.let {
-            SessionEffect.CancelIncomingConfirmation(
-                context.attempt.runtimeSessionId,
-                context.attempt.id,
-                it
-            )
-        }
-        active = context.copy(
-            phase = SignalingAttemptPhase.TERMINATING,
+        val terminalChannels = pending.channelIds.filterTo(linkedSetOf()) { it in channels }
+        remember(pending.wireRequestKey, outcome, response)
+        if (terminalChannels.isEmpty()) return finishPendingImmediately(current, pending)
+        val cancelConfirmation = cancelConfirmationEffect(pending)
+        pendingInbound = pending.copy(
+            phase = PendingInboundPhase.TERMINATING,
             confirmationChannelId = null,
             confirmationSurface = null,
             confirmationActionNonce = null,
-            decisionDeadlineElapsedMs = null,
             terminalOutcome = outcome,
-            pendingTerminalChannels = pending
+            pendingTerminalChannels = terminalChannels
         )
-        val effects = listOfNotNull(cancelConfirmation) + pending.map { channelId ->
+        val effects = listOf(cancelConfirmation) + terminalChannels.map { channelId ->
             responseEffect(
-                runtimeSessionId = context.attempt.runtimeSessionId,
-                attemptId = context.attempt.id,
+                runtimeSessionId = pending.runtimeSessionId,
+                attemptId = pending.attemptId,
                 channelId = channelId,
                 response = response
             )
@@ -1390,7 +1404,6 @@ internal class SignalingControlCoordinator(
             val remainingChannels = context.channelIds - channelId
             val updated = context.copy(
                 channelIds = remainingChannels,
-                confirmationChannelId = null,
                 mediaOwnerChannelId = context.mediaOwnerChannelId?.takeIf {
                     it in remainingChannels
                 },
@@ -1416,7 +1429,6 @@ internal class SignalingControlCoordinator(
         }
         active = context.copy(
             channelIds = remaining,
-            confirmationChannelId = context.confirmationChannelId?.takeUnless { it == channelId },
             selectionCohort = context.selectionCohort?.let { cohort ->
                 val remainingCohort = cohort.channelIds - channelId
                 if (remainingCohort.isEmpty()) null else cohort.copy(channelIds = remainingCohort)
@@ -1436,44 +1448,108 @@ internal class SignalingControlCoordinator(
         if (remaining.isEmpty() || context.mediaOwnerChannelId == channelId) {
             return finishAttemptImmediately(current, context)
         }
-        val (withoutChannel, confirmationEffects) = removeConfirmationChannel(
-            context,
-            channelId,
-            remaining
-        )
-        active = withoutChannel.copy(
+        active = context.copy(
+            channelIds = remaining,
             pendingTerminalChannels = context.pendingTerminalChannels - channelId
         )
         return accepted(
             state = current,
             effects = listOf(
                 closeEffect(context.attempt.runtimeSessionId, context.attempt.id, channelId)
-            ) + confirmationEffects
+            )
         )
     }
 
-    private fun removeConfirmationChannel(
-        context: AttemptChannelSet,
-        removedChannelId: ControlChannelId,
-        remainingChannelIds: Set<ControlChannelId>
-    ): Pair<AttemptChannelSet, List<SessionEffect>> {
-        if (context.confirmationChannelId != removedChannelId) {
-            return context.copy(channelIds = remainingChannelIds) to emptyList()
+    private fun finishSentPendingTerminalChannel(
+        current: IntercomState,
+        pending: PendingInboundRequest,
+        channelId: ControlChannelId
+    ): SignalingControlDecision =
+        removePendingChannel(current, pending, channelId, closeRemoved = true)
+
+    private fun removePendingChannel(
+        current: IntercomState,
+        pending: PendingInboundRequest,
+        channelId: ControlChannelId,
+        closeRemoved: Boolean
+    ): SignalingControlDecision {
+        channels.remove(channelId)
+        val remaining = pending.channelIds - channelId
+        val prefixEffects = if (closeRemoved) {
+            listOf(closeEffect(pending.runtimeSessionId, pending.attemptId, channelId))
+        } else {
+            emptyList()
+        }
+        if (remaining.isEmpty()) {
+            return finishPendingImmediately(
+                current,
+                pending,
+                prefixEffects,
+                remainingChannelIds = emptySet()
+            )
+        }
+        if (pending.phase == PendingInboundPhase.TERMINATING) {
+            val remainingTerminal = pending.pendingTerminalChannels - channelId
+            if (remainingTerminal.isEmpty()) {
+                return finishPendingImmediately(
+                    current,
+                    pending,
+                    prefixEffects,
+                    remainingChannelIds = remaining
+                )
+            }
+            pendingInbound = pending.copy(
+                channelIds = remaining,
+                pendingTerminalChannels = remainingTerminal
+            )
+            return accepted(state = current, effects = prefixEffects)
+        }
+        if (pending.confirmationChannelId != channelId) {
+            pendingInbound = pending.copy(channelIds = remaining)
+            return accepted(state = current, effects = prefixEffects)
         }
 
-        val previousNonce = requireNotNull(context.confirmationActionNonce)
-        val migrated = context.copy(
-            channelIds = remainingChannelIds,
-            confirmationChannelId = requireNotNull(remainingChannelIds.minOrNull()),
+        val previousNonce = requireNotNull(pending.confirmationActionNonce)
+        val migrated = pending.copy(
+            channelIds = remaining,
+            confirmationChannelId = requireNotNull(remaining.minOrNull()),
             confirmationActionNonce = actionNonce()
         )
-        return migrated to listOf(
+        pendingInbound = migrated
+        return accepted(
+            state = current,
+            effects = prefixEffects + listOf(
+                SessionEffect.CancelIncomingConfirmation(
+                    pending.runtimeSessionId,
+                    pending.attemptId,
+                    previousNonce
+                ),
+                SessionEffect.PublishIncomingConfirmation(migrated.confirmationPrompt())
+            )
+        )
+    }
+
+    private fun finishPendingImmediately(
+        current: IntercomState,
+        pending: PendingInboundRequest,
+        prefixEffects: List<SessionEffect> = emptyList(),
+        remainingChannelIds: Set<ControlChannelId> = pending.channelIds
+    ): SignalingControlDecision {
+        val cancelConfirmation = pending.confirmationActionNonce?.let {
             SessionEffect.CancelIncomingConfirmation(
-                context.attempt.runtimeSessionId,
-                context.attempt.id,
-                previousNonce
-            ),
-            SessionEffect.PublishIncomingConfirmation(migrated.confirmationPrompt())
+                pending.runtimeSessionId,
+                pending.attemptId,
+                it
+            )
+        }
+        remainingChannelIds.forEach(channels::remove)
+        pendingInbound = null
+        return accepted(
+            state = IntercomState.Discovering(pending.runtimeSessionId),
+            effects = listOfNotNull(cancelConfirmation) + prefixEffects +
+                remainingChannelIds.map {
+                    closeEffect(pending.runtimeSessionId, pending.attemptId, it)
+                }
         )
     }
 
@@ -1489,13 +1565,6 @@ internal class SignalingControlCoordinator(
                 ?: ConnectionAttemptTerminalOutcome.FAILED
         )
         rememberDisconnectedIfAccepted(context)
-        val cancelConfirmation = context.confirmationActionNonce?.let {
-            SessionEffect.CancelIncomingConfirmation(
-                context.attempt.runtimeSessionId,
-                context.attempt.id,
-                it
-            )
-        }
         val channelIds = context.channelIds
         channelIds.forEach(channels::remove)
         active = null
@@ -1505,7 +1574,7 @@ internal class SignalingControlCoordinator(
         }
         return accepted(
             state = IntercomState.Discovering(context.attempt.runtimeSessionId),
-            effects = listOfNotNull(cancelConfirmation) + prefixEffects + closeEffects +
+            effects = prefixEffects + closeEffects +
                 SessionEffect.AbortAttemptAndResumeDiscovery(
                 context.attempt.runtimeSessionId,
                 context.attempt.id
@@ -1513,16 +1582,33 @@ internal class SignalingControlCoordinator(
         )
     }
 
-    private fun terminateAttempt(attempt: ConnectionAttempt): SignalingControlDecision {
-        ownedAttempt = attempt
-        recordTerminal(attempt, ConnectionAttemptTerminalOutcome.FAILED)
-        clearOwnedAttempt(attempt)
-        return accepted(
-            state = IntercomState.Discovering(attempt.runtimeSessionId),
-            effects = listOf(
-                SessionEffect.AbortAttemptAndResumeDiscovery(attempt.runtimeSessionId, attempt.id)
+    private fun handleDuplicatePendingRequest(
+        current: IntercomState,
+        channel: VerifiedControlChannel,
+        pending: PendingInboundRequest
+    ): SignalingControlDecision {
+        if (channel.transport != pending.transport) {
+            return accepted(
+                effects = listOf(
+                    rejectEffect(
+                        pending.runtimeSessionId,
+                        pending.attemptId,
+                        channel.channelId,
+                        RejectReason.SUPERSEDED_CHANNEL,
+                        retryable = false
+                    )
+                )
             )
-        )
+        }
+        if (pending.phase != PendingInboundPhase.WAITING_LOCAL_DECISION) {
+            return replayCompleted(
+                pending.runtimeSessionId,
+                channel.channelId,
+                requireNotNull(completedAttempts[pending.wireRequestKey])
+            )
+        }
+        pendingInbound = pending.copy(channelIds = pending.channelIds + channel.channelId)
+        return accepted(state = current)
     }
 
     private fun busyRequest(
@@ -1571,35 +1657,36 @@ internal class SignalingControlCoordinator(
         attemptId: ConnectionAttemptId,
         channelId: ControlChannelId,
         actionNonce: String
-    ): AttemptChannelSet? {
+    ): PendingInboundRequest? {
         val confirmation = current as? IntercomState.IncomingConfirmation ?: return null
-        return active?.takeIf {
-            it.phase == SignalingAttemptPhase.WAITING_LOCAL_DECISION &&
-                it.attempt == confirmation.attempt &&
-                it.attempt.runtimeSessionId == runtimeSessionId &&
-                it.attempt.id == attemptId &&
+        return pendingInbound?.takeIf {
+            it.phase == PendingInboundPhase.WAITING_LOCAL_DECISION &&
+                confirmation.runtimeSessionId == runtimeSessionId &&
+                confirmation.attemptId == attemptId &&
+                it.runtimeSessionId == runtimeSessionId &&
+                it.attemptId == attemptId &&
                 it.confirmationChannelId == channelId &&
                 it.confirmationActionNonce == actionNonce
         }
     }
 
-    private fun AttemptChannelSet.confirmationPrompt(): IncomingConfirmationPrompt =
+    private fun PendingInboundRequest.confirmationPrompt(): IncomingConfirmationPrompt =
         IncomingConfirmationPrompt(
-            runtimeSessionId = attempt.runtimeSessionId,
-            attemptId = attempt.id,
+            runtimeSessionId = runtimeSessionId,
+            attemptId = attemptId,
             channelId = requireNotNull(confirmationChannelId),
             actionNonce = requireNotNull(confirmationActionNonce),
             peer = peer,
-            decisionDeadlineElapsedMs = requireNotNull(decisionDeadlineElapsedMs),
+            decisionDeadlineElapsedMs = decisionDeadlineAt.elapsedRealtimeMs,
             surface = requireNotNull(confirmationSurface)
         )
 
     private fun cancelConfirmationEffect(
-        context: AttemptChannelSet
+        pending: PendingInboundRequest
     ): SessionEffect.CancelIncomingConfirmation = SessionEffect.CancelIncomingConfirmation(
-        context.attempt.runtimeSessionId,
-        context.attempt.id,
-        requireNotNull(context.confirmationActionNonce)
+        pending.runtimeSessionId,
+        pending.attemptId,
+        requireNotNull(pending.confirmationActionNonce)
     )
 
     private fun matchingActive(
@@ -1620,6 +1707,9 @@ internal class SignalingControlCoordinator(
         attemptId: ConnectionAttemptId,
         channelId: ControlChannelId
     ): SignalingControlDecision {
+        pendingInbound?.takeIf { channelId in it.channelIds }?.let {
+            return removePendingChannel(current, it, channelId, closeRemoved = true)
+        }
         val context = active
         if (context != null && channelId in context.channelIds) {
             if (context.mediaOwnerChannelId == channelId) {
@@ -1637,15 +1727,31 @@ internal class SignalingControlCoordinator(
     private fun inboundAttempt(
         runtimeSessionId: RuntimeSessionId,
         channel: VerifiedControlChannel,
-        deadlineElapsedRealtimeMs: Long
+        deadlineAt: MonotonicTimestamp
     ): ConnectionAttempt = ConnectionAttempt(
         id = channel.wireRequestKey.attemptId,
         runtimeSessionId = runtimeSessionId,
         targetLock = channel.targetLock,
         trigger = ConnectionTrigger.INBOUND,
         channelPlan = ChannelPlan.single(channel.transport),
-        deadlineElapsedRealtimeMs = deadlineElapsedRealtimeMs
+        deadlineElapsedRealtimeMs = deadlineAt.elapsedRealtimeMs
     )
+
+    private fun newAttemptDeadline(): MonotonicTimestamp =
+        deadlineAfter(clock.now(), attemptTimeoutMs)
+
+    private fun deadlineAfter(
+        startedAt: MonotonicTimestamp,
+        durationMs: Long
+    ): MonotonicTimestamp = deadlineAfter(startedAt.elapsedRealtimeMs, durationMs)
+
+    private fun deadlineAfter(startedAtElapsedMs: Long, durationMs: Long): MonotonicTimestamp {
+        require(startedAtElapsedMs >= 0L) { "Monotonic start must not be negative" }
+        require(durationMs > 0L) { "Deadline duration must be positive" }
+        return MonotonicTimestamp(Math.addExact(startedAtElapsedMs, durationMs))
+    }
+
+    private fun nowElapsedRealtimeMs(): Long = clock.now().elapsedRealtimeMs
 
     private fun eligibleChannels(
         wireRequestKey: WireRequestKey,
@@ -1718,16 +1824,6 @@ internal class SignalingControlCoordinator(
         channelId
     )
 
-    private fun IntercomState.withRebasedAttempt(
-        previous: ConnectionAttempt,
-        rebased: ConnectionAttempt
-    ): IntercomState? = when (this) {
-        is IntercomState.Connecting -> takeIf { attempt == previous }?.copy(attempt = rebased)
-        is IntercomState.Optimizing -> takeIf { attempt == previous }?.copy(attempt = rebased)
-        is IntercomState.Recovering -> takeIf { attempt == previous }?.copy(attempt = rebased)
-        else -> null
-    }
-
     private fun remember(
         key: WireRequestKey,
         outcome: AttemptOutcome,
@@ -1739,7 +1835,7 @@ internal class SignalingControlCoordinator(
             key = key,
             outcome = outcome,
             response = response,
-            expiresAtElapsedMs = elapsedRealtime() + TOMBSTONE_TTL_MS
+            expiresAtElapsedMs = Math.addExact(nowElapsedRealtimeMs(), TOMBSTONE_TTL_MS)
         )
         while (completedAttempts.size > MAX_TOMBSTONES) {
             completedAttempts.remove(completedAttempts.keys.first())
@@ -1747,7 +1843,7 @@ internal class SignalingControlCoordinator(
     }
 
     private fun pruneCompleted() {
-        val now = elapsedRealtime()
+        val now = nowElapsedRealtimeMs()
         completedAttempts.entries.removeAll { it.value.expiresAtElapsedMs <= now }
     }
 

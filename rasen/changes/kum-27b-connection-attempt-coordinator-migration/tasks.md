@@ -54,8 +54,27 @@ keeping KUM-27 In Progress. B3 may start only after this gate passes.
 
 ## 3. B3: Immutable Total Deadline Ownership
 
-Authorized after the B2 gate; not started and contains no executable tasks
-until the B3 scope is frozen.
+- [x] 3.1 Freeze the atomic B3 deadline/pending-inbound boundary in proposal,
+  specs, design, and tasks; strictly validate the change.
+- [x] 3.2 Add deterministic failing tests for Coordinator-created outbound,
+  paired-inbound, accepted-inbound, recovery, and glare-preserved deadlines.
+- [x] 3.3 Replace the unpaired inbound sentinel attempt with a
+  Coordinator-owned `PendingInboundRequest`; keep `currentAttempt` null until a
+  valid local accept and create no attempt on reject/timeout/final-channel loss.
+- [x] 3.4 Remove deadline inputs from production intent/recovery events and
+  remove Service deadline creation plus request-delivery/remote-accept rebases.
+- [x] 3.5 Replace implicit/reschedule paths with one explicit
+  `ScheduleAttemptDeadline` effect per created attempt and a duplicate-safe
+  physical scheduler.
+- [x] 3.6 Add exact before/at/after deadline, no-rebase, no-sentinel,
+  no-attempt-on-pending-terminal, and one-schedule regression coverage.
+- [ ] 3.7 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
+  `assembleDebug`, strict Rasen validation, GitHub CI, and fixed-SHA read-only
+  architecture review.
+
+Delivery gate after apply: deliver B3 as an atomic commit on Draft PR #4,
+complete fixed-SHA review with P0=0/P1=0, and synchronize Linear evidence while
+keeping KUM-27 In Progress. B4 may start only after this gate passes.
 
 ## 4. B4: Callback, Candidate And Cleanup Lifecycle
 
