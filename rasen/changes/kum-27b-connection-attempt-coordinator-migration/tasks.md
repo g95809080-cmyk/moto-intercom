@@ -121,13 +121,37 @@ keeping KUM-27 In Progress. B4 may start only after this gate passes.
   start, and newer-handle preservation.
 - [x] 4.8 Remediate the first review P1 findings by attempt-scoping delayed
   cleanup effects and refusing pre-authorization physical session replacement.
-- [ ] 4.9 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+- [x] 4.9 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
   strict Rasen validation, GitHub CI, and fixed-SHA read-only architecture
   review.
 
 Delivery gate after apply: deliver B4 as one atomic implementation commit on
 Draft PR #4, complete fixed-SHA review with P0=0/P1=0, and synchronize Linear
 evidence while keeping KUM-27 In Progress. B5 may start only after this gate.
+
+### B4 Gate Record
+
+- Implementation Head `928ea95a00541d7f145677c2943dc8fecec065e3`:
+  Review Round 1 REQUEST CHANGES, P0=0, P1=2.
+- P1 findings: delayed terminal cleanup could release replacement-attempt
+  resources, and Service could replace an occupied channel slot before
+  Coordinator authorization.
+- Remediation Head `03d49fa4e0c9c33e66b8e22fb4647c11914e44a5`:
+  abort/restart/open effects revalidate current attempt ownership, occupied
+  physical session slots fail closed, and deterministic replacement ordering
+  tests cover both findings.
+- Review Round 2: APPROVED, P0=0, P1=0, B4 complete YES, B5 allowed YES.
+- Verification: 205 JVM tests passed with 0 failures/errors/skipped; Lint 0
+  errors/34 existing warnings; `assembleDebug` passed; Rasen strict validation
+  1/1.
+- GitHub CI `29650223254`: success at the implementation Head; remediation CI
+  `29650945945`: success at the approved Head.
+- Physical-device testing: not required for B4; no adapter, WebRTC engine,
+  permission, audio, database, or OEM implementation semantics changed.
+- Efficiency: elapsed 1h39m; workers 2 (one main writer and one read-only
+  reviewer); review rounds 2; handoffs 1 runtime continuation;
+  runtime-cumulative token usage 3,823,237 at the gate (checkpoint-only split
+  unavailable); full repository rescans 0.
 
 ## 5. B5: Adapter Remaining-Time Contract
 
