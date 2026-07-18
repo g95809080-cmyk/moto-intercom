@@ -266,6 +266,59 @@ remaining monotonic budget and contextual task tokens to those adapter-internal
 operations atomically. B4 changes no Signaling v2 messages, TargetLock policy,
 WebRTC SDP/ICE semantics, pairing, database, UI, permissions, or KUM-28 policy.
 
+### 18. B5 one remaining-budget contract
+
+Every targeted adapter task captures the immutable `ConnectionAttempt` and
+reads remaining time as `max(0, deadlineAt - monotonicNow)` immediately before
+blocking, scheduling, retrying, or handing off a resource. A local cap uses
+`min(localCap, remaining)`. Zero remaining time starts no work, exact-deadline
+callbacks have no attempt authority, and no adapter may create, copy, or reset
+the total deadline.
+
+Passive discovery without an attempt remains outside the attempt budget. Once
+passive discovery resolves a targeted attempt, every operation that can claim,
+fail, clean, or hand off that target must capture and re-check the exact attempt
+plus its existing endpoint/generation token.
+
+### 19. B5 LAN and HELLO cutover
+
+`LanDiscoveryCoordinator` keeps its physical `LanAttemptLease`, but client
+Socket connect uses the smaller of the existing 2-second cap and current
+remaining budget. Connect completion and HELLO handoff re-check the same lease
+and deadline. `SignalingSessionV2.establish` keeps the existing 1-second HELLO
+cap for passive inbound sessions and clamps it to remaining budget whenever an
+originating attempt exists. It uses an injected monotonic clock, never wall
+clock time.
+
+### 20. B5 P2P task and Socket cutover
+
+P2P targeted connect, connect watchdog, group validation, group-info retries,
+Socket transport, and targeted recovery callbacks capture the exact attempt,
+TargetLock/address where applicable, and current generation. Their delays are
+bounded by remaining budget and re-check context at callback execution. A stale
+cleanup may finish closing its old physical resource, but it cannot rediscover,
+retry, report failure for, or remove a newer attempt's resources.
+
+`WifiDirectSignalingSocket` replaces wall-clock ready loops with an injected
+monotonic deadline. Server accept polling, client connect timeout, and retry
+sleep each clamp to current remaining time. Socket ready/failure callbacks are
+accepted only while the Tunnel's captured attempt/generation/target context is
+current and unexpired.
+
+The delayed Service recovery restart re-checks the exact Coordinator recovery
+attempt and remaining budget immediately before reopening adapters. Passive P2P
+discovery retries stay passive and may retain local cadence; they gain no
+attempt authority.
+
+### 21. B5/B6 boundary
+
+B5 changes timing/context plumbing only. It preserves the 10-second total
+budget, current single-transport behavior, existing local caps when enough
+budget remains, Signaling v2 and TargetLock semantics, and all product-state
+policy. B6 owns the consolidated regression and physical-device matrix. B5
+does not add T+5 fallback, dual-transport racing, an optimization window, or
+`OPTIMIZING`.
+
 ## Risks / Trade-offs
 
 - [The legacy data-class `copy` paths can create a later deadline] -> B3 removes
@@ -296,6 +349,11 @@ WebRTC SDP/ICE semantics, pairing, database, UI, permissions, or KUM-28 policy.
 - [A stale physical manager can block the current winner] -> Treat the Service
   context as a disposable locator, close the stale manager, and let only the
   Coordinator-authorized winner start.
+- [A local timeout can exceed the total attempt] -> Clamp every targeted
+  operation and delay to monotonic remaining budget at the point of use.
+- [Old P2P cleanup can revive or remove replacement work] -> Capture attempt,
+  target, and generation; permit old physical close completion but reject stale
+  retry, rediscovery, failure, and handoff callbacks.
 
 ## Migration Plan
 
@@ -313,7 +371,10 @@ WebRTC SDP/ICE semantics, pairing, database, UI, permissions, or KUM-28 policy.
 8. B4: gate signaling completions, SDP/ICE, WebRTC callbacks, and cleanup on the
    current Coordinator candidate/winner; remove Service policy claims.
 9. Run targeted/full gates and fixed-SHA read-only review, then record evidence.
-10. B5-B6 remain deferred until their preceding gates; KUM-28 remains absent.
+10. B5: add the pure remaining-budget contract, then atomically migrate LAN and
+    HELLO, P2P task tokens, Socket loops, and delayed recovery restart.
+11. Run B5 targeted/full gates and fixed-SHA read-only review.
+12. B6 remains deferred until B5 approval; KUM-28 remains absent.
 
 Rollback is commit-level to the approved B1 head. B2 changes no schema,
 protocol, dependency, identity, pairing, database, permission, or persisted
@@ -321,6 +382,6 @@ data, and restoring B1 restores the previous production ownership paths.
 
 ## Open Questions
 
-None for B4. The callback/candidate/cleanup cutover must not leave a Service
-policy claim, channel-only media buffer, non-contextual WebRTC callback, or
-close path that can touch a replacement handle.
+None for B5. Adapter cleanup may complete after logical terminal revocation,
+but no old task may retry, rediscover, report failure for, hand off, or remove a
+replacement attempt.

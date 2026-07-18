@@ -155,7 +155,29 @@ evidence while keeping KUM-27 In Progress. B5 may start only after this gate.
 
 ## 5. B5: Adapter Remaining-Time Contract
 
-Deferred until the B4 gate and contains no executable tasks in this checkpoint.
+- [x] 5.1 Freeze the B5 remaining-budget/task-token boundary in proposal,
+  specs, design, and tasks; strictly validate the change.
+- [ ] 5.2 Add pure monotonic remaining-budget and bounded-cap helpers with
+  deterministic 0/1/cap-1/cap/greater-than-cap tests.
+- [ ] 5.3 Clamp targeted LAN connect and attempt-owned HELLO exchange to
+  remaining budget while preserving exact lease and handoff checks.
+- [ ] 5.4 Bind P2P connect, watchdog, group validation, group-info retry, and
+  targeted cleanup/recovery callbacks to immutable attempt/target/generation
+  context and remaining budget.
+- [ ] 5.5 Replace P2P Socket wall-clock ready/connect/retry loops with monotonic
+  remaining time and exact attempt-aware ready/failure predicates.
+- [ ] 5.6 Revalidate exact recovery attempt and positive remaining budget before
+  delayed Service adapter restart.
+- [ ] 5.7 Add deterministic regressions for expiry boundaries, replacement
+  during LAN/P2P/Socket work, stale cleanup, exact deadline, and no KUM-28
+  behavior.
+- [ ] 5.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+  strict Rasen validation, GitHub CI, and fixed-SHA read-only architecture
+  review.
+
+Delivery gate after apply: deliver B5 as one atomic implementation commit on
+Draft PR #4, complete fixed-SHA review with P0=0/P1=0, and synchronize Linear
+evidence while keeping KUM-27 In Progress. B6 may start only after this gate.
 
 ## 6. B6: Full Regression And Physical Verification
 

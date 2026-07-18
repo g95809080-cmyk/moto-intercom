@@ -7,7 +7,9 @@ ownership into the existing `SignalingControlCoordinator`. B3 removes the
 remaining mutable total-deadline paths and the false attempt used while an
 unpaired inbound request awaits confirmation. B4 closes the remaining
 upper-layer callback, logical-candidate, winner, and exact-cleanup ownership
-gaps between that Coordinator and Service-owned physical handles.
+gaps between that Coordinator and Service-owned physical handles. B5 makes
+every targeted LAN/P2P/Socket operation consume the same immutable monotonic
+attempt budget and reject stale adapter tasks.
 
 ## What Changes
 
@@ -41,8 +43,13 @@ gaps between that Coordinator and Service-owned physical handles.
 - Replace channel-only Service policy claims with one contextual physical media
   locator; stale cleanup closes only the exact old handle and cannot close or
   authorize a replacement.
-- Keep adapter-internal watchdog/retry remaining-time contracts in B5, B6
-  verification deferred, and KUM-28 absent.
+- Add pure remaining-budget helpers and pass immutable attempt context through
+  LAN connect/HELLO, P2P connect/group/watchdog/retry, Socket-ready/connect
+  loops, and delayed recovery restart execution.
+- Clamp each targeted local cap or delay to the remaining total budget; cleanup
+  may finish after terminal revocation but cannot revive or mutate a replacement
+  attempt.
+- Keep B6 full regression/physical verification deferred and KUM-28 absent.
 
 ## Capabilities
 
@@ -54,7 +61,7 @@ gaps between that Coordinator and Service-owned physical handles.
 - `connection-attempt-coordinator-ownership`: Defines the B2 production
   creation owner, current-attempt record, first-terminal-wins contract, and B3
   immutable total-deadline/pending-inbound cutover plus the B4 contextual
-  candidate/callback/cleanup contract.
+  candidate/callback/cleanup and B5 adapter remaining-budget contracts.
 
 ### Modified Capabilities
 
@@ -71,6 +78,7 @@ None. The approved KUM-27A ownership contract remains authoritative.
   window, but makes attempt deadlines immutable and strictly monotonic.
 - Changes Service-side callback routing, media buffering, and exact physical
   cleanup without changing Signaling v2 or WebRTC protocol semantics.
-- Leaves LAN/P2P/Socket watchdog and retry timing for B5 and leaves TargetLock,
-  UI, database, pairing, identity, notification, Gradle, permissions, and
-  dependencies unchanged.
+- Changes targeted LAN/P2P/Socket timeout and retry execution only by clamping
+  existing local caps to the immutable remaining attempt budget and adding
+  stale task checks. TargetLock, UI, database, pairing, identity, notification,
+  Gradle, permissions, and dependencies remain unchanged.

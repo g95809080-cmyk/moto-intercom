@@ -255,3 +255,76 @@ T+5 fallback, dual-channel racing, an optimization window, or `OPTIMIZING`.
 - **WHEN** the fixed B4 diff is reviewed
 - **THEN** it contains upper-layer candidate/callback/exact-cleanup migration
   only, with no B5 timing or KUM-28 behavior
+
+### Requirement: Targeted adapter work consumes remaining total budget
+B5 SHALL calculate remaining time only from the immutable attempt deadline and
+a monotonic clock. Each targeted local timeout or delayed retry SHALL use the
+smaller of its existing cap and current remaining time. Zero remaining time
+MUST start no work, and no adapter may reset or extend the attempt deadline.
+
+#### Scenario: Local cap and remaining-budget boundaries
+- **WHEN** remaining time is 0, 1, cap-1, cap, or greater than cap
+- **THEN** the operation receives respectively no budget, 1, cap-1, cap, or cap
+  milliseconds without changing the attempt deadline
+
+#### Scenario: Passive discovery has no attempt
+- **WHEN** LAN or P2P performs passive discovery without a targeted attempt
+- **THEN** its discovery cadence remains local and cannot claim attempt,
+  terminal, target, channel, or media authority
+
+### Requirement: LAN connect and HELLO are attempt-bounded
+Targeted LAN Socket connect SHALL capture the exact attempt lease and clamp its
+2-second cap to remaining budget. HELLO exchange SHALL retain its 1-second cap
+and clamp it when an originating attempt exists. Completion and handoff MUST
+re-check the same attempt and an unexpired deadline.
+
+#### Scenario: LAN budget expires before connect or HELLO
+- **WHEN** no remaining time exists before LAN connect or HELLO begins
+- **THEN** no current channel is handed off and no replacement attempt is
+  released, failed, or otherwise mutated
+
+### Requirement: P2P targeted tasks carry immutable context
+The P2P targeted adapter SHALL capture the exact attempt, target, and generation
+context for connect, watchdog, group validation, group-info retry, Socket
+transport, and targeted cleanup/recovery callbacks. A callback that is expired
+or no longer current MUST NOT retry, rediscover, report a current failure, hand
+off a Socket, or mutate replacement resources.
+
+#### Scenario: Attempt changes during P2P group validation
+- **WHEN** an old group-info, watchdog, retry, ready, or failure callback arrives
+  after replacement
+- **THEN** it has no effect on the replacement attempt or its physical handles
+
+#### Scenario: Old cleanup finishes late
+- **WHEN** physical group or Socket cleanup for a terminal attempt finishes
+  after its logical budget
+- **THEN** closing the exact old resource is allowed, but no retry or discovery
+  action is scheduled with old attempt authority
+
+### Requirement: P2P Socket loops use monotonic remaining time
+`WifiDirectSignalingSocket` SHALL use monotonic time for its ready deadline and
+SHALL clamp accept polling, client connect timeout, and retry sleep to current
+remaining time. It SHALL close stale Sockets without a ready callback.
+
+#### Scenario: Socket retry reaches the exact deadline
+- **WHEN** a connect attempt or retry delay consumes the final remaining budget
+- **THEN** no subsequent connect iteration or ready callback is allowed
+
+### Requirement: Delayed recovery restart revalidates current attempt
+Service SHALL re-check the exact current recovery attempt and positive remaining
+budget immediately before delayed adapter restart.
+
+#### Scenario: Recovery is replaced during cleanup backoff
+- **WHEN** the delayed restart for recovery attempt A runs after attempt B or a
+  terminal state became current
+- **THEN** no adapter is reopened for attempt A
+
+### Requirement: B6 and KUM-28 remain deferred
+B5 MUST keep one transport per attempt and MUST NOT add T+5 fallback,
+dual-transport racing, a 1-second optimization window, or `OPTIMIZING`. Full
+regression and physical verification remain B6 work.
+
+#### Scenario: B5 review
+- **WHEN** the fixed B5 diff is reviewed
+- **THEN** it contains only remaining-budget and stale adapter-task migration
+  plus direct tests and artifacts
