@@ -733,16 +733,25 @@ class IntercomService : Service() {
                     state = state.toProductState(),
                     occurredAt = System.currentTimeMillis()
                 )
-            )
-            when (state) {
-                PeerConnection.PeerConnectionState.CONNECTED -> {
-                    activeMediaChannelId
-                        ?.let(signalingSessions::get)
-                        ?.let { runCatching(it::markMediaConnected).onFailure(::handleError) }
-                    attemptDeadlineScheduler.cancel(attempt)
-                    mediaConnected = true
-                    publishStatus(VOICE_CONNECTED_STATUS)
+            ) { accepted ->
+                if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                    postForSession(token) {
+                        val connected = orchestrator.state.value as? IntercomState.Connected
+                        if (accepted && connected?.attempt == attempt) {
+                            activeMediaChannelId
+                                ?.let(signalingSessions::get)
+                                ?.let {
+                                    runCatching(it::markMediaConnected).onFailure(::handleError)
+                                }
+                            attemptDeadlineScheduler.cancel(attempt)
+                            mediaConnected = true
+                            publishStatus(VOICE_CONNECTED_STATUS)
+                        }
+                    }
                 }
+            }
+            when (state) {
+                PeerConnection.PeerConnectionState.CONNECTED -> Unit
                 PeerConnection.PeerConnectionState.DISCONNECTED,
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.CLOSED -> {

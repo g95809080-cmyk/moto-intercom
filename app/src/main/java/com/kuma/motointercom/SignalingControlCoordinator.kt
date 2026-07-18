@@ -255,6 +255,12 @@ internal class SignalingControlCoordinator(
         val attempt = matchingOwnedAttempt(event.runtimeSessionId, event.attemptId)
             ?.takeIf { current.connectionAttemptOrNull() == it }
             ?: return rejected()
+        if (
+            event.state == WebRtcConnectionState.CONNECTED &&
+            attempt.isExpiredAt(clock.now())
+        ) {
+            return rejected()
+        }
         return when (event.state) {
             WebRtcConnectionState.CONNECTED -> connectWebRtc(current, attempt, event.occurredAt)
             WebRtcConnectionState.DISCONNECTED -> connectionLost(
@@ -670,6 +676,7 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         occurredAtElapsedMs: Long
     ): SignalingControlDecision {
+        if (current.attempt.isExpiredAt(clock.now())) return rejected()
         val losingContext = active
         if (
             losingContext != null &&

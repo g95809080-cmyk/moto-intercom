@@ -125,6 +125,12 @@ time is equal to or greater than its deadline.
 - **WHEN** glare selects the inbound wire request for the current target
 - **THEN** the replacement request role preserves the existing total deadline
 
+#### Scenario: Success or glare arrives at the total deadline
+- **WHEN** WebRTC success or a glare winner is processed at or after the
+  current attempt's monotonic deadline before the queued timer callback
+- **THEN** the Coordinator rejects that state advance, Service keeps the
+  physical timer active, and timeout remains able to terminate the attempt
+
 ### Requirement: One physical deadline schedule per attempt
 The Coordinator SHALL emit one explicit `ScheduleAttemptDeadline` effect when
 it creates an attempt. Service SHALL execute that effect but MUST NOT schedule

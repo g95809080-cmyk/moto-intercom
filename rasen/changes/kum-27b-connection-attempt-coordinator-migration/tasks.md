@@ -68,7 +68,10 @@ keeping KUM-27 In Progress. B3 may start only after this gate passes.
   physical scheduler.
 - [x] 3.6 Add exact before/at/after deadline, no-rebase, no-sentinel,
   no-attempt-on-pending-terminal, and one-schedule regression coverage.
-- [ ] 3.7 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
+- [x] 3.7 Remediate the first review P1 by rejecting WebRTC success and glare
+  at the exact total deadline and deferring physical timer cancellation until
+  Coordinator-authorized success.
+- [ ] 3.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
   `assembleDebug`, strict Rasen validation, GitHub CI, and fixed-SHA read-only
   architecture review.
 

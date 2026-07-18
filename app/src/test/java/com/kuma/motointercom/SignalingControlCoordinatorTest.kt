@@ -713,6 +713,52 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun sameTargetGlareAtDeadlineCannotReplaceExpiredAttempt() = runBlocking {
+        harness().use { harness ->
+            val localAttempt = outboundAttempt(ATTEMPT_B)
+            harness.start(localAttempt)
+            val localChannel = requesterChannel(CHANNEL_B, localAttempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, localChannel)
+                )
+            )
+            harness.nextEffect()
+
+            val remoteWinner = responderChannel(
+                channelId = CHANNEL_A,
+                requesterDeviceId = DEVICE_B,
+                requesterRuntime = RUNTIME_B,
+                responderDeviceId = DEVICE_A,
+                attemptId = ATTEMPT_A,
+                originatingAttempt = localAttempt
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, remoteWinner)
+                )
+            )
+            harness.advanceBy(localAttempt.deadlineElapsedRealtimeMs - 100L)
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_A,
+                        remoteWinner.channelId,
+                        remoteWinner.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        localAttempt.deadlineElapsedRealtimeMs
+                    )
+                )
+            )
+
+            assertEquals(localAttempt, harness.orchestrator.currentAttempt)
+            assertFalse(harness.hasPendingEffect())
+        }
+    }
+
+    @Test
     fun glareLostIsBroadcastAcrossEveryVerifiedLosingRequestChannel() = runBlocking {
         harness().use { harness ->
             val localWinner = outboundAttempt(ATTEMPT_A)

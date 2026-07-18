@@ -14,7 +14,7 @@ class SessionOrchestratorTest {
 
     @Test
     fun connectedThenImmediateDisconnectCannotRemainStaleConnected() = runBlocking {
-        val orchestrator = orchestrator()
+        val orchestrator = orchestrator(elapsedRealtime = { 0L })
         val attempt = attempt("attempt-current", "peer-a", Transport.LAN)
         val peer = PeerIdentity(
             deviceId = "peer-a",
@@ -194,7 +194,7 @@ class SessionOrchestratorTest {
     @Test
     fun p2pVerifiedIdentityIsPersistedOnlyAfterConnected() = runBlocking {
         val repository = RecordingPairingRepository()
-        val orchestrator = orchestrator(repository)
+        val orchestrator = orchestrator(repository, elapsedRealtime = { 0L })
         val attempt = attempt(
             "attempt-p2p",
             "peer-p2p",
@@ -370,7 +370,7 @@ class SessionOrchestratorTest {
     @Test
     fun lanMatchingSocketIdentityIsPersistedAfterConnected() = runBlocking {
         val repository = RecordingPairingRepository()
-        val orchestrator = orchestrator(repository)
+        val orchestrator = orchestrator(repository, elapsedRealtime = { 0L })
         val lanAttempt = attempt("attempt-lan-verified", "peer-lan", Transport.LAN)
         val verifiedPeer = PeerIdentity(
             deviceId = "peer-lan",
@@ -407,8 +407,14 @@ class SessionOrchestratorTest {
 
     private fun orchestrator(
         repository: RecordingPairingRepository = RecordingPairingRepository(),
-        onLog: (String) -> Unit = {}
-    ) = SessionOrchestrator(repository, Dispatchers.Unconfined, onLog = onLog)
+        onLog: (String) -> Unit = {},
+        elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L }
+    ) = SessionOrchestrator(
+        repository,
+        Dispatchers.Unconfined,
+        onLog = onLog,
+        elapsedRealtime = elapsedRealtime
+    )
 
     private fun attempt(
         id: String,

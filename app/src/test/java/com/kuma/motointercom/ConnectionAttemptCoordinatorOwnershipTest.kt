@@ -232,6 +232,43 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(connecting.attempt, coordinator.currentAttempt)
     }
 
+    @Test
+    fun successAtDeadlineCannotBeatQueuedTimeout() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
+        val coordinator = coordinator(RecordingAttemptIdFactory("attempt-success"), clock)
+        val connecting = requireNotNull(
+            coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
+        ).state as IntercomState.Connecting
+        val withPeer = connecting.copy(peer = verifiedPeer())
+        clock.advanceBy(10_000L)
+
+        val connected = requireNotNull(
+            coordinator.handle(
+                withPeer,
+                SessionEvent.WebRtcStateChanged(
+                    runtimeSessionId = runtime,
+                    attemptId = connecting.attempt.id,
+                    state = WebRtcConnectionState.CONNECTED,
+                    occurredAt = 5L
+                )
+            )
+        )
+        val timeout = requireNotNull(
+            coordinator.handle(
+                withPeer,
+                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, 10_500L)
+            )
+        )
+
+        assertFalse(connected.accepted)
+        assertTrue(timeout.accepted)
+        assertEquals(
+            ConnectionAttemptTerminalOutcome.TIMED_OUT,
+            coordinator.terminalOutcome(connecting.attempt.id)
+        )
+        assertNull(coordinator.currentAttempt)
+    }
+
     private fun coordinator(
         ids: RecordingAttemptIdFactory,
         clock: MonotonicClock = FakeMonotonicClock(MonotonicTimestamp(500L))

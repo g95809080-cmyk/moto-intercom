@@ -355,6 +355,7 @@ class Kum26LogicalNodeAcceptanceTest {
             SessionOrchestrator(
                 RecordingPairingRepository(),
                 Dispatchers.Unconfined,
+                elapsedRealtime = { 0L },
                 attemptIdFactory = { ConnectionAttemptId(ATTEMPT_RECOVERY) }
             )
         )

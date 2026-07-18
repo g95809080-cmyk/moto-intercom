@@ -158,6 +158,11 @@ unpaired request uses the accepted event occurrence time plus 10 seconds.
 Glare preserves the already-created attempt deadline. Validity is strict:
 `now >= deadlineAt` is expired.
 
+WebRTC success and glare may advance product state only while the Coordinator's
+monotonic clock is strictly before that deadline. Service keeps the physical
+timer until the Coordinator has accepted success and published the matching
+`Connected` state, so a callback queued at the boundary cannot cancel timeout.
+
 `ConnectPresenceRequested`, channel-loss events, signaling-loss events, and
 WebRTC terminal events no longer carry caller-created recovery or attempt
 deadlines. Service therefore cannot create or reset a logical attempt budget.
@@ -224,8 +229,10 @@ change adapter retry/remaining-budget APIs reserved for B5.
 3. B3: add failing deadline/pending-inbound boundary tests.
 4. B3: atomically remove external deadline inputs, all rebases, the sentinel
    attempt, and implicit Service scheduling; add one explicit schedule effect.
-5. Run targeted/full gates and fixed-SHA read-only review, then record evidence.
-6. B4-B6 remain deferred until their preceding gates; KUM-28 remains absent.
+5. Reject WebRTC success and glare at the exact total deadline, and cancel the
+   physical timer only after Coordinator-authorized success.
+6. Run targeted/full gates and fixed-SHA read-only review, then record evidence.
+7. B4-B6 remain deferred until their preceding gates; KUM-28 remains absent.
 
 Rollback is commit-level to the approved B1 head. B2 changes no schema,
 protocol, dependency, identity, pairing, database, permission, or persisted
