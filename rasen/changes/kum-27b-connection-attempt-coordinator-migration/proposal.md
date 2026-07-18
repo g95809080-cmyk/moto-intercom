@@ -5,7 +5,9 @@ monotonic time seam before ownership can move safely. B1 completed that pure
 domain foundation, and B2 moved production attempt creation plus first-terminal
 ownership into the existing `SignalingControlCoordinator`. B3 removes the
 remaining mutable total-deadline paths and the false attempt used while an
-unpaired inbound request awaits confirmation.
+unpaired inbound request awaits confirmation. B4 closes the remaining
+upper-layer callback, logical-candidate, winner, and exact-cleanup ownership
+gaps between that Coordinator and Service-owned physical handles.
 
 ## What Changes
 
@@ -31,8 +33,16 @@ unpaired inbound request awaits confirmation.
 - Represent an unpaired inbound request awaiting confirmation as a
   Coordinator-owned `PendingInboundRequest`, not a `ConnectionAttempt`; create
   the inbound attempt only after a current, valid local acceptance.
-- Keep B4-B6 deferred. B3 does not migrate adapter/callback ownership or
-  remaining-time contracts, change candidate/winner behavior, or start KUM-28.
+- Add an immutable connection-candidate context carrying runtime, attempt,
+  channel, wire request, target, transport, and verified peer identity.
+- Require Service signaling delivery, send completion, WebRTC callbacks, media
+  buffering, and close effects to re-check the current Coordinator-owned
+  candidate and winner before touching a physical handle.
+- Replace channel-only Service policy claims with one contextual physical media
+  locator; stale cleanup closes only the exact old handle and cannot close or
+  authorize a replacement.
+- Keep adapter-internal watchdog/retry remaining-time contracts in B5, B6
+  verification deferred, and KUM-28 absent.
 
 ## Capabilities
 
@@ -43,7 +53,8 @@ unpaired inbound request awaits confirmation.
   deterministic clock test support.
 - `connection-attempt-coordinator-ownership`: Defines the B2 production
   creation owner, current-attempt record, first-terminal-wins contract, and B3
-  immutable total-deadline/pending-inbound cutover.
+  immutable total-deadline/pending-inbound cutover plus the B4 contextual
+  candidate/callback/cleanup contract.
 
 ### Modified Capabilities
 
@@ -58,6 +69,8 @@ None. The approved KUM-27A ownership contract remains authoritative.
   while preserving Service as the physical effect executor.
 - Preserves the 10-second attempt budget and 15-second human confirmation
   window, but makes attempt deadlines immutable and strictly monotonic.
-- Leaves adapters, callback routing beyond the B3 deadline boundary,
-  Signaling v2, TargetLock, WebRTC, UI, database, pairing, identity,
-  notification, Gradle, permissions, and dependencies unchanged.
+- Changes Service-side callback routing, media buffering, and exact physical
+  cleanup without changing Signaling v2 or WebRTC protocol semantics.
+- Leaves LAN/P2P/Socket watchdog and retry timing for B5 and leaves TargetLock,
+  UI, database, pairing, identity, notification, Gradle, permissions, and
+  dependencies unchanged.

@@ -1039,6 +1039,182 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun mismatchedResponseContextCannotRemoveTheCurrentOwner() = runBlocking {
+        harness().use { harness ->
+            val attempt = outboundAttempt()
+            val owner = requesterChannel(CHANNEL_A, attempt)
+            harness.start(attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, owner)
+                )
+            )
+            harness.nextEffect()
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_C,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey
+                    )
+                )
+            )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        ConnectionAttemptId(ATTEMPT_B),
+                        owner.channelId,
+                        owner.wireRequestKey.copy(
+                            attemptId = ConnectionAttemptId(ATTEMPT_B)
+                        )
+                    )
+                )
+            )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey.copy(
+                            requesterDeviceId = DeviceId.parse(DEVICE_C)
+                        )
+                    )
+                )
+            )
+
+            assertFalse(harness.hasPendingEffect())
+            assertEquals(setOf(owner.channelId), harness.orchestrator.activeControlAttempt?.channelIds)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+        }
+    }
+
+    @Test
+    fun staleCallbacksCannotRemoveAReplacementUsingTheSameChannelId() = runBlocking {
+        harness().use { harness ->
+            val previous = outboundAttempt(ATTEMPT_A)
+            val previousChannel = requesterChannel(CHANNEL_A, previous)
+            harness.start(previous)
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.ControlChannelVerified(RUNTIME_A, previousChannel)
+            )
+            harness.nextEffect()
+
+            val replacement = outboundAttempt(ATTEMPT_B)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(SessionEvent.AttemptReplaced(replacement))
+            )
+            val replacementChannel = requesterChannel(CHANNEL_A, replacement)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, replacementChannel)
+                )
+            )
+            harness.nextEffect()
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ChannelClosed(
+                        RUNTIME_A,
+                        previousChannel.channelId,
+                        previousChannel.wireRequestKey,
+                        "stale reader"
+                    )
+                )
+            )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingSendFailed(
+                        RUNTIME_A,
+                        previous.id,
+                        previousChannel.channelId,
+                        SignalingMessageTypeV2.CONNECT_REQUEST,
+                        "stale send completion"
+                    )
+                )
+            )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ProtocolViolation(
+                        RUNTIME_A,
+                        previousChannel.channelId,
+                        previousChannel.wireRequestKey,
+                        "stale protocol callback"
+                    )
+                )
+            )
+
+            assertFalse(harness.hasPendingEffect())
+            assertEquals(replacement, harness.orchestrator.currentAttempt)
+            assertEquals(
+                setOf(replacementChannel.channelId),
+                harness.orchestrator.activeControlAttempt?.channelIds
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        replacement.id,
+                        replacementChannel.channelId,
+                        replacementChannel.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+        }
+    }
+
+    @Test
+    fun duplicateOwnerAcceptIsIdempotent() = runBlocking {
+        harness().use { harness ->
+            val attempt = outboundAttempt()
+            val owner = requesterChannel(CHANNEL_A, attempt)
+            harness.start(attempt)
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.ControlChannelVerified(RUNTIME_A, owner)
+            )
+            harness.nextEffect()
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.RemoteConnectAccepted(
+                    RUNTIME_A,
+                    attempt.id,
+                    owner.channelId,
+                    owner.wireRequestKey
+                )
+            )
+            harness.nextEffect()
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey
+                    )
+                )
+            )
+            assertFalse(harness.hasPendingEffect())
+            assertEquals(owner.channelId, harness.orchestrator.activeControlAttempt?.mediaOwnerChannelId)
+            assertEquals(AttemptOutcome.ACCEPTED, harness.orchestrator.activeControlAttempt?.terminalOutcome)
+            assertTrue(harness.orchestrator.state.value is IntercomState.Connecting)
+        }
+    }
+
+    @Test
     fun firstAttemptTerminalOutcomeWinsMailboxOrder() = runBlocking {
         harness().use { harness ->
             val attempt = outboundAttempt()
@@ -1075,7 +1251,8 @@ class SignalingControlCoordinatorTest {
                     )
                 )
             )
-            assertTrue(harness.nextEffect() is SessionEffect.CloseControlChannel)
+            val close = harness.nextEffect() as SessionEffect.CloseControlChannel
+            assertEquals(attempt.targetLock, close.targetLock)
             assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
         }
     }

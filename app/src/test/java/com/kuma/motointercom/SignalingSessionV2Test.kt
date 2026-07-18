@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,6 +13,93 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 
 class SignalingSessionV2Test {
+    @Test
+    fun candidateContextMatchesOnlyTheExactPhysicalSession() {
+        socketPair().use { sockets ->
+            val attempt = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
+            val requesterFuture = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.opener,
+                    physicalRole = PhysicalSocketRole.OPENER,
+                    localDeviceId = DEVICE_A,
+                    localSessionId = SESSION_A,
+                    originatingAttempt = attempt
+                )
+            }
+            val responderFuture = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.acceptor,
+                    physicalRole = PhysicalSocketRole.ACCEPTOR,
+                    localDeviceId = DEVICE_B,
+                    localSessionId = SESSION_B,
+                    originatingAttempt = null,
+                    expectedRemoteTargetLock = TargetLock(
+                        DEVICE_A,
+                        RuntimeSessionId(SESSION_A)
+                    )
+                )
+            }
+            val requester = requesterFuture.get(2, TimeUnit.SECONDS)
+            val responder = responderFuture.get(2, TimeUnit.SECONDS)
+            try {
+                val candidate = requireNotNull(
+                    requester.toConnectionCandidateContext(attempt)
+                )
+
+                assertTrue(requester.matchesCandidate(candidate))
+                assertTrue(
+                    requester.matchesControlHandle(
+                        RuntimeSessionId(SESSION_A),
+                        ConnectionAttemptId(ATTEMPT_A),
+                        requester.channel.channelId,
+                        attempt.targetLock
+                    )
+                )
+                assertFalse(
+                    requester.matchesControlHandle(
+                        RuntimeSessionId(SESSION_A),
+                        ConnectionAttemptId(ATTEMPT_A),
+                        requester.channel.channelId,
+                        TargetLock(DEVICE_C, RuntimeSessionId(SESSION_C))
+                    )
+                )
+                assertFalse(
+                    requester.matchesControlHandle(
+                        RuntimeSessionId(SESSION_C),
+                        ConnectionAttemptId(ATTEMPT_A),
+                        requester.channel.channelId
+                    )
+                )
+                assertFalse(
+                    requester.matchesControlHandle(
+                        RuntimeSessionId(SESSION_A),
+                        ConnectionAttemptId(ATTEMPT_B),
+                        requester.channel.channelId
+                    )
+                )
+                assertFalse(
+                    requester.matchesControlHandle(
+                        RuntimeSessionId(SESSION_A),
+                        ConnectionAttemptId(ATTEMPT_A),
+                        ControlChannelId.create()
+                    )
+                )
+                assertNull(
+                    requester.toConnectionCandidateContext(
+                        attempt.copy(id = ConnectionAttemptId(ATTEMPT_B))
+                    )
+                )
+
+                requester.close()
+                assertFalse(requester.matchesCandidate(candidate))
+                assertTrue(requester.hasCandidateIdentity(candidate))
+            } finally {
+                requester.close()
+                responder.close()
+            }
+        }
+    }
+
     @Test
     fun requesterFirstHelloWorksForEveryProductAndPhysicalRoleCombination() {
         PhysicalSocketRole.entries.forEach { requesterPhysicalRole ->

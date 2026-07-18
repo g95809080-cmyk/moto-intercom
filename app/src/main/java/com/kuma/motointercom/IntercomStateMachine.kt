@@ -274,7 +274,8 @@ internal sealed interface SessionEffect {
     data class CloseControlChannel(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
-        val channelId: ControlChannelId
+        val channelId: ControlChannelId,
+        val targetLock: TargetLock
     ) : SessionEffect
 
     data class PublishIncomingConfirmation(

@@ -185,3 +185,73 @@ race behavior.
 - **WHEN** the fixed B3 diff is reviewed
 - **THEN** it contains only deadline and pending-inbound ownership changes plus
   their direct tests and artifacts
+
+### Requirement: Coordinator owns complete logical candidate context
+In B4 each current candidate SHALL be identified by immutable runtime, attempt,
+channel, wire request, TargetLock, transport, request role, and verified peer
+context. The existing Coordinator SHALL remain the candidate and media-winner
+authority. Service maps and physical handle presence MUST NOT select, replace,
+or authorize a candidate.
+
+#### Scenario: Candidate context is created
+- **WHEN** a verified control channel belongs to the current attempt
+- **THEN** all candidate identity fields agree with that attempt, its one
+  planned transport, and its verified target
+
+#### Scenario: Candidate context is stale
+- **WHEN** runtime, attempt, channel, wire request, target, transport, role, or
+  verified peer differs from the current Coordinator candidate
+- **THEN** it has no signaling, media, winner, or cleanup authority
+
+### Requirement: Service cleanup targets exact physical handles
+Service SHALL execute close effects only against a physical session matching
+the effect runtime, attempt, and channel. A stale close, send completion, or
+reader callback MUST NOT remove, close, or mutate a replacement session.
+
+#### Scenario: Old close effect follows replacement
+- **WHEN** an old attempt's close effect arrives after the channel map slot
+  contains a replacement session
+- **THEN** the replacement remains open and owned by its current context
+
+#### Scenario: Old send completion follows replacement
+- **WHEN** an old session completes a send after it is no longer the exact map
+  object for that candidate
+- **THEN** no sent/failed event is applied to the current candidate
+
+### Requirement: Media signaling and callbacks require current winner context
+Service SHALL carry immutable candidate context through pending and delivered
+SDP/ICE, queued-message flush, WebRTC state, disconnect, audio, and error
+callbacks and re-check the current Coordinator attempt, owner channel, phase,
+and target immediately before use. Pending media SHALL be keyed by full
+candidate context, not bare channel ID.
+
+#### Scenario: Current winner receives media signaling
+- **WHEN** the exact current Coordinator winner receives SDP/ICE
+- **THEN** Service queues or delivers it only for that matching media context
+
+#### Scenario: Late media callback follows replacement or terminal outcome
+- **WHEN** an old candidate emits SDP/ICE, PeerConnection state, disconnect,
+  audio, or error after replacement or terminal cleanup
+- **THEN** it cannot mutate product state, feed the newer manager, cancel its
+  timer, or alter current UI/media state
+
+### Requirement: Service media state is a physical locator only
+B4 SHALL remove `tunnelChosen` and channel-only media-owner checks as policy
+gates. Service MAY retain one contextual physical media locator for exact
+execution and idempotent cleanup, but the Coordinator SHALL authorize every
+winner and product-state transition.
+
+#### Scenario: Duplicate or stale StartWebRtc effect
+- **WHEN** a duplicate matching start or a stale different start is executed
+- **THEN** the matching physical manager remains single and stale physical
+  state cannot block or replace the Coordinator winner
+
+### Requirement: B5 and KUM-28 remain deferred
+B4 MUST NOT change adapter-internal remaining-time, watchdog, retry, group, or
+Socket-loop contracts. It MUST keep one transport per attempt and MUST NOT add
+T+5 fallback, dual-channel racing, an optimization window, or `OPTIMIZING`.
+
+#### Scenario: B4 review
+- **WHEN** the fixed B4 diff is reviewed
+- **THEN** it contains upper-layer candidate/callback/exact-cleanup migration
+  only, with no B5 timing or KUM-28 behavior

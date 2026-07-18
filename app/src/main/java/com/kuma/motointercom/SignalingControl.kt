@@ -133,6 +133,97 @@ internal data class MediaChannelCandidate(
     val transport: Transport
 )
 
+internal data class ConnectionCandidateContext(
+    val attempt: ConnectionAttempt,
+    val channelId: ControlChannelId,
+    val wireRequestKey: WireRequestKey,
+    val targetLock: TargetLock,
+    val transport: Transport,
+    val requestRole: RequestRole,
+    val peer: PeerIdentity
+) {
+    init {
+        require(wireRequestKey.attemptId == attempt.id) {
+            "Candidate wire request must match the attempt"
+        }
+        require(targetLock == attempt.targetLock) {
+            "Candidate TargetLock must match the attempt"
+        }
+        require(transport == attempt.channelPlan.transport) {
+            "Candidate transport must match the attempt plan"
+        }
+        require(peer.isVerifiedFor(targetLock)) {
+            "Candidate peer must be verified for the attempt TargetLock"
+        }
+        when (requestRole) {
+            RequestRole.REQUESTER -> {
+                require(wireRequestKey.requesterSessionId == attempt.runtimeSessionId) {
+                    "Requester candidate runtime must match the attempt"
+                }
+                require(wireRequestKey.responderDeviceId.value == attempt.targetDeviceId) {
+                    "Requester candidate target must match the responder"
+                }
+            }
+            RequestRole.RESPONDER -> {
+                require(wireRequestKey.requesterDeviceId.value == attempt.targetDeviceId) {
+                    "Responder candidate target must match the requester"
+                }
+                require(
+                    wireRequestKey.requesterSessionId ==
+                        attempt.targetLock.expectedRemoteSessionId
+                ) {
+                    "Responder candidate runtime must match the requester"
+                }
+            }
+        }
+    }
+
+    val runtimeSessionId: RuntimeSessionId
+        get() = attempt.runtimeSessionId
+
+    val attemptId: ConnectionAttemptId
+        get() = attempt.id
+}
+
+internal fun isCurrentMediaCandidate(
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    candidate: ConnectionCandidateContext
+): Boolean {
+    val active = activeAttempt ?: return false
+    val phaseAllowsMedia = when (active.phase) {
+        SignalingAttemptPhase.ACCEPTED,
+        SignalingAttemptPhase.MEDIA_NEGOTIATING,
+        SignalingAttemptPhase.CONNECTED -> true
+        else -> false
+    }
+    return currentAttempt == candidate.attempt &&
+        active.attempt == candidate.attempt &&
+        active.wireRequestKey == candidate.wireRequestKey &&
+        active.peer == candidate.peer &&
+        candidate.channelId in active.channelIds &&
+        active.mediaOwnerChannelId == candidate.channelId &&
+        active.terminalOutcome == AttemptOutcome.ACCEPTED &&
+        phaseAllowsMedia
+}
+
+internal fun isCurrentSelectionCandidate(
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    candidate: ConnectionCandidateContext,
+    wireRequestKey: WireRequestKey
+): Boolean {
+    val active = activeAttempt ?: return false
+    return currentAttempt == candidate.attempt &&
+        active.attempt == candidate.attempt &&
+        active.phase == SignalingAttemptPhase.SELECTING_MEDIA &&
+        active.mediaOwnerChannelId == null &&
+        active.wireRequestKey == wireRequestKey &&
+        candidate.wireRequestKey == wireRequestKey &&
+        active.peer == candidate.peer &&
+        candidate.channelId in active.channelIds
+}
+
 internal fun selectMediaChannel(
     candidates: Collection<MediaChannelCandidate>,
     preferredTransport: Transport?

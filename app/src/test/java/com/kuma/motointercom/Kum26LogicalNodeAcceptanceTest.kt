@@ -195,7 +195,7 @@ class Kum26LogicalNodeAcceptanceTest {
         val harness = OrchestratorHarness(
             SessionOrchestrator(repository, Dispatchers.Unconfined)
         )
-        val resources = ResourceProbe(tunnelClaimed = true)
+        val resources = ResourceProbe(mediaLocated = true)
 
         establishedPair(oldAttempt, DEVICE_B, SESSION_B).use { oldPair ->
             advanceRequesterToAccepted(oldPair)
@@ -236,7 +236,7 @@ class Kum26LogicalNodeAcceptanceTest {
                 oldPair.requester.close()
 
                 assertTrue(oldPair.requester.isClosed)
-                assertFalse(resources.tunnelClaimed)
+                assertFalse(resources.mediaLocated)
                 assertEquals(newAttempt, harness.orchestrator.currentAttempt)
                 assertTrue(repository.saved.isEmpty())
             } finally {
@@ -591,7 +591,7 @@ class Kum26LogicalNodeAcceptanceTest {
         }
     }
 
-    private class ResourceProbe(var tunnelClaimed: Boolean = false) {
+    private class ResourceProbe(var mediaLocated: Boolean = false) {
         fun abort(session: SignalingSessionV2) {
             AttemptResourceController(
                 runtimeSessionId = RUNTIME_A,
@@ -599,7 +599,7 @@ class Kum26LogicalNodeAcceptanceTest {
                 closeLanDiscovery = {},
                 closeWifiDirect = { it() },
                 closeAudioRoute = {},
-                releaseTunnel = { tunnelClaimed = false },
+                clearMediaLocator = { mediaLocated = false },
                 clearConnectionState = {},
                 resumeDiscovery = {}
             ).abortAndResumeDiscovery()

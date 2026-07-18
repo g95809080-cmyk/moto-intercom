@@ -178,10 +178,9 @@ class SessionOrchestratorTest {
             assertTrue(orchestrator.state.value is IntercomState.Discovering)
 
             assertFalse(
-                canActivateTunnel(
+                canApplyAttemptCallback(
                     accepted = tunnelAccepted,
                     sessionCurrent = true,
-                    tunnelClaimed = true,
                     currentAttempt = orchestrator.currentAttempt,
                     expectedAttempt = attempt
                 )

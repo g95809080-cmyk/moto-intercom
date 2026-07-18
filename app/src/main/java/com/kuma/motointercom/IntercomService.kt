@@ -25,7 +25,6 @@ import kotlinx.coroutines.launch
 import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 后台免死对讲服务。
@@ -107,8 +106,10 @@ class IntercomService : Service() {
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
     private val signalingSessions = linkedMapOf<ControlChannelId, SignalingSessionV2>()
-    private val pendingMediaMessages = linkedMapOf<ControlChannelId, MutableList<SignalingMessageV2>>()
-    private var activeMediaChannelId: ControlChannelId? = null
+    private val pendingMediaMessages =
+        linkedMapOf<ConnectionCandidateContext, MutableList<SignalingMessageV2>>()
+    private var activeMediaContext: ConnectionCandidateContext? = null
+    private var activeMediaSession: SignalingSessionV2? = null
 
     private var bluetoothReady = false
     private var physicalLinkReady = false
@@ -126,7 +127,6 @@ class IntercomService : Service() {
     private var localDeviceId = ""
     private var recoveryGeneration = 0
     private var presenceExpiryGeneration = 0
-    private val tunnelChosen = AtomicLong(NO_SESSION_TOKEN)
 
     override fun onCreate() {
         super.onCreate()
@@ -247,7 +247,7 @@ class IntercomService : Service() {
 
     internal fun connectToPresence(selectedPresence: RiderPresence) {
         mainHandler.post {
-            if (activeSession == null || tunnelChosen.get() != NO_SESSION_TOKEN) return@post
+            if (activeSession == null) return@post
             val runtimeSessionId = activeRuntimeSessionId ?: return@post
             val presence = presenceAggregator.snapshot().resolveCurrentSelection(selectedPresence)
             if (presence == null) {
@@ -285,7 +285,6 @@ class IntercomService : Service() {
         bluetoothReady = false
         physicalLinkReady = false
         remoteRiderName = null
-        tunnelChosen.set(NO_SESSION_TOKEN)
         publishPresenceSnapshot(presenceAggregator.clear())
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(SEARCHING_STATUS)
@@ -457,7 +456,11 @@ class IntercomService : Service() {
                 return@dispatchOnMain
             }
 
-            signalingSessions.put(session.channel.channelId, session)?.close()
+            signalingSessions.put(session.channel.channelId, session)?.let { replaced ->
+                removePendingMediaMessages(replaced)
+                closeMediaIfMatches(replaced)
+                replaced.close()
+            }
             val runtimeSessionId = session.pinnedIdentity.localSessionId
             orchestrator.dispatch(
                 SessionEvent.ControlChannelVerified(
@@ -514,9 +517,10 @@ class IntercomService : Service() {
     ) {
         if (
             !isSessionCurrent(token) ||
+            session.isClosed ||
             signalingSessions[session.channel.channelId] !== session
         ) {
-            closeControlChannel(session.channel.channelId)
+            closeControlChannel(session)
             return
         }
         val runtimeSessionId = session.pinnedIdentity.localSessionId
@@ -565,10 +569,24 @@ class IntercomService : Service() {
             is SignalingMessageV2.Offer,
             is SignalingMessageV2.Answer,
             is SignalingMessageV2.Candidate -> {
-                val manager = intercomManager
-                    ?.takeIf { activeMediaChannelId == channelId }
+                val attempt = orchestrator.currentAttempt
+                val candidate = attempt?.let(session::toConnectionCandidateContext)
+                if (
+                    candidate == null ||
+                    !canUseMediaCandidate(
+                        sessionCurrent = isSessionCurrent(token),
+                        currentAttempt = attempt,
+                        activeAttempt = orchestrator.activeControlAttempt,
+                        candidate = candidate,
+                        session = session
+                    )
+                ) {
+                    closeControlChannel(session)
+                    return
+                }
+                val manager = intercomManager?.takeIf { activeMediaContext == candidate }
                 if (manager == null) {
-                    pendingMediaMessages.getOrPut(channelId, ::mutableListOf) += message
+                    pendingMediaMessages.getOrPut(candidate, ::mutableListOf) += message
                 } else {
                     manager.handleRemoteSignaling(message)
                 }
@@ -589,9 +607,14 @@ class IntercomService : Service() {
         session: SignalingSessionV2,
         failure: Throwable
     ) {
-        removeSignalingSession(session.channel.channelId, session)
-        pendingMediaMessages.remove(session.channel.channelId)
-        if (!isSessionCurrent(token)) return
+        if (
+            !isSessionCurrent(token) ||
+            signalingSessions[session.channel.channelId] !== session
+        ) {
+            closeControlChannel(session)
+            return
+        }
+        closeControlChannel(session)
         val runtimeSessionId = session.pinnedIdentity.localSessionId
         val event = if (failure is SignalingV2Exception) {
             SessionEvent.ProtocolViolation(
@@ -617,14 +640,37 @@ class IntercomService : Service() {
     ) {
         orchestrator.dispatch(event) { accepted ->
             if (!accepted) {
-                dispatchOnMain { closeControlChannel(session.channel.channelId) }
+                dispatchOnMain { closeControlChannel(session) }
             }
         }
     }
 
-    private fun closeControlChannel(channelId: ControlChannelId) {
-        pendingMediaMessages.remove(channelId)
-        signalingSessions.remove(channelId)?.close()
+    private fun closeControlChannel(session: SignalingSessionV2) {
+        if (signalingSessions[session.channel.channelId] === session) {
+            signalingSessions.remove(session.channel.channelId)
+            removePendingMediaMessages(session)
+            closeMediaIfMatches(session)
+        }
+        session.close()
+    }
+
+    private fun closeControlChannel(
+        runtimeSessionId: RuntimeSessionId,
+        attemptId: ConnectionAttemptId,
+        channelId: ControlChannelId,
+        targetLock: TargetLock
+    ) {
+        val session = signalingSessions[channelId]
+            ?.takeIf {
+                it.matchesControlHandle(
+                    runtimeSessionId,
+                    attemptId,
+                    channelId,
+                    targetLock
+                )
+            }
+            ?: return
+        closeControlChannel(session)
     }
 
     private fun removeSignalingSession(
@@ -636,20 +682,43 @@ class IntercomService : Service() {
         }
     }
 
+    private fun removePendingMediaMessages(session: SignalingSessionV2) {
+        pendingMediaMessages.keys.removeAll(session::hasCandidateIdentity)
+    }
+
+    private fun closeMediaIfMatches(session: SignalingSessionV2) {
+        val context = activeMediaContext
+            ?.takeIf { activeMediaSession === session && session.hasCandidateIdentity(it) }
+            ?: return
+        closeActiveMediaContext()
+        pendingMediaMessages.remove(context)
+    }
+
+    private fun closeActiveMediaContext() {
+        val manager = intercomManager
+        activeMediaContext = null
+        activeMediaSession = null
+        intercomManager = null
+        mediaConnected = false
+        runCatching { manager?.close() }.onFailure(::handleError)
+    }
+
     private fun startWebRtc(effect: SessionEffect.StartWebRtc) {
         val token = activeSession ?: return
         val controlAttempt = orchestrator.activeControlAttempt
-        if (
-            controlAttempt?.attempt != effect.attempt ||
-            controlAttempt.mediaOwnerChannelId != effect.channelId ||
-            controlAttempt.phase != SignalingAttemptPhase.ACCEPTED ||
-            controlAttempt.terminalOutcome != AttemptOutcome.ACCEPTED
-        ) {
-            return
-        }
         val session = signalingSessions[effect.channelId]
+        val candidate = session?.toConnectionCandidateContext(effect.attempt)
         if (
             session == null ||
+            candidate == null ||
+            !canUseMediaCandidate(
+                sessionCurrent = isSessionCurrent(token),
+                currentAttempt = orchestrator.currentAttempt,
+                activeAttempt = controlAttempt,
+                candidate = candidate,
+                session = session,
+                expectedRole = effect.role
+            ) ||
             !canStartWebRtc(
                 sessionCurrent = isSessionCurrent(token),
                 currentAttempt = orchestrator.currentAttempt,
@@ -658,18 +727,26 @@ class IntercomService : Service() {
                 expectedRole = effect.role
             )
         ) {
-            closeControlChannel(effect.channelId)
+            if (session != null && candidate != null) closeControlChannel(session)
             return
         }
-        val existingOwner = activeMediaChannelId
-        if (existingOwner != null && existingOwner != effect.channelId) {
-            closeControlChannel(effect.channelId)
+        if (
+            intercomManager != null &&
+            activeMediaContext == candidate &&
+            activeMediaSession === session
+        ) {
             return
         }
-        if (intercomManager != null && existingOwner == effect.channelId) return
+        if (
+            intercomManager != null ||
+            activeMediaContext != null ||
+            activeMediaSession != null
+        ) {
+            closeActiveMediaContext()
+        }
 
-        activeMediaChannelId = effect.channelId
-        tunnelChosen.set(token.value)
+        activeMediaContext = candidate
+        activeMediaSession = session
         lanDiscovery?.retainPassiveIngress(effect.attempt)
         if (effect.attempt.channelPlan.transport == Transport.LAN) {
             val closingTunnel = wifiTunnel
@@ -695,14 +772,16 @@ class IntercomService : Service() {
             signalingSession = session,
             webRtcRole = effect.role,
             onIntercomDisconnected = {
-                onIntercomDisconnected(token, effect.attempt, it)
+                onIntercomDisconnected(token, candidate, it)
             },
             onConnectionStateChanged = {
-                onConnectionStateChanged(token, effect.attempt, it)
+                onConnectionStateChanged(token, candidate, it)
             },
-            onAudioLevelChanged = { onAudioLevelChanged(token, it) },
-            onError = { error -> postForSession(token) { handleError(error) } },
-            isSessionCurrent = { isSessionCurrent(token) }
+            onAudioLevelChanged = { onAudioLevelChanged(token, candidate, it) },
+            onError = { error ->
+                postForMediaContext(token, candidate) { handleError(error) }
+            },
+            isSessionCurrent = { isCurrentMediaContext(token, candidate) }
         ).also {
             publishLog(
                 "Starting WebRTC after CONNECT_ACCEPT: role=${effect.role} " +
@@ -712,7 +791,7 @@ class IntercomService : Service() {
             publishStatus(MEDIA_INITIALIZING_STATUS)
             it.start()
         }
-        pendingMediaMessages.remove(effect.channelId)
+        pendingMediaMessages.remove(candidate)
             .orEmpty()
             .forEach { intercomManager?.handleRemoteSignaling(it) }
 
@@ -721,29 +800,29 @@ class IntercomService : Service() {
 
     private fun onConnectionStateChanged(
         token: SessionGeneration.Token,
-        attempt: ConnectionAttempt,
+        candidate: ConnectionCandidateContext,
         state: PeerConnection.PeerConnectionState
     ) {
-        postForSession(token) {
+        postForMediaContext(token, candidate) {
             publishLog("WebRTC 状态：$state")
             orchestrator.dispatch(
                 SessionEvent.WebRtcStateChanged(
-                    runtimeSessionId = attempt.runtimeSessionId,
-                    attemptId = attempt.id,
+                    runtimeSessionId = candidate.runtimeSessionId,
+                    attemptId = candidate.attemptId,
                     state = state.toProductState(),
                     occurredAt = System.currentTimeMillis()
                 )
             ) { accepted ->
                 if (state == PeerConnection.PeerConnectionState.CONNECTED) {
-                    postForSession(token) {
+                    postForMediaContext(token, candidate) {
                         val connected = orchestrator.state.value as? IntercomState.Connected
-                        if (accepted && connected?.attempt == attempt) {
-                            activeMediaChannelId
-                                ?.let(signalingSessions::get)
+                        if (accepted && connected?.attempt == candidate.attempt) {
+                            signalingSessions[candidate.channelId]
+                                ?.takeIf { it.matchesCandidate(candidate) }
                                 ?.let {
                                     runCatching(it::markMediaConnected).onFailure(::handleError)
                                 }
-                            attemptDeadlineScheduler.cancel(attempt)
+                            attemptDeadlineScheduler.cancel(candidate.attempt)
                             mediaConnected = true
                             publishStatus(VOICE_CONNECTED_STATUS)
                         }
@@ -765,15 +844,15 @@ class IntercomService : Service() {
 
     private fun onIntercomDisconnected(
         token: SessionGeneration.Token,
-        attempt: ConnectionAttempt,
+        candidate: ConnectionCandidateContext,
         error: IOException
     ) {
-        postForSession(token) {
+        postForMediaContext(token, candidate) {
             publishLog("信令通道断开：${error.message}")
             orchestrator.dispatch(
                 SessionEvent.SignalingDisconnected(
-                    runtimeSessionId = attempt.runtimeSessionId,
-                    attemptId = attempt.id
+                    runtimeSessionId = candidate.runtimeSessionId,
+                    attemptId = candidate.attemptId
                 )
             )
         }
@@ -813,7 +892,10 @@ class IntercomService : Service() {
                 if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
             },
             closeAudioRoute = { audioToClose?.close() },
-            releaseTunnel = { tunnelChosen.set(NO_SESSION_TOKEN) },
+            clearMediaLocator = {
+                activeMediaContext = null
+                activeMediaSession = null
+            },
             clearConnectionState = {
                 bluetoothReady = false
                 physicalLinkReady = false
@@ -834,7 +916,6 @@ class IntercomService : Service() {
                     }
                     val recoveryToken = sessions.start()
                     activeSession = recoveryToken
-                    tunnelChosen.set(NO_SESSION_TOKEN)
                     publishLog("重新启动车友发现")
                     startAudioRoute(recoveryToken)
                     startDiscoveryTransports(
@@ -849,8 +930,12 @@ class IntercomService : Service() {
         ).abortAndResumeDiscovery()
     }
 
-    private fun onAudioLevelChanged(token: SessionGeneration.Token, level: Float) {
-        postForSession(token) { listener?.onAudioLevelChanged(level) }
+    private fun onAudioLevelChanged(
+        token: SessionGeneration.Token,
+        candidate: ConnectionCandidateContext,
+        level: Float
+    ) {
+        postForMediaContext(token, candidate) { listener?.onAudioLevelChanged(level) }
     }
 
     private fun stopIntercom() {
@@ -866,7 +951,6 @@ class IntercomService : Service() {
         activeRuntimeSessionId = null
         localDeviceId = ""
         running = false
-        tunnelChosen.set(NO_SESSION_TOKEN)
         publishPresenceSnapshot(presenceAggregator.clear())
         drainSignalingSessions().forEach(SignalingSessionV2::close)
         lanDiscovery?.close()
@@ -905,6 +989,22 @@ class IntercomService : Service() {
     private fun isSessionCurrent(token: SessionGeneration.Token): Boolean =
         running && sessions.isCurrent(token) && activeSession == token
 
+    private fun isCurrentMediaContext(
+        token: SessionGeneration.Token,
+        candidate: ConnectionCandidateContext
+    ): Boolean {
+        val session = signalingSessions[candidate.channelId] ?: return false
+        return activeMediaContext == candidate &&
+            activeMediaSession === session &&
+            canUseMediaCandidate(
+                sessionCurrent = isSessionCurrent(token),
+                currentAttempt = orchestrator.currentAttempt,
+                activeAttempt = orchestrator.activeControlAttempt,
+                candidate = candidate,
+                session = session
+            )
+    }
+
     private fun dispatchOnMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else mainHandler.post(action)
     }
@@ -912,6 +1012,16 @@ class IntercomService : Service() {
     private fun postForSession(token: SessionGeneration.Token, action: () -> Unit) {
         dispatchOnMain {
             if (isSessionCurrent(token)) action()
+        }
+    }
+
+    private fun postForMediaContext(
+        token: SessionGeneration.Token,
+        candidate: ConnectionCandidateContext,
+        action: () -> Unit
+    ) {
+        dispatchOnMain {
+            if (isCurrentMediaContext(token, candidate)) action()
         }
     }
 
@@ -969,10 +1079,25 @@ class IntercomService : Service() {
                 SignalingMessageV2.Disconnect(effect.reason)
             )
             is SessionEffect.SelectMediaChannel -> {
+                val currentAttempt = orchestrator.currentAttempt
+                val activeAttempt = orchestrator.activeControlAttempt
                 val candidates = effect.cohort.channelIds.mapNotNull { channelId ->
                     signalingSessions[channelId]
                         ?.takeUnless(SignalingSessionV2::isClosed)
-                        ?.let { MediaChannelCandidate(channelId, it.channel.transport) }
+                        ?.let { session ->
+                            currentAttempt
+                                ?.let(session::toConnectionCandidateContext)
+                                ?.takeIf { candidate ->
+                                    session.matchesCandidate(candidate) &&
+                                        isCurrentSelectionCandidate(
+                                            currentAttempt,
+                                            activeAttempt,
+                                            candidate,
+                                            effect.wireRequestKey
+                                        )
+                                }
+                                ?.let { MediaChannelCandidate(channelId, it.transport) }
+                        }
                 }
                 orchestrator.dispatch(
                     SessionEvent.MediaChannelSelected(
@@ -984,7 +1109,12 @@ class IntercomService : Service() {
                 )
             }
             is SessionEffect.StartWebRtc -> startWebRtc(effect)
-            is SessionEffect.CloseControlChannel -> closeControlChannel(effect.channelId)
+            is SessionEffect.CloseControlChannel -> closeControlChannel(
+                effect.runtimeSessionId,
+                effect.attemptId,
+                effect.channelId,
+                effect.targetLock
+            )
             is SessionEffect.PublishIncomingConfirmation ->
                 publishIncomingConfirmation(effect.prompt)
             is SessionEffect.CancelIncomingConfirmation -> cancelIncomingConfirmation(effect)
@@ -1147,8 +1277,8 @@ class IntercomService : Service() {
         val session = signalingSessions[channelId]
         if (
             session == null ||
-            session.pinnedIdentity.localSessionId != runtimeSessionId ||
-            session.wireRequestKey.attemptId != attemptId
+            session.isClosed ||
+            !session.matchesControlHandle(runtimeSessionId, attemptId, channelId)
         ) {
             orchestrator.dispatch(
                 SessionEvent.SignalingSendFailed(
@@ -1163,6 +1293,14 @@ class IntercomService : Service() {
         }
         session.send(message) { result ->
             dispatchOnMain {
+                if (
+                    signalingSessions[channelId] !== session ||
+                    session.isClosed ||
+                    !session.matchesControlHandle(runtimeSessionId, attemptId, channelId)
+                ) {
+                    closeControlChannel(session)
+                    return@dispatchOnMain
+                }
                 val failure = result.exceptionOrNull()
                 if (failure == null) {
                     orchestrator.dispatch(
@@ -1174,8 +1312,7 @@ class IntercomService : Service() {
                         )
                     )
                 } else {
-                    removeSignalingSession(channelId, session)
-                    pendingMediaMessages.remove(channelId)
+                    closeControlChannel(session)
                     orchestrator.dispatch(
                         SessionEvent.SignalingSendFailed(
                             runtimeSessionId,
@@ -1230,7 +1367,8 @@ class IntercomService : Service() {
         signalingSessions.values.toList().also {
             signalingSessions.clear()
             pendingMediaMessages.clear()
-            activeMediaChannelId = null
+            activeMediaContext = null
+            activeMediaSession = null
         }
 
     private fun updateStageStatus() {
@@ -1439,7 +1577,6 @@ class IntercomService : Service() {
     }
 
     companion object {
-        private const val NO_SESSION_TOKEN = 0L
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
@@ -1503,13 +1640,12 @@ class IntercomService : Service() {
     }
 }
 
-internal fun canActivateTunnel(
+internal fun canApplyAttemptCallback(
     accepted: Boolean,
     sessionCurrent: Boolean,
-    tunnelClaimed: Boolean,
     currentAttempt: ConnectionAttempt?,
     expectedAttempt: ConnectionAttempt
-): Boolean = accepted && sessionCurrent && tunnelClaimed && currentAttempt == expectedAttempt
+): Boolean = accepted && sessionCurrent && currentAttempt == expectedAttempt
 
 internal fun canRegisterControlChannel(
     sessionCurrent: Boolean,
@@ -1524,6 +1660,65 @@ internal fun canRegisterControlChannel(
         (attempt == null || attempt.targetLock == session.targetLock) &&
         session.peer.isVerifiedFor(session.targetLock)
 }
+
+internal fun SignalingSessionV2.toConnectionCandidateContext(
+    attempt: ConnectionAttempt
+): ConnectionCandidateContext? = runCatching {
+    ConnectionCandidateContext(
+        attempt = attempt,
+        channelId = channel.channelId,
+        wireRequestKey = wireRequestKey,
+        targetLock = targetLock,
+        transport = channel.transport,
+        requestRole = requestRole,
+        peer = peer
+    )
+}.getOrNull()
+
+internal fun SignalingSessionV2.matchesControlHandle(
+    runtimeSessionId: RuntimeSessionId,
+    attemptId: ConnectionAttemptId,
+    channelId: ControlChannelId
+): Boolean = pinnedIdentity.localSessionId == runtimeSessionId &&
+    wireRequestKey.attemptId == attemptId &&
+    channel.channelId == channelId
+
+internal fun SignalingSessionV2.matchesControlHandle(
+    runtimeSessionId: RuntimeSessionId,
+    attemptId: ConnectionAttemptId,
+    channelId: ControlChannelId,
+    targetLock: TargetLock
+): Boolean = matchesControlHandle(runtimeSessionId, attemptId, channelId) &&
+    this.targetLock == targetLock
+
+internal fun SignalingSessionV2.hasCandidateIdentity(
+    candidate: ConnectionCandidateContext
+): Boolean = matchesControlHandle(
+        candidate.runtimeSessionId,
+        candidate.attemptId,
+        candidate.channelId
+    ) &&
+    wireRequestKey == candidate.wireRequestKey &&
+    targetLock == candidate.targetLock &&
+    channel.transport == candidate.transport &&
+    requestRole == candidate.requestRole &&
+    peer == candidate.peer
+
+internal fun SignalingSessionV2.matchesCandidate(
+    candidate: ConnectionCandidateContext
+): Boolean = !isClosed && hasCandidateIdentity(candidate)
+
+internal fun canUseMediaCandidate(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    candidate: ConnectionCandidateContext,
+    session: SignalingSessionV2,
+    expectedRole: WebRtcRole? = null
+): Boolean = sessionCurrent &&
+    isCurrentMediaCandidate(currentAttempt, activeAttempt, candidate) &&
+    session.matchesCandidate(candidate) &&
+    (expectedRole == null || session.requestRole.webRtcRole == expectedRole)
 
 internal fun canStartWebRtc(
     sessionCurrent: Boolean,

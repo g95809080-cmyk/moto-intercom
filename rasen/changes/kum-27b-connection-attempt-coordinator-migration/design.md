@@ -10,6 +10,10 @@ B3 performs the previously reserved atomic cutover: the Coordinator owns every
 total attempt deadline, attempts are scheduled once, and an unpaired inbound
 request awaiting confirmation is no longer represented by a sentinel attempt.
 
+B4 consumes that approved foundation. The Coordinator remains the logical
+candidate and winner authority, while Service owns only contextual physical
+session/media handles and executes exact cleanup.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -30,13 +34,22 @@ request awaiting confirmation is no longer represented by a sentinel attempt.
 - Replace the unpaired inbound sentinel with a Coordinator-owned pending-request
   model and create the real inbound attempt only on valid local acceptance.
 - Schedule each created attempt once through an explicit Service effect.
+- Carry one immutable candidate context through Service signaling, selection,
+  media buffering, WebRTC callbacks, and cleanup execution.
+- Make every upper-layer callback re-check runtime, attempt, channel, wire
+  request, target, and current Coordinator winner before it can affect media or
+  product state.
+- Ensure stale close/send/media callbacks touch only their exact old physical
+  handle and cannot close or claim a replacement.
+- Remove Service channel-only/tunnel claims as policy gates; retain only a
+  contextual physical media locator.
 
 **Non-Goals:**
 
 - No change to the 10-second attempt budget or 15-second human decision window.
-- No callback/candidate cleanup migration beyond the B3 deadline and pending
-  confirmation boundary; that remains B4.
 - No adapter remaining-time contract change; that remains B5.
+- No LAN/P2P/Socket watchdog, retry, group, or connect-loop migration in B4;
+  B5 combines their contextual task tokens with remaining-time contracts.
 - No second live Coordinator, transport race, fallback scheduler, optimization
   window, or other KUM-28 behavior.
 
@@ -142,7 +155,7 @@ inbound representation.
 This change follows an equivalent deterministic full-feature subset:
 proposal, specs/design/tasks, one writer apply, targeted and full verification,
 one read-only architecture review loop, Draft PR update, and evidence sync.
-Archive, deployment, and KUM-28 remain outside B3.
+Archive, deployment, and KUM-28 remain outside B4.
 
 Execution is fixed to Rasen 0.1.3 with `DO_NOT_TRACK=1` and
 `RASEN_TELEMETRY=0`. Maximum concurrent write workers is one; the reviewer is
@@ -199,6 +212,60 @@ identity, and strict deadline. It does not claim that all Socket, P2P, SDP/ICE,
 or delayed adapter callbacks have completed the B4 migration, and it does not
 change adapter retry/remaining-budget APIs reserved for B5.
 
+### 14. B4 candidate identity is immutable and complete
+
+`ConnectionCandidateContext` contains the current immutable attempt plus the
+verified channel ID, wire request key, TargetLock, transport, request role, and
+verified peer. Construction fails unless all identities and the single planned
+transport agree. The context is the callback and physical-handle lease; a bare
+channel ID is not candidate authority.
+
+The existing Coordinator remains the logical owner through its current attempt,
+verified channel registry, candidate set, deterministic media owner, phase, and
+terminal mailbox. No second Coordinator, Service-side candidate registry, or
+winner election is introduced.
+
+### 15. B4 exact physical handle lifecycle
+
+Service may locate a `SignalingSessionV2` by channel ID, but a close/send/select
+operation may use it only when local runtime, wire attempt ID, channel ID,
+TargetLock, transport, request role, and verified peer match the immutable
+candidate context. A stale `CloseControlChannel` effect checks its existing
+runtime/attempt/channel tuple before removal, so it cannot close a replacement
+session that reused the physical map slot.
+
+Pending SDP/ICE is keyed by complete candidate context rather than channel ID.
+Signaling send completion re-checks exact session object identity before
+dispatching success or failure. Stale completion closes or ignores only its old
+session and has no logical effect.
+
+### 16. B4 media authorization and callbacks
+
+`StartWebRtc` is still emitted only by the Coordinator winner. Service creates a
+single physical `activeMediaContext` after checking the Coordinator's current
+attempt, candidate, owner, phase, terminal protocol outcome, and exact session.
+That context is a locator, not policy authority. A different stale locator is
+closed before the current authorized winner starts; a duplicate matching start
+is idempotent.
+
+Remote SDP/ICE delivery, queued-message flush, WebRTC connection/disconnect,
+audio-level, and media-error callbacks all carry the same immutable context and
+re-check Coordinator ownership immediately before acting. Late callbacks from a
+terminal or replaced candidate are ignored and cannot affect a newer manager.
+
+The legacy `tunnelChosen` and channel-only `activeMediaChannelId` gates are
+removed. Presence intent is always submitted to the Coordinator, which alone
+accepts or rejects it. Runtime teardown clears the contextual locator and exact
+physical handles idempotently.
+
+### 17. B4/B5 boundary
+
+B4 does not change LAN Socket connect caps, P2P group/watchdog/retry timing,
+`WifiDirectSignalingSocket` loops, or their use of local constants. B5 will add
+remaining monotonic budget and contextual task tokens to those adapter-internal
+operations atomically. B4 changes no Signaling v2 messages, TargetLock policy,
+WebRTC SDP/ICE semantics, pairing, database, UI, permissions, or KUM-28 policy.
+
 ## Risks / Trade-offs
 
 - [The legacy data-class `copy` paths can create a later deadline] -> B3 removes
@@ -220,6 +287,15 @@ change adapter retry/remaining-budget APIs reserved for B5.
 - [Protocol tombstones can be mistaken for logical terminal ownership] -> Keep
   protocol `AttemptOutcome` separate and prove that only the Coordinator's
   logical mailbox decides first-terminal product behavior.
+- [A channel ID can be reused after an old effect was queued] -> Require the
+  effect runtime/attempt/channel tuple and exact session/candidate context before
+  closing or dispatching any completion.
+- [Old SDP/ICE or PeerConnection callbacks can act through Service fields] ->
+  Key buffers and callback closures by immutable candidate context and re-check
+  the Coordinator winner at point of use.
+- [A stale physical manager can block the current winner] -> Treat the Service
+  context as a disposable locator, close the stale manager, and let only the
+  Coordinator-authorized winner start.
 
 ## Migration Plan
 
@@ -232,7 +308,12 @@ change adapter retry/remaining-budget APIs reserved for B5.
 5. Reject WebRTC success and glare at the exact total deadline, and cancel the
    physical timer only after Coordinator-authorized success.
 6. Run targeted/full gates and fixed-SHA read-only review, then record evidence.
-7. B4-B6 remain deferred until their preceding gates; KUM-28 remains absent.
+7. B4: add immutable candidate context, exact Service handle matching, and
+   context-keyed media buffering.
+8. B4: gate signaling completions, SDP/ICE, WebRTC callbacks, and cleanup on the
+   current Coordinator candidate/winner; remove Service policy claims.
+9. Run targeted/full gates and fixed-SHA read-only review, then record evidence.
+10. B5-B6 remain deferred until their preceding gates; KUM-28 remains absent.
 
 Rollback is commit-level to the approved B1 head. B2 changes no schema,
 protocol, dependency, identity, pairing, database, permission, or persisted
@@ -240,6 +321,6 @@ data, and restoring B1 restores the previous production ownership paths.
 
 ## Open Questions
 
-None for B3. The deadline/pending-inbound cutover is atomic; implementation
-must not leave an external deadline source, rebase, sentinel attempt, or second
-schedule path.
+None for B4. The callback/candidate/cleanup cutover must not leave a Service
+policy claim, channel-only media buffer, non-contextual WebRTC callback, or
+close path that can touch a replacement handle.

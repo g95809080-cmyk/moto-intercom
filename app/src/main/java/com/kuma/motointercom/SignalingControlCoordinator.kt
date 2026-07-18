@@ -8,6 +8,11 @@ internal data class SignalingControlDecision(
     val effects: List<SessionEffect> = emptyList()
 )
 
+private data class TerminalAttemptRecord(
+    val attempt: ConnectionAttempt,
+    val outcome: ConnectionAttemptTerminalOutcome
+)
+
 internal class SignalingControlCoordinator(
     private val clock: MonotonicClock,
     private val attemptTimeoutMs: Long,
@@ -21,8 +26,8 @@ internal class SignalingControlCoordinator(
     }
     private val channels = linkedMapOf<ControlChannelId, VerifiedControlChannel>()
     private val completedAttempts = linkedMapOf<WireRequestKey, CompletedWireAttempt>()
-    private val terminalAttemptOutcomes =
-        linkedMapOf<ConnectionAttemptId, ConnectionAttemptTerminalOutcome>()
+    private val terminalAttempts =
+        linkedMapOf<ConnectionAttemptId, TerminalAttemptRecord>()
     @Volatile
     private var ownedAttempt: ConnectionAttempt? = null
     @Volatile
@@ -41,7 +46,7 @@ internal class SignalingControlCoordinator(
 
     internal fun terminalOutcome(
         attemptId: ConnectionAttemptId
-    ): ConnectionAttemptTerminalOutcome? = terminalAttemptOutcomes[attemptId]
+    ): ConnectionAttemptTerminalOutcome? = terminalAttempts[attemptId]?.outcome
 
     fun handle(
         current: IntercomState,
@@ -143,7 +148,7 @@ internal class SignalingControlCoordinator(
             pendingInbound = null
             ownedAttempt = null
             completedAttempts.clear()
-            terminalAttemptOutcomes.clear()
+            terminalAttempts.clear()
         }
     }
 
@@ -419,7 +424,7 @@ internal class SignalingControlCoordinator(
                     )
                 }
             ) + pending.channelIds.map {
-                closeEffect(pending.runtimeSessionId, pending.attemptId, it)
+                closeEffect(pending.runtimeSessionId, pending.attemptId, it, pending.targetLock)
             }
             pending.channelIds.forEach(channels::remove)
             pendingInbound = null
@@ -747,7 +752,8 @@ internal class SignalingControlCoordinator(
             SessionEffect.CloseControlChannel(
                 runtimeSessionId = current.runtimeSessionId,
                 attemptId = current.attempt.id,
-                channelId = it
+                channelId = it,
+                targetLock = current.attempt.targetLock
             )
         } + SessionEffect.ScheduleAttemptDeadline(attempt) + selectEffect(attempt, cohort)
         return accepted(
@@ -991,14 +997,16 @@ internal class SignalingControlCoordinator(
                 current,
                 event.runtimeSessionId,
                 event.attemptId,
-                event.channelId
+                event.channelId,
+                event.wireRequestKey
             )
         if (context.mediaOwnerChannelId != null) {
             return closeConflictingChannel(
                 current,
                 event.runtimeSessionId,
                 event.attemptId,
-                event.channelId
+                event.channelId,
+                event.wireRequestKey
             )
         }
         if (current.connectionAttemptOrNull() != context.attempt) {
@@ -1006,7 +1014,8 @@ internal class SignalingControlCoordinator(
                 current,
                 event.runtimeSessionId,
                 event.attemptId,
-                event.channelId
+                event.channelId,
+                event.wireRequestKey
             )
         }
         if (context.attempt.isExpiredAt(clock.now())) {
@@ -1028,7 +1037,8 @@ internal class SignalingControlCoordinator(
             SessionEffect.CloseControlChannel(
                 runtimeSessionId = context.attempt.runtimeSessionId,
                 attemptId = context.attempt.id,
-                channelId = it
+                channelId = it,
+                targetLock = context.attempt.targetLock
             )
         } + SessionEffect.StartWebRtc(
             runtimeSessionId = context.attempt.runtimeSessionId,
@@ -1053,7 +1063,8 @@ internal class SignalingControlCoordinator(
             current,
             event.runtimeSessionId,
             event.attemptId,
-            event.channelId
+            event.channelId,
+            event.wireRequestKey
         )
         if (event.reason.scope == ResponseScope.CHANNEL) {
             return removeChannelAndContinueOrTerminate(current, context, event.channelId)
@@ -1063,7 +1074,8 @@ internal class SignalingControlCoordinator(
                 current,
                 event.runtimeSessionId,
                 event.attemptId,
-                event.channelId
+                event.channelId,
+                event.wireRequestKey
             )
         }
         remember(
@@ -1091,14 +1103,16 @@ internal class SignalingControlCoordinator(
             current,
             event.runtimeSessionId,
             event.attemptId,
-            event.channelId
+            event.channelId,
+            event.wireRequestKey
         )
         if (context.terminalOutcome == AttemptOutcome.ACCEPTED) {
             return closeConflictingChannel(
                 current,
                 event.runtimeSessionId,
                 event.attemptId,
-                event.channelId
+                event.channelId,
+                event.wireRequestKey
             )
         }
         remember(
@@ -1126,7 +1140,8 @@ internal class SignalingControlCoordinator(
             current,
             event.runtimeSessionId,
             event.attemptId,
-            event.channelId
+            event.channelId,
+            event.wireRequestKey
         )
         if (context.mediaOwnerChannelId != event.channelId) {
             return removeChannelAndContinueOrTerminate(current, context, event.channelId)
@@ -1198,7 +1213,12 @@ internal class SignalingControlCoordinator(
             pendingTerminalChannels = setOf(owner)
         )
         val effects = nonOwners.map {
-            closeEffect(context.attempt.runtimeSessionId, context.attempt.id, it)
+            closeEffect(
+                context.attempt.runtimeSessionId,
+                context.attempt.id,
+                it,
+                context.attempt.targetLock
+            )
         } + SessionEffect.SendDisconnect(
             runtimeSessionId = context.attempt.runtimeSessionId,
             attemptId = context.attempt.id,
@@ -1257,16 +1277,38 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.SignalingSendFailed
     ): SignalingControlDecision {
-        pendingInbound?.takeIf { event.channelId in it.channelIds }?.let {
+        pendingInbound?.takeIf {
+            it.runtimeSessionId == event.runtimeSessionId &&
+                it.attemptId == event.attemptId &&
+                event.channelId in it.channelIds
+        }?.let {
             return removePendingChannel(current, it, event.channelId, closeRemoved = true)
         }
-        val context = active
-        channels.remove(event.channelId)
-        if (context == null || event.channelId !in context.channelIds) {
+        val context = active?.takeIf {
+            it.attempt.runtimeSessionId == event.runtimeSessionId &&
+                it.attempt.id == event.attemptId &&
+                event.channelId in it.channelIds
+        }
+        if (context == null) {
+            val removedChannel = channels[event.channelId]
+                ?.takeIf {
+                    current.runtimeSessionId == event.runtimeSessionId &&
+                        it.wireRequestKey.attemptId == event.attemptId
+                }
+                ?: return rejected()
+            channels.remove(event.channelId)
             return accepted(
-                effects = listOf(closeEffect(event.runtimeSessionId, event.attemptId, event.channelId))
+                effects = listOf(
+                    closeEffect(
+                        event.runtimeSessionId,
+                        event.attemptId,
+                        event.channelId,
+                        removedChannel.targetLock
+                    )
+                )
             )
         }
+        channels.remove(event.channelId)
         if (
             context.mediaOwnerChannelId == event.channelId ||
             context.channelIds.size == 1
@@ -1280,7 +1322,14 @@ internal class SignalingControlCoordinator(
         )
         return accepted(
             state = current,
-            effects = listOf(closeEffect(event.runtimeSessionId, event.attemptId, event.channelId))
+            effects = listOf(
+                closeEffect(
+                    event.runtimeSessionId,
+                    event.attemptId,
+                    event.channelId,
+                    context.attempt.targetLock
+                )
+            )
         )
     }
 
@@ -1289,14 +1338,29 @@ internal class SignalingControlCoordinator(
         event: SessionEvent.ChannelClosed
     ): SignalingControlDecision {
         pendingInbound?.takeIf {
-            it.wireRequestKey == event.wireRequestKey && event.channelId in it.channelIds
+            it.runtimeSessionId == event.runtimeSessionId &&
+                it.wireRequestKey == event.wireRequestKey &&
+                event.channelId in it.channelIds
         }?.let {
             return removePendingChannel(current, it, event.channelId, closeRemoved = false)
         }
-        channels.remove(event.channelId)
         val context = active
-            ?.takeIf { it.wireRequestKey == event.wireRequestKey && event.channelId in it.channelIds }
-            ?: return accepted(state = current)
+            ?.takeIf {
+                it.attempt.runtimeSessionId == event.runtimeSessionId &&
+                    it.wireRequestKey == event.wireRequestKey &&
+                    event.channelId in it.channelIds
+            }
+        if (context == null) {
+            val storedChannel = channels[event.channelId]
+                ?.takeIf {
+                    current.runtimeSessionId == event.runtimeSessionId &&
+                        it.wireRequestKey == event.wireRequestKey
+                }
+                ?: return rejected()
+            channels.remove(storedChannel.channelId)
+            return accepted(state = current)
+        }
+        channels.remove(event.channelId)
         if (context.mediaOwnerChannelId == event.channelId) {
             if (current is IntercomState.Connected) {
                 rememberDisconnectedIfAccepted(context)
@@ -1337,31 +1401,42 @@ internal class SignalingControlCoordinator(
         event: SessionEvent.ProtocolViolation
     ): SignalingControlDecision {
         pendingInbound?.takeIf {
-            it.wireRequestKey == event.wireRequestKey && event.channelId in it.channelIds
+            it.runtimeSessionId == event.runtimeSessionId &&
+                it.wireRequestKey == event.wireRequestKey &&
+                event.channelId in it.channelIds
         }?.let {
             return removePendingChannel(current, it, event.channelId, closeRemoved = true)
         }
-        val context = active
-        val isOwner = context?.wireRequestKey == event.wireRequestKey &&
-            context.mediaOwnerChannelId == event.channelId
-        return if (isOwner) {
-            finishAttemptImmediately(current, requireNotNull(context))
-        } else {
-            channels.remove(event.channelId)
-            if (context != null && event.channelId in context.channelIds) {
-                removeChannelAndContinueOrTerminate(current, context, event.channelId)
-            } else {
-                accepted(
-                    state = current,
-                    effects = listOf(
-                        closeEffect(
-                            event.runtimeSessionId,
-                            event.wireRequestKey.attemptId,
-                            event.channelId
-                        )
+        val context = active?.takeIf {
+            it.attempt.runtimeSessionId == event.runtimeSessionId &&
+                it.wireRequestKey == event.wireRequestKey &&
+                event.channelId in it.channelIds
+        }
+        if (context == null) {
+            val storedChannel = channels[event.channelId]
+                ?.takeIf {
+                    current.runtimeSessionId == event.runtimeSessionId &&
+                        it.wireRequestKey == event.wireRequestKey
+                }
+                ?: return rejected()
+            channels.remove(storedChannel.channelId)
+            return accepted(
+                state = current,
+                effects = listOf(
+                    closeEffect(
+                        event.runtimeSessionId,
+                        event.wireRequestKey.attemptId,
+                        event.channelId,
+                        storedChannel.targetLock
                     )
                 )
-            }
+            )
+        }
+        val isOwner = context.mediaOwnerChannelId == event.channelId
+        return if (isOwner) {
+            finishAttemptImmediately(current, context)
+        } else {
+            removeChannelAndContinueOrTerminate(current, context, event.channelId)
         }
     }
 
@@ -1399,9 +1474,27 @@ internal class SignalingControlCoordinator(
         event: SessionEvent.SignalingMessageSent
     ): SignalingControlDecision {
         val channelId = event.channelId
-        val context = active
+        val context = active?.takeIf {
+            it.attempt.runtimeSessionId == event.runtimeSessionId &&
+                it.attempt.id == event.attemptId &&
+                channelId in it.channelIds
+        }
+        val storedChannel = channels[channelId]
+        val targetLock = context?.attempt?.targetLock ?: storedChannel
+            ?.takeIf {
+                current.runtimeSessionId == event.runtimeSessionId &&
+                    it.wireRequestKey.attemptId == event.attemptId &&
+                    completedAttempts[it.wireRequestKey] != null
+            }
+            ?.targetLock
+            ?: return rejected()
         channels.remove(channelId)
-        val close = closeEffect(event.runtimeSessionId, event.attemptId, channelId)
+        val close = closeEffect(
+            event.runtimeSessionId,
+            event.attemptId,
+            channelId,
+            targetLock
+        )
         if (
             context != null &&
             context.phase == SignalingAttemptPhase.TERMINATING &&
@@ -1462,7 +1555,12 @@ internal class SignalingControlCoordinator(
         return accepted(
             state = current,
             effects = listOf(
-                closeEffect(context.attempt.runtimeSessionId, context.attempt.id, channelId)
+                closeEffect(
+                    context.attempt.runtimeSessionId,
+                    context.attempt.id,
+                    channelId,
+                    context.attempt.targetLock
+                )
             )
         )
     }
@@ -1483,7 +1581,14 @@ internal class SignalingControlCoordinator(
         channels.remove(channelId)
         val remaining = pending.channelIds - channelId
         val prefixEffects = if (closeRemoved) {
-            listOf(closeEffect(pending.runtimeSessionId, pending.attemptId, channelId))
+            listOf(
+                closeEffect(
+                    pending.runtimeSessionId,
+                    pending.attemptId,
+                    channelId,
+                    pending.targetLock
+                )
+            )
         } else {
             emptyList()
         }
@@ -1555,7 +1660,12 @@ internal class SignalingControlCoordinator(
             state = IntercomState.Discovering(pending.runtimeSessionId),
             effects = listOfNotNull(cancelConfirmation) + prefixEffects +
                 remainingChannelIds.map {
-                    closeEffect(pending.runtimeSessionId, pending.attemptId, it)
+                    closeEffect(
+                        pending.runtimeSessionId,
+                        pending.attemptId,
+                        it,
+                        pending.targetLock
+                    )
                 }
         )
     }
@@ -1577,7 +1687,12 @@ internal class SignalingControlCoordinator(
         active = null
         clearOwnedAttempt(context.attempt)
         val closeEffects = channelIds.map {
-            closeEffect(context.attempt.runtimeSessionId, context.attempt.id, it)
+            closeEffect(
+                context.attempt.runtimeSessionId,
+                context.attempt.id,
+                it,
+                context.attempt.targetLock
+            )
         }
         return accepted(
             state = IntercomState.Discovering(context.attempt.runtimeSessionId),
@@ -1644,9 +1759,15 @@ internal class SignalingControlCoordinator(
     ): SignalingControlDecision {
         val response = completed.response
         return if (response == null) {
+            val targetLock = channels[channelId]?.targetLock ?: return accepted()
             accepted(
                 effects = listOf(
-                    closeEffect(runtimeSessionId, completed.key.attemptId, channelId)
+                    closeEffect(
+                        runtimeSessionId,
+                        completed.key.attemptId,
+                        channelId,
+                        targetLock
+                    )
                 )
             )
         } else {
@@ -1712,22 +1833,35 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         runtimeSessionId: RuntimeSessionId,
         attemptId: ConnectionAttemptId,
-        channelId: ControlChannelId
+        channelId: ControlChannelId,
+        wireRequestKey: WireRequestKey
     ): SignalingControlDecision {
-        pendingInbound?.takeIf { channelId in it.channelIds }?.let {
-            return removePendingChannel(current, it, channelId, closeRemoved = true)
+        val context = active?.takeIf {
+            it.attempt.runtimeSessionId == runtimeSessionId &&
+                it.attempt.id == attemptId &&
+                it.wireRequestKey == wireRequestKey
         }
-        val context = active
         if (context != null && channelId in context.channelIds) {
-            if (context.mediaOwnerChannelId == channelId) {
-                return finishAttemptImmediately(current, context)
-            }
-            return removeChannelAndContinueOrTerminate(current, context, channelId)
+            return accepted(state = current)
         }
-        channels.remove(channelId)
+        val targetLock = context?.attempt?.targetLock ?: terminalAttempts[attemptId]
+            ?.takeIf {
+                it.attempt.runtimeSessionId == runtimeSessionId &&
+                    completedAttempts[wireRequestKey]?.key?.attemptId == attemptId
+            }
+            ?.attempt
+            ?.targetLock
+            ?: return rejected()
         return accepted(
             state = current,
-            effects = listOf(closeEffect(runtimeSessionId, attemptId, channelId))
+            effects = listOf(
+                closeEffect(
+                    runtimeSessionId,
+                    attemptId,
+                    channelId,
+                    targetLock
+                )
+            )
         )
     }
 
@@ -1824,11 +1958,13 @@ internal class SignalingControlCoordinator(
     private fun closeEffect(
         runtimeSessionId: RuntimeSessionId,
         attemptId: ConnectionAttemptId,
-        channelId: ControlChannelId
+        channelId: ControlChannelId,
+        targetLock: TargetLock
     ): SessionEffect.CloseControlChannel = SessionEffect.CloseControlChannel(
         runtimeSessionId,
         attemptId,
-        channelId
+        channelId,
+        targetLock
     )
 
     private fun remember(
@@ -1908,10 +2044,10 @@ internal class SignalingControlCoordinator(
         attempt: ConnectionAttempt,
         outcome: ConnectionAttemptTerminalOutcome
     ): Boolean {
-        if (attempt.id in terminalAttemptOutcomes) return false
-        terminalAttemptOutcomes[attempt.id] = outcome
-        while (terminalAttemptOutcomes.size > MAX_TERMINAL_OUTCOMES) {
-            terminalAttemptOutcomes.remove(terminalAttemptOutcomes.keys.first())
+        if (attempt.id in terminalAttempts) return false
+        terminalAttempts[attempt.id] = TerminalAttemptRecord(attempt, outcome)
+        while (terminalAttempts.size > MAX_TERMINAL_OUTCOMES) {
+            terminalAttempts.remove(terminalAttempts.keys.first())
         }
         return true
     }

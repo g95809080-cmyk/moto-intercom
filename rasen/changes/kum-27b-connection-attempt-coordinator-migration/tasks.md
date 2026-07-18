@@ -104,7 +104,28 @@ keeping KUM-27 In Progress. B4 may start only after this gate passes.
 
 ## 4. B4: Callback, Candidate And Cleanup Lifecycle
 
-Allowed after B3 evidence synchronization; not started in this gate record.
+- [x] 4.1 Freeze the B4 upper-layer candidate/callback/exact-cleanup boundary
+  in proposal, specs, design, and tasks; strictly validate the change.
+- [x] 4.2 Add immutable `ConnectionCandidateContext` plus pure exact-session
+  and current-Coordinator-winner predicates.
+- [x] 4.3 Key pending media and the physical media locator by complete candidate
+  context; remove `tunnelChosen` and channel-only policy claims.
+- [x] 4.4 Make selection, signaling reader/send completion, SDP/ICE delivery,
+  and close effects validate the exact runtime/attempt/channel/target context.
+- [x] 4.5 Capture candidate context in WebRTC state, disconnect, audio, and
+  error callbacks; stale callbacks must not affect a newer manager or attempt.
+- [x] 4.6 Make duplicate starts and terminal cleanup idempotent while preserving
+  exact newer-attempt sessions and the single Coordinator/state-writer boundary.
+- [x] 4.7 Add deterministic JVM coverage for wrong runtime, attempt, channel,
+  wire request, target, stale close/send/SDP/ICE/WebRTC callbacks, duplicate
+  start, and newer-handle preservation.
+- [ ] 4.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+  strict Rasen validation, GitHub CI, and fixed-SHA read-only architecture
+  review.
+
+Delivery gate after apply: deliver B4 as one atomic implementation commit on
+Draft PR #4, complete fixed-SHA review with P0=0/P1=0, and synchronize Linear
+evidence while keeping KUM-27 In Progress. B5 may start only after this gate.
 
 ## 5. B5: Adapter Remaining-Time Contract
 
