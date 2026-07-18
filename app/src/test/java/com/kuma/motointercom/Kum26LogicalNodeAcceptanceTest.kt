@@ -506,7 +506,8 @@ class Kum26LogicalNodeAcceptanceTest {
             localNickname = localDeviceId,
             localDeviceName = localDeviceId,
             originatingAttempt = originatingAttempt,
-            expectedRemoteTargetLock = expectedRemoteTargetLock
+            expectedRemoteTargetLock = expectedRemoteTargetLock,
+            monotonicClock = MonotonicClock { MonotonicTimestamp(0L) }
         )
     }
 

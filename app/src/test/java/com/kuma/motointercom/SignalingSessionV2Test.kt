@@ -614,7 +614,7 @@ class SignalingSessionV2Test {
         localSessionId: String,
         originatingAttempt: ConnectionAttempt?,
         expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
-        monotonicClock: MonotonicClock? = null
+        monotonicClock: MonotonicClock = MonotonicClock { MonotonicTimestamp(0L) }
     ) = SignalingSessionV2.establish(
         socket = socket,
         transport = Transport.LAN,

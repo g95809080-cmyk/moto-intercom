@@ -178,11 +178,11 @@ internal class WifiDirectTunnel(
         }
         val m = manager ?: return
         val c = channel ?: return
+        val taskContext = currentTargetContext()
 
         try {
             val peers = peerRegistry.snapshot()
             Log.d(TAG, "discoverServices start pending=${peers.pending.size} accepted=${peers.accepted.size}")
-            val taskContext = currentTargetContext()
             m.discoverServices(
                 c,
                 discoverAction(
@@ -193,7 +193,7 @@ internal class WifiDirectTunnel(
                 )
             )
         } catch (t: Throwable) {
-            postError(t)
+            postError(t, taskContext)
         }
     }
 
@@ -219,7 +219,7 @@ internal class WifiDirectTunnel(
         val address = normalizedAddress(device.deviceAddress)
         if (!peerRegistry.isAccepted(address)) {
             logPeer(device, accepted = false, reason = "未发布 MotoCom DNS-SD 身份")
-            postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS)
+            postDiscoveryStatus(NO_MOTOCOM_PEER_STATUS, currentTargetContext())
             return
         }
         if (peerClaims[address]?.matches(attempt.targetLock) != true) return
@@ -258,14 +258,14 @@ internal class WifiDirectTunnel(
                         { if (isTargetedContextCurrent(taskContext)) discoverPeers() },
                         delay
                     )
-                }, isCurrent = { isTargetedContextCurrent(taskContext) })
+                }, isCurrent = { isTargetedContextCurrent(taskContext) }, taskContext = taskContext)
             )
         } catch (t: Throwable) {
             if (!isTargetedContextCurrent(taskContext)) return
             cancelConnectWatchdog()
             connectingAddress = null
             state = State.DISCOVERING
-            postError(t)
+            postError(t, taskContext)
         }
     }
 
@@ -518,7 +518,7 @@ internal class WifiDirectTunnel(
                 }
             }
         } catch (t: Throwable) {
-            if (isCapturedTaskCurrent(taskContext)) postError(t)
+            if (isCapturedTaskCurrent(taskContext)) postError(t, taskContext)
         }
     }
 
@@ -822,7 +822,9 @@ internal class WifiDirectTunnel(
         try {
             m.requestConnectionInfo(c) { info -> handleConnectionInfo(info, taskContext) }
         } catch (t: Throwable) {
-            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                postError(t, taskContext)
+            }
         }
     }
 
@@ -905,7 +907,9 @@ internal class WifiDirectTunnel(
                 validateGroup(info, group, attempt, validation, taskContext)
             }
         } catch (t: Throwable) {
-            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                postError(t, taskContext)
+            }
         }
     }
 
@@ -990,7 +994,7 @@ internal class WifiDirectTunnel(
         val ownerAddress = info.groupOwnerAddress
         if (ownerAddress == null) {
             if (taskContext == null || isTargetedContextCurrent(taskContext)) {
-                postError(IllegalStateException("未获取到组长 IP"))
+                postError(IllegalStateException("未获取到组长 IP"), taskContext)
             }
             removeGroupAndRediscover("P2P group 没有组长 IP", taskContext = taskContext)
             return
@@ -999,7 +1003,7 @@ internal class WifiDirectTunnel(
         val localAddress = localP2pAddress(group.`interface`)
         if (localAddress == null) {
             if (taskContext == null || isTargetedContextCurrent(taskContext)) {
-                postError(IllegalStateException("未获取到本机 P2P 接口 IP"))
+                postError(IllegalStateException("未获取到本机 P2P 接口 IP"), taskContext)
             }
             removeGroupAndRediscover("P2P 接口没有可用 IPv4 地址", taskContext = taskContext)
             return
@@ -1089,7 +1093,10 @@ internal class WifiDirectTunnel(
         if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         Log.w(TAG, "检测到外部/错误 P2P group，禁止启动 TCP 并清理: $reason")
         if (taskContext == null || isTargetedContextCurrent(taskContext)) {
-            postDiscoveryStatus("检测到非 MotoCom P2P 组，正在清理并重新搜索")
+            postDiscoveryStatus(
+                "检测到非 MotoCom P2P 组，正在清理并重新搜索",
+                taskContext
+            )
         }
         removeGroupAndRediscover(reason, taskContext = taskContext)
     }
@@ -1202,7 +1209,10 @@ internal class WifiDirectTunnel(
                     }
 
                     if (mayRediscover) {
-                        postError(IllegalStateException("清理错误 P2P group 失败: ${reasonText(code)}"))
+                        postError(
+                            IllegalStateException("清理错误 P2P group 失败: ${reasonText(code)}"),
+                            taskContext
+                        )
                     }
                     recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
                 }
@@ -1214,7 +1224,9 @@ internal class WifiDirectTunnel(
                 return
             }
             removingGroup = false
-            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                postError(t, taskContext)
+            }
             recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
         }
     }
@@ -1337,7 +1349,11 @@ internal class WifiDirectTunnel(
         peerRegistry.reset()
         peerDevices.clear()
         peerClaims.clear()
-        mainHandler.post { onPeersChanged(emptyList()) }
+        mainHandler.post {
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                onPeersChanged(emptyList())
+            }
+        }
     }
 
     private fun cancelPendingRetry() {
@@ -1448,7 +1464,8 @@ internal class WifiDirectTunnel(
                 }, delay)
             }
         },
-        isCurrent = { isSetupCurrent(setup) }
+        isCurrent = { isSetupCurrent(setup) },
+        taskContext = taskContext
     )
 
     private fun isSetupCurrent(setup: WifiDirectSetupRecoveryGate.Session): Boolean =
@@ -1475,7 +1492,8 @@ internal class WifiDirectTunnel(
         },
         isCurrent = {
             running && setupRecoveryGate.isEnabled && isCapturedTaskCurrent(taskContext)
-        }
+        },
+        taskContext = taskContext
     )
 
     private fun isCapturedTaskCurrent(taskContext: TargetedTaskContext?): Boolean =
@@ -1490,7 +1508,8 @@ internal class WifiDirectTunnel(
             resetTunnelOnly()
             mainHandler.postDelayed({ if (running) discoverPeers() }, BUSY_RETRY_DELAY_MS)
         },
-        isCurrent: () -> Boolean = { true }
+        isCurrent: () -> Boolean = { true },
+        taskContext: TargetedTaskContext? = null
     ) =
         object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
@@ -1501,10 +1520,13 @@ internal class WifiDirectTunnel(
                 if (!isCurrent()) return
                 onFailed()
                 if (reason == WifiP2pManager.BUSY) {
-                    postError(IllegalStateException(BUSY_STATUS))
+                    postError(IllegalStateException(BUSY_STATUS), taskContext)
                     onBusy()
                 } else {
-                    postError(IllegalStateException("$message: ${reasonText(reason)}"))
+                    postError(
+                        IllegalStateException("$message: ${reasonText(reason)}"),
+                        taskContext
+                    )
                 }
             }
         }
@@ -1532,7 +1554,9 @@ internal class WifiDirectTunnel(
             )
         } catch (t: Throwable) {
             runCatching { socket.close() }
-            if (taskContext == null || isTargetedContextCurrent(taskContext)) postError(t)
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                postError(t, taskContext)
+            }
             return
         }
         mainHandler.post {
@@ -1566,7 +1590,7 @@ internal class WifiDirectTunnel(
             } catch (t: Throwable) {
                 session.close()
                 if (taskContext == null || isTargetedContextCurrent(taskContext)) {
-                    postError(t)
+                    postError(t, taskContext)
                     removeGroupAndRediscover(
                         "signaling socket handoff failure",
                         taskContext = taskContext
@@ -1598,7 +1622,7 @@ internal class WifiDirectTunnel(
                 (taskContext != null && !isTargetedContextCurrent(taskContext)) ||
                 (taskContext == null && targetAttempt != null)
             ) return@post
-            postError(error)
+            postError(error, taskContext)
             removeGroupAndRediscover("signaling socket failure", taskContext = taskContext)
         }
     }
@@ -1607,12 +1631,21 @@ internal class WifiDirectTunnel(
         running && generation == socketTransportGeneration &&
             socketTransport != null && state == State.GROUP_READY
 
-    private fun postError(t: Throwable) {
-        mainHandler.post { onError(t) }
+    private fun postError(t: Throwable, taskContext: TargetedTaskContext? = null) {
+        mainHandler.post {
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) onError(t)
+        }
     }
 
-    private fun postDiscoveryStatus(message: String) {
-        mainHandler.post { onDiscoveryStatus(message) }
+    private fun postDiscoveryStatus(
+        message: String,
+        taskContext: TargetedTaskContext? = null
+    ) {
+        mainHandler.post {
+            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
+                onDiscoveryStatus(message)
+            }
+        }
     }
 
     private fun logPeer(device: WifiP2pDevice, accepted: Boolean, reason: String) {

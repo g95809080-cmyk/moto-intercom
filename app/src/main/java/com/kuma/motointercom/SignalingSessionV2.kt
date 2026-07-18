@@ -141,7 +141,7 @@ internal class SignalingSessionV2 private constructor(
             localDeviceName: String,
             originatingAttempt: ConnectionAttempt?,
             expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
-            monotonicClock: MonotonicClock? = null
+            monotonicClock: MonotonicClock
         ): SignalingSessionV2 {
             val previousTimeout = socket.soTimeout
             try {
@@ -169,7 +169,6 @@ internal class SignalingSessionV2 private constructor(
                 }
                 if (
                     originatingAttempt != null &&
-                    monotonicClock != null &&
                     originatingAttempt.remainingMillis(monotonicClock) <= 0L
                 ) {
                     throw SignalingV2Exception("outbound attempt deadline expired before HELLO")
@@ -179,7 +178,7 @@ internal class SignalingSessionV2 private constructor(
                 requireCanonicalUuid(localRuntimeSessionId.value, "localSessionId")
                 val beforeHelloRead = {
                     val helloTimeoutMillis =
-                        if (originatingAttempt != null && monotonicClock != null) {
+                        if (originatingAttempt != null) {
                             originatingAttempt.boundedTimeoutMillis(
                                 monotonicClock,
                                 HELLO_READ_TIMEOUT_MS.toLong()
@@ -228,7 +227,6 @@ internal class SignalingSessionV2 private constructor(
 
                 if (
                     originatingAttempt != null &&
-                    monotonicClock != null &&
                     originatingAttempt.remainingMillis(monotonicClock) <= 0L
                 ) {
                     throw SignalingV2Exception("outbound attempt deadline expired during HELLO")
