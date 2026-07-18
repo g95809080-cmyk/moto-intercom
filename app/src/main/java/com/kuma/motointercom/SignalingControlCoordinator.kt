@@ -344,6 +344,10 @@ internal class SignalingControlCoordinator(
         outcome: ConnectionAttemptTerminalOutcome,
         restartConnectedDiscovery: Boolean
     ): SignalingControlDecision {
+        active?.takeIf {
+            it.attempt.id == current.attempt.id &&
+                it.phase == SignalingAttemptPhase.TERMINATING
+        }?.let { return finishAttemptImmediately(current, it) }
         if (recoveryDeadlineElapsedRealtimeMs <= 0L) return rejected()
         val existingOutcome = terminalOutcome(current.attempt.id)
         if (

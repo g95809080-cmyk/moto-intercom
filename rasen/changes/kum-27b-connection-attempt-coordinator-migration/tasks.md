@@ -33,6 +33,8 @@ pipeline delivery gates, not additional implementation tasks.
   first-terminal-wins ordering.
 - [ ] 2.6 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
   `assembleDebug`, GitHub CI, and fixed-SHA read-only architecture review.
+- [x] 2.7 Remediate the first review P0 by latching local terminal cleanup
+  ahead of queued WebRTC, signaling, and owner-channel recovery callbacks.
 
 Delivery gate after apply: deliver B2 as one atomic commit on Draft PR #4,
 complete fixed-SHA review with P0=0/P1=0, and synchronize Linear evidence while

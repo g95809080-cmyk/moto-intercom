@@ -59,6 +59,12 @@ first outcome or mutate product state for that terminal attempt.
 - **THEN** the outcome remains `SUCCESS` and the timeout cannot undo the
   connected state
 
+#### Scenario: Local disconnect precedes a recovery callback
+- **WHEN** local disconnect has entered terminal cleanup and a queued WebRTC,
+  signaling, or owner-channel close callback arrives
+- **THEN** the Coordinator completes the existing cleanup without creating a
+  recovery attempt or consuming another attempt ID
+
 ### Requirement: SessionOrchestrator remains the state writer
 The Coordinator SHALL return state/effect decisions, but only
 `SessionOrchestrator` SHALL assign product state. Service, timer callbacks,

@@ -13,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -574,6 +575,88 @@ class SignalingControlCoordinatorTest {
             assertTrue(cleanup.any { it is SessionEffect.CloseControlChannel })
             assertTrue(cleanup.any { it is SessionEffect.AbortAttemptAndResumeDiscovery })
             assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+        }
+    }
+
+    @Test
+    fun localDisconnectBlocksQueuedWebRtcRecovery() = runBlocking {
+        var createdRecoveryIds = 0
+        harness(
+            attemptIdFactory = {
+                createdRecoveryIds++
+                ConnectionAttemptId("unexpected-recovery-$createdRecoveryIds")
+            }
+        ).use { harness ->
+            val (attempt, _) = beginConnectedLocalDisconnect(harness)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        attempt.id,
+                        WebRtcConnectionState.DISCONNECTED,
+                        501L,
+                        recovery()
+                    )
+                )
+            )
+
+            assertLocalDisconnectCleanup(harness, attempt)
+            assertEquals(0, createdRecoveryIds)
+        }
+    }
+
+    @Test
+    fun localDisconnectBlocksQueuedSignalingRecovery() = runBlocking {
+        var createdRecoveryIds = 0
+        harness(
+            attemptIdFactory = {
+                createdRecoveryIds++
+                ConnectionAttemptId("unexpected-recovery-$createdRecoveryIds")
+            }
+        ).use { harness ->
+            val (attempt, _) = beginConnectedLocalDisconnect(harness)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingDisconnected(
+                        RUNTIME_A,
+                        attempt.id,
+                        recovery()
+                    )
+                )
+            )
+
+            assertLocalDisconnectCleanup(harness, attempt)
+            assertEquals(0, createdRecoveryIds)
+        }
+    }
+
+    @Test
+    fun localDisconnectBlocksQueuedOwnerChannelRecovery() = runBlocking {
+        var createdRecoveryIds = 0
+        harness(
+            attemptIdFactory = {
+                createdRecoveryIds++
+                ConnectionAttemptId("unexpected-recovery-$createdRecoveryIds")
+            }
+        ).use { harness ->
+            val (attempt, owner) = beginConnectedLocalDisconnect(harness)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ChannelClosed(
+                        RUNTIME_A,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        recovery(),
+                        "queued owner close"
+                    )
+                )
+            )
+
+            assertLocalDisconnectCleanup(harness, attempt)
+            assertEquals(0, createdRecoveryIds)
         }
     }
 
@@ -1465,6 +1548,67 @@ class SignalingControlCoordinatorTest {
         return accepted
     }
 
+    private suspend fun beginConnectedLocalDisconnect(
+        harness: Harness
+    ): Pair<ConnectionAttempt, VerifiedControlChannel> {
+        val attempt = outboundAttempt()
+        harness.start(attempt)
+        val owner = requesterChannel(CHANNEL_A, attempt)
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.ControlChannelVerified(RUNTIME_A, owner)
+            )
+        )
+        assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.RemoteConnectAccepted(
+                    RUNTIME_A,
+                    attempt.id,
+                    owner.channelId,
+                    owner.wireRequestKey
+                )
+            )
+        )
+        assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    RUNTIME_A,
+                    attempt.id,
+                    WebRtcConnectionState.CONNECTED,
+                    500L,
+                    recovery()
+                )
+            )
+        )
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.DisconnectRequested(RUNTIME_A, attempt.id)
+            )
+        )
+        assertTrue(harness.nextEffect() is SessionEffect.SendDisconnect)
+        assertEquals(SignalingAttemptPhase.TERMINATING, activePhase(harness))
+        assertTrue(harness.orchestrator.state.value is IntercomState.Connected)
+        return attempt to owner
+    }
+
+    private suspend fun assertLocalDisconnectCleanup(
+        harness: Harness,
+        attempt: ConnectionAttempt
+    ) {
+        val cleanup = listOf(harness.nextEffect(), harness.nextEffect())
+        assertTrue(cleanup.any { it is SessionEffect.CloseControlChannel })
+        assertTrue(cleanup.any { it is SessionEffect.AbortAttemptAndResumeDiscovery })
+        assertFalse(cleanup.any { it is SessionEffect.RestartDiscovery })
+        assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+        assertNull(harness.orchestrator.currentAttempt)
+        assertEquals(
+            ConnectionAttemptTerminalOutcome.SUCCESS,
+            harness.orchestrator.terminalOutcome(attempt.id)
+        )
+    }
+
     private fun activePhase(harness: Harness): SignalingAttemptPhase =
         requireNotNull(harness.orchestrator.activeControlAttempt).phase
 
@@ -1527,16 +1671,23 @@ class SignalingControlCoordinatorTest {
 
     private fun recovery(): Long = 20_000L
 
-    private fun harness(pairedDeviceIds: Set<String> = emptySet()) = Harness(pairedDeviceIds)
+    private fun harness(
+        pairedDeviceIds: Set<String> = emptySet(),
+        attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create
+    ) = Harness(pairedDeviceIds, attemptIdFactory)
 
-    private class Harness(pairedDeviceIds: Set<String>) : AutoCloseable {
+    private class Harness(
+        pairedDeviceIds: Set<String>,
+        attemptIdFactory: () -> ConnectionAttemptId
+    ) : AutoCloseable {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         private val effectQueue = Channel<SessionEffect>(Channel.UNLIMITED)
         var currentPrompt: IncomingConfirmationPrompt? = null
         val orchestrator = SessionOrchestrator(
             pairingRepository = NoOpPairingRepository(pairedDeviceIds),
             dispatcher = Dispatchers.Unconfined,
-            elapsedRealtime = { 100L }
+            elapsedRealtime = { 100L },
+            attemptIdFactory = attemptIdFactory
         )
 
         init {
