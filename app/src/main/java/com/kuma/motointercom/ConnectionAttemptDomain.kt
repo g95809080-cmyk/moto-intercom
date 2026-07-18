@@ -28,5 +28,10 @@ data class ConnectionAttemptEventContext(
 enum class ConnectionAttemptTerminalOutcome {
     SUCCESS,
     CANCELED,
-    TIMED_OUT
+    TIMED_OUT,
+    FAILED,
+    REJECTED,
+    BUSY,
+    DISCONNECTED,
+    GLARE_LOST
 }

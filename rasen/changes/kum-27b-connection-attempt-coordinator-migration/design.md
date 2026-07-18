@@ -1,15 +1,15 @@
 ## Context
 
 KUM-27A approved one future Coordinator owner while preserving
-`SessionOrchestrator` as the only product-state writer. The current repository
-already has one `ConnectionAttempt` type with immutable identity, target,
-trigger, `ChannelPlan`, and a raw monotonic deadline value. It also already
-rejects multi-transport plans. B1 must strengthen this type as the future
-domain boundary without moving any current owner or changing runtime behavior.
+`SessionOrchestrator` as the only product-state writer. B1 completed the
+framework-free `ConnectionAttempt` domain model and deterministic clock seam.
+B2 now moves production attempt creation and first-terminal ownership into the
+existing `SignalingControlCoordinator` without creating another Coordinator.
 
-The current runtime intentionally still rebases copied attempts and injects
-clock lambdas in several components. Removing those paths belongs to later
-atomic ownership checkpoints, not B1.
+The current runtime intentionally still rebases copied attempts and sources
+absolute deadlines from Service and Coordinator clock lambdas. Removing those
+paths, the `Long.MAX_VALUE` inbound sentinel, and external deadline inputs is
+the atomic B3 cutover, not B2.
 
 ## Goals / Non-Goals
 
@@ -21,14 +21,18 @@ atomic ownership checkpoints, not B1.
 - Express preferred transport, deadline expiration, attempt/target matching,
   and terminal outcomes in framework-free domain code.
 - Provide deterministic JVM tests and a test-only fake clock.
+- Make the existing Coordinator create outbound and recovery attempts with a
+  deterministic ID factory while retaining the existing supplied deadline.
+- Make it own the current logical attempt and the first terminal outcome.
+- Remove live reducer and Service authority to mint IDs, construct production
+  attempts, or independently end an attempt.
 
 **Non-Goals:**
 
-- No attempt creation or termination ownership migration.
-- No current deadline scheduler, timeout, rebase, or 10-second behavior change.
+- No deadline source, scheduler, rebase, sentinel, or 10-second behavior change.
 - No callback, candidate, winner, Service, adapter, signaling, WebRTC, Target
   Lock, persistence, notification, UI, Gradle, or dependency change.
-- No second live Coordinator, B2 implementation, or KUM-28 behavior.
+- No second live Coordinator, B3 implementation, or KUM-28 behavior.
 
 ## Decisions
 
@@ -79,12 +83,60 @@ Adapters and callbacks are not routed through this predicate in B1.
 instances and does not decide outcomes. The evolved Coordinator will own that
 decision in a later authorized checkpoint.
 
-### 6. Bounded pipeline
+### 6. B2 production creation boundary
+
+The existing Coordinator receives an injected attempt-ID factory. A current
+Presence selection carries target/runtime/transport availability plus the
+existing absolute deadline value; the Coordinator validates that intent,
+chooses exactly one transport, creates the ID and complete attempt, records it
+as current, and returns the state/effect decision to `SessionOrchestrator`.
+`IntercomService` no longer mints the outbound ID and the reducer no longer
+constructs the production attempt.
+
+Recovery events carry only the already-existing absolute recovery deadline.
+The Coordinator creates the fresh recovery ID and attempt while preserving the
+connected attempt's target and single-transport plan. Service does not create a
+`RecoveryAttemptSpec`, and the reducer does not construct a recovery attempt.
+
+This is an explicit compatibility phase: the Coordinator owns attempt identity,
+target, trigger, plan, and construction, while the existing caller remains the
+single source of the absolute deadline value until B3. The Coordinator stores
+that value unchanged and neither computes nor rebases it in B2, so there are
+not two deadline decision owners.
+
+### 7. B2 first-terminal mailbox
+
+The Coordinator records at most one logical terminal outcome for each attempt.
+Timeout, local cancellation, transport-open failure, signaling failure,
+disconnect, recovery exhaustion, stop, and WebRTC success/failure are routed
+through it before the generic reducer. Later contradictory or duplicate events
+cannot overwrite the first outcome or change product state.
+
+Signaling `AttemptOutcome` remains protocol-response/tombstone state in B2; it
+is not a second logical attempt-terminal authority. `SessionOrchestrator`
+continues to apply every product-state assignment and emit returned effects.
+
+### 8. B2/B3 atomic boundary
+
+B2 deliberately leaves these coupled paths untouched:
+
+- outbound request-delivery and remote-accept deadline rebases;
+- unpaired inbound `Long.MAX_VALUE` sentinel and accept-time rebase;
+- `RescheduleAttemptDeadline` and Service timer execution;
+- paired inbound deadline creation in the existing Coordinator;
+- adapter timeout and remaining-budget contracts.
+
+B3 must replace all of them together with Coordinator-owned monotonic deadline
+creation and the approved `PendingInboundRequest` representation. B2 must not
+introduce a temporary second deadline, compatibility Coordinator, or alternate
+inbound representation.
+
+### 9. Bounded pipeline
 
 This checkpoint follows an equivalent deterministic full-feature subset:
 proposal, specs/design/tasks, one writer apply, targeted and full verification,
-one read-only architecture review loop, Draft PR, and evidence sync. Ship,
-archive, retro, merge, deployment, and B2 are outside this run.
+one read-only architecture review loop, Draft PR update, and evidence sync.
+B3, archive, merge, deployment, and KUM-28 are outside this checkpoint.
 
 Execution is fixed to Rasen 0.1.3 with `DO_NOT_TRACK=1` and
 `RASEN_TELEMETRY=0`. Maximum concurrent write workers is one; the reviewer is
@@ -94,9 +146,8 @@ auto-decompose, automatic merge, or automatic deployment is permitted.
 ## Risks / Trade-offs
 
 - [The legacy data-class `copy` paths can still create a new instance with a
-  later raw deadline] -> B1 does not call or expand those paths; the new
-  `deadlineAt` is immutable per instance. Their atomic removal remains in the
-  later deadline-ownership checkpoint.
+  later raw deadline] -> B2 does not call or expand those paths. Their atomic
+  removal remains in B3.
 - [Raw deadline and typed deadline could diverge] -> `deadlineAt` is derived
   from the existing raw value and introduces no second stored field.
 - [A pure event predicate could be mistaken for completed callback migration]
@@ -104,21 +155,32 @@ auto-decompose, automatic merge, or automatic deployment is permitted.
   deferred.
 - [A test fake could leak into production] -> Keep it under `app/src/test` and
   verify release assembly plus source imports.
+- [Moving creation before moving deadline source can create two deadline
+  owners] -> Treat the absolute deadline as an opaque compatibility input in
+  B2; only its existing caller computes it and the Coordinator never modifies
+  it until the atomic B3 cutover.
+- [Protocol tombstones can be mistaken for logical terminal ownership] -> Keep
+  protocol `AttemptOutcome` separate and prove that only the Coordinator's
+  logical mailbox decides first-terminal product behavior.
 
 ## Migration Plan
 
-1. Add the pure timestamp, clock, event context, and terminal outcome types.
-2. Add derived helpers to the existing `ConnectionAttempt` type without
-   changing its constructor or callers.
-3. Add deterministic B1 JVM tests and run targeted plus full repository gates.
-4. Deliver as one atomic commit and Draft PR, then perform fixed-SHA read-only
-   architecture review.
-5. Stop. B2 and later ownership cutovers require separate authorization.
+1. B1: add the pure domain foundation and deterministic tests. Complete.
+2. B2: inject deterministic ID creation into the existing Coordinator, move
+   outbound/recovery construction to it, and remove Service/reducer ID and
+   attempt construction authority.
+3. B2: route attempt-ending events through one first-terminal mailbox while
+   preserving `SessionOrchestrator` as the product-state writer.
+4. Run targeted and full gates, deliver one atomic B2 commit, and perform a
+   fixed-SHA read-only architecture review.
+5. B3 later performs the atomic deadline/pending-inbound cutover described
+   above. B4-B6 and KUM-28 remain deferred.
 
-Rollback is commit-level and restores the exact pre-B1 runtime because B1 has
-no production wiring, schema, protocol, dependency, or data change.
+Rollback is commit-level to the approved B1 head. B2 changes no schema,
+protocol, dependency, identity, pairing, database, permission, or persisted
+data, and restoring B1 restores the previous production ownership paths.
 
 ## Open Questions
 
-None for B1. Production clock assembly and owner cutovers remain intentionally
-deferred to their authorized checkpoints.
+None for B2. The fixed B2/B3 boundary above is mandatory; implementation must
+stop rather than partially move the inbound sentinel or deadline rebases.

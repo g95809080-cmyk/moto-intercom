@@ -437,10 +437,7 @@ class SessionOrchestratorTest {
         deadlineElapsedRealtimeMs = 10_000L
     )
 
-    private fun recovery(id: String) = RecoveryAttemptSpec(
-        id = ConnectionAttemptId(id),
-        deadlineElapsedRealtimeMs = 20_000L
-    )
+    private fun recovery(id: String): Long = 20_000L
 
     private class RecordingPairingRepository : PairingRepository {
         val saved = mutableListOf<PairingRecord>()

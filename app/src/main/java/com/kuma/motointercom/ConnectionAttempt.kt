@@ -77,17 +77,6 @@ data class ConnectionAttempt(
     fun isStale(event: ConnectionAttemptEventContext): Boolean = !accepts(event)
 }
 
-data class RecoveryAttemptSpec(
-    val id: ConnectionAttemptId,
-    val deadlineElapsedRealtimeMs: Long
-) {
-    init {
-        require(deadlineElapsedRealtimeMs > 0L) {
-            "Recovery attempt deadline must be positive"
-        }
-    }
-}
-
 internal fun plannedDiscoveryTransports(attempt: ConnectionAttempt?): Set<Transport> =
     attempt?.channelPlan?.plannedTransports ?: Transport.entries.toSet()
 

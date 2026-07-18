@@ -259,7 +259,6 @@ class IntercomService : Service() {
             orchestrator.dispatch(
                 SessionEvent.ConnectPresenceRequested(
                     runtimeSessionId = runtimeSessionId,
-                    attemptId = ConnectionAttemptId.create(),
                     targetDeviceId = targetDeviceId,
                     targetSessionId = targetSessionId,
                     availableTransports = presence.availableTransports,
@@ -564,7 +563,7 @@ class IntercomService : Service() {
                 channelId,
                 session.wireRequestKey,
                 message.reason,
-                createRecoverySpec()
+                createRecoveryDeadline()
             )
             is SignalingMessageV2.Offer,
             is SignalingMessageV2.Answer,
@@ -582,7 +581,7 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 channelId,
                 session.wireRequestKey,
-                createRecoverySpec(),
+                createRecoveryDeadline(),
                 "HELLO is not allowed after channel identity is pinned"
             )
         }
@@ -603,7 +602,7 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 session.channel.channelId,
                 session.wireRequestKey,
-                createRecoverySpec(),
+                createRecoveryDeadline(),
                 failure.message.orEmpty()
             )
         } else {
@@ -611,7 +610,7 @@ class IntercomService : Service() {
                 runtimeSessionId,
                 session.channel.channelId,
                 session.wireRequestKey,
-                createRecoverySpec(),
+                createRecoveryDeadline(),
                 failure.message.orEmpty()
             )
         }
@@ -698,16 +697,26 @@ class IntercomService : Service() {
         remoteRiderName = effect.peer.nickname
         publishStatus(SIGNALING_CONNECTED_STATUS)
 
-        val recoverySpec = createRecoverySpec()
+        val recoveryDeadlineElapsedRealtimeMs = createRecoveryDeadline()
         intercomManager = IntercomManager(
             context = this,
             signalingSession = session,
             webRtcRole = effect.role,
             onIntercomDisconnected = {
-                onIntercomDisconnected(token, effect.attempt, recoverySpec, it)
+                onIntercomDisconnected(
+                    token,
+                    effect.attempt,
+                    recoveryDeadlineElapsedRealtimeMs,
+                    it
+                )
             },
             onConnectionStateChanged = {
-                onConnectionStateChanged(token, effect.attempt, recoverySpec, it)
+                onConnectionStateChanged(
+                    token,
+                    effect.attempt,
+                    recoveryDeadlineElapsedRealtimeMs,
+                    it
+                )
             },
             onAudioLevelChanged = { onAudioLevelChanged(token, it) },
             onError = { error -> postForSession(token) { handleError(error) } },
@@ -731,7 +740,7 @@ class IntercomService : Service() {
     private fun onConnectionStateChanged(
         token: SessionGeneration.Token,
         attempt: ConnectionAttempt,
-        recovery: RecoveryAttemptSpec,
+        recoveryDeadlineElapsedRealtimeMs: Long,
         state: PeerConnection.PeerConnectionState
     ) {
         postForSession(token) {
@@ -742,7 +751,7 @@ class IntercomService : Service() {
                     attemptId = attempt.id,
                     state = state.toProductState(),
                     occurredAt = System.currentTimeMillis(),
-                    recovery = recovery
+                    recoveryDeadlineElapsedRealtimeMs = recoveryDeadlineElapsedRealtimeMs
                 )
             )
             when (state) {
@@ -768,7 +777,7 @@ class IntercomService : Service() {
     private fun onIntercomDisconnected(
         token: SessionGeneration.Token,
         attempt: ConnectionAttempt,
-        recovery: RecoveryAttemptSpec,
+        recoveryDeadlineElapsedRealtimeMs: Long,
         error: IOException
     ) {
         postForSession(token) {
@@ -777,7 +786,7 @@ class IntercomService : Service() {
                 SessionEvent.SignalingDisconnected(
                     runtimeSessionId = attempt.runtimeSessionId,
                     attemptId = attempt.id,
-                    recovery = recovery
+                    recoveryDeadlineElapsedRealtimeMs = recoveryDeadlineElapsedRealtimeMs
                 )
             )
         }
@@ -1223,10 +1232,8 @@ class IntercomService : Service() {
         )
     }
 
-    private fun createRecoverySpec(): RecoveryAttemptSpec = RecoveryAttemptSpec(
-        id = ConnectionAttemptId.create(),
-        deadlineElapsedRealtimeMs = SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
-    )
+    private fun createRecoveryDeadline(): Long =
+        SystemClock.elapsedRealtime() + CONNECTION_ATTEMPT_TIMEOUT_MS
 
     private fun PeerConnection.PeerConnectionState.toProductState(): WebRtcConnectionState =
         when (this) {

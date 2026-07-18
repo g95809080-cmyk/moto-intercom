@@ -19,7 +19,24 @@ pipeline delivery gates, not additional implementation tasks.
 
 ## 2. B2: Attempt Creation And Termination Ownership
 
-Deferred. Not authorized and contains no executable tasks in this checkpoint.
+- [x] 2.1 Update proposal, specs, design, and tasks with the fixed B2/B3
+  compatibility boundary and strict validation.
+- [x] 2.2 Add deterministic attempt-ID creation, one current-attempt record,
+  and a bounded first-terminal mailbox to the existing Coordinator.
+- [x] 2.3 Move outbound and recovery attempt construction out of Service and
+  the reducer while preserving the existing externally supplied deadlines.
+- [x] 2.4 Route production timeout, cancellation, transport failure,
+  disconnect, recovery exhaustion, stop, and WebRTC terminal ordering through
+  the Coordinator; keep `SessionOrchestrator` as the only state writer.
+- [x] 2.5 Add deterministic JVM coverage for one creation owner, duplicate
+  intent rejection, recovery identity/target/plan retention, and
+  first-terminal-wins ordering.
+- [ ] 2.6 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
+  `assembleDebug`, GitHub CI, and fixed-SHA read-only architecture review.
+
+Delivery gate after apply: deliver B2 as one atomic commit on Draft PR #4,
+complete fixed-SHA review with P0=0/P1=0, and synchronize Linear evidence while
+keeping KUM-27 In Progress. B3 may start only after this gate passes.
 
 ## 3. B3: Immutable Total Deadline Ownership
 

@@ -1525,10 +1525,7 @@ class SignalingControlCoordinatorTest {
         isDeviceIdVerified = true
     )
 
-    private fun recovery() = RecoveryAttemptSpec(
-        ConnectionAttemptId(RECOVERY_ATTEMPT),
-        20_000L
-    )
+    private fun recovery(): Long = 20_000L
 
     private fun harness(pairedDeviceIds: Set<String> = emptySet()) = Harness(pairedDeviceIds)
 
