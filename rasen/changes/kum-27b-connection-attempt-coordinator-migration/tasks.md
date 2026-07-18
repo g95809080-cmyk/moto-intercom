@@ -71,7 +71,7 @@ keeping KUM-27 In Progress. B3 may start only after this gate passes.
 - [x] 3.7 Remediate the first review P1 by rejecting WebRTC success and glare
   at the exact total deadline and deferring physical timer cancellation until
   Coordinator-authorized success.
-- [ ] 3.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
+- [x] 3.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`,
   `assembleDebug`, strict Rasen validation, GitHub CI, and fixed-SHA read-only
   architecture review.
 
@@ -79,9 +79,32 @@ Delivery gate after apply: deliver B3 as an atomic commit on Draft PR #4,
 complete fixed-SHA review with P0=0/P1=0, and synchronize Linear evidence while
 keeping KUM-27 In Progress. B4 may start only after this gate passes.
 
+### B3 Gate Record
+
+- Implementation Head `d6eb6ba828ab55f73d8c89e777ca5d1c74da47ad`:
+  Review Round 1 REQUEST CHANGES, P0=0, P1=1.
+- P1: WebRTC success or glare processed at the exact total deadline could beat
+  the queued timeout, and Service canceled the physical timer before the
+  Coordinator accepted success.
+- Remediation Head `d96030c9ac3e37ced44b105069f90568ba2eaa3b`:
+  exact-deadline success/glare are rejected, physical cancellation follows
+  Coordinator-authorized `Connected`, and deterministic regressions cover both
+  orderings.
+- Review Round 2: APPROVED, P0=0, P1=0, B3 complete YES, B4 allowed YES.
+- Verification: 197 JVM tests passed with 0 failures/errors/skipped; Lint 0
+  Fatal/0 Error/34 warnings; `assembleDebug` passed; Rasen strict validation
+  1/1.
+- GitHub CI `29647590056`: success at the remediation Head.
+- Physical-device testing: not required for B3; no adapter, WebRTC, permission,
+  audio, database, or OEM implementation changed.
+- Efficiency: elapsed 2h14m; workers 2 (one main writer and one reused read-only
+  reviewer); review rounds 2; handoffs 1 runtime continuation; runtime-cumulative
+  token usage 2,658,491 at the gate (checkpoint-only split unavailable); full
+  repository rescans 0.
+
 ## 4. B4: Callback, Candidate And Cleanup Lifecycle
 
-Deferred until the B3 gate and contains no executable tasks in this checkpoint.
+Allowed after B3 evidence synchronization; not started in this gate record.
 
 ## 5. B5: Adapter Remaining-Time Contract
 
