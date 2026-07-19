@@ -598,14 +598,20 @@ class Kum26LogicalNodeAcceptanceTest {
     }
 
     @Test
-    fun recoveryRetainsTargetAndPlanRejectsRolloverAndExitsDeterministically() = runBlocking {
+    fun recoveryRetainsTargetAndPlanRejectsRolloverAndRetriesDeterministically() = runBlocking {
         val attempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B)
+        val recoveryIds = ArrayDeque(
+            listOf(
+                ConnectionAttemptId(ATTEMPT_RECOVERY),
+                ConnectionAttemptId(ATTEMPT_RECOVERY_RETRY)
+            )
+        )
         val harness = OrchestratorHarness(
             SessionOrchestrator(
                 RecordingPairingRepository(),
                 Dispatchers.Unconfined,
                 elapsedRealtime = { 0L },
-                attemptIdFactory = { ConnectionAttemptId(ATTEMPT_RECOVERY) }
+                attemptIdFactory = recoveryIds::removeFirst
             )
         )
         harness.use {
@@ -681,12 +687,21 @@ class Kum26LogicalNodeAcceptanceTest {
                     )
                 )
             )
-            assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+            val retrying = harness.orchestrator.state.value as IntercomState.Recovering
+            assertEquals(1, retrying.consecutiveFinalFailures)
+            assertEquals(ConnectionAttemptId(ATTEMPT_RECOVERY_RETRY), retrying.attempt.id)
+            assertEquals(recoveryAttempt.targetLock, retrying.attempt.targetLock)
+            assertEquals(recoveryAttempt.channelPlan, retrying.attempt.channelPlan)
             assertEquals(
-                SessionEffect.AbortAttemptAndResumeDiscovery(
+                SessionEffect.RestartDiscovery(
                     RUNTIME_A,
-                    recoveryAttempt.id
+                    retrying.attempt,
+                    restartDelayMillis = 1_500L
                 ),
+                harness.nextEffect()
+            )
+            assertEquals(
+                SessionEffect.ScheduleAttemptDeadline(retrying.attempt),
                 harness.nextEffect()
             )
         }
@@ -972,6 +987,7 @@ class Kum26LogicalNodeAcceptanceTest {
         private const val ATTEMPT_C = "dddddddd-1111-4111-8111-dddddddddddd"
         private const val ATTEMPT_NEW = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb"
         private const val ATTEMPT_RECOVERY = "cccccccc-1111-4111-8111-cccccccccccc"
+        private const val ATTEMPT_RECOVERY_RETRY = "cccccccc-2222-4222-8222-cccccccccccc"
         private val RUNTIME_A = RuntimeSessionId(SESSION_A)
     }
 }

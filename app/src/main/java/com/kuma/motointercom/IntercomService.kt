@@ -973,10 +973,24 @@ class IntercomService : Service() {
 
     private fun abortResourcesAndResumeDiscovery(
         runtimeSessionId: RuntimeSessionId,
-        nextAttempt: ConnectionAttempt?
+        nextAttempt: ConnectionAttempt?,
+        restartDelayMillis: Long = restartDiscoveryDelayMillis(nextAttempt),
+        resetEffect: SessionEffect.ResetWirelessEnvironment? = null
     ) {
         val token = activeSession ?: return
         if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
+        if (
+            resetEffect != null &&
+            !canExecuteResetWirelessEnvironmentEffect(
+                resetEffect,
+                orchestrator.state.value,
+                orchestrator.currentAttempt,
+                orchestrator.activeControlAttempt,
+                orchestrator.pendingInboundRequest
+            )
+        ) {
+            return
+        }
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         attemptMilestoneScheduler.cancelRuntime(runtimeSessionId)
@@ -1025,6 +1039,18 @@ class IntercomService : Service() {
                         return@postDelayed
                     }
                     if (
+                        resetEffect != null &&
+                        !canExecuteResetWirelessEnvironmentEffect(
+                            resetEffect,
+                            orchestrator.state.value,
+                            orchestrator.currentAttempt,
+                            orchestrator.activeControlAttempt,
+                            orchestrator.pendingInboundRequest
+                        )
+                    ) {
+                        return@postDelayed
+                    }
+                    if (
                         !canRestartRecoveryAttempt(
                             expectedAttempt = nextAttempt,
                             currentAttempt = orchestrator.currentAttempt,
@@ -1054,7 +1080,15 @@ class IntercomService : Service() {
                         resumedRuntimeSessionId,
                         nextAttempt
                     )
-                }, restartDiscoveryDelayMillis(nextAttempt))
+                    resetEffect?.let {
+                        orchestrator.dispatch(
+                            SessionEvent.ResetCompleted(
+                                it.runtimeSessionId,
+                                it.failedAttemptId
+                            )
+                        )
+                    }
+                }, restartDelayMillis)
             },
             onError = ::handleError
         ).abortAndResumeDiscovery()
@@ -1214,7 +1248,33 @@ class IntercomService : Service() {
                         orchestrator.currentAttempt
                     )
                 ) {
-                    abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
+                    abortResourcesAndResumeDiscovery(
+                        runtimeSessionId = effect.runtimeSessionId,
+                        nextAttempt = effect.attempt,
+                        restartDelayMillis = effect.restartDelayMillis
+                    )
+                }
+            }
+            is SessionEffect.ResetWirelessEnvironment -> {
+                if (
+                    canExecuteResetWirelessEnvironmentEffect(
+                        effect,
+                        orchestrator.state.value,
+                        orchestrator.currentAttempt,
+                        orchestrator.activeControlAttempt,
+                        orchestrator.pendingInboundRequest
+                    )
+                ) {
+                    publishLog(
+                        "Resetting wireless environment after " +
+                            "${effect.consecutiveFinalFailures} final recovery failures"
+                    )
+                    abortResourcesAndResumeDiscovery(
+                        runtimeSessionId = effect.runtimeSessionId,
+                        nextAttempt = null,
+                        restartDelayMillis = 0L,
+                        resetEffect = effect
+                    )
                 }
             }
             is SessionEffect.ScheduleAttemptDeadline -> {
@@ -1967,6 +2027,21 @@ internal fun canExecuteRestartDiscoveryEffect(
     effect.runtimeSessionId == effect.attempt.runtimeSessionId &&
     currentState.attempt == effect.attempt &&
     currentAttempt == effect.attempt
+
+internal fun canExecuteResetWirelessEnvironmentEffect(
+    effect: SessionEffect.ResetWirelessEnvironment,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = currentState is IntercomState.Resetting &&
+    currentState.runtimeSessionId == effect.runtimeSessionId &&
+    currentState.targetDeviceId == effect.targetDeviceId &&
+    currentState.failedAttemptId == effect.failedAttemptId &&
+    currentState.consecutiveFinalFailures == effect.consecutiveFinalFailures &&
+    currentAttempt == null &&
+    activeAttempt == null &&
+    pendingInbound == null
 
 internal fun canRestartRecoveryAttempt(
     expectedAttempt: ConnectionAttempt?,

@@ -438,32 +438,47 @@ internal class WifiDirectTunnel(
             finishCloseCleanup(cleanupGeneration, c)
             return
         }
-        cancelConnectForClose(m, c, cleanupGeneration)
-    }
-
-    private fun cancelConnectForClose(
-        m: WifiP2pManager,
-        c: WifiP2pManager.Channel,
-        generation: Int
-    ) {
-        runCloseCleanupAction(
-            label = "cancelConnect",
-            action = { listener -> m.cancelConnect(c, listener) },
-            onComplete = { removeGroupForClose(m, c, generation, attempt = 1) }
-        )
+        WifiDirectCloseSequence(
+            cancelConnect = { complete ->
+                runCloseCleanupAction(
+                    label = "cancelConnect",
+                    action = { listener -> m.cancelConnect(c, listener) },
+                    onComplete = complete
+                )
+            },
+            removeGroup = { complete ->
+                removeGroupForClose(m, c, attempt = 1, onComplete = complete)
+            },
+            clearServiceRequests = { complete ->
+                runCloseCleanupAction(
+                    label = "clearServiceRequests",
+                    action = { listener -> m.clearServiceRequests(c, listener) },
+                    onComplete = complete
+                )
+            },
+            clearLocalServices = { complete ->
+                runCloseCleanupAction(
+                    label = "clearLocalServices",
+                    action = { listener -> m.clearLocalServices(c, listener) },
+                    onComplete = complete
+                )
+            },
+            closeChannel = { finishCloseCleanup(cleanupGeneration, c) },
+            onError = { failure -> Log.w(TAG, "close sequence failure", failure) }
+        ).start()
     }
 
     private fun removeGroupForClose(
         m: WifiP2pManager,
         c: WifiP2pManager.Channel,
-        generation: Int,
-        attempt: Int
+        attempt: Int,
+        onComplete: () -> Unit
     ) {
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
                     Log.d(TAG, "removeGroup success during close")
-                    clearServiceRequestsForClose(m, c, generation)
+                    onComplete()
                 }
 
                 override fun onFailure(reason: Int) {
@@ -475,42 +490,18 @@ internal class WifiDirectTunnel(
                                 "attempt=${attempt + 1}/$REMOVE_GROUP_BUSY_RETRY_COUNT"
                         )
                         mainHandler.postDelayed(
-                            { removeGroupForClose(m, c, generation, attempt + 1) },
+                            { removeGroupForClose(m, c, attempt + 1, onComplete) },
                             BUSY_RETRY_DELAY_MS
                         )
                     } else {
-                        clearServiceRequestsForClose(m, c, generation)
+                        onComplete()
                     }
                 }
             })
         } catch (t: Throwable) {
             Log.w(TAG, "removeGroup failure during close", t)
-            clearServiceRequestsForClose(m, c, generation)
+            onComplete()
         }
-    }
-
-    private fun clearServiceRequestsForClose(
-        m: WifiP2pManager,
-        c: WifiP2pManager.Channel,
-        generation: Int
-    ) {
-        runCloseCleanupAction(
-            label = "clearServiceRequests",
-            action = { listener -> m.clearServiceRequests(c, listener) },
-            onComplete = { clearLocalServicesForClose(m, c, generation) }
-        )
-    }
-
-    private fun clearLocalServicesForClose(
-        m: WifiP2pManager,
-        c: WifiP2pManager.Channel,
-        generation: Int
-    ) {
-        runCloseCleanupAction(
-            label = "clearLocalServices",
-            action = { listener -> m.clearLocalServices(c, listener) },
-            onComplete = { finishCloseCleanup(generation, c) }
-        )
     }
 
     private fun runCloseCleanupAction(

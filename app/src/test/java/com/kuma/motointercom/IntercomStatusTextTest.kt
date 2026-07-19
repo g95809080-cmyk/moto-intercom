@@ -31,6 +31,21 @@ class IntercomStatusTextTest {
         )
     }
 
+    @Test
+    fun resettingNotificationUsesVisibleProductStateInsteadOfTransportFallback() {
+        val resetting = IntercomState.Resetting(
+            runtimeSessionId = RuntimeSessionId("runtime-current"),
+            targetDeviceId = "device-b",
+            failedAttemptId = ConnectionAttemptId("attempt-recovery-3"),
+            consecutiveFinalFailures = 3
+        )
+
+        assertEquals(
+            intercomStatusDetail(resetting),
+            foregroundNotificationText(resetting, "generic transport status")
+        )
+    }
+
     private fun recoveringState(
         nickname: String,
         deviceName: String

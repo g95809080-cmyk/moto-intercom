@@ -20,8 +20,8 @@ internal fun intercomStatusDetail(state: IntercomState): String = when (state) {
 internal fun foregroundNotificationText(
     state: IntercomState,
     fallback: String
-): String = if (state is IntercomState.Recovering) {
-    recoveryStatusText(state.peer)
-} else {
-    fallback
+): String = when (state) {
+    is IntercomState.Recovering,
+    is IntercomState.Resetting -> intercomStatusDetail(state)
+    else -> fallback
 }

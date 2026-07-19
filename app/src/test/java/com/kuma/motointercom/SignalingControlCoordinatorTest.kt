@@ -443,6 +443,98 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun recoveryRejectUsesActiveTerminalRootWithoutLosingFailureCount() = runBlocking {
+        val recoveryIds = ArrayDeque(
+            listOf(
+                ConnectionAttemptId("30000000-0000-4000-8000-000000000002"),
+                ConnectionAttemptId("30000000-0000-4000-8000-000000000003")
+            )
+        )
+        harness(attemptIdFactory = recoveryIds::removeFirst).use { harness ->
+            val connectedAttempt = outboundAttempt()
+            harness.start(connectedAttempt)
+            val connectedChannel = requesterChannel(CHANNEL_A, connectedAttempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, connectedChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        connectedAttempt.id,
+                        connectedChannel.channelId,
+                        connectedChannel.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        connectedAttempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        500L
+                    )
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingDisconnected(RUNTIME_A, connectedAttempt.id)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.RestartDiscovery)
+            assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+            val recovery1 = harness.orchestrator.state.value as IntercomState.Recovering
+            val recoveryChannel = requesterChannel(CHANNEL_B, recovery1.attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, recoveryChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectRejected(
+                        RUNTIME_A,
+                        recovery1.attempt.id,
+                        recoveryChannel.channelId,
+                        recoveryChannel.wireRequestKey,
+                        RejectReason.USER_REJECTED,
+                        retryable = false
+                    )
+                )
+            )
+
+            val effects = listOf(
+                harness.nextEffect(),
+                harness.nextEffect(),
+                harness.nextEffect()
+            )
+            val recovery2 = harness.orchestrator.state.value as IntercomState.Recovering
+            assertEquals(1, recovery2.consecutiveFinalFailures)
+            assertEquals(recovery1.attempt.targetLock, recovery2.attempt.targetLock)
+            assertTrue(effects.any { it is SessionEffect.CloseControlChannel })
+            assertTrue(
+                effects.any {
+                    it is SessionEffect.RestartDiscovery &&
+                        it.attempt == recovery2.attempt &&
+                        it.restartDelayMillis == 1_500L
+                }
+            )
+            assertTrue(
+                effects.any {
+                    it == SessionEffect.ScheduleAttemptDeadline(recovery2.attempt)
+                }
+            )
+        }
+    }
+
+    @Test
     fun nonOwnerDisconnectCannotEndAcceptedAttemptButOwnerDisconnectCan() = runBlocking {
         harness().use { harness ->
             val attempt = outboundAttempt()

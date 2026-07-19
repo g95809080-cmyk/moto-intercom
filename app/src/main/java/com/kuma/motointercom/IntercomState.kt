@@ -86,8 +86,15 @@ sealed interface IntercomState {
 
     data class Recovering(
         val attempt: ConnectionAttempt,
-        val peer: PeerIdentity
+        val peer: PeerIdentity,
+        val consecutiveFinalFailures: Int = 0
     ) : IntercomState {
+        init {
+            require(consecutiveFinalFailures in 0 until RECOVERY_RESET_FAILURE_THRESHOLD) {
+                "Recovering failure count must remain below the reset threshold"
+            }
+        }
+
         override val kind = SessionState.RECOVERING
         override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
         val attemptId: ConnectionAttemptId = attempt.id
@@ -96,8 +103,17 @@ sealed interface IntercomState {
 
     data class Resetting(
         override val runtimeSessionId: RuntimeSessionId,
-        val targetDeviceId: String
+        val targetDeviceId: String,
+        val failedAttemptId: ConnectionAttemptId,
+        val consecutiveFinalFailures: Int
     ) : IntercomState {
+        init {
+            require(targetDeviceId.isNotBlank()) { "Reset target device ID must not be blank" }
+            require(consecutiveFinalFailures >= RECOVERY_RESET_FAILURE_THRESHOLD) {
+                "Resetting requires the recovery failure threshold"
+            }
+        }
+
         override val kind = SessionState.RESETTING
     }
 
@@ -107,6 +123,8 @@ sealed interface IntercomState {
         override val kind = SessionState.STOPPING
     }
 }
+
+internal const val RECOVERY_RESET_FAILURE_THRESHOLD = 3
 
 internal fun IntercomState.connectionAttemptOrNull(): ConnectionAttempt? = when (this) {
     is IntercomState.IncomingConfirmation -> null

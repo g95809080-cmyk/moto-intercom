@@ -202,7 +202,10 @@ internal sealed interface SessionEvent {
         val attemptId: ConnectionAttemptId
     ) : SessionEvent
 
-    data class ResetCompleted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
+    data class ResetCompleted(
+        val runtimeSessionId: RuntimeSessionId,
+        val failedAttemptId: ConnectionAttemptId
+    ) : SessionEvent
 
     data class DisconnectRequested(
         val runtimeSessionId: RuntimeSessionId,
@@ -235,8 +238,27 @@ internal sealed interface SessionEffect {
 
     data class RestartDiscovery(
         val runtimeSessionId: RuntimeSessionId,
-        val attempt: ConnectionAttempt
-    ) : SessionEffect
+        val attempt: ConnectionAttempt,
+        val restartDelayMillis: Long = 0L
+    ) : SessionEffect {
+        init {
+            require(restartDelayMillis >= 0L) { "Restart delay must not be negative" }
+        }
+    }
+
+    data class ResetWirelessEnvironment(
+        val runtimeSessionId: RuntimeSessionId,
+        val targetDeviceId: String,
+        val failedAttemptId: ConnectionAttemptId,
+        val consecutiveFinalFailures: Int
+    ) : SessionEffect {
+        init {
+            require(targetDeviceId.isNotBlank()) { "Reset target device ID must not be blank" }
+            require(consecutiveFinalFailures >= RECOVERY_RESET_FAILURE_THRESHOLD) {
+                "Wireless reset requires the recovery failure threshold"
+            }
+        }
+    }
 
     data class ScheduleAttemptDeadline(
         val attempt: ConnectionAttempt
@@ -378,7 +400,10 @@ internal fun reduceIntercomState(
 
     is SessionEvent.ResetCompleted ->
         (current as? IntercomState.Resetting)
-            ?.takeIf { it.matches(event.runtimeSessionId) }
+            ?.takeIf {
+                it.matches(event.runtimeSessionId) &&
+                    it.failedAttemptId == event.failedAttemptId
+            }
             ?.let { transition(IntercomState.Discovering(event.runtimeSessionId)) }
 
     is SessionEvent.StopRequested ->
