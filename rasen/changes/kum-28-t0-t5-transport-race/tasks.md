@@ -58,7 +58,7 @@
   binds Base/Head, scope, tests, behavior, deferred physical rows, and rollback.
 - [x] 6.3 Complete fixed-SHA read-only architecture review and automatically
   remediate every in-scope P0/P1 with a new commit, CI, and re-review.
-- [ ] 6.4 Update `docs/verification/sprint-3-final-verification.md`, PR, and
+- [x] 6.4 Update `docs/verification/sprint-3-final-verification.md`, PR, and
   Linear evidence; prove working tree clean and remote ahead/behind 0/0.
-- [ ] 6.5 After all gates pass, turn the PR Ready, merge with a merge commit,
+- [x] 6.5 After all gates pass, turn the PR Ready, merge with a merge commit,
   retain the branch, require green main CI, then close KUM-28 and Sprint 3.
