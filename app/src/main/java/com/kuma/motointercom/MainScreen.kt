@@ -75,7 +75,7 @@ internal class MainScreen(
         }
         if (state is IntercomState.Connected) setRemoteRider(state.peer.nickname)
         statusText.setTextColor(statusColor(state))
-        statusDetailText.text = statusDetail(state)
+        statusDetailText.text = intercomStatusDetail(state)
         updateActionButton()
         updateMotionForState()
     }
@@ -83,7 +83,7 @@ internal class MainScreen(
     fun setStatus(message: String) {
         statusText.text = message
         statusText.setTextColor(statusColor(productState))
-        statusDetailText.text = statusDetail(productState)
+        statusDetailText.text = intercomStatusDetail(productState)
         updateMotionForState()
         appendLog(message)
     }
@@ -501,18 +501,6 @@ internal class MainScreen(
         IntercomState.Offline,
         is IntercomState.Stopping -> TEXT_PRIMARY
         else -> ACCENT_GREEN
-    }
-
-    private fun statusDetail(state: IntercomState): String = when (state) {
-        IntercomState.Offline -> "已停止对讲，可重新启动"
-        is IntercomState.Discovering -> "正在搜索附近 MotoCom 车友..."
-        is IntercomState.IncomingConfirmation -> "等待确认陌生车友的连接请求"
-        is IntercomState.Connecting -> "正在建立信令与媒体通道"
-        is IntercomState.Optimizing -> "正在选择更稳定的连接通道"
-        is IntercomState.Connected -> "语音通道在线，保持骑行沟通"
-        is IntercomState.Recovering -> "正在恢复原车友连接"
-        is IntercomState.Resetting -> "正在重置无线连接"
-        is IntercomState.Stopping -> "正在停止对讲"
     }
 
     private fun createCard(): LinearLayout =

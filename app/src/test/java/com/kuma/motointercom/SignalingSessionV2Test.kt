@@ -15,6 +15,57 @@ import java.util.concurrent.TimeUnit
 
 class SignalingSessionV2Test {
     @Test
+    fun recoveryAcceptsOnlyOriginalTargetWhenThirdNodeRespondsFirst() {
+        val recoveryAttempt = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
+            .copy(trigger = ConnectionTrigger.RECOVERY)
+        val recovering = IntercomState.Recovering(
+            recoveryAttempt,
+            PeerIdentity(
+                deviceId = DEVICE_B,
+                nickname = "Rider B",
+                runtimeSessionId = RuntimeSessionId(SESSION_B),
+                isDeviceIdVerified = true
+            )
+        )
+
+        val cSession = incomingResponderSession(
+            requesterDeviceId = DEVICE_C,
+            requesterSessionId = SESSION_C,
+            attemptId = ATTEMPT_B
+        )
+        val bSession = incomingResponderSession(
+            requesterDeviceId = DEVICE_B,
+            requesterSessionId = SESSION_B,
+            attemptId = ATTEMPT_B
+        )
+        try {
+            assertTrue(isNonTargetRecoveryChannel(recovering, cSession.responder.targetLock))
+            assertFalse(isNonTargetRecoveryChannel(recovering, bSession.responder.targetLock))
+            assertFalse(
+                canInstallControlSession(
+                    sessionCurrent = true,
+                    currentAttempt = recoveryAttempt,
+                    existingSession = null,
+                    session = cSession.responder,
+                    currentState = recovering
+                )
+            )
+            assertTrue(
+                canInstallControlSession(
+                    sessionCurrent = true,
+                    currentAttempt = recoveryAttempt,
+                    existingSession = null,
+                    session = bSession.responder,
+                    currentState = recovering
+                )
+            )
+        } finally {
+            cSession.close()
+            bSession.close()
+        }
+    }
+
+    @Test
     fun candidateContextMatchesOnlyTheExactPhysicalSession() {
         socketPair().use { sockets ->
             val attempt = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
@@ -694,6 +745,51 @@ class SignalingSessionV2Test {
         monotonicClock = monotonicClock
     )
 
+    private fun incomingResponderSession(
+        requesterDeviceId: String,
+        requesterSessionId: String,
+        attemptId: String
+    ): IncomingSessionPair {
+        val sockets = socketPair()
+        val requesterAttempt = attempt(
+            attemptId,
+            requesterSessionId,
+            DEVICE_A,
+            SESSION_A
+        )
+        val requester = CompletableFuture.supplyAsync {
+            establish(
+                socket = sockets.opener,
+                physicalRole = PhysicalSocketRole.OPENER,
+                localDeviceId = requesterDeviceId,
+                localSessionId = requesterSessionId,
+                originatingAttempt = requesterAttempt
+            )
+        }
+        val responder = CompletableFuture.supplyAsync {
+            establish(
+                socket = sockets.acceptor,
+                physicalRole = PhysicalSocketRole.ACCEPTOR,
+                localDeviceId = DEVICE_A,
+                localSessionId = SESSION_A,
+                originatingAttempt = null,
+                expectedRemoteTargetLock = TargetLock(
+                    requesterDeviceId,
+                    RuntimeSessionId(requesterSessionId)
+                )
+            )
+        }
+        return try {
+            IncomingSessionPair(
+                requester = requester.get(2, TimeUnit.SECONDS),
+                responder = responder.get(2, TimeUnit.SECONDS)
+            )
+        } catch (t: Throwable) {
+            sockets.close()
+            throw t
+        }
+    }
+
     private fun attempt(
         attemptId: String,
         localSessionId: String,
@@ -742,6 +838,16 @@ class SignalingSessionV2Test {
         override fun close() {
             runCatching { opener.close() }
             runCatching { acceptor.close() }
+        }
+    }
+
+    private data class IncomingSessionPair(
+        val requester: SignalingSessionV2,
+        val responder: SignalingSessionV2
+    ) : AutoCloseable {
+        override fun close() {
+            requester.close()
+            responder.close()
         }
     }
 

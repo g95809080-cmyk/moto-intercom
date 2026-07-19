@@ -110,6 +110,15 @@ data class ConnectionAttempt(
 internal fun plannedDiscoveryTransports(attempt: ConnectionAttempt?): Set<Transport> =
     attempt?.channelPlan?.plannedTransports ?: Transport.entries.toSet()
 
+internal fun bindPlannedAdapterIngress(
+    attempt: ConnectionAttempt,
+    bindLan: (ConnectionAttempt) -> Unit,
+    bindWifiDirect: (ConnectionAttempt) -> Unit
+) {
+    if (Transport.LAN in attempt.channelPlan) bindLan(attempt)
+    if (Transport.WIFI_DIRECT in attempt.channelPlan) bindWifiDirect(attempt)
+}
+
 internal fun openPlannedTransport(
     attempt: ConnectionAttempt,
     transport: Transport,

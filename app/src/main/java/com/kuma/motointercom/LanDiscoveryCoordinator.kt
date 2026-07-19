@@ -33,6 +33,7 @@ internal class LanDiscoveryCoordinator(
     private val onControlChannelReady: (SignalingSessionV2) -> Unit,
     private val onLog: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
+    initialTargetAttempt: ConnectionAttempt? = null,
     private val monotonicClock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(System.nanoTime() / 1_000_000L)
     }
@@ -44,6 +45,7 @@ internal class LanDiscoveryCoordinator(
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
     private val targetedClientSocket = AtomicReference<Socket?>()
+    private val ingressAttempt = LanAttemptLease(initialTargetAttempt)
     private val targetAttempt = LanAttemptLease()
     private val clientConnecting = AtomicBoolean(false)
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
@@ -67,18 +69,25 @@ internal class LanDiscoveryCoordinator(
         executor.execute { runLanUdpBroadcaster(localIp) }
     }
 
-    fun connect(attempt: ConnectionAttempt): Boolean {
+    fun restrictIngress(attempt: ConnectionAttempt): Boolean {
         if (
             !isActive() ||
             Transport.LAN !in attempt.channelPlan ||
             attempt.remainingMillis(monotonicClock) <= 0L
         ) return false
+        ingressAttempt.bind(attempt)
+        return true
+    }
+
+    fun connect(attempt: ConnectionAttempt): Boolean {
+        if (!restrictIngress(attempt)) return false
         targetAttempt.bind(attempt)
         connectTargetIfAvailable()
         return true
     }
 
     fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
+        ingressAttempt.release(completedAttempt)
         if (targetAttempt.release(completedAttempt)) {
             closeQuietly(targetedClientSocket.getAndSet(null))
             clientConnecting.set(false)
@@ -220,7 +229,7 @@ internal class LanDiscoveryCoordinator(
             while (isActive()) {
                 val socket = candidate.accept()
                 acceptedSocket = socket
-                val attempt = targetAttempt.current
+                val attempt = ingressAttempt.current
                 val session = try {
                     SignalingSessionV2.establish(
                         socket = socket,
@@ -471,6 +480,7 @@ internal class LanDiscoveryCoordinator(
         }
         stopNsdDiscovery()
         executor.shutdownNow()
+        ingressAttempt.clear()
         targetAttempt.clear()
         deviceRegistry.clear()
         onDevicesChanged(emptyList())
@@ -543,8 +553,8 @@ internal class LanDiscoveryCoordinator(
     }
 }
 
-internal class LanAttemptLease {
-    private val attempt = AtomicReference<ConnectionAttempt?>()
+internal class LanAttemptLease(initialAttempt: ConnectionAttempt? = null) {
+    private val attempt = AtomicReference(initialAttempt)
 
     val current: ConnectionAttempt?
         get() = attempt.get()
