@@ -39,7 +39,7 @@
 
 ## 5. Review And Delivery
 
-- [ ] 5.1 Commit atomically, push, open the KUM-33 Draft PR, and synchronize
+- [x] 5.1 Commit atomically, push, open the KUM-33 Draft PR, and synchronize
   Linear while KUM-9 remains In Progress and KUM-34 remains Todo.
 - [ ] 5.2 Complete fixed-SHA read-only architecture review and remediate any
   in-scope P0/P1 until APPROVED with P0=0 and P1=0.

@@ -40,8 +40,10 @@ Evidence state: 2026-07-19
 - KUM-32 third fixed-SHA review: APPROVED, P0=0, P1=0 at `5f1d1d6`
 - KUM-33 base: `5c49a53db45ecaa5b9f449af5f04d28250f3f772`
 - KUM-33 implementation source: `616c22fcc270e98c276a0fb8e3a3943101334492`
+- KUM-33 automated-evidence head: `834dc7e74897784c455b9c0636487b3cbc3590bf`
+- KUM-33 pull request: [#11](https://github.com/g95809080-cmyk/moto-intercom/pull/11) - Draft
 - KUM-33 Rasen change: `kum-33-three-second-recovery-fallback`
-- Linear: KUM-9 In Progress; KUM-37/KUM-32 Done; KUM-33 In Progress; KUM-34 through KUM-36 Todo
+- Linear: KUM-9 In Progress; KUM-37/KUM-32 Done; KUM-33 In Review; KUM-34 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
