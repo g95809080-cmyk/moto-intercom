@@ -200,7 +200,7 @@ internal class WifiDirectTunnel(
     fun connect(attempt: ConnectionAttempt): Boolean {
         if (
             !running ||
-            attempt.channelPlan.transport != Transport.WIFI_DIRECT ||
+            Transport.WIFI_DIRECT !in attempt.channelPlan ||
             attempt.remainingMillis(monotonicClock) <= 0L
         ) return false
         groupValidationGate.cancel()
@@ -211,6 +211,44 @@ internal class WifiDirectTunnel(
         targetAddress = null
         connectTargetIfAvailable()
         return true
+    }
+
+    fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
+        if (!running) return
+        val currentTarget = targetAttempt
+        if (currentTarget != null && !currentTarget.hasSameImmutableIdentity(completedAttempt)) {
+            return
+        }
+        if (currentTarget != null) {
+            targetAttemptGeneration++
+            targetAttempt = null
+            targetAddress = null
+        }
+        groupValidationGate.cancel()
+        validatingGroup = false
+        cancelPendingRetry()
+        cancelConnectWatchdog()
+        if (
+            state == State.DISCOVERING &&
+            connectingAddress == null &&
+            !tunnelStarted &&
+            socketTransport == null
+        ) {
+            return
+        }
+        removeGroupAndRediscover("transport race selected LAN")
+    }
+
+    fun retainSelectedChannel(completedAttempt: ConnectionAttempt) {
+        val currentTarget = targetAttempt ?: return
+        if (!currentTarget.hasSameImmutableIdentity(completedAttempt)) return
+        targetAttemptGeneration++
+        targetAttempt = null
+        targetAddress = null
+        groupValidationGate.cancel()
+        validatingGroup = false
+        cancelPendingRetry()
+        cancelConnectWatchdog()
     }
 
     @SuppressLint("MissingPermission")

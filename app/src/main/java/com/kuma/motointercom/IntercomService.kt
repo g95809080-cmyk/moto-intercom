@@ -83,6 +83,14 @@ class IntercomService : Service() {
             )
         }
     )
+    private val attemptMilestoneScheduler = AttemptMilestoneScheduler(
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        onElapsed = { milestone ->
+            orchestrator.dispatch(SessionEvent.AttemptMilestoneElapsed(milestone))
+        }
+    )
     private val incomingConfirmationScheduler = IncomingConfirmationDeadlineScheduler(
         elapsedRealtime = SystemClock::elapsedRealtime,
         postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
@@ -437,7 +445,7 @@ class IntercomService : Service() {
             onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.start() }
         }
-        targetAttempt?.let(::beginTargetedTransport)
+        targetAttempt?.let { beginTargetedTransport(it, it.preferredTransport) }
     }
 
     private fun registerControlChannel(
@@ -744,19 +752,16 @@ class IntercomService : Service() {
 
         activeMediaContext = candidate
         activeMediaSession = session
+        attemptMilestoneScheduler.cancel(effect.attempt)
         lanDiscovery?.retainPassiveIngress(effect.attempt)
-        if (effect.attempt.channelPlan.transport == Transport.LAN) {
-            val closingTunnel = wifiTunnel
-            try {
-                closingTunnel?.close {
-                    dispatchOnMain {
-                        if (wifiTunnel === closingTunnel) wifiTunnel = null
-                    }
-                }
-            } catch (t: Throwable) {
-                if (wifiTunnel === closingTunnel) wifiTunnel = null
-                handleError(t)
-            }
+        if (candidate.transport == Transport.LAN) {
+            runCatching {
+                wifiTunnel?.retainPassiveIngress(effect.attempt)
+            }.onFailure(::handleError)
+        } else {
+            runCatching {
+                wifiTunnel?.retainSelectedChannel(effect.attempt)
+            }.onFailure(::handleError)
         }
 
         physicalLinkReady = true
@@ -863,6 +868,7 @@ class IntercomService : Service() {
         if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
+        attemptMilestoneScheduler.cancelRuntime(runtimeSessionId)
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         val generation = ++recoveryGeneration
         markDiscoveryUnavailable()
@@ -965,6 +971,7 @@ class IntercomService : Service() {
         }
         recoveryGeneration++
         attemptDeadlineScheduler.cancel()
+        attemptMilestoneScheduler.cancel()
         cancelAllIncomingConfirmationSurfaces()
         sessions.invalidate()
         activeSession = null
@@ -1048,8 +1055,16 @@ class IntercomService : Service() {
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
             is SessionEffect.OpenTargetedTransport -> {
-                if (orchestrator.currentAttempt == effect.attempt) {
-                    beginTargetedTransport(effect.attempt)
+                if (
+                    orchestrator.currentAttempt == effect.attempt &&
+                    effect.transport in effect.attempt.channelPlan
+                ) {
+                    beginTargetedTransport(effect.attempt, effect.transport)
+                }
+            }
+            is SessionEffect.ScheduleAttemptMilestone -> {
+                if (orchestrator.currentAttempt == effect.milestone.attempt) {
+                    attemptMilestoneScheduler.schedule(effect.milestone)
                 }
             }
             is SessionEffect.AbortAttemptAndResumeDiscovery -> {
@@ -1368,28 +1383,32 @@ class IntercomService : Service() {
         }
     }
 
-    private fun openTargetedTransport(attempt: ConnectionAttempt): Boolean {
+    private fun openTargetedTransport(
+        attempt: ConnectionAttempt,
+        transport: Transport
+    ): Boolean {
         if (activeRuntimeSessionId != attempt.runtimeSessionId) return false
         return openPlannedTransport(
             attempt,
+            transport,
             openLan = { lanDiscovery?.connect(it) == true },
             openWifiDirect = { wifiTunnel?.connect(it) == true }
         )
     }
 
-    private fun beginTargetedTransport(attempt: ConnectionAttempt) {
-        val result = runCatching { openTargetedTransport(attempt) }
+    private fun beginTargetedTransport(attempt: ConnectionAttempt, transport: Transport) {
+        val result = runCatching { openTargetedTransport(attempt, transport) }
         if (result.getOrDefault(false)) {
             publishStatus(PEER_FOUND_STATUS)
             return
         }
         val reason = result.exceptionOrNull()?.message ?: "transport adapter unavailable"
-        publishLog("Targeted transport open failed for ${attempt.id.value}: $reason")
+        publishLog("Targeted transport open failed for ${attempt.id.value}/$transport: $reason")
         orchestrator.dispatch(
             SessionEvent.TargetedTransportOpenFailed(
                 runtimeSessionId = attempt.runtimeSessionId,
                 attemptId = attempt.id,
-                transport = attempt.channelPlan.transport,
+                transport = transport,
                 reason = reason
             )
         )
@@ -1697,7 +1716,7 @@ internal fun canRegisterControlChannel(
     return !session.isClosed &&
         sessionCurrent &&
         (attempt == null || currentAttempt == attempt) &&
-        (attempt == null || attempt.channelPlan.transport == session.channel.transport) &&
+        (attempt == null || session.channel.transport in attempt.channelPlan) &&
         (attempt == null || attempt.targetLock == session.targetLock) &&
         session.peer.isVerifiedFor(session.targetLock)
 }
@@ -1812,7 +1831,7 @@ internal fun canStartWebRtc(
     sessionCurrent &&
     currentAttempt == expectedAttempt &&
     session.wireRequestKey.attemptId == expectedAttempt.id &&
-    session.channel.transport == expectedAttempt.channelPlan.transport &&
+    session.channel.transport in expectedAttempt.channelPlan &&
     session.targetLock == expectedAttempt.targetLock &&
     session.peer.isVerifiedFor(expectedAttempt.targetLock) &&
     session.requestRole.webRtcRole == expectedRole &&

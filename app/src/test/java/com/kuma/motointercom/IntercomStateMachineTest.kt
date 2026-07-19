@@ -94,7 +94,8 @@ class IntercomStateMachineTest {
         val connected = IntercomState.Connected(
             attempt = attempt,
             peer = peer.copy(isDeviceIdVerified = true),
-            connectedAt = 1L
+            connectedAt = 1L,
+            transport = Transport.LAN
         )
 
         assertNull(

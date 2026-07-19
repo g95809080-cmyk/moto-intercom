@@ -13,15 +13,31 @@ private data class TerminalAttemptRecord(
     val outcome: ConnectionAttemptTerminalOutcome
 )
 
+private data class TargetedTransportRace(
+    val attempt: ConnectionAttempt,
+    val openedTransports: Set<Transport>,
+    val failedTransports: Set<Transport> = emptySet(),
+    val fallbackMilestone: AttemptMilestone.FallbackTransport? = null
+)
+
 internal class SignalingControlCoordinator(
     private val clock: MonotonicClock,
     private val attemptTimeoutMs: Long,
+    private val fallbackDelayMs: Long = 5_000L,
+    private val optimizationWindowMs: Long = 1_000L,
     private val confirmationTimeoutMs: Long = 15_000L,
     private val actionNonce: () -> String = { UUID.randomUUID().toString() },
     private val attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create
 ) {
     init {
         require(attemptTimeoutMs > 0L) { "Attempt timeout must be positive" }
+        require(fallbackDelayMs in 1 until attemptTimeoutMs) {
+            "Fallback delay must be inside the total attempt timeout"
+        }
+        require(optimizationWindowMs > 0L) { "Optimization window must be positive" }
+        require(fallbackDelayMs + optimizationWindowMs <= attemptTimeoutMs) {
+            "Fallback plus optimization must fit inside the total attempt timeout"
+        }
         require(confirmationTimeoutMs > 0L) { "Confirmation timeout must be positive" }
     }
     private val channels = linkedMapOf<ControlChannelId, VerifiedControlChannel>()
@@ -34,6 +50,8 @@ internal class SignalingControlCoordinator(
     private var active: AttemptChannelSet? = null
     @Volatile
     private var pendingInbound: PendingInboundRequest? = null
+    @Volatile
+    private var targetedTransportRace: TargetedTransportRace? = null
 
     internal val currentAttempt: ConnectionAttempt?
         get() = ownedAttempt
@@ -89,6 +107,7 @@ internal class SignalingControlCoordinator(
                 event
             )
             is SessionEvent.AttemptTimedOut -> attemptTimedOut(current, event)
+            is SessionEvent.AttemptMilestoneElapsed -> attemptMilestoneElapsed(current, event)
             is SessionEvent.WebRtcStateChanged -> webRtcStateChanged(current, event)
             is SessionEvent.SignalingDisconnected -> signalingDisconnected(current, event)
             is SessionEvent.RecoveryExhausted -> recoveryExhausted(current, event)
@@ -147,6 +166,7 @@ internal class SignalingControlCoordinator(
             active = null
             pendingInbound = null
             ownedAttempt = null
+            targetedTransportRace = null
             completedAttempts.clear()
             terminalAttempts.clear()
         }
@@ -175,9 +195,13 @@ internal class SignalingControlCoordinator(
         ) {
             return rejected()
         }
-        val transport = when {
-            Transport.LAN in event.availableTransports -> Transport.LAN
-            Transport.WIFI_DIRECT in event.availableTransports -> Transport.WIFI_DIRECT
+        val plan = when {
+            Transport.LAN in event.availableTransports &&
+                Transport.WIFI_DIRECT in event.availableTransports ->
+                ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT)
+            Transport.LAN in event.availableTransports -> ChannelPlan.single(Transport.LAN)
+            Transport.WIFI_DIRECT in event.availableTransports ->
+                ChannelPlan.single(Transport.WIFI_DIRECT)
             else -> return rejected()
         }
         val newAttemptId = attemptIdFactory()
@@ -187,15 +211,18 @@ internal class SignalingControlCoordinator(
             runtimeSessionId = event.runtimeSessionId,
             targetLock = TargetLock(event.targetDeviceId, event.targetSessionId),
             trigger = ConnectionTrigger.USER,
-            channelPlan = ChannelPlan.single(transport),
+            channelPlan = plan,
             deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
         )
         ownedAttempt = attempt
+        targetedTransportRace = createTargetedTransportRace(attempt)
+        val fallbackMilestone = targetedTransportRace?.fallbackMilestone
         return accepted(
             state = IntercomState.Connecting(attempt),
-            effects = listOf(
+            effects = listOfNotNull(
                 SessionEffect.ScheduleAttemptDeadline(attempt),
-                SessionEffect.OpenTargetedTransport(attempt)
+                SessionEffect.OpenTargetedTransport(attempt, attempt.preferredTransport),
+                fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
             )
         )
     }
@@ -211,6 +238,7 @@ internal class SignalingControlCoordinator(
         recordTerminal(previous, ConnectionAttemptTerminalOutcome.CANCELED)
         active?.takeIf { it.attempt == previous }?.let(::forgetActiveChannels)
         ownedAttempt = event.attempt
+        targetedTransportRace = null
         return accepted(transition.state, transition.effects)
     }
 
@@ -221,13 +249,111 @@ internal class SignalingControlCoordinator(
         val attempt = matchingOwnedAttempt(event.runtimeSessionId, event.attemptId)
             ?.takeIf {
                 current.connectionAttemptOrNull() == it &&
-                    it.channelPlan.transport == event.transport
+                    event.transport in it.channelPlan
             }
             ?: return rejected()
-        return terminateOwnedAttempt(
-            current,
-            attempt,
-            ConnectionAttemptTerminalOutcome.FAILED
+        val race = targetedTransportRace?.takeIf { it.attempt == attempt }
+            ?: return terminateOwnedAttempt(
+                current,
+                attempt,
+                ConnectionAttemptTerminalOutcome.FAILED
+            )
+        if (event.transport !in race.openedTransports) return rejected()
+        val updated = race.copy(failedTransports = race.failedTransports + event.transport)
+        targetedTransportRace = updated
+        val liveTransports = active
+            ?.takeIf { it.attempt == attempt }
+            ?.channelIds
+            .orEmpty()
+            .mapNotNullTo(linkedSetOf()) { channels[it]?.transport }
+        val viableOpened = (updated.openedTransports - updated.failedTransports) + liveTransports
+        val pending = attempt.channelPlan.plannedTransports - updated.openedTransports
+        return if (viableOpened.isNotEmpty() || pending.isNotEmpty()) {
+            accepted(state = current)
+        } else {
+            terminateOwnedAttempt(current, attempt, ConnectionAttemptTerminalOutcome.FAILED)
+        }
+    }
+
+    private fun attemptMilestoneElapsed(
+        current: IntercomState,
+        event: SessionEvent.AttemptMilestoneElapsed
+    ): SignalingControlDecision = when (val milestone = event.milestone) {
+        is AttemptMilestone.FallbackTransport -> fallbackTransportDue(current, milestone)
+        is AttemptMilestone.MediaOptimization -> mediaOptimizationDue(current, milestone)
+    }
+
+    private fun fallbackTransportDue(
+        current: IntercomState,
+        milestone: AttemptMilestone.FallbackTransport
+    ): SignalingControlDecision {
+        val attempt = matchingOwnedAttempt(
+            milestone.attempt.runtimeSessionId,
+            milestone.attempt.id
+        )?.takeIf {
+            it == milestone.attempt &&
+                current.connectionAttemptOrNull() == it &&
+                !it.isExpiredAt(clock.now())
+        } ?: return rejected()
+        val race = targetedTransportRace?.takeIf {
+            it.attempt == attempt && it.fallbackMilestone == milestone
+        } ?: return rejected()
+        if (clock.now().elapsedRealtimeMs < milestone.scheduledAt.elapsedRealtimeMs) {
+            return rejected()
+        }
+        if (
+            milestone.transport in race.openedTransports ||
+            active?.takeIf { it.attempt == attempt }?.mediaOwnerChannelId != null ||
+            terminalOutcome(attempt.id) != null
+        ) {
+            return rejected()
+        }
+        targetedTransportRace = race.copy(
+            openedTransports = race.openedTransports + milestone.transport
+        )
+        return accepted(
+            state = current,
+            effects = listOf(SessionEffect.OpenTargetedTransport(attempt, milestone.transport))
+        )
+    }
+
+    private fun mediaOptimizationDue(
+        current: IntercomState,
+        milestone: AttemptMilestone.MediaOptimization
+    ): SignalingControlDecision {
+        val context = active?.takeIf {
+            it.phase == SignalingAttemptPhase.OPTIMIZING_MEDIA &&
+                it.attempt == milestone.attempt &&
+                it.wireRequestKey == milestone.wireRequestKey &&
+                it.optimizationMilestone == milestone &&
+                current.connectionAttemptOrNull() == it.attempt
+        } ?: return rejected()
+        if (context.attempt.isExpiredAt(clock.now())) {
+            return terminateOwnedAttempt(
+                current,
+                context.attempt,
+                ConnectionAttemptTerminalOutcome.TIMED_OUT
+            )
+        }
+        if (clock.now().elapsedRealtimeMs < milestone.scheduledAt.elapsedRealtimeMs) {
+            return rejected()
+        }
+        val remaining = context.channelIds.filterTo(linkedSetOf()) { it in channels }
+        if (remaining.isEmpty()) return finishAttemptImmediately(current, context)
+        val cohort = SelectionCohort(
+            context.wireRequestKey,
+            remaining,
+            nowElapsedRealtimeMs()
+        )
+        active = context.copy(
+            channelIds = remaining,
+            phase = SignalingAttemptPhase.SELECTING_MEDIA,
+            selectionCohort = cohort,
+            optimizationMilestone = null
+        )
+        return accepted(
+            state = current,
+            effects = listOf(selectEffect(context.attempt, cohort))
         )
     }
 
@@ -300,8 +426,10 @@ internal class SignalingControlCoordinator(
                 .takeIf { it.isVerifiedFor(attempt.targetLock) }
             else -> null
         } ?: return rejected()
+        val winnerTransport = winnerTransport(attempt) ?: return rejected()
         if (!recordTerminal(attempt, ConnectionAttemptTerminalOutcome.SUCCESS)) return rejected()
-        return accepted(IntercomState.Connected(attempt, peer, connectedAt))
+        targetedTransportRace = null
+        return accepted(IntercomState.Connected(attempt, peer, connectedAt, winnerTransport))
     }
 
     private fun signalingDisconnected(
@@ -371,18 +499,28 @@ internal class SignalingControlCoordinator(
         )
         if (existingOutcome == null) recordTerminal(current.attempt, outcome)
         ownedAttempt = recoveryAttempt
+        targetedTransportRace = createTargetedTransportRace(recoveryAttempt)
+        val fallbackMilestone = targetedTransportRace?.fallbackMilestone
         return accepted(
             state = IntercomState.Recovering(recoveryAttempt, current.peer),
             effects = if (restartConnectedDiscovery) {
-                listOf(
+                listOfNotNull(
                     SessionEffect.RestartDiscovery(
                         recoveryAttempt.runtimeSessionId,
                         recoveryAttempt
                     ),
-                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt)
+                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
+                    fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
                 )
             } else {
-                listOf(SessionEffect.ScheduleAttemptDeadline(recoveryAttempt))
+                listOfNotNull(
+                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
+                    SessionEffect.OpenTargetedTransport(
+                        recoveryAttempt,
+                        recoveryAttempt.preferredTransport
+                    ),
+                    fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
+                )
             }
         )
     }
@@ -460,7 +598,7 @@ internal class SignalingControlCoordinator(
         if (
             ownedAttempt != attempt ||
             current.connectionAttemptOrNull() != attempt ||
-            attempt.channelPlan.transport != channel.transport ||
+            channel.transport !in attempt.channelPlan ||
             attempt.targetLock != channel.targetLock
         ) {
             return rejected()
@@ -498,7 +636,9 @@ internal class SignalingControlCoordinator(
                     attemptId = attempt.id,
                     channelId = channel.channelId,
                     trigger = attempt.trigger.toRequestTrigger(),
-                    preferredTransportHint = attempt.channelPlan.transport
+                    preferredTransportHint = attempt.channelPlan.fallbackTransport?.let {
+                        attempt.preferredTransport
+                    }
                 )
             )
         )
@@ -535,19 +675,26 @@ internal class SignalingControlCoordinator(
             currentAttempt != null &&
             currentAttempt.targetLock == channel.targetLock
         ) {
-            return acceptGlareWinner(current, channel, event.occurredAtElapsedMs)
+            return acceptGlareWinner(
+                current,
+                channel,
+                event.preferredTransportHint,
+                event.occurredAtElapsedMs
+            )
         }
         if (current is IntercomState.Discovering) {
             return when {
                 policy.paired -> beginPairedInboundConnection(
                     current,
                     channel,
+                    event.preferredTransportHint,
                     event.occurredAtElapsedMs
                 )
                 policy.confirmationAvailability.preferredSurface() != null ->
                     beginInboundConfirmation(
                         current,
                         channel,
+                        event.preferredTransportHint,
                         requireNotNull(policy.confirmationAvailability.preferredSurface())
                     )
                 else -> rejectInboundWithoutConfirmation(
@@ -565,20 +712,8 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         context: AttemptChannelSet
     ): SignalingControlDecision {
-        if (channel.transport != context.attempt.channelPlan.transport) {
-            return accepted(
-                effects = listOf(
-                    rejectEffect(
-                        context.attempt.runtimeSessionId,
-                        context.attempt.id,
-                        channel.channelId,
-                        RejectReason.SUPERSEDED_CHANNEL,
-                        retryable = false
-                    )
-                )
-            )
-        }
-        return accepted(
+        val reject = {
+            accepted(
             effects = listOf(
                 rejectEffect(
                     context.attempt.runtimeSessionId,
@@ -588,21 +723,64 @@ internal class SignalingControlCoordinator(
                     retryable = false
                 )
             )
+            )
+        }
+        val existingTransports = context.channelIds.mapNotNullTo(linkedSetOf()) {
+            channels[it]?.transport
+        }
+        if (
+            channel.transport !in context.attempt.channelPlan ||
+            channel.transport in existingTransports ||
+            channel.targetLock != context.attempt.targetLock ||
+            channel.peer != context.peer ||
+            context.phase !in setOf(
+                SignalingAttemptPhase.OPTIMIZING_MEDIA,
+                SignalingAttemptPhase.SELECTING_MEDIA
+            )
+        ) {
+            return reject()
+        }
+        val channelIds = context.channelIds + channel.channelId
+        val cohort = SelectionCohort(
+            context.wireRequestKey,
+            channelIds,
+            nowElapsedRealtimeMs()
         )
+        val preferredArrived = channel.transport == context.attempt.preferredTransport
+        active = context.copy(
+            channelIds = channelIds,
+            phase = if (preferredArrived) {
+                SignalingAttemptPhase.SELECTING_MEDIA
+            } else {
+                context.phase
+            },
+            selectionCohort = cohort,
+            optimizationMilestone = if (preferredArrived) null else context.optimizationMilestone
+        )
+        return if (
+            preferredArrived || context.phase == SignalingAttemptPhase.SELECTING_MEDIA
+        ) {
+            accepted(state = current, effects = listOf(selectEffect(context.attempt, cohort)))
+        } else {
+            accepted(state = current)
+        }
     }
 
     private fun beginInboundConfirmation(
         current: IntercomState.Discovering,
         channel: VerifiedControlChannel,
+        preferredTransportHint: Transport?,
         surface: ConfirmationSurface
     ): SignalingControlDecision {
-        val channelIds = eligibleChannels(channel.wireRequestKey, channel.transport)
+        val plan = inboundChannelPlan(channel.transport, preferredTransportHint)
+        val channelIds = eligibleChannels(channel.wireRequestKey, plan)
         val pending = PendingInboundRequest(
             runtimeSessionId = current.runtimeSessionId,
             wireRequestKey = channel.wireRequestKey,
             targetLock = channel.targetLock,
             peer = channel.peer,
             transport = channel.transport,
+            channelPlan = plan,
             channelIds = channelIds,
             phase = PendingInboundPhase.WAITING_LOCAL_DECISION,
             confirmationChannelId = channel.channelId,
@@ -624,35 +802,30 @@ internal class SignalingControlCoordinator(
     private fun beginPairedInboundConnection(
         current: IntercomState.Discovering,
         channel: VerifiedControlChannel,
+        preferredTransportHint: Transport?,
         occurredAtElapsedMs: Long
     ): SignalingControlDecision {
         val deadlineAt = deadlineAfter(occurredAtElapsedMs, attemptTimeoutMs)
         if (clock.now().elapsedRealtimeMs >= deadlineAt.elapsedRealtimeMs) {
             return rejectInboundWithoutConfirmation(current, channel, RejectReason.TIMEOUT)
         }
-        val eligible = eligibleChannels(channel.wireRequestKey, channel.transport)
+        val plan = inboundChannelPlan(channel.transport, preferredTransportHint)
+        val eligible = eligibleChannels(channel.wireRequestKey, plan)
         if (eligible.isEmpty()) return rejected()
         val attempt = inboundAttempt(
             runtimeSessionId = current.runtimeSessionId,
             channel = channel,
+            channelPlan = plan,
             deadlineAt = deadlineAt
         )
-        val cohort = SelectionCohort(channel.wireRequestKey, eligible, nowElapsedRealtimeMs())
         ownedAttempt = attempt
-        active = AttemptChannelSet(
-            wireRequestKey = channel.wireRequestKey,
+        return beginMediaSelection(
+            current = current,
             attempt = attempt,
             peer = channel.peer,
+            wireRequestKey = channel.wireRequestKey,
             channelIds = eligible,
-            phase = SignalingAttemptPhase.SELECTING_MEDIA,
-            selectionCohort = cohort
-        )
-        return accepted(
-            state = IntercomState.Connecting(attempt, channel.peer),
-            effects = listOf(
-                SessionEffect.ScheduleAttemptDeadline(attempt),
-                selectEffect(attempt, cohort)
-            )
+            prefixEffects = listOf(SessionEffect.ScheduleAttemptDeadline(attempt))
         )
     }
 
@@ -679,6 +852,7 @@ internal class SignalingControlCoordinator(
     private fun acceptGlareWinner(
         current: IntercomState.Connecting,
         channel: VerifiedControlChannel,
+        preferredTransportHint: Transport?,
         occurredAtElapsedMs: Long
     ): SignalingControlDecision {
         if (current.attempt.isExpiredAt(clock.now())) return rejected()
@@ -719,7 +893,8 @@ internal class SignalingControlCoordinator(
         recordTerminal(current.attempt, ConnectionAttemptTerminalOutcome.GLARE_LOST)
         losingChannelIds.forEach(channels::remove)
 
-        val eligible = eligibleChannels(channel.wireRequestKey, channel.transport)
+        val plan = inboundChannelPlan(channel.transport, preferredTransportHint)
+        val eligible = eligibleChannels(channel.wireRequestKey, plan)
         if (eligible.isEmpty()) {
             active = null
             clearOwnedAttempt(current.attempt)
@@ -736,18 +911,10 @@ internal class SignalingControlCoordinator(
         val attempt = inboundAttempt(
             runtimeSessionId = current.runtimeSessionId,
             channel = channel,
+            channelPlan = plan,
             deadlineAt = current.attempt.deadlineAt
         )
-        val cohort = SelectionCohort(channel.wireRequestKey, eligible, occurredAtElapsedMs)
         ownedAttempt = attempt
-        active = AttemptChannelSet(
-            wireRequestKey = channel.wireRequestKey,
-            attempt = attempt,
-            peer = channel.peer,
-            channelIds = eligible,
-            phase = SignalingAttemptPhase.SELECTING_MEDIA,
-            selectionCohort = cohort
-        )
         val effects = losingChannelIds.map {
             SessionEffect.CloseControlChannel(
                 runtimeSessionId = current.runtimeSessionId,
@@ -755,10 +922,14 @@ internal class SignalingControlCoordinator(
                 channelId = it,
                 targetLock = current.attempt.targetLock
             )
-        } + SessionEffect.ScheduleAttemptDeadline(attempt) + selectEffect(attempt, cohort)
-        return accepted(
-            state = IntercomState.Connecting(attempt, channel.peer),
-            effects = effects
+        } + SessionEffect.ScheduleAttemptDeadline(attempt)
+        return beginMediaSelection(
+            current = current,
+            attempt = attempt,
+            peer = channel.peer,
+            wireRequestKey = channel.wireRequestKey,
+            channelIds = eligible,
+            prefixEffects = effects
         )
     }
 
@@ -781,7 +952,7 @@ internal class SignalingControlCoordinator(
             return timeoutIncomingConfirmation(current, pending)
         }
         val eligible = pending.channelIds.filterTo(linkedSetOf()) { channelId ->
-            channels[channelId]?.transport == pending.transport
+            channels[channelId]?.transport?.let { it in pending.channelPlan } == true
         }
         if (eligible.isEmpty()) return finishPendingImmediately(current, pending)
         val confirmationChannel = channels[pending.confirmationChannelId]
@@ -789,25 +960,20 @@ internal class SignalingControlCoordinator(
         val acceptedAttempt = inboundAttempt(
             runtimeSessionId = pending.runtimeSessionId,
             channel = confirmationChannel,
+            channelPlan = pending.channelPlan,
             deadlineAt = acceptedDeadline
         )
-        val cohort = SelectionCohort(pending.wireRequestKey, eligible, nowElapsedRealtimeMs())
         ownedAttempt = acceptedAttempt
-        active = AttemptChannelSet(
-            wireRequestKey = pending.wireRequestKey,
+        pendingInbound = null
+        return beginMediaSelection(
+            current = current,
             attempt = acceptedAttempt,
             peer = pending.peer,
+            wireRequestKey = pending.wireRequestKey,
             channelIds = eligible,
-            phase = SignalingAttemptPhase.SELECTING_MEDIA,
-            selectionCohort = cohort
-        )
-        pendingInbound = null
-        return accepted(
-            state = IntercomState.Connecting(acceptedAttempt, pending.peer),
-            effects = listOf(
+            prefixEffects = listOf(
                 cancelConfirmationEffect(pending),
-                SessionEffect.ScheduleAttemptDeadline(acceptedAttempt),
-                selectEffect(acceptedAttempt, cohort)
+                SessionEffect.ScheduleAttemptDeadline(acceptedAttempt)
             )
         )
     }
@@ -960,8 +1126,10 @@ internal class SignalingControlCoordinator(
 
         active = context.copy(
             phase = SignalingAttemptPhase.ACCEPTING,
-            mediaOwnerChannelId = selected
+            mediaOwnerChannelId = selected,
+            optimizationMilestone = null
         )
+        targetedTransportRace = null
         val effects = mutableListOf<SessionEffect>(
             SessionEffect.SendConnectAccept(
                 runtimeSessionId = context.attempt.runtimeSessionId,
@@ -1033,6 +1201,7 @@ internal class SignalingControlCoordinator(
             mediaOwnerChannelId = event.channelId,
             terminalOutcome = AttemptOutcome.ACCEPTED
         )
+        targetedTransportRace = null
         val effects = losing.map {
             SessionEffect.CloseControlChannel(
                 runtimeSessionId = context.attempt.runtimeSessionId,
@@ -1393,6 +1562,20 @@ internal class SignalingControlCoordinator(
                 effects = listOf(selectEffect(context.attempt, cohort))
             )
         }
+        if (
+            context.phase == SignalingAttemptPhase.OPTIMIZING_MEDIA &&
+            cohort != null &&
+            remaining.any { channels[it]?.transport == context.attempt.preferredTransport }
+        ) {
+            active = requireNotNull(active).copy(
+                phase = SignalingAttemptPhase.SELECTING_MEDIA,
+                optimizationMilestone = null
+            )
+            return accepted(
+                state = current,
+                effects = listOf(selectEffect(context.attempt, cohort))
+            )
+        }
         return accepted(state = current)
     }
 
@@ -1709,7 +1892,11 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         pending: PendingInboundRequest
     ): SignalingControlDecision {
-        if (channel.transport != pending.transport) {
+        if (
+            channel.transport !in pending.channelPlan ||
+            channel.targetLock != pending.targetLock ||
+            channel.peer != pending.peer
+        ) {
             return accepted(
                 effects = listOf(
                     rejectEffect(
@@ -1865,16 +2052,70 @@ internal class SignalingControlCoordinator(
         )
     }
 
+    private fun beginMediaSelection(
+        current: IntercomState,
+        attempt: ConnectionAttempt,
+        peer: PeerIdentity,
+        wireRequestKey: WireRequestKey,
+        channelIds: Set<ControlChannelId>,
+        prefixEffects: List<SessionEffect> = emptyList()
+    ): SignalingControlDecision {
+        if (attempt.isExpiredAt(clock.now())) {
+            return terminateOwnedAttempt(
+                current,
+                attempt,
+                ConnectionAttemptTerminalOutcome.TIMED_OUT
+            )
+        }
+        val cohort = SelectionCohort(wireRequestKey, channelIds, nowElapsedRealtimeMs())
+        val preferredReady = channelIds.any {
+            channels[it]?.transport == attempt.preferredTransport
+        }
+        if (attempt.channelPlan.fallbackTransport != null && !preferredReady) {
+            val milestone = AttemptMilestone.MediaOptimization(
+                attempt = attempt,
+                wireRequestKey = wireRequestKey,
+                scheduledAt = optimizationAt(attempt)
+            )
+            active = AttemptChannelSet(
+                wireRequestKey = wireRequestKey,
+                attempt = attempt,
+                peer = peer,
+                channelIds = channelIds,
+                phase = SignalingAttemptPhase.OPTIMIZING_MEDIA,
+                selectionCohort = cohort,
+                optimizationMilestone = milestone
+            )
+            return accepted(
+                state = IntercomState.Optimizing(attempt, peer),
+                effects = prefixEffects + SessionEffect.ScheduleAttemptMilestone(milestone)
+            )
+        }
+        active = AttemptChannelSet(
+            wireRequestKey = wireRequestKey,
+            attempt = attempt,
+            peer = peer,
+            channelIds = channelIds,
+            phase = SignalingAttemptPhase.SELECTING_MEDIA,
+            selectionCohort = cohort
+        )
+        return accepted(
+            state = IntercomState.Connecting(attempt, peer),
+            effects = prefixEffects + selectEffect(attempt, cohort)
+        )
+    }
+
     private fun inboundAttempt(
         runtimeSessionId: RuntimeSessionId,
         channel: VerifiedControlChannel,
+        channelPlan: ChannelPlan,
         deadlineAt: MonotonicTimestamp
     ): ConnectionAttempt = ConnectionAttempt(
         id = channel.wireRequestKey.attemptId,
         runtimeSessionId = runtimeSessionId,
         targetLock = channel.targetLock,
         trigger = ConnectionTrigger.INBOUND,
-        channelPlan = ChannelPlan.single(channel.transport),
+        channelPlan = channelPlan,
         deadlineElapsedRealtimeMs = deadlineAt.elapsedRealtimeMs
     )
 
@@ -1894,12 +2135,57 @@ internal class SignalingControlCoordinator(
 
     private fun nowElapsedRealtimeMs(): Long = clock.now().elapsedRealtimeMs
 
+    private fun optimizationAt(attempt: ConnectionAttempt): MonotonicTimestamp =
+        MonotonicTimestamp(
+            minOf(
+                Math.addExact(nowElapsedRealtimeMs(), optimizationWindowMs),
+                attempt.deadlineElapsedRealtimeMs
+            )
+        )
+
+    private fun inboundChannelPlan(
+        channelTransport: Transport,
+        preferredTransportHint: Transport?
+    ): ChannelPlan {
+        if (preferredTransportHint == null) return ChannelPlan.single(channelTransport)
+        val fallback = Transport.entries.single { it != preferredTransportHint }
+        return ChannelPlan.race(preferredTransportHint, fallback).also {
+            require(channelTransport in it) { "Inbound channel must belong to the hinted plan" }
+        }
+    }
+
     private fun eligibleChannels(
         wireRequestKey: WireRequestKey,
         transport: Transport
     ): Set<ControlChannelId> = channels.values
         .filter { it.wireRequestKey == wireRequestKey && it.transport == transport }
         .mapTo(linkedSetOf()) { it.channelId }
+
+    private fun eligibleChannels(
+        wireRequestKey: WireRequestKey,
+        channelPlan: ChannelPlan
+    ): Set<ControlChannelId> = channels.values
+        .filter { it.wireRequestKey == wireRequestKey && it.transport in channelPlan }
+        .mapTo(linkedSetOf()) { it.channelId }
+
+    private fun winnerTransport(attempt: ConnectionAttempt): Transport? {
+        val context = active?.takeIf {
+            it.attempt == attempt &&
+                it.mediaOwnerChannelId != null &&
+                it.terminalOutcome == AttemptOutcome.ACCEPTED
+        }
+        val owner = context?.mediaOwnerChannelId
+        val channel = owner?.let(channels::get)?.takeIf {
+            it.wireRequestKey == context.wireRequestKey &&
+                it.targetLock == attempt.targetLock &&
+                it.peer == context.peer &&
+                it.transport in attempt.channelPlan
+        }
+        if (channel != null) return channel.transport
+        return attempt.preferredTransport.takeIf {
+            attempt.channelPlan.fallbackTransport == null
+        }
+    }
 
     private fun selectEffect(
         attempt: ConnectionAttempt,
@@ -1909,7 +2195,7 @@ internal class SignalingControlCoordinator(
         attemptId = attempt.id,
         wireRequestKey = cohort.wireRequestKey,
         cohort = cohort,
-        preferredTransport = attempt.channelPlan.transport
+        preferredTransport = attempt.preferredTransport
     )
 
     private fun responseEffect(
@@ -2038,6 +2324,32 @@ internal class SignalingControlCoordinator(
 
     private fun clearOwnedAttempt(attempt: ConnectionAttempt) {
         if (ownedAttempt?.id == attempt.id) ownedAttempt = null
+        if (targetedTransportRace?.attempt?.id == attempt.id) targetedTransportRace = null
+    }
+
+    private fun createTargetedTransportRace(
+        attempt: ConnectionAttempt
+    ): TargetedTransportRace {
+        val fallbackMilestone = attempt.channelPlan.fallbackTransport?.let {
+            AttemptMilestone.FallbackTransport(
+                attempt = attempt,
+                transport = it,
+                scheduledAt = fallbackAt(attempt)
+            )
+        }
+        return TargetedTransportRace(
+            attempt = attempt,
+            openedTransports = setOf(attempt.preferredTransport),
+            fallbackMilestone = fallbackMilestone
+        )
+    }
+
+    private fun fallbackAt(attempt: ConnectionAttempt): MonotonicTimestamp {
+        val startedAt = Math.subtractExact(
+            attempt.deadlineElapsedRealtimeMs,
+            attemptTimeoutMs
+        )
+        return MonotonicTimestamp(Math.addExact(startedAt, fallbackDelayMs))
     }
 
     private fun recordTerminal(

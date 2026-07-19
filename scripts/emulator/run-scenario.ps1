@@ -73,6 +73,20 @@ function Get-SharedAddress {
     return $match.Groups["address"].Value
 }
 
+function Get-UiDump {
+    param([string]$Serial)
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $output = Invoke-AdbText $Serial "ui" @(
+            "exec-out", "uiautomator", "dump", "/dev/tty"
+        )
+        if ($output -match "<hierarchy\b" -and $output -notmatch "ERROR:") {
+            return
+        }
+        if ($attempt -lt 3) { Start-Sleep -Seconds 1 }
+    }
+    throw "UI hierarchy was unavailable after 3 attempts: $Serial"
+}
+
 function Run-Smoke {
     foreach ($serial in $Serials) {
         Invoke-AdbText $serial "force-stop" @("shell", "am", "force-stop", $targetPackage) | Out-Null
@@ -84,7 +98,7 @@ function Run-Smoke {
             throw "Launcher activity did not resolve: $serial output=$activity"
         }
         Invoke-AdbText $serial "launch" @("shell", "am", "start", "-W", "-n", $component) | Out-Null
-        Invoke-AdbText $serial "ui" @("exec-out", "uiautomator", "dump", "/dev/tty") | Out-Null
+        Get-UiDump $serial
     }
 
     $addresses = @{}

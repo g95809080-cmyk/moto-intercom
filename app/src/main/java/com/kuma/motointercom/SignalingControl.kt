@@ -20,6 +20,9 @@ internal data class VerifiedControlChannel(
             require(originatingAttempt.id == wireRequestKey.attemptId) {
                 "Requester channel attempt does not match its wire request key"
             }
+            require(transport in originatingAttempt.channelPlan) {
+                "Requester channel transport must belong to the attempt plan"
+            }
         }
     }
 }
@@ -37,6 +40,7 @@ internal data class SelectionCohort(
 
 internal enum class SignalingAttemptPhase {
     WAITING_REMOTE_DECISION,
+    OPTIMIZING_MEDIA,
     SELECTING_MEDIA,
     ACCEPTING,
     ACCEPTED,
@@ -70,6 +74,7 @@ internal data class AttemptChannelSet(
     val phase: SignalingAttemptPhase,
     val mediaOwnerChannelId: ControlChannelId? = null,
     val selectionCohort: SelectionCohort? = null,
+    val optimizationMilestone: AttemptMilestone.MediaOptimization? = null,
     val terminalOutcome: AttemptOutcome? = null,
     val pendingTerminalChannels: Set<ControlChannelId> = emptySet()
 ) {
@@ -82,6 +87,13 @@ internal data class AttemptChannelSet(
         }
         require(selectionCohort == null || selectionCohort.wireRequestKey == wireRequestKey) {
             "Selection cohort must belong to the same wire request"
+        }
+        require(
+            optimizationMilestone == null ||
+                optimizationMilestone.attempt == attempt &&
+                optimizationMilestone.wireRequestKey == wireRequestKey
+        ) {
+            "Optimization milestone must belong to the active attempt"
         }
     }
 }
@@ -97,6 +109,7 @@ internal data class PendingInboundRequest(
     val targetLock: TargetLock,
     val peer: PeerIdentity,
     val transport: Transport,
+    val channelPlan: ChannelPlan = ChannelPlan.single(transport),
     val channelIds: Set<ControlChannelId>,
     val phase: PendingInboundPhase,
     val confirmationChannelId: ControlChannelId? = null,
@@ -109,6 +122,9 @@ internal data class PendingInboundRequest(
     init {
         require(peer.isVerifiedFor(targetLock)) {
             "Pending inbound peer must match its TargetLock"
+        }
+        require(transport in channelPlan) {
+            "Pending inbound channel must belong to its immutable plan"
         }
         require(channelIds.isNotEmpty()) { "Pending inbound channels must not be empty" }
         require(confirmationChannelId == null || confirmationChannelId in channelIds) {
@@ -149,7 +165,7 @@ internal data class ConnectionCandidateContext(
         require(targetLock == attempt.targetLock) {
             "Candidate TargetLock must match the attempt"
         }
-        require(transport == attempt.channelPlan.transport) {
+        require(transport in attempt.channelPlan) {
             "Candidate transport must match the attempt plan"
         }
         require(peer.isVerifiedFor(targetLock)) {

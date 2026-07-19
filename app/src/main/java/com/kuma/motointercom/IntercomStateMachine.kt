@@ -160,6 +160,10 @@ internal sealed interface SessionEvent {
         val scheduledDeadlineElapsedRealtimeMs: Long
     ) : SessionEvent
 
+    data class AttemptMilestoneElapsed(
+        val milestone: AttemptMilestone
+    ) : SessionEvent
+
     data class TransportOptimizing(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId
@@ -201,7 +205,12 @@ internal sealed interface SessionEvent {
 
 internal sealed interface SessionEffect {
     data class OpenTargetedTransport(
-        val attempt: ConnectionAttempt
+        val attempt: ConnectionAttempt,
+        val transport: Transport = attempt.preferredTransport
+    ) : SessionEffect
+
+    data class ScheduleAttemptMilestone(
+        val milestone: AttemptMilestone
     ) : SessionEffect
 
     data class AbortAttemptAndResumeDiscovery(
@@ -337,6 +346,7 @@ internal fun reduceIntercomState(
     is SessionEvent.ConnectPresenceRequested,
     is SessionEvent.TargetedTransportOpenFailed,
     is SessionEvent.AttemptTimedOut,
+    is SessionEvent.AttemptMilestoneElapsed,
     is SessionEvent.WebRtcStateChanged,
     is SessionEvent.SignalingDisconnected,
     is SessionEvent.RecoveryExhausted,
@@ -385,7 +395,7 @@ private fun reduceTunnelReady(
     current: IntercomState,
     event: SessionEvent.TunnelReady
 ): SessionTransition? {
-    if (event.transport != event.attempt.channelPlan.transport) return null
+    if (event.transport !in event.attempt.channelPlan) return null
     if (!event.peer.isVerifiedFor(event.attempt.targetLock)) return null
 
     return when (current) {
