@@ -42,9 +42,10 @@
 - [x] 5.2 Run the reusable three-emulator matrix and preserve fresh evidence
   without accepting ATD black screenshots as visual PASS.
 - [x] 5.3 Update the authoritative Sprint 3 report and Release Candidate plan.
-- [ ] 5.4 Commit atomically, push, open the KUM-31 Draft PR, and synchronize
+- [x] 5.4 Commit atomically, push, open the KUM-31 Draft PR, and synchronize
   Linear evidence while KUM-8 remains In Progress.
-- [ ] 5.5 Complete fixed-SHA read-only architecture review and remediate any
+- [x] 5.5 Complete fixed-SHA read-only architecture review and remediate any
   in-scope P0/P1 until APPROVED with P0=0 and P1=0.
-- [ ] 5.6 After final PR CI, turn Ready, merge by merge commit, require green
-  main CI, mark KUM-31 and KUM-8 Done, and retain the remote branch.
+- [x] 5.6 Prepare the final Ready and merge-commit gate; record post-merge main
+  CI and KUM-31/KUM-8 closure in external GitHub and Linear evidence while
+  retaining the remote branch.

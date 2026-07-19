@@ -1,6 +1,6 @@
 # Sprint 3 Final Verification
 
-Status: **KUM-31 LOCAL AUTOMATED GATE COMPLETE - PR, CI, AND REVIEW PENDING**
+Status: **KUM-31 REVIEW APPROVED - FINAL EVIDENCE-SYNC CI PENDING**
 
 Evidence state: 2026-07-19
 
@@ -8,10 +8,12 @@ Evidence state: 2026-07-19
 
 - Repository: `g95809080-cmyk/moto-intercom`
 - Branch: `feat/kum-31-fallback-verification`
-- Pull request: not opened yet
+- Pull request: [#8](https://github.com/g95809080-cmyk/moto-intercom/pull/8) - Draft
 - KUM-31 base and current `main`: `830c5e6974f2c1ddca71f020db137a0d433978bc`
 - Verified KUM-31 source head: `5b3e1d1bf7dc8be5e066e95f9547e019d939941c`
-- KUM-31 PR CI and fixed-SHA review: pending
+- Reviewed KUM-31 head: `1d0e2189ec06b949d1b507a3debc6afde57e2191`
+- Reviewed-head GitHub Actions: [run 29686642730](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29686642730) - success
+- Fixed-SHA architecture review: APPROVED, P0=0, P1=0
 - KUM-30 final PR head: `bf566bc154de4132bbe1594a08b5dd80a0254e61`
 - KUM-30 merge commit: `830c5e6974f2c1ddca71f020db137a0d433978bc`
 - KUM-30 final PR CI: [run 29684691731](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684691731) - success
@@ -193,7 +195,7 @@ owner, loser cleanup, actual winner transport, and recovery scheduling.
 | Debug APK | `5b3e1d1` | PASS | `assembleDebug` |
 | Android test APK | `5b3e1d1` | PASS | `assembleDebugAndroidTest` |
 | Rasen strict validation | `5b3e1d1` | PASS | 1/1 |
-| GitHub Actions | pending | PENDING | requires pushed evidence head |
+| Reviewed-head GitHub Actions | `1d0e218` | PASS | run `29686642730` |
 
 Deterministic coverage binds exact T+5 opening, ordered retire-LAN/retry-P2P,
 same attempt/target/plan/deadline, duplicate BUSY idempotency, pre-fallback and
@@ -382,9 +384,22 @@ hierarchy, network, process, service, and log evidence carry this gate.
 
 ## KUM-31 architecture review
 
-Fixed-SHA independent read-only review is pending the evidence commit. KUM-31
-cannot become Ready, merge, or move to Done until it returns APPROVED with
-P0=0 and P1=0 and the same head passes GitHub Actions.
+```text
+Base SHA: 830c5e6974f2c1ddca71f020db137a0d433978bc
+Head SHA: 1d0e2189ec06b949d1b507a3debc6afde57e2191
+Result: APPROVED
+P0: 0
+P1: 0
+KUM-31 complete: YES
+Sprint 3 close allowed: YES
+```
+
+The independent read-only reviewer traced the BUSY producer, immutable-attempt
+event, Coordinator acceptance guards, retired-transport viability and channel
+adoption, ordered Service effects, adapter generation/remaining-time checks,
+and fallback terminal accounting. It found no second product-state writer,
+Coordinator, deadline owner, target selector, or media owner. No development
+evidence is missing; real OEM overlap behavior remains RC-only residual risk.
 
 ## Physical acceptance queue
 
@@ -415,10 +430,11 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-29 Exit Criteria | PASS |
 | KUM-30 Exit Criteria | PASS - merged, main CI green, Done |
 | KUM-31 local automated gate | PASS |
-| Known KUM-31 P0 / P1 | 0 known / 0 known; independent review pending |
-| KUM-31 Draft PR | NOT OPENED |
-| KUM-31 PR may become Ready | NO - PR CI and architecture review pending |
-| KUM-31 PR may merge | NO - final unchanged gate pending |
+| KUM-31 architecture review | APPROVED - P0=0, P1=0 |
+| KUM-31 reviewed-head CI | PASS - run `29686642730` |
+| KUM-31 Draft PR | OPEN - #8 |
+| KUM-31 PR may become Ready | YES after final evidence-only Head CI succeeds |
+| KUM-31 PR may merge | YES by merge commit after the final unchanged gate |
 | KUM-31 may move to Done | NO - merge and green `main` CI pending |
 | Sprint 3 may close | NO - KUM-31 delivery remains open |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
@@ -429,12 +445,18 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 - KUM-28 elapsed: approximately 2 hours from Linear start to fixed-SHA approval.
 - KUM-29 elapsed: approximately 1h26m from Linear start to green main CI.
 - KUM-30 elapsed to fixed-SHA approval: approximately 1h22m.
-- Workers: one write worker; two sequential read-only reviewer instances. The
+- KUM-31 elapsed to fixed-SHA approval: approximately 1h08m.
+- KUM-30 workers: one write worker; two sequential read-only reviewer instances. The
   first was stopped after failing to return a conclusion; the second completed.
+- KUM-31 workers: one write worker and one independent read-only reviewer.
 - Completed KUM-30 architecture review rounds: 1.
+- Completed KUM-31 architecture review rounds: 1.
 - Runtime handoffs inherited during KUM-30: 1.
+- Runtime handoffs inherited during KUM-31: 1.
 - Goal-runtime cumulative token usage at KUM-30 approval: 6,289,417; a
   KUM-30-only split was not exposed.
+- Goal-runtime cumulative token usage at KUM-31 approval: 8,638,468; a
+  KUM-31-only split was not exposed.
 - Repeated full-repository rescans: 0.
 
 ## Residual risk
