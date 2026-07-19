@@ -1,8 +1,8 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-33 AUTOMATED GATE PASSED - ARCHITECTURE REVIEW PENDING**
+Status: **KUM-33 P1 REMEDIATION AUTOMATED GATE PASSED - ARCHITECTURE RE-REVIEW PENDING**
 
-Evidence state: 2026-07-19
+Evidence state: 2026-07-20
 
 ## Bound revision
 
@@ -41,6 +41,10 @@ Evidence state: 2026-07-19
 - KUM-33 base: `5c49a53db45ecaa5b9f449af5f04d28250f3f772`
 - KUM-33 implementation source: `616c22fcc270e98c276a0fb8e3a3943101334492`
 - KUM-33 automated-evidence head: `834dc7e74897784c455b9c0636487b3cbc3590bf`
+- KUM-33 initial review/delivery head: `5e1da34882d934e9812aa1100c497c8511388aab`
+- KUM-33 initial PR-head GitHub Actions: run `29700055312` - success
+- KUM-33 per-transport readiness remediation source:
+  `9d773ad77e7927ec86482de614d99e79ac59aaa0`
 - KUM-33 pull request: [#11](https://github.com/g95809080-cmyk/moto-intercom/pull/11) - Draft
 - KUM-33 Rasen change: `kum-33-three-second-recovery-fallback`
 - Linear: KUM-9 In Progress; KUM-37/KUM-32 Done; KUM-33 In Review; KUM-34 through KUM-36 Todo
@@ -240,11 +244,14 @@ model:
   normal attempts retain T+5 and every attempt retains immutable T+10;
 - media-only recovery opens the preferred transport immediately on existing
   adapters;
-- signaling-loss recovery completes mandatory cleanup, rebuilds only planned
-  adapters, then reports exact-attempt readiness to the Coordinator with no
-  additional recovery backoff;
-- if cleanup consumed T+3, the Coordinator opens preferred then the already-due
-  alternate without resetting either clock; and
+- signaling-loss recovery schedules T+3 from immutable attempt creation,
+  completes mandatory cleanup, rebuilds only planned adapters, and reports
+  exact-attempt readiness independently for LAN and Wi-Fi Direct;
+- LAN becomes eligible after its synchronous adapter start, while Wi-Fi Direct
+  becomes eligible only after old-group cleanup and DNS-SD setup complete;
+- if T+3 arrives before the alternate adapter is ready, the Coordinator records
+  fallback due and opens it when that adapter later reports ready, without
+  resetting either clock; and
 - KUM-32 target admission, KUM-31 overlap fallback, KUM-37 hot audio, and the
   single `StartWebRtc` owner remain unchanged.
 
@@ -256,28 +263,35 @@ remain unimplemented.
 
 | Check | Bound revision | Result | Evidence |
 | --- | --- | --- | --- |
-| Targeted JVM | `616c22f` | PASS | 88 tests across recovery ownership, signaling, transport race, logical A/B/C acceptance, and cleanup; 0 failures/errors/skipped |
-| Full JVM gate | `616c22f` | PASS | 263 tests; 39 suites; 0 failures, errors, or skipped |
-| Lint | `616c22f` | PASS | 0 Fatal, 0 Error, 34 warnings |
-| Debug APK | `616c22f` | PASS | `assembleDebug`; SHA-256 `C42BDED42C74A53AFE7C4A56F4646BECD6779EE2C62A8DDE546BB8C98CA528BD` |
-| Android test APK | `616c22f` | PASS | `assembleDebugAndroidTest`; SHA-256 `8CFDDA1E17263DDEA30232532F6B3FFD71C7A91A5CAA8AC0E40A3D1EC7E49CE3` |
-| Recovery timing instrumentation | `616c22f` | PASS | 2/2 on each of three API 36 emulators; 6/6 total |
-| Rasen strict validation | `616c22f` | PASS | 1/1; 4/4 artifacts complete |
-| PowerShell compatibility | `616c22f` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
+| P1 targeted JVM | `9d773ad` | PASS | 31 tests across Coordinator ownership, Service readiness routing, logical A/B/C acceptance, exact T+3 races, stale events, and asynchronous adapter startup; 0 failures/errors/skipped |
+| Full JVM gate | `9d773ad` | PASS | 266 tests; 40 suites; 0 failures, errors, or skipped |
+| Lint | `9d773ad` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `9d773ad` | PASS | `assembleDebug`; SHA-256 `A4E05A9181F37B2731A9F2B62CFF421273F48358827A8616FB39135D11FC946D` |
+| Android test APK | `9d773ad` | PASS | `assembleDebugAndroidTest`; SHA-256 `5A6A9F9A01FAB5AAC98DA7034CAD8779D582F7C870E9492DF817B170F50FFE70` |
+| Recovery timing instrumentation | `9d773ad` | PASS | 2/2 on each of three API 36 emulators inside the full matrix; 6/6 total |
+| Rasen strict validation | `9d773ad` | PASS | 1/1; 4/4 artifacts complete |
+| Production startup-order regression | `9d773ad` | PASS | Service readiness router proves Wi-Fi Direct cannot open before asynchronous cleanup/DNS-SD readiness, LAN does not wait, and a due alternate opens only when ready |
 
 The first emulator run correctly failed because the new test fixture used a
 non-canonical runtime ID at the `WireRequestKey` trust boundary. Replacing the
 fixture values with canonical UUIDs made the unchanged production scenario pass
 on all three nodes. This was a test-data defect, not a production fallback.
 
+The first local P1-remediation Gradle invocation lacked `ANDROID_HOME` and
+`ANDROID_SDK_ROOT` in the temporary checkout and stopped before compilation.
+Rerunning with the installed SDK passed. A submission self-review then found
+that LAN readiness was dispatched from the right-hand side of the field
+assignment; the adapter is now stored before synchronous readiness can trigger
+`OpenTargetedTransport`. The complete clean gate and emulator matrix were rerun
+after that correction.
+
 ## KUM-33 emulator matrix
 
 - Emulator: 36.6.11; API 36 AOSP ATD x86_64
 - Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
-- KUM-33 timing result: `build/emulator-results/20260720-025658-recovery-timing` - PASS
-- Full matrix: `build/emulator-results/20260720-025801-all` - PASS
-- Evidence archive: `build/emulator-evidence/20260720-025849.zip`
-- Archive SHA-256: `3CEC85F2BB048F38BB1FBF87684AB31DBFBCBD57029D764CE26182B471AEE6A2`
+- Full matrix: `build/emulator-results/20260720-040113-all` - PASS
+- Evidence archive: `build/emulator-evidence/20260720-040157.zip`
+- Archive SHA-256: `07368D11D1F6505E2F7BFA998F57416A619E8E2498BEA8C4BD0EA58A90D99358`
 
 Every node logged the same immutable attempt/target/deadline evidence:
 
@@ -293,6 +307,26 @@ and bounded shutdown. The connected MI 6 was excluded from every command.
 
 ATD screenshots remained all black on visual inspection and are
 `UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
+
+## KUM-33 architecture review
+
+The initial fixed-SHA read-only review at `5e1da34` returned REQUEST CHANGES,
+P0=0, P1=2. It found that Service sent aggregate recovery readiness immediately
+after `WifiDirectTunnel.start()`, before asynchronous startup group cleanup and
+DNS-SD setup completed. That premature open could bind `targetAttempt`, make the
+startup callback's captured null context stale, and silently prevent Wi-Fi
+Direct discovery. Existing instrumentation exercised the Coordinator directly
+and did not cover this Service-to-adapter ordering.
+
+The remediation at `9d773ad` replaces aggregate readiness with exact
+per-transport events. T+3 is scheduled at attempt creation; the race tracks
+adapter readiness and whether fallback is due. LAN reports only after its
+synchronous start succeeds. Wi-Fi Direct reports only after
+`serviceDiscoveryReady = true`, with the adapter stored before any synchronous
+open effect can run. Focused production-path tests cover both preferred orders,
+milestone-before-readiness, readiness-at-T+3, duplicates, stale attempts, and
+the asynchronous cleanup boundary. Fixed-SHA architecture re-review remains
+pending.
 
 ## Physical acceptance queue
 
@@ -322,9 +356,9 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-32 architecture review | APPROVED at `5f1d1d6`; P0=0/P1=0 |
 | KUM-32 may move to Done | YES - merged as `5c49a53`, exact-main CI `29698415621` passed, Linear Done |
 | KUM-33 may start | YES - active on `feat/kum-33-three-second-recovery-fallback` from `5c49a53` |
-| KUM-33 implementation/automated gate | PASS at source `616c22f`; emulator matrix `20260720-025801-all` passed |
-| KUM-33 architecture review | PENDING fixed-SHA review |
-| KUM-33 may move to Done | NO - Draft PR, CI, APPROVED review, merge, and main CI remain |
+| KUM-33 implementation/automated gate | PASS at remediation source `9d773ad`; 266 JVM tests and emulator matrix `20260720-040113-all` passed |
+| KUM-33 architecture review | Initial REQUEST CHANGES at `5e1da34`, P0=0/P1=2; fixed-SHA re-review pending |
+| KUM-33 may move to Done | NO - remediation push/CI, APPROVED review, merge, and main CI remain |
 | KUM-34 may start | NO |
 | Sprint 4 may close | NO - KUM-33 is In Progress; KUM-34 through KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
