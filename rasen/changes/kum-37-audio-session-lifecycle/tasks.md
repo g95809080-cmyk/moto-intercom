@@ -36,4 +36,4 @@
 - [x] 6.3 Update Sprint 4 verification and the Release Candidate physical plan with KUM-37 evidence and deferrals.
 - [x] 6.4 Commit atomically, push, open the KUM-37 Draft PR, and synchronize Linear while KUM-32 remains Todo.
 - [x] 6.5 Complete fixed-SHA read-only architecture review and remediate in-scope P0/P1 until APPROVED with P0=0 and P1=0.
-- [ ] 6.6 Turn the PR Ready, merge with a merge commit, verify green main CI, close KUM-37, retain the remote branch, and only then allow KUM-32.
+- [x] 6.6 Prepare the final Ready and merge-commit gate; record merge, post-merge main CI, KUM-37 closure, and KUM-32 authorization in external GitHub/Linear evidence while retaining the remote branch.
