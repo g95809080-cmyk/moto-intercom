@@ -17,6 +17,7 @@ private data class TargetedTransportRace(
     val attempt: ConnectionAttempt,
     val openedTransports: Set<Transport>,
     val failedTransports: Set<Transport> = emptySet(),
+    val retiredTransports: Set<Transport> = emptySet(),
     val fallbackMilestone: AttemptMilestone.FallbackTransport? = null
 )
 
@@ -106,6 +107,8 @@ internal class SignalingControlCoordinator(
                 current,
                 event
             )
+            is SessionEvent.TargetedTransportOverlapUnavailable ->
+                targetedTransportOverlapUnavailable(current, event)
             is SessionEvent.AttemptTimedOut -> attemptTimedOut(current, event)
             is SessionEvent.AttemptMilestoneElapsed -> attemptMilestoneElapsed(current, event)
             is SessionEvent.WebRtcStateChanged -> webRtcStateChanged(current, event)
@@ -266,13 +269,58 @@ internal class SignalingControlCoordinator(
             ?.channelIds
             .orEmpty()
             .mapNotNullTo(linkedSetOf()) { channels[it]?.transport }
-        val viableOpened = (updated.openedTransports - updated.failedTransports) + liveTransports
+            .minus(updated.retiredTransports)
+        val viableOpened = (
+            updated.openedTransports - updated.failedTransports - updated.retiredTransports
+            ) + liveTransports
         val pending = attempt.channelPlan.plannedTransports - updated.openedTransports
         return if (viableOpened.isNotEmpty() || pending.isNotEmpty()) {
             accepted(state = current)
         } else {
             terminateOwnedAttempt(current, attempt, ConnectionAttemptTerminalOutcome.FAILED)
         }
+    }
+
+    private fun targetedTransportOverlapUnavailable(
+        current: IntercomState,
+        event: SessionEvent.TargetedTransportOverlapUnavailable
+    ): SignalingControlDecision {
+        val attempt = ownedAttempt?.takeIf {
+            it == event.attempt &&
+                current.connectionAttemptOrNull() == it &&
+                !it.isExpiredAt(clock.now()) &&
+                event.transport == it.channelPlan.fallbackTransport
+        } ?: return rejected()
+        val race = targetedTransportRace?.takeIf {
+            it.attempt == attempt &&
+                event.transport in it.openedTransports &&
+                event.transport !in it.failedTransports &&
+                attempt.preferredTransport !in it.retiredTransports
+        } ?: return rejected()
+        if (
+            terminalOutcome(attempt.id) != null ||
+            active?.takeIf { it.attempt == attempt }?.mediaOwnerChannelId != null ||
+            channels.values.any {
+                it.requestRole == RequestRole.REQUESTER &&
+                    it.originatingAttempt == attempt &&
+                    it.transport == attempt.preferredTransport
+            }
+        ) {
+            return rejected()
+        }
+        targetedTransportRace = race.copy(
+            retiredTransports = race.retiredTransports + attempt.preferredTransport
+        )
+        return accepted(
+            state = current,
+            effects = listOf(
+                SessionEffect.RetireTargetedTransport(
+                    attempt,
+                    attempt.preferredTransport
+                ),
+                SessionEffect.OpenTargetedTransport(attempt, event.transport)
+            )
+        )
     }
 
     private fun attemptMilestoneElapsed(
@@ -595,10 +643,15 @@ internal class SignalingControlCoordinator(
         }
 
         val attempt = channel.originatingAttempt ?: return rejected()
+        val retiredTransports = targetedTransportRace
+            ?.takeIf { it.attempt == attempt }
+            ?.retiredTransports
+            .orEmpty()
         if (
             ownedAttempt != attempt ||
             current.connectionAttemptOrNull() != attempt ||
             channel.transport !in attempt.channelPlan ||
+            channel.transport in retiredTransports ||
             attempt.targetLock != channel.targetLock
         ) {
             return rejected()

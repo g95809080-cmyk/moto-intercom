@@ -427,6 +427,16 @@ class IntercomService : Service() {
             onDisconnected = {
                 postForSession(token) { publishStatus(SIGNAL_LOST_STATUS) }
             },
+            onTargetedOverlapUnavailable = { attempt ->
+                postForSession(token) {
+                    orchestrator.dispatch(
+                        SessionEvent.TargetedTransportOverlapUnavailable(
+                            attempt,
+                            Transport.WIFI_DIRECT
+                        )
+                    )
+                }
+            },
             onError = { error -> postForSession(token) { handleError(error) } }
         ).also { it.start() }
         }
@@ -1088,6 +1098,11 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.RetireTargetedTransport -> {
+                if (orchestrator.currentAttempt == effect.attempt) {
+                    retireTargetedTransport(effect.attempt, effect.transport)
+                }
+            }
             is SessionEffect.OpenTargetedTransport -> {
                 if (
                     orchestrator.currentAttempt == effect.attempt &&
@@ -1442,6 +1457,15 @@ class IntercomService : Service() {
             transport,
             openLan = { lanDiscovery?.connect(it) == true },
             openWifiDirect = { wifiTunnel?.connect(it) == true }
+        )
+    }
+
+    private fun retireTargetedTransport(attempt: ConnectionAttempt, transport: Transport) {
+        retirePlannedTransport(
+            attempt,
+            transport,
+            retireLan = { lanDiscovery?.retainPassiveIngress(it) },
+            retireWifiDirect = { wifiTunnel?.retainPassiveIngress(it) }
         )
     }
 

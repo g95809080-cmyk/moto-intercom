@@ -1,26 +1,28 @@
 # Sprint 3 Final Verification
 
-Status: **KUM-30 PRE-MERGE GATE COMPLETE - FINAL TASK SYNC CI PENDING**
+Status: **KUM-31 REVIEW APPROVED - FINAL EVIDENCE-SYNC CI PENDING**
 
 Evidence state: 2026-07-19
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
-- Branch: `feat/kum-30-cancel-glare-stale-callbacks`
-- Pull request: [#7](https://github.com/g95809080-cmyk/moto-intercom/pull/7) - Draft
-- PR base and review base: `6f1839748307cb6b62d25d9fc5d613d679f9ffad`
-- Verified KUM-30 source head: `ebcf3f19d3e13b7c68c88aca7281193c74300783`
-- Reviewed KUM-30 PR head: `ea0c72fff7e6882b0a7f25836e926cb747757edb`
-- Pre-task-sync KUM-30 report head: `304f73c042959c8b698b87b11a7c75b311e7a590`
-- Reviewed-head GitHub Actions: [run 29683765394](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29683765394) - success
-- Report-head GitHub Actions: [run 29684514194](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684514194) - success
-- Baseline main GitHub Actions: [run 29681780079](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29681780079) - success
+- Branch: `feat/kum-31-fallback-verification`
+- Pull request: [#8](https://github.com/g95809080-cmyk/moto-intercom/pull/8) - Draft
+- KUM-31 base and current `main`: `830c5e6974f2c1ddca71f020db137a0d433978bc`
+- Verified KUM-31 source head: `5b3e1d1bf7dc8be5e066e95f9547e019d939941c`
+- Reviewed KUM-31 head: `1d0e2189ec06b949d1b507a3debc6afde57e2191`
+- Reviewed-head GitHub Actions: [run 29686642730](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29686642730) - success
+- Fixed-SHA architecture review: APPROVED, P0=0, P1=0
+- KUM-30 final PR head: `bf566bc154de4132bbe1594a08b5dd80a0254e61`
+- KUM-30 merge commit: `830c5e6974f2c1ddca71f020db137a0d433978bc`
+- KUM-30 final PR CI: [run 29684691731](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684691731) - success
+- Baseline main GitHub Actions: [run 29684877764](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684877764) - success
 - Linear: KUM-8 In Progress; KUM-27 Done; KUM-28 Done; KUM-29 Done;
-  KUM-30 In Review; KUM-31 Todo
+  KUM-30 Done; KUM-31 In Progress
 
 This is the single Sprint 3 evidence index. Report-only commits that update this
-file do not change reviewed source heads. KUM-27 through KUM-30 evidence remains
+file do not change reviewed source heads. KUM-27 through KUM-31 evidence remains
 here; issue-scoped reports retain detailed historical review notes only.
 
 ## KUM-27 delivery boundary
@@ -91,6 +93,35 @@ No production source changed. The existing `SessionOrchestrator` mailbox,
 Coordinator, Socket identity, and exact media-context gates passed the new
 regressions, so no runtime remediation was required.
 
+PR [#7](https://github.com/g95809080-cmyk/moto-intercom/pull/7) merged by merge
+commit `830c5e6974f2c1ddca71f020db137a0d433978bc`. Final PR CI run
+`29684691731` and main CI run `29684877764` passed; KUM-30 is Done.
+
+## KUM-31 delivery boundary
+
+KUM-31 found and closes one runtime evidence gap in the merged race. When the
+exact T+5 targeted Wi-Fi Direct fallback returned `WifiP2pManager.BUSY`, the
+adapter retried locally while the Coordinator kept LAN targeted work active, so
+automatic sequential fallback on hardware without stable overlap was not
+provable.
+
+The minimal remediation keeps the existing owners and schedule:
+
+- the P2P adapter emits a typed, immutable-attempt overlap-unavailable event;
+- only a LAN-preferred/P2P-fallback targeted BUSY can produce that event;
+- the existing Coordinator accepts it once, only after fallback opened, while
+  the attempt is current/unexpired and has no preferred requester candidate or
+  media owner;
+- the Coordinator retires LAN then retries P2P for the same attempt, target,
+  plan, and immutable T+10 deadline;
+- retired LAN is excluded from viability and late channel adoption; and
+- Service executes ordered exact-attempt effects while adapters remain bounded
+  physical executors.
+
+No product-state writer, Coordinator, total-deadline owner, target selection,
+protocol, identity, database, UI, notification, WebRTC, Sprint 4, signing,
+deployment, or release behavior was added or changed.
+
 ## KUM-27 automated evidence
 
 | Check | Bound revision | Result | Evidence |
@@ -151,7 +182,27 @@ owner, loser cleanup, actual winner transport, and recovery scheduling.
 | Debug APK | `ebcf3f1` | PASS | `assembleDebug` |
 | Android test APK | `ebcf3f1` | PASS | `assembleDebugAndroidTest` |
 | Rasen strict validation | `ebcf3f1` | PASS | 1/1 |
-| GitHub Actions | `ea0c72f` | PASS | run `29683765394` |
+| Final PR CI | `bf566bc` | PASS | run `29684691731` |
+| Main CI | `830c5e6` | PASS | run `29684877764` |
+
+## KUM-31 automated evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Targeted JVM | `5b3e1d1` | PASS | 25 tests; 2 suites; 0 failures, errors, or skipped |
+| Full JVM gate | `5b3e1d1` | PASS | 244 tests; 35 suites; 0 failures, errors, or skipped |
+| Lint | `5b3e1d1` | PASS | 0 Fatal, 0 Error, 34 existing warnings |
+| Debug APK | `5b3e1d1` | PASS | `assembleDebug` |
+| Android test APK | `5b3e1d1` | PASS | `assembleDebugAndroidTest` |
+| Rasen strict validation | `5b3e1d1` | PASS | 1/1 |
+| Reviewed-head GitHub Actions | `1d0e218` | PASS | run `29686642730` |
+
+Deterministic coverage binds exact T+5 opening, ordered retire-LAN/retry-P2P,
+same attempt/target/plan/deadline, duplicate BUSY idempotency, pre-fallback and
+post-candidate rejection, wrong/replaced/canceled/expired attempts, retired LAN
+callback exclusion, fallback terminal failure, pure BUSY classification, and
+exact physical retire routing. Existing one-media-owner and concurrent mailbox
+regressions also remained green.
 
 ## KUM-27 emulator matrix
 
@@ -307,6 +358,49 @@ product-state writer, one Coordinator, one media owner, fail-closed stale media,
 deterministic mailbox concurrency, and honest exclusion of black ATD screenshots.
 The only non-blocking finding was this report/tasks synchronization.
 
+## KUM-31 emulator matrix
+
+- Emulator: 36.6.11
+- Image: API 36 AOSP ATD x86_64
+- AVD: `MotoIntercom_API_36`
+- Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
+- Shared addresses: `10.0.2.16`, `10.0.2.17`, `10.0.2.18`
+- Result: `build/emulator-results/20260719-200116-all` - PASS
+- Fresh evidence archive: `build/emulator-evidence/20260719-200157.zip`
+- Archive SHA-256: `FA9609A72916000C786F8FEAEC3C13C0BA38F71269B101715461B974DA2007B5`
+
+The matrix passed all six pairwise shared-network probes, Android NSD and Socket
+exchange, three single-node synthetic PCM metric tests, both endpoints of the
+synthetic network audio exchange, bounded offline/recovery, process restart on
+all three nodes, UI hierarchy capture, and log/resource evidence collection.
+No app FATAL, ANR, instrumentation failure, or assertion marker was found. The
+connected MI 6 was excluded from every command and remained untouched.
+
+All three UI hierarchies contained the app package and rendered hierarchy. The
+API 36 AOSP ATD framebuffer again returned identical all-black PNGs with
+SHA-256 `C35BACDB98B522206335AFA5B9BAFFD2E4E3352A40749BB747E469CD403AF514`.
+They are `UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS; instrumentation, UI
+hierarchy, network, process, service, and log evidence carry this gate.
+
+## KUM-31 architecture review
+
+```text
+Base SHA: 830c5e6974f2c1ddca71f020db137a0d433978bc
+Head SHA: 1d0e2189ec06b949d1b507a3debc6afde57e2191
+Result: APPROVED
+P0: 0
+P1: 0
+KUM-31 complete: YES
+Sprint 3 close allowed: YES
+```
+
+The independent read-only reviewer traced the BUSY producer, immutable-attempt
+event, Coordinator acceptance guards, retired-transport viability and channel
+adoption, ordered Service effects, adapter generation/remaining-time checks,
+and fallback terminal accounting. It found no second product-state writer,
+Coordinator, deadline owner, target selector, or media owner. No development
+evidence is missing; real OEM overlap behavior remains RC-only residual risk.
+
 ## Physical acceptance queue
 
 The validation timing is governed by the accepted
@@ -334,13 +428,15 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-27 Exit Criteria | PASS |
 | KUM-28 Exit Criteria | PASS |
 | KUM-29 Exit Criteria | PASS |
-| KUM-30 automated gate | PASS |
-| Known KUM-30 P0 / P1 | 0 / 0 |
-| KUM-30 Draft PR | OPEN - #7 |
-| KUM-30 PR may become Ready | YES after final tasks-only Head CI succeeds |
-| KUM-30 PR may merge | YES by merge commit after the final unchanged gate |
-| KUM-30 may move to Done | NO until merge and green `main` CI |
-| Sprint 3 may close | NO while KUM-30 delivery and KUM-31 gate synchronization remain open |
+| KUM-30 Exit Criteria | PASS - merged, main CI green, Done |
+| KUM-31 local automated gate | PASS |
+| KUM-31 architecture review | APPROVED - P0=0, P1=0 |
+| KUM-31 reviewed-head CI | PASS - run `29686642730` |
+| KUM-31 Draft PR | OPEN - #8 |
+| KUM-31 PR may become Ready | YES after final evidence-only Head CI succeeds |
+| KUM-31 PR may merge | YES by merge commit after the final unchanged gate |
+| KUM-31 may move to Done | NO - merge and green `main` CI pending |
+| Sprint 3 may close | NO - KUM-31 delivery remains open |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Efficiency
@@ -349,12 +445,18 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 - KUM-28 elapsed: approximately 2 hours from Linear start to fixed-SHA approval.
 - KUM-29 elapsed: approximately 1h26m from Linear start to green main CI.
 - KUM-30 elapsed to fixed-SHA approval: approximately 1h22m.
-- Workers: one write worker; two sequential read-only reviewer instances. The
+- KUM-31 elapsed to fixed-SHA approval: approximately 1h08m.
+- KUM-30 workers: one write worker; two sequential read-only reviewer instances. The
   first was stopped after failing to return a conclusion; the second completed.
+- KUM-31 workers: one write worker and one independent read-only reviewer.
 - Completed KUM-30 architecture review rounds: 1.
+- Completed KUM-31 architecture review rounds: 1.
 - Runtime handoffs inherited during KUM-30: 1.
+- Runtime handoffs inherited during KUM-31: 1.
 - Goal-runtime cumulative token usage at KUM-30 approval: 6,289,417; a
   KUM-30-only split was not exposed.
+- Goal-runtime cumulative token usage at KUM-31 approval: 8,638,468; a
+  KUM-31-only split was not exposed.
 - Repeated full-repository rescans: 0.
 
 ## Residual risk

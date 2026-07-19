@@ -60,6 +60,70 @@ class TransportRaceDomainTest {
     }
 
     @Test
+    fun sequentialFallbackClassifierRequiresBusyLanPreferredP2pFallback() {
+        val eligible = attempt(
+            id = "eligible",
+            plan = ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT)
+        )
+        val reversed = attempt(
+            id = "reversed",
+            plan = ChannelPlan.race(Transport.WIFI_DIRECT, Transport.LAN)
+        )
+        val single = attempt(
+            id = "single",
+            plan = ChannelPlan.single(Transport.WIFI_DIRECT)
+        )
+
+        assertTrue(shouldReportSequentialFallback(busy = true, eligible))
+        assertFalse(shouldReportSequentialFallback(busy = false, eligible))
+        assertFalse(shouldReportSequentialFallback(busy = true, reversed))
+        assertFalse(shouldReportSequentialFallback(busy = true, single))
+        assertFalse(shouldReportSequentialFallback(busy = true, attempt = null))
+    }
+
+    @Test
+    fun retirePlannedTransportRoutesOnlyTheExactPlannedTransport() {
+        val attempt = attempt(
+            id = "retire",
+            plan = ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT)
+        )
+        val retired = mutableListOf<Pair<Transport, ConnectionAttempt>>()
+
+        assertTrue(
+            retirePlannedTransport(
+                attempt,
+                Transport.LAN,
+                retireLan = { retired += Transport.LAN to it },
+                retireWifiDirect = { retired += Transport.WIFI_DIRECT to it }
+            )
+        )
+        assertEquals(listOf(Transport.LAN to attempt), retired)
+
+        retired.clear()
+        assertTrue(
+            retirePlannedTransport(
+                attempt,
+                Transport.WIFI_DIRECT,
+                retireLan = { retired += Transport.LAN to it },
+                retireWifiDirect = { retired += Transport.WIFI_DIRECT to it }
+            )
+        )
+        assertEquals(listOf(Transport.WIFI_DIRECT to attempt), retired)
+
+        retired.clear()
+        val single = attempt.copy(channelPlan = ChannelPlan.single(Transport.LAN))
+        assertFalse(
+            retirePlannedTransport(
+                single,
+                Transport.WIFI_DIRECT,
+                retireLan = { retired += Transport.LAN to it },
+                retireWifiDirect = { retired += Transport.WIFI_DIRECT to it }
+            )
+        )
+        assertTrue(retired.isEmpty())
+    }
+
+    @Test
     fun schedulerKeepsFallbackAndOptimizationMilestonesConcurrent() {
         var now = 1_000L
         val posted = mutableListOf<Pair<Runnable, Long>>()

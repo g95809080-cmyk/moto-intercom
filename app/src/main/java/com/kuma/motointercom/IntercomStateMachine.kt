@@ -154,6 +154,11 @@ internal sealed interface SessionEvent {
         val reason: String
     ) : SessionEvent
 
+    data class TargetedTransportOverlapUnavailable(
+        val attempt: ConnectionAttempt,
+        val transport: Transport
+    ) : SessionEvent
+
     data class AttemptTimedOut(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -207,6 +212,11 @@ internal sealed interface SessionEffect {
     data class OpenTargetedTransport(
         val attempt: ConnectionAttempt,
         val transport: Transport = attempt.preferredTransport
+    ) : SessionEffect
+
+    data class RetireTargetedTransport(
+        val attempt: ConnectionAttempt,
+        val transport: Transport
     ) : SessionEffect
 
     data class ScheduleAttemptMilestone(
@@ -345,6 +355,7 @@ internal fun reduceIntercomState(
     is SessionEvent.ConfirmationSurfaceUnavailable,
     is SessionEvent.ConnectPresenceRequested,
     is SessionEvent.TargetedTransportOpenFailed,
+    is SessionEvent.TargetedTransportOverlapUnavailable,
     is SessionEvent.AttemptTimedOut,
     is SessionEvent.AttemptMilestoneElapsed,
     is SessionEvent.WebRtcStateChanged,
