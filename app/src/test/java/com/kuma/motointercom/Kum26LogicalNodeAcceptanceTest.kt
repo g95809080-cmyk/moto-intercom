@@ -26,6 +26,210 @@ import org.junit.Test
 
 class Kum26LogicalNodeAcceptanceTest {
     @Test
+    fun recoveryAdmissionRejectsCFasterThenBAloneOwnsMediaOnReusedAdapters() = runBlocking {
+        val originalAttempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B).copy(
+            channelPlan = ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT)
+        )
+        val harness = OrchestratorHarness(
+            SessionOrchestrator(
+                RecordingPairingRepository(),
+                Dispatchers.Unconfined,
+                elapsedRealtime = { 0L },
+                attemptIdFactory = { ConnectionAttemptId(ATTEMPT_RECOVERY) }
+            )
+        )
+
+        harness.use {
+            harness.start(originalAttempt)
+            establishedPair(originalAttempt, DEVICE_B, SESSION_B).use { originalPair ->
+                assertEquals(
+                    ControlChannelAdmissionOutcome.ADMITTED,
+                    admitControlSession(
+                        sessionCurrent = true,
+                        currentAttempt = originalAttempt,
+                        existingSession = null,
+                        session = originalPair.requester,
+                        currentState = harness.orchestrator.state.value,
+                        onRejectedNonTargetWifiDirect = { _, _ ->
+                            throw AssertionError("original B must not request P2P cleanup")
+                        }
+                    )
+                )
+                assertTrue(
+                    harness.orchestrator.dispatchAndAwait(
+                        SessionEvent.ControlChannelVerified(
+                            RUNTIME_A,
+                            originalPair.requester.toVerifiedControlChannel()
+                        )
+                    )
+                )
+                assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+                advanceRequesterToAccepted(originalPair)
+                assertTrue(
+                    harness.orchestrator.dispatchAndAwait(
+                        SessionEvent.RemoteConnectAccepted(
+                            RUNTIME_A,
+                            originalAttempt.id,
+                            originalPair.requester.channel.channelId,
+                            originalPair.requester.wireRequestKey
+                        )
+                    )
+                )
+                assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+                assertTrue(harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        originalAttempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        1L
+                    )
+                ))
+            }
+
+            assertTrue(harness.orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    RUNTIME_A,
+                    originalAttempt.id,
+                    WebRtcConnectionState.DISCONNECTED,
+                    2L
+                )
+            ))
+            val recovering = harness.orchestrator.state.value as IntercomState.Recovering
+            val recoveryAttempt = recovering.attempt
+            val recoveryEffects = List(3) { harness.nextEffect() }
+            assertFalse(recoveryEffects.any { it is SessionEffect.RestartDiscovery })
+
+            val lanIngress = mutableListOf<ConnectionAttempt>()
+            val wifiDirectIngress = mutableListOf<ConnectionAttempt>()
+            val lanOpens = mutableListOf<ConnectionAttempt>()
+            val wifiDirectOpens = mutableListOf<ConnectionAttempt>()
+            val openEffect = recoveryEffects.single { it is SessionEffect.OpenTargetedTransport }
+                as SessionEffect.OpenTargetedTransport
+            bindPlannedAdapterIngress(
+                openEffect.attempt,
+                bindLan = lanIngress::add,
+                bindWifiDirect = wifiDirectIngress::add
+            )
+            assertTrue(
+                openPlannedTransport(
+                    openEffect.attempt,
+                    openEffect.transport,
+                    openLan = { lanOpens.add(it) },
+                    openWifiDirect = { wifiDirectOpens.add(it) }
+                )
+            )
+            assertEquals(listOf(recoveryAttempt), lanIngress)
+            assertEquals(listOf(recoveryAttempt), wifiDirectIngress)
+            assertEquals(listOf(recoveryAttempt), lanOpens)
+            assertTrue(wifiDirectOpens.isEmpty())
+
+            incomingPair(
+                requesterDeviceId = DEVICE_C,
+                requesterSessionId = SESSION_C,
+                attemptId = ATTEMPT_C,
+                transport = Transport.WIFI_DIRECT
+            ).use { cPair ->
+                var cleanupAttempt: ConnectionAttempt? = null
+                var cleanupTarget: TargetLock? = null
+                assertEquals(
+                    ControlChannelAdmissionOutcome.REJECTED_NON_TARGET_WIFI_DIRECT,
+                    admitControlSession(
+                        sessionCurrent = true,
+                        currentAttempt = recoveryAttempt,
+                        existingSession = null,
+                        session = cPair.responder,
+                        currentState = recovering,
+                        onRejectedNonTargetWifiDirect = { expectedAttempt, actualTargetLock ->
+                            cleanupAttempt = expectedAttempt
+                            cleanupTarget = actualTargetLock
+                        }
+                    )
+                )
+                assertTrue(cPair.responder.isClosed)
+                assertTrue(cPair.sockets.acceptor.isClosed)
+                assertEquals(recoveryAttempt, cleanupAttempt)
+                assertEquals(cPair.responder.targetLock, cleanupTarget)
+
+                establishedPair(recoveryAttempt, DEVICE_B, SESSION_B).use { bPair ->
+                    assertEquals(
+                        ControlChannelAdmissionOutcome.ADMITTED,
+                        admitControlSession(
+                            sessionCurrent = true,
+                            currentAttempt = recoveryAttempt,
+                            existingSession = null,
+                            session = bPair.requester,
+                            currentState = recovering,
+                            onRejectedNonTargetWifiDirect = { _, _ ->
+                                throw AssertionError("target B must not request P2P cleanup")
+                            }
+                        )
+                    )
+                    assertFalse(bPair.requester.isClosed)
+                    assertTrue(
+                        harness.orchestrator.dispatchAndAwait(
+                            SessionEvent.ControlChannelVerified(
+                                RUNTIME_A,
+                                bPair.requester.toVerifiedControlChannel()
+                            )
+                        )
+                    )
+                    assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+                    advanceRequesterToAccepted(bPair)
+                    assertTrue(
+                        harness.orchestrator.dispatchAndAwait(
+                            SessionEvent.RemoteConnectAccepted(
+                                RUNTIME_A,
+                                recoveryAttempt.id,
+                                bPair.requester.channel.channelId,
+                                bPair.requester.wireRequestKey
+                            )
+                        )
+                    )
+
+                    val startWebRtc = harness.nextEffect() as SessionEffect.StartWebRtc
+                    assertEquals(bPair.requester.channel.channelId, startWebRtc.channelId)
+                    assertFalse(harness.hasPendingEffect())
+                    val activeAttempt = requireNotNull(harness.orchestrator.activeControlAttempt)
+                    val bCandidate = requireNotNull(
+                        bPair.requester.toConnectionCandidateContext(recoveryAttempt)
+                    )
+                    assertEquals(setOf(bPair.requester.channel.channelId), activeAttempt.channelIds)
+                    assertEquals(bPair.requester.channel.channelId, activeAttempt.mediaOwnerChannelId)
+                    assertTrue(
+                        canUseMediaCandidate(
+                            sessionCurrent = true,
+                            currentAttempt = recoveryAttempt,
+                            activeAttempt = activeAttempt,
+                            candidate = bCandidate,
+                            session = bPair.requester,
+                            expectedRole = startWebRtc.role
+                        )
+                    )
+                    assertTrue(
+                        canStartWebRtc(
+                            sessionCurrent = true,
+                            currentAttempt = recoveryAttempt,
+                            expectedAttempt = recoveryAttempt,
+                            session = bPair.requester,
+                            expectedRole = startWebRtc.role
+                        )
+                    )
+                    assertNull(cPair.responder.toConnectionCandidateContext(recoveryAttempt))
+                    assertFalse(
+                        canStartWebRtc(
+                            sessionCurrent = true,
+                            currentAttempt = recoveryAttempt,
+                            expectedAttempt = recoveryAttempt,
+                            session = cPair.responder,
+                            expectedRole = startWebRtc.role
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
     fun thirdDeviceFirstIsClosedWithoutResourcesAndLockedTargetStillRegisters() = runBlocking {
         val attempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B)
         val repository = RecordingPairingRepository()
@@ -463,7 +667,8 @@ class Kum26LogicalNodeAcceptanceTest {
     private fun establishedPair(
         attempt: ConnectionAttempt,
         remoteDeviceId: String,
-        remoteSessionId: String
+        remoteSessionId: String,
+        transport: Transport = Transport.LAN
     ): SessionPair {
         val sockets = socketPair()
         val requester = establishAsync(
@@ -471,7 +676,8 @@ class Kum26LogicalNodeAcceptanceTest {
             PhysicalSocketRole.OPENER,
             DEVICE_A,
             SESSION_A,
-            attempt
+            attempt,
+            transport = transport
         )
         val responder = establishAsync(
             sockets.acceptor,
@@ -479,7 +685,47 @@ class Kum26LogicalNodeAcceptanceTest {
             remoteDeviceId,
             remoteSessionId,
             null,
-            TargetLock(DEVICE_A, RuntimeSessionId(SESSION_A))
+            TargetLock(DEVICE_A, RuntimeSessionId(SESSION_A)),
+            transport
+        )
+        return SessionPair(
+            sockets,
+            requester.get(2, TimeUnit.SECONDS),
+            responder.get(2, TimeUnit.SECONDS)
+        )
+    }
+
+    private fun incomingPair(
+        requesterDeviceId: String,
+        requesterSessionId: String,
+        attemptId: String,
+        transport: Transport
+    ): SessionPair {
+        val sockets = socketPair()
+        val requesterAttempt = ConnectionAttempt(
+            id = ConnectionAttemptId(attemptId),
+            runtimeSessionId = RuntimeSessionId(requesterSessionId),
+            targetLock = TargetLock(DEVICE_A, RUNTIME_A),
+            trigger = ConnectionTrigger.USER,
+            channelPlan = ChannelPlan.single(transport),
+            deadlineElapsedRealtimeMs = 10_000L
+        )
+        val requester = establishAsync(
+            sockets.opener,
+            PhysicalSocketRole.OPENER,
+            requesterDeviceId,
+            requesterSessionId,
+            requesterAttempt,
+            transport = transport
+        )
+        val responder = establishAsync(
+            sockets.acceptor,
+            PhysicalSocketRole.ACCEPTOR,
+            DEVICE_A,
+            SESSION_A,
+            null,
+            TargetLock(requesterDeviceId, RuntimeSessionId(requesterSessionId)),
+            transport
         )
         return SessionPair(
             sockets,
@@ -494,11 +740,12 @@ class Kum26LogicalNodeAcceptanceTest {
         localDeviceId: String,
         localSessionId: String,
         originatingAttempt: ConnectionAttempt?,
-        expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock
+        expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
+        transport: Transport = Transport.LAN
     ) = CompletableFuture.supplyAsync {
         SignalingSessionV2.establish(
             socket = socket,
-            transport = Transport.LAN,
+            transport = transport,
             physicalRole = physicalRole,
             openedAtElapsedMs = 1L,
             localDeviceId = localDeviceId,
@@ -688,6 +935,7 @@ class Kum26LogicalNodeAcceptanceTest {
         private const val SESSION_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
         private const val SESSION_OLD = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         private const val ATTEMPT_A = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+        private const val ATTEMPT_C = "dddddddd-1111-4111-8111-dddddddddddd"
         private const val ATTEMPT_NEW = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb"
         private const val ATTEMPT_RECOVERY = "cccccccc-1111-4111-8111-cccccccccccc"
         private val RUNTIME_A = RuntimeSessionId(SESSION_A)

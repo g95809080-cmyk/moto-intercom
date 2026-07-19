@@ -502,24 +502,17 @@ class IntercomService : Service() {
             val currentAttempt = orchestrator.currentAttempt
             val currentState = orchestrator.state.value
             if (
-                !canInstallControlSession(
+                admitControlSession(
                     sessionCurrent = isSessionCurrent(token),
                     currentAttempt = currentAttempt,
                     existingSession = signalingSessions[session.channel.channelId],
                     session = session,
-                    currentState = currentState
-                )
+                    currentState = currentState,
+                    onRejectedNonTargetWifiDirect = { expectedAttempt, actualTargetLock ->
+                        wifiTunnel?.rejectNonTargetGroup(expectedAttempt, actualTargetLock)
+                    }
+                ) != ControlChannelAdmissionOutcome.ADMITTED
             ) {
-                session.close()
-                if (
-                    session.channel.transport == Transport.WIFI_DIRECT &&
-                    isNonTargetRecoveryChannel(currentState, session.targetLock)
-                ) {
-                    wifiTunnel?.rejectNonTargetGroup(
-                        (currentState as IntercomState.Recovering).attempt,
-                        session.targetLock
-                    )
-                }
                 return@dispatchOnMain
             }
 
@@ -1485,12 +1478,11 @@ class IntercomService : Service() {
         transport: Transport
     ): Boolean {
         if (activeRuntimeSessionId != attempt.runtimeSessionId) return false
-        if (Transport.LAN in attempt.channelPlan) {
-            lanDiscovery?.restrictIngress(attempt)
-        }
-        if (Transport.WIFI_DIRECT in attempt.channelPlan) {
-            wifiTunnel?.restrictIngress(attempt)
-        }
+        bindPlannedAdapterIngress(
+            attempt,
+            bindLan = { lanDiscovery?.restrictIngress(it) },
+            bindWifiDirect = { wifiTunnel?.restrictIngress(it) }
+        )
         return openPlannedTransport(
             attempt,
             transport,
@@ -1852,6 +1844,45 @@ internal fun canInstallControlSession(
     currentState: IntercomState? = null
 ): Boolean = existingSession == null &&
     canRegisterControlChannel(sessionCurrent, currentAttempt, session, currentState)
+
+internal enum class ControlChannelAdmissionOutcome {
+    ADMITTED,
+    REJECTED,
+    REJECTED_NON_TARGET_WIFI_DIRECT
+}
+
+internal fun admitControlSession(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    existingSession: SignalingSessionV2?,
+    session: SignalingSessionV2,
+    currentState: IntercomState? = null,
+    onRejectedNonTargetWifiDirect: (ConnectionAttempt, TargetLock) -> Unit
+): ControlChannelAdmissionOutcome {
+    if (
+        canInstallControlSession(
+            sessionCurrent,
+            currentAttempt,
+            existingSession,
+            session,
+            currentState
+        )
+    ) {
+        return ControlChannelAdmissionOutcome.ADMITTED
+    }
+
+    val recoveryAttempt = (currentState as? IntercomState.Recovering)?.attempt
+    val rejectedNonTargetWifiDirect =
+        session.channel.transport == Transport.WIFI_DIRECT &&
+            recoveryAttempt != null &&
+            recoveryAttempt.targetLock != session.targetLock
+    session.close()
+    if (rejectedNonTargetWifiDirect) {
+        onRejectedNonTargetWifiDirect(requireNotNull(recoveryAttempt), session.targetLock)
+        return ControlChannelAdmissionOutcome.REJECTED_NON_TARGET_WIFI_DIRECT
+    }
+    return ControlChannelAdmissionOutcome.REJECTED
+}
 
 internal fun isNonTargetRecoveryChannel(
     currentState: IntercomState?,

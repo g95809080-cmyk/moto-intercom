@@ -10,7 +10,7 @@
 - [x] 2.2 Add verified-Socket tests proving responder B is eligible and responder C is rejected during recovery.
 - [x] 2.3 Add adapter-lease tests proving recovery ingress is target-bound before open work, active connect remains gated, and only the matching attempt releases it.
 - [x] 2.4 Add shared UI/notification text tests for named and fallback recovery peers.
-- [x] 2.5 Add a deterministic A/B/C race proving C responds first but cannot become target, control owner, or media owner.
+- [x] 2.5 Add a deterministic A/B/C race through the production admission seam proving C closes with P2P cleanup, B is admitted, exactly one `StartWebRtc` is emitted, and only B passes the media gate.
 
 ## 3. Recovery Target Enforcement
 
@@ -30,6 +30,6 @@
 - [x] 5.2 Run full JVM, `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest` and record exact results.
 - [x] 5.3 Run the applicable reusable three-emulator matrix and preserve fresh evidence without representing hardware-only rows as PASS.
 - [x] 5.4 Update the Sprint 4 verification index and Release Candidate physical queue with KUM-32 evidence/deferrals.
-- [ ] 5.5 Commit atomically, push, open the KUM-32 Draft PR, and synchronize Linear while KUM-33 remains Todo.
+- [x] 5.5 Commit atomically, push, open the KUM-32 Draft PR, and synchronize Linear while KUM-33 remains Todo.
 - [ ] 5.6 Complete fixed-SHA read-only architecture review and remediate in-scope P0/P1 until APPROVED with P0=0 and P1=0.
 - [ ] 5.7 Mark the PR Ready, merge with a merge commit, verify main CI, close KUM-32, and keep the remote branch before starting KUM-33.

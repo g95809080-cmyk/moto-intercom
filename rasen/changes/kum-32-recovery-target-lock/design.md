@@ -56,17 +56,20 @@ KUM-35 disconnect, or KUM-36 final-matrix policy.
    opened. Existing selected-channel/passive paths release both matching leases;
    runtime stop/replacement still closes adapters and invalidates callbacks.
    Service also refreshes every planned adapter's ingress lease immediately
-   before any preferred/fallback open, covering recovery paths that reuse rather
-   than reconstruct adapters.
+   before any preferred/fallback open through one shared production helper. The
+   media-only recovery path therefore reuses the existing adapter instances,
+   binds every transport in the immutable plan, and opens only the transport
+   named by `OpenTargetedTransport`.
 
 4. **Add a Service defense-in-depth target check.** The verified-control-channel
    installation gate receives the current product state. While `RECOVERING`, a
    session must match the recovery attempt's `TargetLock`, including responder
-   sessions with no originating attempt. Rejection closes the session before it
-   enters the Service registry or Coordinator. A rejected non-target Wi-Fi
-   Direct Socket also tells the adapter to remove its current group and restart
-   target-bound discovery. This complements adapter validation; a Socket-only
-   fix was rejected because it would leave the wrong P2P group alive.
+   sessions with no originating attempt. A production admission seam used by
+   `IntercomService` returns an explicit non-target Wi-Fi Direct cleanup outcome,
+   closes the rejected session before registry/Coordinator ownership, and tells
+   the adapter to remove its current group and restart target-bound discovery.
+   This complements adapter validation; a Socket-only fix was rejected because
+   it would leave the wrong P2P group alive.
 
 5. **Share presentation text, not presentation state.** A small pure helper maps
    `IntercomState.Recovering.peer` to `正在恢复与 {车友} 的连接`, with device-name and
@@ -76,10 +79,11 @@ KUM-35 disconnect, or KUM-36 final-matrix policy.
    recovery target text.
 
 6. **Use layered evidence.** JVM tests cover attempt retention, Presence
-   rejection, exact Socket target gating, seeded adapter leases, presentation,
-   and the A/B/C race. Existing instrumentation and the reusable three-emulator
-   matrix cover integration, process restart, networking, and resource evidence.
-   Hardware-only observations remain Release Candidate work.
+   rejection, the production Socket admission seam, seeded/reused adapter
+   leases, presentation, and the A/B/C race through the Coordinator and media
+   gate. Existing instrumentation and the reusable three-emulator matrix cover
+   integration, process restart, networking, and resource evidence. Hardware-only
+   observations remain Release Candidate work.
 
 ## Risks / Trade-offs
 
