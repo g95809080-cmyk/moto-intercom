@@ -1,6 +1,6 @@
 # KUM-29 Optimizing Winner Verification
 
-Status: **ROUND-2 P0/P1 REMEDIATED - COMMIT, CI, AND RE-REVIEW PENDING**
+Status: **APPROVED - READY FOR MERGE**
 
 Evidence state: 2026-07-19
 
@@ -11,7 +11,9 @@ Evidence state: 2026-07-19
 - Certification base: `657d5264d0967259000359ccbc6a22bceb133ed4`
 - Initial certification Head: `554ead24b1f53a8fc663ad6a3afbf385725d1b38`
 - Round-1 remediation Head: `e51e696b6162fc7531fc4f0ac63674d6ba9f6993`
-- Round-2 remediation Head: pending remediation commit
+- Round-2 remediation Head: `678c89ee7688b7b74110efc325da133cdb6c0f63`
+- Reviewed source Head: `678c89ee7688b7b74110efc325da133cdb6c0f63`
+- Final evidence commit: report-only follow-up after reviewed source Head
 - Runtime implementation PR: [#5](https://github.com/g95809080-cmyk/moto-intercom/pull/5)
 - Runtime implementation source Head: `f96ba4d0a536b6bfc226d111c5a843cf622f1d75`
 - Runtime implementation final PR Head: `1d2d4b6395d172b2765271dd167b33bc22462ac6`
@@ -79,9 +81,10 @@ move the close deadline later. This branch now hardens all four boundaries.
 | Round-2 remediation SHA-256 | RECORDED | `11FBAB8D600B1D065C12FC0BCEA62787113A2F745C675E60609BDB6AD7AA916F` |
 | Fixed-SHA architecture review round 1 | REQUEST CHANGES | P0=0, P1=2 at `554ead24` |
 | Fixed-SHA architecture review round 2 | REQUEST CHANGES | P0=1, P1=1 at `e51e696b` |
-| Fixed-SHA architecture review round 3 | PENDING | Round-2 remediation Base/Head will be bound after commit |
+| Fixed-SHA architecture review round 3 | APPROVED | P0=0, P1=0 at `678c89ee` |
 | Initial PR-head CI | PASS | run `29679762746` at `554ead24`; final Head CI still required |
-| Round-1 remediation CI | PASS | run `29680625383` at `e51e696b`; final Head CI still required |
+| Round-1 remediation CI | PASS | run `29680625383` at `e51e696b` |
+| Current-head CI | PASS | run `29681237026` at `678c89ee` |
 | Main merge CI | PENDING | Required before KUM-29 Done |
 
 All emulator matrices use emulator serials only. The connected MI 6 remains
@@ -105,7 +108,7 @@ Release Candidate acceptance is completed.
 
 ## Gate
 
-The round-2 P0/P1 fixes, JVM/build gate, and fresh three-emulator evidence are
-complete. The remaining gates are the remediation commit and push, final PR-head
-CI, fixed-SHA read-only round-3 review with P0=0 and P1=0, merge commit, and green
-main CI.
+The round-2 P0/P1 fixes, JVM/build gate, fresh three-emulator evidence, current
+Head CI, and fixed-SHA round-3 review are complete. The remaining delivery gates
+are turning the Draft PR Ready, merging with a merge commit, requiring green main
+CI, and synchronizing final Linear evidence.

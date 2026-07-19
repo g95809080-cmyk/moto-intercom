@@ -14,7 +14,8 @@
   transport persistence, and rejection of a second owner claim.
 - [x] 2.3 Prove bounded cleanup for dual-success, single-success, all-failure,
   cancellation, stale milestone, and deadline terminal paths.
-- [x] 2.4 Confirm the certification branch has no Android runtime behavior diff.
+- [x] 2.4 Confirm Android behavior changes are limited to the approved KUM-29
+  expiry, idempotency, and bounded-cleanup boundaries.
 
 ## 3. Review Remediation
 
@@ -43,9 +44,9 @@
 
 - [x] 5.1 Add the issue-scoped verification report with exact commands, results,
   source SHA traceability, and deferred physical rows.
-- [ ] 5.2 Commit atomically, push, and update the Draft PR to a fixed remediation
+- [x] 5.2 Commit atomically, push, and update the Draft PR to a fixed remediation
   Base/Head.
-- [ ] 5.3 Complete read-only architecture re-review; remediate any in-scope P0/P1,
+- [x] 5.3 Complete read-only architecture re-review; remediate any in-scope P0/P1,
   rerun gates, and repeat review until P0=0 and P1=0.
 - [ ] 5.4 Turn Ready and merge with a merge commit after PR CI succeeds; retain
   the remote branch and require green main CI.
