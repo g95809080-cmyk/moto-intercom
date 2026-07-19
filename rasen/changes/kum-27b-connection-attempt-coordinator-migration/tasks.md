@@ -210,12 +210,35 @@ evidence while keeping KUM-27 In Progress. B6 may start only after this gate.
 - [x] 6.6 Document every emulator limitation and a complete Release Candidate
   physical matrix with all hardware-only rows marked
   `DEFERRED_TO_RELEASE_CANDIDATE`.
-- [ ] 6.7 Run targeted tests, `testDebugUnitTest`, instrumentation tests,
+- [x] 6.7 Run targeted tests, `testDebugUnitTest`, instrumentation tests,
   `lintDebug`, `assembleDebug`, strict Rasen validation, and GitHub CI.
-- [ ] 6.8 Complete fixed-SHA read-only architecture review, remediate all P0/P1,
+- [x] 6.8 Complete fixed-SHA read-only architecture review, remediate all P0/P1,
   synchronize PR/Linear evidence, and prove KUM-28 remains absent.
 
 Delivery gate after apply: B6 may close KUM-27 only when automated and emulator
 evidence passes, architecture review is APPROVED with P0=0/P1=0, deferred
 physical checks have a complete Release Candidate plan, and PR #4 remains the
 single KUM-27 branch/PR. No production deployment is authorized.
+
+### B6 Gate Record
+
+- Fixed Base `932c81c5ce30ae5087134db1591f48c6fd3d6ae1`, approved Head
+  `4b9f6bd79255891d88e35f1d88699432c4ff5e65`.
+- Verification: 213 JVM tests passed in 33 suites; Lint 0 Fatal/0 Error with
+  34 existing warnings; `assembleDebug` and `assembleDebugAndroidTest` passed;
+  strict Rasen validation 1/1; all emulator scripts parsed under Windows
+  PowerShell 5.1; GitHub CI `29674202727` succeeded.
+- Emulator 36.6.11 three-node `all` matrix passed at
+  `build/emulator-results/20260719-125710-all`; evidence archive SHA-256 is
+  `37DBC43B64DB5F8418793EEC2DCD58F5EB9382F5242FE97A9B1F2161F9C8D3D6`.
+- Deliberate synthetic-audio and NSD client failures both left no server app
+  PID, test PID, or matching host ADB child. Normal success behavior remained
+  intact and post-matrix residual-process/crash scans were clean.
+- Fixed-SHA architecture re-review: APPROVED, P0=0, P1=0, B1-B6 complete YES,
+  KUM-27 may close after PR merge and green `main` CI.
+- Every hardware/OEM/acoustic row remains `DEFERRED_TO_RELEASE_CANDIDATE` and
+  is not claimed as passed. KUM-28 behavior remains absent.
+- Efficiency: elapsed 1h15m from the B6 start evidence; workers 2 (one writer,
+  one read-only reviewer); review rounds 2; handoffs 1 runtime continuation;
+  goal-runtime cumulative token usage 1,114,599 at approval; full repository
+  rescans 0.
