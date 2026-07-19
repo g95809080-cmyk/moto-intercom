@@ -61,8 +61,11 @@ Evidence state: 2026-07-20
 - KUM-33 Rasen change: `kum-33-three-second-recovery-fallback`
 - KUM-34 base: `34f715d77c80e492ce90ecdd7efc6d1603a74d8e`
 - KUM-34 implementation source: `5b184a21efafccc72ccf1d71766c5b7e038c5c6b`
+- KUM-34 automated-evidence head: `1d4296b22de2aba6cf3503fd4a389f96adfd849a`
+- KUM-34 pull request: [#12](https://github.com/g95809080-cmyk/moto-intercom/pull/12) - open Draft
+- KUM-34 initial PR-head GitHub Actions: run `29705529941` - in progress at evidence synchronization
 - KUM-34 Rasen change: `kum-34-resetting-wireless-reset`
-- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33 Done; KUM-34 In Progress; KUM-35/KUM-36 Todo
+- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33 Done; KUM-34 In Review; KUM-35/KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -431,8 +434,8 @@ ATD screenshots are identical black frames on visual inspection and remain
 
 ## KUM-34 architecture review
 
-Pending fixed Base `34f715d77c80e492ce90ecdd7efc6d1603a74d8e` and review Head after the
-automated-evidence synchronization commit. KUM-34 remains In Progress and its
+Pending fixed Base `34f715d77c80e492ce90ecdd7efc6d1603a74d8e` and review Head after this
+Draft-delivery synchronization commit. KUM-34 remains In Review and its
 PR must remain Draft until APPROVED with P0=0 and P1=0.
 
 ## Physical acceptance queue
@@ -469,8 +472,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-34 may start | YES - active on `feat/kum-34-resetting-wireless-reset` from `34f715d` |
 | KUM-34 implementation/automated gate | PASS at `5b184a2`; 279 JVM tests and emulator matrix `20260720-055703-all` passed |
 | KUM-34 architecture review | PENDING fixed-SHA read-only review |
-| KUM-34 may move to Done | NO - Draft PR, CI, APPROVED review, merge, and exact-main CI remain |
-| Sprint 4 may close | NO - KUM-34 is In Progress; KUM-35/KUM-36 remain Todo |
+| KUM-34 may move to Done | NO - Draft PR #12, exact-Head CI, APPROVED review, merge, and exact-main CI remain |
+| Sprint 4 may close | NO - KUM-34 is In Review; KUM-35/KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Residual risk
