@@ -54,9 +54,9 @@
 
 - [x] 6.1 Run `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, strict
   Rasen validation, PowerShell parser checks, and the reusable emulator matrix.
-- [ ] 6.2 Commit atomically, push the branch, and create a Draft PR whose body
+- [x] 6.2 Commit atomically, push the branch, and create a Draft PR whose body
   binds Base/Head, scope, tests, behavior, deferred physical rows, and rollback.
-- [ ] 6.3 Complete fixed-SHA read-only architecture review and automatically
+- [x] 6.3 Complete fixed-SHA read-only architecture review and automatically
   remediate every in-scope P0/P1 with a new commit, CI, and re-review.
 - [ ] 6.4 Update `docs/verification/sprint-3-final-verification.md`, PR, and
   Linear evidence; prove working tree clean and remote ahead/behind 0/0.
