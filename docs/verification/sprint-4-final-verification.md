@@ -20,10 +20,15 @@ Evidence state: 2026-07-19
 - Post-merge main GitHub Actions: run `29691482967` - success
 - KUM-32 base: `76fa55428306fa9d5d859cb936fede989e92546b`
 - KUM-32 implementation head: `dba5155e5dac377eb3b8b2486ea4ac608e65e989`
+- KUM-32 initial evidence head: `eae95751f807fde65e33b1c4297dda63bd91c21f`
+- KUM-32 review-remediation source head: `b7006befa43ff627f301224f1ebd02d8f81487af`
 - KUM-32 pull request: [#10](https://github.com/g95809080-cmyk/moto-intercom/pull/10) - Draft
 - KUM-32 initial GitHub Actions: run `29693572908` - success
-- Initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=3
-- Final fixed-SHA review: APPROVED, P0=0, P1=0
+- KUM-32 initial evidence GitHub Actions: run `29693863050` - success
+- KUM-32 review-remediation GitHub Actions: run `29695549022` - success
+- KUM-37 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=3
+- KUM-37 final fixed-SHA review: APPROVED, P0=0, P1=0
+- KUM-32 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - Linear: KUM-9 In Progress; KUM-37 Done; KUM-32 In Review; KUM-33 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
@@ -146,14 +151,15 @@ disconnect, and KUM-36 final acceptance remain unimplemented.
 
 | Check | Bound revision | Result | Evidence |
 | --- | --- | --- | --- |
-| Targeted JVM | `dba5155` | PASS | 43 tests across Coordinator, Socket, adapter lease, P2P registry, and presentation suites |
-| Full JVM gate | `dba5155` | PASS | 256 tests; 39 suites; 0 failures, errors, or skipped |
-| Lint | `dba5155` | PASS | 0 Fatal, 0 Error, 34 existing warnings |
-| Debug APK | `dba5155` | PASS | `assembleDebug`; SHA-256 `F5AF04253540E3457C737C052584932EE712F8997F66924097278BC4E8226AAD` |
-| Android test APK | `dba5155` | PASS | `assembleDebugAndroidTest`; SHA-256 `AF51A64F28C2A689E4D955EAFB521E994DF2C9268AB82504FC8F8044D91BD404` |
-| Single-emulator instrumentation | `dba5155` | PASS | synthetic PCM 3/3 and actual hot WebRTC lifecycle 1/1 |
-| Rasen strict validation | `dba5155` | PASS | 1/1; 4/4 artifacts complete |
+| Targeted JVM | `b7006be` | PASS | 41 tests across the logical-node admission seam, Coordinator ownership, Socket, and LAN lease suites |
+| Full JVM gate | `b7006be` | PASS | 257 tests; 39 suites; 0 failures, errors, or skipped |
+| Lint | `b7006be` | PASS | 0 Fatal, 0 Error, 30 warnings |
+| Debug APK | `b7006be` | PASS | `assembleDebug`; SHA-256 `20AA695EAC7053BB8A9718950410F71E3D4447699B025558F46D9E596EF27146` |
+| Android test APK | `b7006be` | PASS | `assembleDebugAndroidTest`; SHA-256 `AF51A64F28C2A689E4D955EAFB521E994DF2C9268AB82504FC8F8044D91BD404` |
+| Single-emulator instrumentation | `b7006be` | PASS | synthetic PCM 3/3 and actual hot WebRTC lifecycle 1/1 inside the explicit emulator matrix |
+| Rasen strict validation | `b7006be` | PASS | 1/1; 4/4 artifacts complete |
 | Initial GitHub Actions | `dba5155` | PASS | run `29693572908` |
+| Review-remediation GitHub Actions | `b7006be` | PASS | run `29695549022` |
 
 The final clean gate initially encountered a Windows lock on Gradle's generated
 `classes.jar`. Stopping the Gradle daemon and rerunning the identical clean gate
@@ -163,9 +169,9 @@ passed; this was a local process lock, not a source failure.
 
 - Emulator: 36.6.11; API 36 AOSP ATD x86_64
 - Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
-- Result: `build/emulator-results/20260719-234430-all` - PASS
-- Evidence archive: `build/emulator-evidence/20260719-234515.zip`
-- Archive SHA-256: `D6B881EDB496074E6FA46DDE9C2F823C40FA4A2D15012624F16970D7993F2D6C`
+- Result: `build/emulator-results/20260720-004355-all` - PASS
+- Evidence archive: `build/emulator-evidence/20260720-004433.zip`
+- Archive SHA-256: `7E08809994AEDE94547E4D9FBFF3869A25FCC1B0ADE5EF081494AB5B135220E8`
 
 The matrix passed explicit-emulator app launch/UI hierarchy, pairwise shared
 network probes, NSD/Socket exchange, synthetic PCM metrics/transfer, bounded
@@ -175,8 +181,22 @@ black and are `UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
 
 ## KUM-32 architecture review
 
-Fixed-SHA read-only review is pending. No KUM-32 closure, Ready transition, or
-merge is allowed until APPROVED with P0=0 and P1=0.
+The initial fixed-SHA read-only review at `eae9575` returned P0=0 and P1=1.
+The existing A/B/C tests exercised only the pure admission predicate and manual
+session closure, so they did not prove the Service/Coordinator seam, rejected
+non-target P2P cleanup, the single B media owner, or adapter reuse after a
+media-only loss.
+
+The remediation at `b7006be` adds one production admission seam used by
+`IntercomService`, an explicit non-target Wi-Fi Direct cleanup outcome, and a
+deterministic real-Socket A/B/C regression. The scenario proves C closes and
+cleanup runs, B is admitted afterward, the Coordinator emits exactly one
+`StartWebRtc`, only B passes the media gate, and media-only recovery reuses the
+existing adapters while binding every planned ingress before opening only the
+selected transport.
+
+Second fixed-SHA read-only review is pending. No KUM-32 closure, Ready
+transition, or merge is allowed until APPROVED with P0=0 and P1=0.
 
 ## Physical acceptance queue
 
@@ -202,8 +222,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-37 reviewed-head CI | PASS - run `29690610503` |
 | KUM-37 may move to Done | YES - merged as `76fa554`, main CI `29691482967` passed, Linear Done |
 | KUM-32 may start | YES - active on `feat/kum-32-recovery-target-lock` from `76fa554` |
-| KUM-32 implementation/automated gate | PASS at `dba5155`; CI `29693572908` passed |
-| KUM-32 architecture review | PENDING |
+| KUM-32 implementation/automated gate | PASS at `b7006be`; CI `29695549022` and emulator matrix `20260720-004355-all` passed |
+| KUM-32 architecture review | REQUEST CHANGES at `eae9575`, P0=0/P1=1; remediation complete, second fixed-SHA review pending |
 | KUM-32 may move to Done | NO - fixed-SHA architecture review and final delivery gates pending |
 | KUM-33 may start | NO |
 | Sprint 4 may close | NO - KUM-32 through KUM-36 remain Todo |
