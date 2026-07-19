@@ -23,7 +23,7 @@
 - [x] 4.1 Run focused KUM-34 JVM tests and strict Rasen validation.
 - [x] 4.2 Run full `testDebugUnitTest`, `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest`; record exact totals and hashes.
 - [x] 4.3 Run applicable instrumentation and reusable multi-emulator reset/rebuild scenarios; preserve fresh logs/evidence and do not treat ATD black frames as visual PASS.
-- [ ] 4.4 Update Sprint 4 verification and RC physical plan, keeping OEM/RF/SCO/acoustic/power/thermal/background rows `DEFERRED_TO_RELEASE_CANDIDATE`.
+- [x] 4.4 Update Sprint 4 verification and RC physical plan, keeping OEM/RF/SCO/acoustic/power/thermal/background rows `DEFERRED_TO_RELEASE_CANDIDATE`.
 
 ## 5. Review And Delivery
 
