@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.DataOutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CompletableFuture
@@ -545,6 +546,70 @@ class SignalingSessionV2Test {
 
             assertSignalingFailure(requester)
             assertTrue(sockets.opener.isClosed)
+        }
+    }
+
+    @Test
+    fun staleOfferAnswerAndIceFailBeforeReaderHandoff() {
+        val staleMediaMessages = listOf(
+            SignalingMessageV2.Offer("{\"type\":\"offer\",\"sdp\":\"v=0\"}"),
+            SignalingMessageV2.Answer("{\"type\":\"answer\",\"sdp\":\"v=0\"}"),
+            SignalingMessageV2.Candidate("{\"candidate\":\"candidate:1\",\"sdpMid\":\"0\"}")
+        )
+
+        staleMediaMessages.forEach { message ->
+            socketPair().use { sockets ->
+                val attempt = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
+                val requesterFuture = CompletableFuture.supplyAsync {
+                    establish(
+                        socket = sockets.opener,
+                        physicalRole = PhysicalSocketRole.OPENER,
+                        localDeviceId = DEVICE_A,
+                        localSessionId = SESSION_A,
+                        originatingAttempt = attempt
+                    )
+                }
+                val responderFuture = CompletableFuture.supplyAsync {
+                    establish(
+                        socket = sockets.acceptor,
+                        physicalRole = PhysicalSocketRole.ACCEPTOR,
+                        localDeviceId = DEVICE_B,
+                        localSessionId = SESSION_B,
+                        originatingAttempt = null,
+                        expectedRemoteTargetLock = TargetLock(
+                            DEVICE_A,
+                            RuntimeSessionId(SESSION_A)
+                        )
+                    )
+                }
+                val requester = requesterFuture.get(2, TimeUnit.SECONDS)
+                val responder = responderFuture.get(2, TimeUnit.SECONDS)
+                val received = java.util.concurrent.LinkedBlockingQueue<SignalingEnvelopeV2>()
+                val failures = java.util.concurrent.LinkedBlockingQueue<Throwable>()
+                try {
+                    requester.startReader(received::add, failures::add)
+                    val staleEnvelope = SignalingEnvelopeV2(
+                        attemptId = ConnectionAttemptId(ATTEMPT_B),
+                        sourceDeviceId = DeviceId.parse(DEVICE_B),
+                        targetDeviceId = DeviceId.parse(DEVICE_A),
+                        sourceSessionId = RuntimeSessionId(SESSION_B),
+                        message = message
+                    )
+                    SignalingV2Framing.write(
+                        DataOutputStream(sockets.acceptor.getOutputStream()),
+                        SignalingV2Codec().encode(staleEnvelope)
+                    )
+
+                    val failure = failures.poll(2, TimeUnit.SECONDS)
+                    assertTrue("${message.type} must fail pinned attempt identity", failure is SignalingV2Exception)
+                    assertTrue(failure?.message?.contains("pinned channel identity") == true)
+                    assertNull(received.poll(100, TimeUnit.MILLISECONDS))
+                    assertTrue(requester.isClosed)
+                } finally {
+                    requester.close()
+                    responder.close()
+                }
+            }
         }
     }
 
