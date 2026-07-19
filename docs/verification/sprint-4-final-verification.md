@@ -1,6 +1,6 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-37 AUTOMATED GATE PASS - CI AND ARCHITECTURE REVIEW PENDING**
+Status: **KUM-37 REMEDIATION AUTOMATED GATE PASS - FINAL CI AND REVIEW PENDING**
 
 Evidence state: 2026-07-19
 
@@ -10,10 +10,12 @@ Evidence state: 2026-07-19
 - Branch: `feat/kum-37-audio-session-lifecycle`
 - Pull request: pending
 - Sprint 4 base: `bd35ea69955001dc175f376f58ab4e6b84d9c223`
-- Verified KUM-37 source head: `823046f0c83aae0c68bee370d65fae16205a758a`
+- Verified KUM-37 source head: `1977e7eec466aeb439f4bc3714ba855d6a11d2d9`
 - Evidence/review head: pending
-- GitHub Actions: pending
-- Fixed-SHA architecture review: pending
+- Initial GitHub Actions: run `29689536790` at `b31175e` - success
+- Final GitHub Actions: pending
+- Initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=3
+- Final fixed-SHA review: pending after remediation
 - Linear: KUM-9 In Progress; KUM-37 In Progress; KUM-32 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
@@ -47,21 +49,23 @@ implemented.
 
 | Check | Bound revision | Result | Evidence |
 | --- | --- | --- | --- |
-| Targeted JVM | `823046f` | PASS | 5 tests; audio lifecycle plus attempt cleanup; 0 failures |
-| Full JVM gate | `823046f` | PASS | 248 tests; 36 suites; 0 failures, errors, or skipped |
-| Lint | `823046f` | PASS | 0 Fatal, 0 Error, 34 existing warnings |
-| Debug APK | `823046f` | PASS | `assembleDebug` |
-| Android test APK | `823046f` | PASS | `assembleDebugAndroidTest` |
-| Actual WebRTC instrumentation | `823046f` | PASS | 1 API 36 emulator test; two sequential PeerConnections reused the same ADM/factory/source/track and never overlapped |
-| Rasen strict validation | `823046f` | PASS | 1/1 |
-| PowerShell compatibility | `823046f` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
+| Targeted JVM | `1977e7e` | PASS | 8 tests; lifecycle, failure cleanup, runtime callback gate, and attempt cleanup; 0 failures |
+| Full JVM gate | `1977e7e` | PASS | 251 tests; 38 suites; 0 failures, errors, or skipped |
+| Lint | `1977e7e` | PASS | 0 Fatal, 0 Error, 34 existing warnings |
+| Debug APK | `1977e7e` | PASS | `assembleDebug` |
+| Android test APK | `1977e7e` | PASS | `assembleDebugAndroidTest` |
+| Actual WebRTC instrumentation | `1977e7e` | PASS | 1 API 36 emulator test; immediate sequential replacement reused the same ADM/factory/source/track, changed PeerConnection, and enforced one active session |
+| Rasen strict validation | `1977e7e` | PASS | 1/1 |
+| PowerShell compatibility | `1977e7e` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
 | GitHub Actions | pending | PENDING | run pending |
 
 The full clean gate ran `testDebugUnitTest`, `lintDebug`, `assembleDebug`, and
 `assembleDebugAndroidTest` in one invocation with the installed Android SDK and
 JDK. An earlier compile invocation lacked `ANDROID_HOME`/`ANDROID_SDK_ROOT` and
 stopped before dependency resolution; rerunning with the installed SDK passed.
-That was environment setup, not a source failure.
+That was environment setup, not a source failure. The first remediation clean
+was then blocked by a Windows lock on Gradle's compiled classes jar; stopping
+the daemon and rerunning the identical clean gate with `--no-daemon` passed.
 
 ## KUM-37 emulator matrix
 
@@ -69,9 +73,9 @@ That was environment setup, not a source failure.
 - Image: API 36 AOSP ATD x86_64
 - AVD: `MotoIntercom_API_36`
 - Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
-- Result: `build/emulator-results/20260719-213820-all` - PASS
-- Fresh evidence archive: `build/emulator-evidence/20260719-213915.zip`
-- Archive SHA-256: `FFAF9EEB777C7844301E2F68762C97C24D9CDA90312D1BDF63024BAB13718DC2`
+- Result: `build/emulator-results/20260719-221645-all` - PASS
+- Fresh evidence archive: `build/emulator-evidence/20260719-221726.zip`
+- Archive SHA-256: `9447F81DEFF92B92A7DD3E63DD5E2DC8C8CFBD15C6C7DA193358D87A73206120`
 
 The matrix passed app smoke/UI hierarchy, all pairwise shared-network probes,
 Android NSD and Socket exchange, deterministic synthetic PCM metrics and
@@ -85,6 +89,13 @@ network, process, service, audio dump, and log evidence carry the development
 gate.
 
 ## Architecture review
+
+The initial fixed-SHA review at `b31175e` returned P0=0 and P1=3. Remediation
+now ensures full Stop runs platform cleanup even when media cleanup throws,
+exercises immediate old-close/new-open ordering on the actual WebRTC engine,
+and deterministically proves runtime-level audio callbacks survive only
+transport-generation rollover, not runtime rollover. The unrelated tracked
+global Rasen pipeline override was removed from the final tree.
 
 ```text
 Base SHA: bd35ea69955001dc175f376f58ab4e6b84d9c223
@@ -114,7 +125,7 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 
 | Gate | Decision |
 | --- | --- |
-| KUM-37 implementation | PASS at source `823046f` |
+| KUM-37 implementation | PASS at source `1977e7e` |
 | KUM-37 automated/emulator gate | PASS |
 | KUM-37 architecture review | PENDING |
 | KUM-37 CI | PENDING |
