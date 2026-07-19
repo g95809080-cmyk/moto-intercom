@@ -1,0 +1,134 @@
+name: full-feature
+description: "Full feature delivery pipeline: office hours validation, proposal with lead review, apply, a parallel fan-out of conditional expert reviews, a review cycle to drive fixes, then ship, archive, and retrospective."
+stages:
+  - id: office-hours
+    kind: standard
+    skill: rasen-office-hours-command
+    role: planner
+    requires: []
+    gate: true
+    leadReview: false
+  - id: propose
+    kind: standard
+    skill: rasen-propose
+    role: planner
+    requires:
+      - office-hours
+    gate: true
+    leadReview: true
+  - id: apply
+    kind: standard
+    skill: rasen-apply-change
+    role: implementer
+    requires:
+      - propose
+    gate: true
+    leadReview: false
+  - id: review
+    kind: standard
+    skill: rasen:review
+    role: reviewer
+    requires:
+      - apply
+    gate: false
+    parallelGroup: experts
+    condition: always
+    leadReview: false
+  - id: cso
+    kind: standard
+    skill: rasen:cso
+    role: reviewer
+    requires:
+      - apply
+    gate: false
+    parallelGroup: experts
+    condition: security-relevant
+    leadReview: false
+  - id: benchmark
+    kind: standard
+    skill: rasen:benchmark
+    role: reviewer
+    requires:
+      - apply
+    gate: false
+    parallelGroup: experts
+    condition: performance-sensitive
+    leadReview: false
+  - id: design-review
+    kind: standard
+    skill: rasen:design-review
+    role: reviewer
+    requires:
+      - apply
+    gate: false
+    parallelGroup: experts
+    condition: ui
+    leadReview: false
+  - id: qa
+    kind: standard
+    skill: rasen:qa
+    role: reviewer
+    requires:
+      - apply
+    gate: false
+    parallelGroup: experts
+    condition: ui
+    leadReview: false
+  - id: qa-only
+    kind: standard
+    skill: rasen:qa-only
+    role: reviewer
+    requires:
+      - apply
+    gate: false
+    parallelGroup: experts
+    condition: non-ui
+    leadReview: false
+  - id: review-loop
+    kind: standard
+    skill: rasen-review-cycle
+    role: fixer
+    requires:
+      - review
+      - cso
+      - benchmark
+      - design-review
+      - qa
+      - qa-only
+    gate: false
+    loop:
+      kind: review-cycle
+      maxRounds: 3
+    leadReview: false
+  - id: ship
+    kind: standard
+    skill: rasen-ship
+    role: shipper
+    requires:
+      - review-loop
+    gate: true
+    leadReview: false
+    model: sonnet
+  - id: archive
+    kind: standard
+    skill: rasen-archive-change
+    role: shipper
+    requires:
+      - ship
+    gate: false
+    leadReview: false
+    model: sonnet
+  - id: retro
+    kind: standard
+    skill: rasen-retro
+    role: reviewer
+    requires:
+      - archive
+    gate: false
+    leadReview: false
+agents:
+  planner: codex
+  implementer: codex
+  reviewer: codex
+  fixer: codex
+  shipper: codex

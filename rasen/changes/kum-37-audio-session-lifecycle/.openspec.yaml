@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-19
+goal: Complete KUM-37 only; preserve online-runtime audio ownership and defer
+  physical audio validation to the release candidate.
