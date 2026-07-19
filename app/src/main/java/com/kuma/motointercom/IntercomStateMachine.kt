@@ -462,10 +462,7 @@ private fun reduceTunnelReady(
             }
             ?.let {
                 transition(
-                    IntercomState.Recovering(
-                        it.attempt,
-                        mergePeer(it.peer, event.peer) ?: it.peer
-                    )
+                    it.copy(peer = mergePeer(it.peer, event.peer) ?: it.peer)
                 )
             }
 
@@ -511,10 +508,7 @@ private fun reduceRemoteIdentity(
             ?.let {
                 if (!matchesTarget(it.attempt)) return null
                 transition(
-                    IntercomState.Recovering(
-                        it.attempt,
-                        mergePeer(it.peer, event.peer) ?: event.peer
-                    )
+                    it.copy(peer = mergePeer(it.peer, event.peer) ?: event.peer)
                 )
             }
 

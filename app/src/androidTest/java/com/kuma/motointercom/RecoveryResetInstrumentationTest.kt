@@ -129,7 +129,10 @@ class RecoveryResetInstrumentationTest {
             removeGroup = action("removeGroup"),
             clearServiceRequests = action("clearServiceRequests"),
             clearLocalServices = action("clearLocalServices"),
-            closeChannel = { calls += "close" }
+            closeChannel = { calls += "close" },
+            postDelayed = { _, _ -> Unit },
+            removeCallbacks = {},
+            stepTimeoutMillis = 1L
         ).start()
 
         assertEquals(

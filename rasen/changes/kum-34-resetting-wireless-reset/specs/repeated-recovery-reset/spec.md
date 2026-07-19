@@ -30,6 +30,14 @@ After the first or second accepted final recovery failure, the Coordinator SHALL
 - **WHEN** a retry attempt is created after a final failure
 - **THEN** Service finishes old Socket/LAN/P2P cleanup, waits the existing bounded reconnect backoff, and starts only the transports in the new immutable plan without extending its deadline
 
+#### Scenario: Retry deadline expires during asynchronous cleanup
+- **WHEN** the current retry reaches its immutable deadline before the previous physical cleanup callback completes
+- **THEN** Service retains one cleanup owner, replaces the pending restart with the Coordinator's latest retry or reset request, and cannot strand the runtime or restart the expired attempt
+
+#### Scenario: Active recovery signaling channel disconnects
+- **WHEN** an accepted control channel disconnects while the same recovery attempt remains current
+- **THEN** the Coordinator retires that channel context, preserves the attempt identity and absolute deadline, and re-emits the remaining deadline and fallback schedules for the rebuilt adapters
+
 #### Scenario: Recovery success clears the episode streak
 - **WHEN** any retry reaches verified WebRTC `CONNECTED`
 - **THEN** the resulting `CONNECTED` state carries no prior recovery-failure streak and a later recovery episode starts from zero
@@ -51,6 +59,10 @@ While product state is `RESETTING`, Service SHALL invalidate old runtime callbac
 #### Scenario: Ordered Wi-Fi Direct cleanup continues through API failures
 - **WHEN** any Wi-Fi Direct cleanup action reports failure or throws
 - **THEN** cleanup records the error, advances to the next required action, closes the channel, and completes at most once
+
+#### Scenario: Wi-Fi Direct cleanup listener never returns
+- **WHEN** `cancelConnect`, `removeGroup`, `clearServiceRequests`, or `clearLocalServices` never invokes its Android callback
+- **THEN** the bounded step watchdog records a timeout, advances exactly once, ignores any later callback, and still reaches channel close and discovery rebuild
 
 #### Scenario: LAN and delayed work are retired before rebuild
 - **WHEN** reset begins

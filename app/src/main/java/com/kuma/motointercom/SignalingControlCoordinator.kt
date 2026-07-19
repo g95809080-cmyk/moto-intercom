@@ -574,15 +574,36 @@ internal class SignalingControlCoordinator(
         )
         is IntercomState.Connecting,
         is IntercomState.Optimizing -> terminateOwnedAttempt(current, attempt, outcome)
-        is IntercomState.Recovering -> accepted(
-            state = current,
-            effects = if (restartConnectedDiscovery) {
-                listOf(SessionEffect.RestartDiscovery(attempt.runtimeSessionId, attempt))
-            } else {
-                emptyList()
-            }
-        )
+        is IntercomState.Recovering -> if (restartConnectedDiscovery) {
+            restartRecoveringAttempt(current, attempt)
+        } else {
+            accepted(state = current)
+        }
         else -> rejected()
+    }
+
+    private fun restartRecoveringAttempt(
+        current: IntercomState.Recovering,
+        attempt: ConnectionAttempt
+    ): SignalingControlDecision {
+        active?.takeIf { it.attempt == attempt }?.let {
+            rememberDisconnectedIfAccepted(it)
+            forgetActiveChannels(it)
+        }
+        targetedTransportRace = createTargetedTransportRace(
+            attempt,
+            preferredTransportOpened = false
+        )
+        return accepted(
+            state = current,
+            effects = listOfNotNull(
+                SessionEffect.RestartDiscovery(attempt.runtimeSessionId, attempt),
+                SessionEffect.ScheduleAttemptDeadline(attempt),
+                targetedTransportRace?.fallbackMilestone?.let(
+                    SessionEffect::ScheduleAttemptMilestone
+                )
+            )
+        )
     }
 
     private fun recoverConnectedAttempt(

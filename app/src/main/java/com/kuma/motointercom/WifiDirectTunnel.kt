@@ -464,6 +464,9 @@ internal class WifiDirectTunnel(
                 )
             },
             closeChannel = { finishCloseCleanup(cleanupGeneration, c) },
+            postDelayed = { callback, delay -> mainHandler.postDelayed(callback, delay) },
+            removeCallbacks = mainHandler::removeCallbacks,
+            stepTimeoutMillis = CLOSE_STEP_TIMEOUT_MS,
             onError = { failure -> Log.w(TAG, "close sequence failure", failure) }
         ).start()
     }
@@ -1850,6 +1853,7 @@ internal class WifiDirectTunnel(
     companion object {
         private const val SOCKET_CONNECT_TIMEOUT_MS = 3_000
         private const val CONNECT_WATCHDOG_MS = 12_000L
+        private const val CLOSE_STEP_TIMEOUT_MS = 5_000L
         private const val SOCKET_RETRY_DELAY_MS = 500L
         private const val BUSY_RETRY_DELAY_MS = 1_000L
         private const val REMOVE_GROUP_BUSY_RETRY_COUNT = 3

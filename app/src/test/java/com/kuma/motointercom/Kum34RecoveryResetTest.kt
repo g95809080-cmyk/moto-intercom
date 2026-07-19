@@ -387,6 +387,45 @@ class Kum34RecoveryResetTest {
         )
     }
 
+    @Test
+    fun recoveryIdentityUpdatesPreserveTheFailureStreak() {
+        val attempt = ConnectionAttemptFixture.create(
+            FakeMonotonicClock(MonotonicTimestamp(1L)),
+            runtimeSessionId = runtime,
+            targetDeviceId = "peer-a",
+            expectedRemoteSessionId = remoteRuntime,
+            trigger = ConnectionTrigger.RECOVERY
+        )
+        val recovering = IntercomState.Recovering(
+            attempt = attempt,
+            peer = verifiedPeer(),
+            consecutiveFinalFailures = 2
+        )
+        val tunnelUpdated = requireNotNull(
+            reduceIntercomState(
+                recovering,
+                SessionEvent.TunnelReady(
+                    attempt,
+                    verifiedPeer().copy(nickname = "Rider A updated"),
+                    Transport.LAN
+                )
+            )
+        ).state as IntercomState.Recovering
+        val identityUpdated = requireNotNull(
+            reduceIntercomState(
+                tunnelUpdated,
+                SessionEvent.RemoteIdentityReceived(
+                    runtime,
+                    attempt.id,
+                    verifiedPeer().copy(deviceName = "Updated phone")
+                )
+            )
+        ).state as IntercomState.Recovering
+
+        assertEquals(2, tunnelUpdated.consecutiveFinalFailures)
+        assertEquals(2, identityUpdated.consecutiveFinalFailures)
+    }
+
     private fun coordinator(
         clock: FakeMonotonicClock,
         ids: AttemptIds,

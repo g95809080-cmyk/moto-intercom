@@ -1,6 +1,7 @@
 package com.kuma.motointercom
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WifiDirectCloseSequenceTest {
@@ -8,6 +9,7 @@ class WifiDirectCloseSequenceTest {
     fun cleanupRunsInRequiredOrderAndWaitsForEveryCallback() {
         val calls = mutableListOf<String>()
         val callbacks = ArrayDeque<() -> Unit>()
+        val scheduler = TestScheduler()
         val action: (String) -> ((() -> Unit) -> Unit) = { name ->
             { complete ->
                 calls += name
@@ -20,7 +22,10 @@ class WifiDirectCloseSequenceTest {
             removeGroup = action("removeGroup"),
             clearServiceRequests = action("clearServiceRequests"),
             clearLocalServices = action("clearLocalServices"),
-            closeChannel = { calls += "close" }
+            closeChannel = { calls += "close" },
+            postDelayed = scheduler::post,
+            removeCallbacks = scheduler::remove,
+            stepTimeoutMillis = 1L
         ).start()
 
         assertEquals(listOf("cancelConnect"), calls)
@@ -58,6 +63,7 @@ class WifiDirectCloseSequenceTest {
     fun thrownAndDuplicateCallbacksStillCompleteExactlyOnce() {
         val calls = mutableListOf<String>()
         var duplicateCancel: (() -> Unit)? = null
+        val scheduler = TestScheduler()
 
         WifiDirectCloseSequence(
             cancelConnect = { complete ->
@@ -79,6 +85,9 @@ class WifiDirectCloseSequenceTest {
                 complete()
             },
             closeChannel = { calls += "close" },
+            postDelayed = scheduler::post,
+            removeCallbacks = scheduler::remove,
+            stepTimeoutMillis = 1L,
             onError = { calls += "error" }
         ).start()
 
@@ -94,5 +103,62 @@ class WifiDirectCloseSequenceTest {
             ),
             calls
         )
+    }
+
+    @Test
+    fun everyMissingAndroidCallbackTimesOutAndStillCloses() {
+        val labels = listOf(
+            "cancelConnect",
+            "removeGroup",
+            "clearServiceRequests",
+            "clearLocalServices"
+        )
+
+        labels.indices.forEach { stalledIndex ->
+            val calls = mutableListOf<String>()
+            val errors = mutableListOf<Throwable>()
+            val scheduler = TestScheduler()
+            val actions = labels.mapIndexed { index, label ->
+                { complete: () -> Unit ->
+                    calls += label
+                    if (index != stalledIndex) complete()
+                }
+            }
+
+            WifiDirectCloseSequence(
+                cancelConnect = actions[0],
+                removeGroup = actions[1],
+                clearServiceRequests = actions[2],
+                clearLocalServices = actions[3],
+                closeChannel = { calls += "close" },
+                postDelayed = scheduler::post,
+                removeCallbacks = scheduler::remove,
+                stepTimeoutMillis = 1L,
+                onError = errors::add
+            ).start()
+
+            scheduler.runAll()
+
+            assertEquals(labels + "close", calls)
+            assertEquals(1, errors.size)
+            assertTrue(errors.single().message.orEmpty().contains(labels[stalledIndex]))
+        }
+    }
+
+    private class TestScheduler {
+        private val callbacks = ArrayDeque<Runnable>()
+
+        fun post(callback: Runnable, delayMillis: Long) {
+            require(delayMillis > 0L)
+            callbacks += callback
+        }
+
+        fun remove(callback: Runnable) {
+            callbacks.remove(callback)
+        }
+
+        fun runAll() {
+            while (callbacks.isNotEmpty()) callbacks.removeFirst().run()
+        }
     }
 }

@@ -535,6 +535,82 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun activeRecoverySignalingDisconnectClearsContextAndRearmsSchedules() = runBlocking {
+        val recoveryIds = ArrayDeque(
+            listOf(ConnectionAttemptId("30000000-0000-4000-8000-000000000011"))
+        )
+        harness(attemptIdFactory = recoveryIds::removeFirst).use { harness ->
+            val connectedAttempt = outboundAttempt()
+            harness.start(connectedAttempt)
+            val connectedChannel = requesterChannel(CHANNEL_A, connectedAttempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, connectedChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        connectedAttempt.id,
+                        connectedChannel.channelId,
+                        connectedChannel.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        connectedAttempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        500L
+                    )
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingDisconnected(RUNTIME_A, connectedAttempt.id)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.RestartDiscovery)
+            assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+            val recovering = harness.orchestrator.state.value as IntercomState.Recovering
+            val recoveryChannel = requesterChannel(CHANNEL_B, recovering.attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, recoveryChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertEquals(recovering.attempt, harness.orchestrator.activeControlAttempt?.attempt)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingDisconnected(RUNTIME_A, recovering.attempt.id)
+                )
+            )
+
+            assertNull(harness.orchestrator.activeControlAttempt)
+            assertEquals(
+                SessionEffect.RestartDiscovery(RUNTIME_A, recovering.attempt),
+                harness.nextEffect()
+            )
+            assertEquals(
+                SessionEffect.ScheduleAttemptDeadline(recovering.attempt),
+                harness.nextEffect()
+            )
+            assertEquals(
+                recovering.attempt.deadlineElapsedRealtimeMs,
+                (harness.orchestrator.state.value as IntercomState.Recovering)
+                    .attempt.deadlineElapsedRealtimeMs
+            )
+        }
+    }
+
+    @Test
     fun nonOwnerDisconnectCannotEndAcceptedAttemptButOwnerDisconnectCan() = runBlocking {
         harness().use { harness ->
             val attempt = outboundAttempt()

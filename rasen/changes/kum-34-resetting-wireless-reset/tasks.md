@@ -29,4 +29,8 @@
 
 - [x] 5.1 Commit atomically, push, open one KUM-34 Draft PR, and synchronize Linear while KUM-9 remains In Progress and KUM-35/KUM-36 remain Todo.
 - [ ] 5.2 Complete fixed Base/Head read-only architecture review and remediate all in-scope P0/P1 findings until APPROVED with P0=0 and P1=0.
+  - [x] Validate initial review P1 findings for Android close callbacks, cleanup/deadline reconciliation, active-channel schedule rearming, and production-order coverage.
+  - [x] Add bounded close-step watchdogs and deterministic never-callback coverage for every required Wi-Fi Direct action.
+  - [x] Coalesce cleanup-time attempt/reset replacements, preserve immutable deadlines, rearm active recovery schedules, and cover exact adapter rebuild/reset completion.
+  - [x] Re-run 284 JVM tests, lint/build/test-APK gates, focused reset instrumentation, and the full three-emulator matrix after remediation.
 - [ ] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-34 Done, and only then start KUM-35.
