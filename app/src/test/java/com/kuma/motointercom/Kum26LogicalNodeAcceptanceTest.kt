@@ -645,7 +645,7 @@ class Kum26LogicalNodeAcceptanceTest {
             assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
             assertTrue(
                 harness.orchestrator.dispatchAndAwait(
-                    SessionEvent.RecoveryTransportsReady(recoveryAttempt)
+                    SessionEvent.RecoveryTransportReady(recoveryAttempt, Transport.LAN)
                 )
             )
             assertEquals(

@@ -31,6 +31,21 @@ private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
 internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
     if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
 
+internal class RecoveryTransportReadinessRouter(
+    private val expectedAttempt: ConnectionAttempt?,
+    private val dispatch: (SessionEvent.RecoveryTransportReady) -> Unit
+) {
+    fun reportReady(transport: Transport) {
+        expectedAttempt?.let { reportReady(it, transport) }
+    }
+
+    fun reportReady(attempt: ConnectionAttempt, transport: Transport) {
+        val expected = expectedAttempt ?: return
+        if (attempt != expected || transport !in expected.channelPlan) return
+        dispatch(SessionEvent.RecoveryTransportReady(expected, transport))
+    }
+}
+
 /**
  * 后台免死对讲服务。
  *
@@ -398,9 +413,12 @@ class IntercomService : Service() {
         targetAttempt: ConnectionAttempt? = null
     ) {
         publishStatus(SEARCHING_STATUS)
+        val recoveryReadiness = RecoveryTransportReadinessRouter(targetAttempt) { event ->
+            postForSession(token) { orchestrator.dispatch(event) }
+        }
         val plannedTransports = plannedDiscoveryTransports(targetAttempt)
         if (Transport.WIFI_DIRECT in plannedTransports) {
-        wifiTunnel = WifiDirectTunnel(
+        val tunnel = WifiDirectTunnel(
             context = this,
             onControlChannelReady = { session ->
                 registerControlChannel(token, session)
@@ -449,12 +467,17 @@ class IntercomService : Service() {
                     )
                 }
             },
+            onStartupReady = { attempt ->
+                recoveryReadiness.reportReady(attempt, Transport.WIFI_DIRECT)
+            },
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt
-        ).also { it.start() }
+        )
+        wifiTunnel = tunnel
+        tunnel.start()
         }
         if (Transport.LAN in plannedTransports) {
-        lanDiscovery = LanDiscoveryCoordinator(
+        val discovery = LanDiscoveryCoordinator(
             context = this,
             token = token,
             isSessionCurrent = ::isSessionCurrent,
@@ -494,9 +517,10 @@ class IntercomService : Service() {
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt
-        ).also { it.start() }
+        )
+        lanDiscovery = discovery
+        if (discovery.start()) recoveryReadiness.reportReady(Transport.LAN)
         }
-        targetAttempt?.let { orchestrator.dispatch(SessionEvent.RecoveryTransportsReady(it)) }
     }
 
     private fun registerControlChannel(

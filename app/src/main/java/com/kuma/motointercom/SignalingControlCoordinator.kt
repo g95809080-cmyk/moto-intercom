@@ -16,9 +16,11 @@ private data class TerminalAttemptRecord(
 private data class TargetedTransportRace(
     val attempt: ConnectionAttempt,
     val openedTransports: Set<Transport>,
+    val readyTransports: Set<Transport>,
     val failedTransports: Set<Transport> = emptySet(),
     val retiredTransports: Set<Transport> = emptySet(),
-    val fallbackMilestone: AttemptMilestone.FallbackTransport? = null
+    val fallbackMilestone: AttemptMilestone.FallbackTransport? = null,
+    val fallbackDue: Boolean = false
 )
 
 internal class SignalingControlCoordinator(
@@ -116,7 +118,7 @@ internal class SignalingControlCoordinator(
             )
             is SessionEvent.TargetedTransportOverlapUnavailable ->
                 targetedTransportOverlapUnavailable(current, event)
-            is SessionEvent.RecoveryTransportsReady -> recoveryTransportsReady(current, event)
+            is SessionEvent.RecoveryTransportReady -> recoveryTransportReady(current, event)
             is SessionEvent.AttemptTimedOut -> attemptTimedOut(current, event)
             is SessionEvent.AttemptMilestoneElapsed -> attemptMilestoneElapsed(current, event)
             is SessionEvent.WebRtcStateChanged -> webRtcStateChanged(current, event)
@@ -358,14 +360,20 @@ internal class SignalingControlCoordinator(
             return rejected()
         }
         if (
+            race.fallbackDue ||
             milestone.transport in race.openedTransports ||
             active?.takeIf { it.attempt == attempt }?.mediaOwnerChannelId != null ||
             terminalOutcome(attempt.id) != null
         ) {
             return rejected()
         }
+        if (milestone.transport !in race.readyTransports) {
+            targetedTransportRace = race.copy(fallbackDue = true)
+            return accepted(state = current)
+        }
         targetedTransportRace = race.copy(
-            openedTransports = race.openedTransports + milestone.transport
+            openedTransports = race.openedTransports + milestone.transport,
+            fallbackDue = true
         )
         return accepted(
             state = current,
@@ -373,9 +381,9 @@ internal class SignalingControlCoordinator(
         )
     }
 
-    private fun recoveryTransportsReady(
+    private fun recoveryTransportReady(
         current: IntercomState,
-        event: SessionEvent.RecoveryTransportsReady
+        event: SessionEvent.RecoveryTransportReady
     ): SignalingControlDecision {
         val recovering = current as? IntercomState.Recovering ?: return rejected()
         val now = clock.now()
@@ -383,38 +391,39 @@ internal class SignalingControlCoordinator(
             it == event.attempt &&
                 recovering.attempt == it &&
                 it.trigger == ConnectionTrigger.RECOVERY &&
+                event.transport in it.channelPlan &&
                 !it.isExpiredAt(now) &&
                 terminalOutcome(it.id) == null
         } ?: return rejected()
         val race = targetedTransportRace?.takeIf {
-            it.attempt == attempt && it.openedTransports.isEmpty()
+            it.attempt == attempt && event.transport !in it.readyTransports
         } ?: return rejected()
         val fallbackMilestone = race.fallbackMilestone
-        val fallbackDue = fallbackMilestone?.takeIf {
+        val fallbackDue = race.fallbackDue || fallbackMilestone?.let {
             now.elapsedRealtimeMs >= it.scheduledAt.elapsedRealtimeMs
+        } == true
+        val readyTransports = race.readyTransports + event.transport
+        val transportsToOpen = buildSet {
+            if (
+                attempt.preferredTransport in readyTransports &&
+                attempt.preferredTransport !in race.openedTransports
+            ) {
+                add(attempt.preferredTransport)
+            }
+            fallbackMilestone?.transport?.takeIf {
+                fallbackDue && it in readyTransports && it !in race.openedTransports
+            }?.let(::add)
         }
         targetedTransportRace = race.copy(
-            openedTransports = buildSet {
-                add(attempt.preferredTransport)
-                fallbackDue?.let { add(it.transport) }
-            }
+            openedTransports = race.openedTransports + transportsToOpen,
+            readyTransports = readyTransports,
+            fallbackDue = fallbackDue
         )
-        val fallbackEffect: SessionEffect? = when {
-            fallbackDue != null -> SessionEffect.OpenTargetedTransport(
-                attempt,
-                fallbackDue.transport
-            )
-            fallbackMilestone != null -> SessionEffect.ScheduleAttemptMilestone(
-                fallbackMilestone
-            )
-            else -> null
-        }
         return accepted(
             state = current,
-            effects = listOfNotNull(
-                SessionEffect.OpenTargetedTransport(attempt, attempt.preferredTransport),
-                fallbackEffect
-            )
+            effects = transportsToOpen.map {
+                SessionEffect.OpenTargetedTransport(attempt, it)
+            }
         )
     }
 
@@ -609,12 +618,13 @@ internal class SignalingControlCoordinator(
         return accepted(
             state = IntercomState.Recovering(recoveryAttempt, current.peer),
             effects = if (restartConnectedDiscovery) {
-                listOf(
+                listOfNotNull(
                     SessionEffect.RestartDiscovery(
                         recoveryAttempt.runtimeSessionId,
                         recoveryAttempt
                     ),
-                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt)
+                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
+                    fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
                 )
             } else {
                 listOfNotNull(
@@ -2457,6 +2467,11 @@ internal class SignalingControlCoordinator(
             attempt = attempt,
             openedTransports = if (preferredTransportOpened) {
                 setOf(attempt.preferredTransport)
+            } else {
+                emptySet()
+            },
+            readyTransports = if (preferredTransportOpened) {
+                attempt.channelPlan.plannedTransports
             } else {
                 emptySet()
             },

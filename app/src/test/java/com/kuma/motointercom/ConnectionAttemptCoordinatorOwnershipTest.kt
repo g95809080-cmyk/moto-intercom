@@ -273,21 +273,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(
             listOf(
                 SessionEffect.RestartDiscovery(runtime, recovery),
-                SessionEffect.ScheduleAttemptDeadline(recovery)
-            ),
-            decision.effects
-        )
-
-        val ready = requireNotNull(
-            coordinator.handle(
-                decision.state as IntercomState.Recovering,
-                SessionEvent.RecoveryTransportsReady(recovery)
-            )
-        )
-        assertTrue(ready.accepted)
-        assertEquals(
-            listOf(
-                SessionEffect.OpenTargetedTransport(recovery, Transport.LAN),
+                SessionEffect.ScheduleAttemptDeadline(recovery),
                 SessionEffect.ScheduleAttemptMilestone(
                     AttemptMilestone.FallbackTransport(
                         recovery,
@@ -295,6 +281,20 @@ class ConnectionAttemptCoordinatorOwnershipTest {
                         MonotonicTimestamp(3_500L)
                     )
                 )
+            ),
+            decision.effects
+        )
+
+        val ready = requireNotNull(
+            coordinator.handle(
+                decision.state as IntercomState.Recovering,
+                SessionEvent.RecoveryTransportReady(recovery, Transport.LAN)
+            )
+        )
+        assertTrue(ready.accepted)
+        assertEquals(
+            listOf(
+                SessionEffect.OpenTargetedTransport(recovery, Transport.LAN)
             ),
             ready.effects
         )
@@ -323,30 +323,62 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             )
         )
         val recovering = recoveryDecision.state as IntercomState.Recovering
+        val milestone = (
+            recoveryDecision.effects.single { it is SessionEffect.ScheduleAttemptMilestone }
+                as SessionEffect.ScheduleAttemptMilestone
+            ).milestone as AttemptMilestone.FallbackTransport
 
         clock.advanceBy(3_000L)
-        val ready = requireNotNull(
+        val due = requireNotNull(
             coordinator.handle(
                 recovering,
-                SessionEvent.RecoveryTransportsReady(recovering.attempt)
+                SessionEvent.AttemptMilestoneElapsed(milestone)
             )
         )
-        assertTrue(ready.accepted)
+        assertTrue(due.accepted)
+        assertTrue(due.effects.isEmpty())
+
+        val preferredReady = requireNotNull(
+            coordinator.handle(
+                recovering,
+                SessionEvent.RecoveryTransportReady(recovering.attempt, Transport.LAN)
+            )
+        )
+        assertTrue(preferredReady.accepted)
         assertEquals(
             listOf(
-                SessionEffect.OpenTargetedTransport(recovering.attempt, Transport.LAN),
+                SessionEffect.OpenTargetedTransport(recovering.attempt, Transport.LAN)
+            ),
+            preferredReady.effects
+        )
+
+        val fallbackReady = requireNotNull(
+            coordinator.handle(
+                recovering,
+                SessionEvent.RecoveryTransportReady(
+                    recovering.attempt,
+                    Transport.WIFI_DIRECT
+                )
+            )
+        )
+        assertTrue(fallbackReady.accepted)
+        assertEquals(
+            listOf(
                 SessionEffect.OpenTargetedTransport(
                     recovering.attempt,
                     Transport.WIFI_DIRECT
                 )
             ),
-            ready.effects
+            fallbackReady.effects
         )
         assertFalse(
             requireNotNull(
                 coordinator.handle(
                     recovering,
-                    SessionEvent.RecoveryTransportsReady(recovering.attempt)
+                    SessionEvent.RecoveryTransportReady(
+                        recovering.attempt,
+                        Transport.WIFI_DIRECT
+                    )
                 )
             ).accepted
         )
@@ -354,7 +386,10 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             requireNotNull(
                 coordinator.handle(
                     recovering,
-                    SessionEvent.RecoveryTransportsReady(connecting.attempt)
+                    SessionEvent.RecoveryTransportReady(
+                        connecting.attempt,
+                        Transport.WIFI_DIRECT
+                    )
                 )
             ).accepted
         )
@@ -389,7 +424,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             requireNotNull(
                 coordinator.handle(
                     recovering,
-                    SessionEvent.RecoveryTransportsReady(recovering.attempt)
+                    SessionEvent.RecoveryTransportReady(recovering.attempt, Transport.LAN)
                 )
             ).accepted
         )

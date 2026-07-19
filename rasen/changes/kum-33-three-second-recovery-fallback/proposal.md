@@ -9,14 +9,16 @@ additional Service backoff.
 
 - Create each recovery attempt with the last successful transport first while
   preserving the same TargetLock and available transport set.
-- Open that transport as soon as mandatory cleanup completes, without the
-  normal failed-attempt discovery backoff.
+- Report each rebuilt adapter independently and open a transport only after
+  that adapter's mandatory startup cleanup completes, without the normal
+  failed-attempt discovery backoff.
 - Schedule the recovery-only fallback exactly three seconds after the immutable
   recovery attempt start, while keeping the existing total T+10 deadline.
 - Open the alternate transport for the same attempt and target when the fast
   window expires; stale, replaced, terminal, or late milestones remain inert.
-- Add deterministic clock/transport/callback coverage and update Sprint 4 and
-  Release Candidate evidence without claiming physical OEM/RF validation.
+- Add deterministic clock/transport/callback coverage for the production
+  Service-to-adapter readiness ordering and update Sprint 4 and Release
+  Candidate evidence without claiming physical OEM/RF validation.
 
 ## Capabilities
 

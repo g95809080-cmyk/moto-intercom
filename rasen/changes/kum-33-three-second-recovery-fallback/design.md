@@ -44,14 +44,17 @@ hot audio ownership.
    from the recovery attempt's immutable start (`deadline - attemptTimeout`) and
    never copies or rebases the deadline.
 
-3. **Make rebuilt transport readiness an explicit Coordinator event.** A
-   signaling disconnect must tear down physical resources before reuse. Service
-   rebuilds only the adapters in the immutable recovery plan, then posts the
-   exact attempt as ready. The Coordinator opens the preferred transport and
-   either schedules the original T+3 milestone or, if cleanup consumed the
-   window, opens the already-due alternate immediately after the preferred.
-   This avoids both an implicit Service timing policy and a missed fallback when
-   cleanup lasts longer than three seconds.
+3. **Report rebuilt readiness per transport.** A signaling disconnect must tear
+   down physical resources before reuse. Service rebuilds only the adapters in
+   the immutable recovery plan. LAN reports ready after its synchronous start;
+   Wi-Fi Direct reports ready only after startup group cleanup and DNS-SD service
+   discovery setup complete. Each event carries the exact attempt and transport.
+   The Coordinator opens the preferred as soon as its adapter is ready. If T+3
+   arrives before the alternate is ready, the race records that fallback is due
+   and opens it immediately when that adapter later reports ready. This avoids
+   an implicit Service timing policy, prevents startup cleanup from being
+   invalidated by a premature targeted open, and does not block LAN on Wi-Fi
+   Direct initialization.
 
 4. **Keep media-only recovery on the direct path.** When adapters remain valid,
    the Coordinator emits the preferred open and T+3 schedule immediately. No
@@ -62,10 +65,12 @@ hot audio ownership.
    extra delay; ordinary terminal-attempt cleanup keeps the existing 1.5-second
    discovery backoff. Cleanup elapsed time consumes the same T+3/T+10 clocks.
 
-6. **Reuse existing stale and winner gates.** Readiness and milestones require
-   exact attempt equality, current `RECOVERING` state, a live deadline, no
-   terminal outcome, and one race record. Existing TargetLock, retired
-   transport, current-winner, and `StartWebRtc` checks remain unchanged.
+6. **Reuse existing stale and winner gates.** Per-transport readiness and
+   milestones require exact attempt equality, membership in the immutable plan,
+   current `RECOVERING` state, a live deadline, no terminal outcome, and one
+   race record. Duplicate, stale, terminal, and wrong-transport readiness is
+   inert. Existing TargetLock, retired transport, current-winner, and
+   `StartWebRtc` checks remain unchanged.
 
 7. **Use layered evidence.** JVM tests cover plan ordering, T+3 boundaries,
    delayed readiness, normal T+5 preservation, stale attempts, early success,
@@ -75,9 +80,10 @@ hot audio ownership.
 
 ## Risks / Trade-offs
 
-- **Cleanup consumes the whole fast window.** -> The Coordinator opens the
-  preferred then the already-due alternate as soon as rebuilt adapters report
-  ready, without resetting T+3 or T+10.
+- **Cleanup consumes the whole fast window.** -> T+3 remains scheduled from
+  immutable attempt creation. The Coordinator records fallback due without
+  opening an unready adapter, then opens each rebuilt transport as soon as that
+  exact adapter reports ready, without resetting T+3 or T+10.
 - **A stale readiness event opens transports for a replacement.** -> Require
   exact immutable attempt equality and current `RECOVERING` state.
 - **Reordering the recovery plan weakens target lock.** -> Only transport order

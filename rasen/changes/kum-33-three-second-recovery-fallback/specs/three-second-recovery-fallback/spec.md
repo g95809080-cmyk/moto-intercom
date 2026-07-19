@@ -41,33 +41,48 @@ non-recovery attempts SHALL retain their existing T+5 fallback schedule.
 - **THEN** its fallback remains scheduled at T+5 and its optimization/deadline behavior is unchanged
 
 ### Requirement: Cleanup completion cannot add recovery backoff
-When signaling loss requires physical adapter teardown, Service SHALL complete
-the mandatory cleanup and then report the exact recovery attempt as transport
-ready without adding the normal failed-attempt discovery backoff. The
-Coordinator SHALL remain the authority that opens the preferred and due
-alternate transports.
+When signaling loss requires physical adapter teardown, Service SHALL report
+each transport ready independently for the exact recovery attempt without
+adding the normal failed-attempt discovery backoff. LAN MAY report ready after
+its synchronous startup. Wi-Fi Direct SHALL report ready only after startup
+group cleanup and DNS-SD service discovery setup complete. The Coordinator
+SHALL remain the authority that opens the preferred and due alternate
+transports.
 
-#### Scenario: Cleanup completes before T+3
-- **WHEN** the exact current recovery environment becomes ready before the fast-window boundary
-- **THEN** the Coordinator opens the preferred transport immediately and schedules the original T+3 milestone
+#### Scenario: Preferred adapter becomes ready before T+3
+- **WHEN** the exact current preferred adapter reports ready before the fast-window boundary
+- **THEN** the Coordinator opens that preferred transport immediately while the original T+3 milestone remains scheduled from attempt creation
 
-#### Scenario: Cleanup completes at or after T+3
-- **WHEN** the exact current recovery environment becomes ready after the alternate milestone is already due
-- **THEN** the Coordinator opens the preferred transport followed by the alternate without resetting either clock
+#### Scenario: Alternate adapter is not ready at T+3
+- **WHEN** the original fallback milestone arrives before the exact alternate adapter is ready
+- **THEN** the Coordinator records fallback due without issuing a physical open
+
+#### Scenario: Due alternate becomes ready later
+- **WHEN** the exact alternate adapter reports ready after fallback is due
+- **THEN** the Coordinator opens it immediately without resetting T+3 or T+10
+
+#### Scenario: LAN startup does not wait for Wi-Fi Direct
+- **WHEN** LAN is ready while Wi-Fi Direct startup cleanup is still running
+- **THEN** LAN eligibility is processed independently and Wi-Fi Direct is not opened before its own readiness callback
 
 #### Scenario: Ordinary failed attempt resumes discovery
 - **WHEN** no recovery attempt is being resumed
 - **THEN** the existing bounded discovery backoff remains in effect
 
 ### Requirement: Recovery timing events fail closed
-Recovery-ready events, fallback milestones, transport callbacks, and media SHALL
-affect only the exact current unexpired recovery attempt. A
+Recovery transport-ready events SHALL affect only the exact current unexpired
+recovery attempt; the same gate applies to fallback milestones, transport
+callbacks, and media. A
 successful recovery SHALL leave exactly one media owner and SHALL make its late
 fallback and prior-attempt callbacks inert.
 
 #### Scenario: Old attempt callback arrives
 - **WHEN** a callback or milestone carries the prior connected attempt or a replaced recovery attempt
 - **THEN** it cannot open a transport, change target, claim media, or extend the deadline
+
+#### Scenario: Duplicate or wrong-transport readiness arrives
+- **WHEN** readiness repeats for the same adapter or names a transport outside the immutable plan
+- **THEN** it cannot open another adapter or change race state
 
 #### Scenario: Recovery succeeds before T+3
 - **WHEN** the preferred transport reconnects and WebRTC reaches connected before the fast window expires
