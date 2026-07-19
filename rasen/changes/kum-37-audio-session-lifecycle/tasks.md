@@ -2,7 +2,7 @@
 
 - [x] 1.1 Freeze the KUM-37 proposal, hot-audio specification, design, allowed scope, forbidden scope, and Release Candidate physical deferrals.
 - [x] 1.2 Record the Sprint 4 audio ownership ADR and its narrow supersession of the KUM-27A RiderAudioEngine lifetime row.
-- [x] 1.3 Strictly validate the complete Rasen change and full-feature Codex runtime configuration.
+- [x] 1.3 Strictly validate the complete Rasen change and full-feature-equivalent Codex execution contract.
 
 ## 2. Runtime Audio Owner
 

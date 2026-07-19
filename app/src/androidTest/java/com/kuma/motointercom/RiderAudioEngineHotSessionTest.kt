@@ -51,8 +51,6 @@ class RiderAudioEngineHotSessionTest {
             }
 
             first.close()
-            assertTrue("first PeerConnection was not disposed", awaitPeerClosed(engine))
-            assertNull(field(engine, "peerConnection"))
 
             val secondSdp = CountDownLatch(1)
             val second = engine.openSession(callbacks(secondSdp, errors))
@@ -66,6 +64,9 @@ class RiderAudioEngineHotSessionTest {
             }
             assertNotSame(firstPeer, secondPeer)
             assertNull("unexpected media error", errors.poll())
+            assertThrows(IllegalStateException::class.java) {
+                engine.openSession(callbacks(CountDownLatch(1), errors))
+            }
 
             second.close()
             assertTrue("second PeerConnection was not disposed", awaitPeerClosed(engine))

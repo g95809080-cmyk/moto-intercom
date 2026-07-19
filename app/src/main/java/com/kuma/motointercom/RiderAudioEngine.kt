@@ -55,6 +55,16 @@ internal interface RiderMediaEngine : Closeable {
     fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
 }
 
+internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
+    var failure: Throwable? = null
+    steps.forEach { step ->
+        runCatching(step).exceptionOrNull()?.let {
+            if (failure == null) failure = it else failure?.addSuppressed(it)
+        }
+    }
+    failure?.let { throw it }
+}
+
 /**
  * Online-runtime audio platform owner with one replaceable WebRTC media session.
  *
@@ -189,8 +199,10 @@ internal class RiderAudioEngine(
         runRtc(allowClosed = true, onFailure = ::postEngineError) {
             try {
                 engineState = EngineState.CLOSED
-                disposeMediaSessionResources()
-                disposePlatformResources()
+                runAllCleanupSteps(
+                    ::disposeMediaSessionResources,
+                    ::disposePlatformResources
+                )
             } catch (t: Throwable) {
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
@@ -294,6 +306,7 @@ internal class RiderAudioEngine(
     }
 
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
+        check(peerConnection == null) { "previous PeerConnection is still active" }
         val config = PeerConnection.RTCConfiguration(emptyList()).apply {
             // 无公网、无服务器：只产出 Wi-Fi Direct 局域网 host candidate。
             iceServers = emptyList()

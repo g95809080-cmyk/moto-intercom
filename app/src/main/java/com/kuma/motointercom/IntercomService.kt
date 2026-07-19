@@ -1084,7 +1084,15 @@ class IntercomService : Service() {
 
     private fun postForRuntime(runtimeSessionId: RuntimeSessionId, action: () -> Unit) {
         dispatchOnMain {
-            if (running && activeRuntimeSessionId == runtimeSessionId) action()
+            if (
+                canDeliverRuntimeAudioCallback(
+                    running = running,
+                    activeRuntimeSessionId = activeRuntimeSessionId,
+                    callbackRuntimeSessionId = runtimeSessionId
+                )
+            ) {
+                action()
+            }
         }
     }
 
@@ -1823,6 +1831,12 @@ internal fun canExecuteAbortAttemptEffect(
     activeAttempt == null &&
     pendingInbound == null &&
     terminalOutcome != null
+
+internal fun canDeliverRuntimeAudioCallback(
+    running: Boolean,
+    activeRuntimeSessionId: RuntimeSessionId?,
+    callbackRuntimeSessionId: RuntimeSessionId
+): Boolean = running && activeRuntimeSessionId == callbackRuntimeSessionId
 
 internal fun canExecuteRestartDiscoveryEffect(
     effect: SessionEffect.RestartDiscovery,
