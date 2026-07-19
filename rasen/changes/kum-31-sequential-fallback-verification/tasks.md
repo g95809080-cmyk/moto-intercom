@@ -2,7 +2,7 @@
 
 - [x] 1.1 Freeze KUM-31 proposal, sequential-fallback specification, design,
   allowed scope, forbidden scope, and Release Candidate physical deferral.
-- [ ] 1.2 Map every KUM-31 development Exit Criterion to an exact owner,
+- [x] 1.2 Map every KUM-31 development Exit Criterion to an exact owner,
   deterministic test, emulator evidence, and final report row.
 - [x] 1.3 Strictly validate the complete Rasen change.
 
@@ -37,11 +37,11 @@
 
 ## 5. Full Gate And Delivery
 
-- [ ] 5.1 Run full JVM, `lintDebug`, `assembleDebug`, and
+- [x] 5.1 Run full JVM, `lintDebug`, `assembleDebug`, and
   `assembleDebugAndroidTest` and record exact totals.
-- [ ] 5.2 Run the reusable three-emulator matrix and preserve fresh evidence
+- [x] 5.2 Run the reusable three-emulator matrix and preserve fresh evidence
   without accepting ATD black screenshots as visual PASS.
-- [ ] 5.3 Update the authoritative Sprint 3 report and Release Candidate plan.
+- [x] 5.3 Update the authoritative Sprint 3 report and Release Candidate plan.
 - [ ] 5.4 Commit atomically, push, open the KUM-31 Draft PR, and synchronize
   Linear evidence while KUM-8 remains In Progress.
 - [ ] 5.5 Complete fixed-SHA read-only architecture review and remediate any
