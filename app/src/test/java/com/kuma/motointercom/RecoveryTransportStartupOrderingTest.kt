@@ -1,6 +1,7 @@
 package com.kuma.motointercom
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,16 +10,34 @@ class RecoveryTransportStartupOrderingTest {
     fun wifiPreferredRecoveryWaitsForAsyncWifiStartupReadiness() {
         val fixture = fixture(Transport.WIFI_DIRECT)
         val effects = mutableListOf<SessionEffect>()
-        val readiness = readinessRouter(fixture, effects)
-        val wifiServiceDiscoveryReady = {
-            readiness.reportReady(fixture.recovering.attempt, Transport.WIFI_DIRECT)
+        val startup = startupRouter(fixture, effects)
+        var cleanupComplete = false
+
+        val adapters = startAdapters(fixture, startup) { onReady ->
+            { attempt ->
+                check(cleanupComplete)
+                onReady(attempt)
+            }
         }
 
-        readiness.reportReady(Transport.LAN)
-
+        assertTrue(adapters.wifiInstalledBeforeStart)
+        assertTrue(adapters.lanInstalledBeforeStart)
         assertTrue(effects.isEmpty())
 
-        wifiServiceDiscoveryReady()
+        assertFalse(
+            adapters.wifi.readiness.reportServiceDiscoveryReady(null)
+        )
+        cleanupComplete = true
+        assertTrue(
+            adapters.wifi.readiness.reportServiceDiscoveryReady(
+                fixture.recovering.attempt
+            )
+        )
+        assertFalse(
+            adapters.wifi.readiness.reportServiceDiscoveryReady(
+                fixture.recovering.attempt
+            )
+        )
 
         assertEquals(
             listOf(
@@ -35,9 +54,9 @@ class RecoveryTransportStartupOrderingTest {
     fun lanPreferredRecoveryDoesNotWaitForWifiAndDueFallbackWaitsUntilWifiReady() {
         val fixture = fixture(Transport.LAN)
         val effects = mutableListOf<SessionEffect>()
-        val readiness = readinessRouter(fixture, effects)
+        val startup = startupRouter(fixture, effects)
 
-        readiness.reportReady(Transport.LAN)
+        val adapters = startAdapters(fixture, startup)
 
         assertEquals(
             listOf(
@@ -59,7 +78,13 @@ class RecoveryTransportStartupOrderingTest {
         assertTrue(due.accepted)
         assertTrue(due.effects.isEmpty())
 
-        readiness.reportReady(fixture.recovering.attempt, Transport.WIFI_DIRECT)
+        assertTrue(adapters.wifiInstalledBeforeStart)
+        assertTrue(adapters.lanInstalledBeforeStart)
+        assertTrue(
+            adapters.wifi.readiness.reportServiceDiscoveryReady(
+                fixture.recovering.attempt
+            )
+        )
 
         assertEquals(
             listOf(
@@ -80,11 +105,15 @@ class RecoveryTransportStartupOrderingTest {
     fun wifiReadinessAtExactT3AlsoOpensTheAlreadyReadyFallbackOnce() {
         val fixture = fixture(Transport.WIFI_DIRECT)
         val effects = mutableListOf<SessionEffect>()
-        val readiness = readinessRouter(fixture, effects)
+        val startup = startupRouter(fixture, effects)
 
-        readiness.reportReady(Transport.LAN)
+        val adapters = startAdapters(fixture, startup)
         fixture.clock.advanceBy(3_000L)
-        readiness.reportReady(fixture.recovering.attempt, Transport.WIFI_DIRECT)
+        assertTrue(
+            adapters.wifi.readiness.reportServiceDiscoveryReady(
+                fixture.recovering.attempt
+            )
+        )
 
         assertEquals(
             listOf(
@@ -99,25 +128,63 @@ class RecoveryTransportStartupOrderingTest {
             ),
             effects
         )
-        assertTrue(
+        assertFalse(
             requireNotNull(
                 fixture.coordinator.handle(
                     fixture.recovering,
                     SessionEvent.AttemptMilestoneElapsed(fixture.milestone)
                 )
-            ).accepted.not()
+            ).accepted
         )
     }
 
-    private fun readinessRouter(
+    private fun startupRouter(
         fixture: Fixture,
         effects: MutableList<SessionEffect>
-    ) = RecoveryTransportReadinessRouter(fixture.recovering.attempt) { event ->
+    ) = RecoveryTransportStartup(fixture.recovering.attempt) { event ->
         val decision = requireNotNull(
             fixture.coordinator.handle(fixture.recovering, event)
         )
         assertTrue(decision.accepted)
         effects += decision.effects
+    }
+
+    private fun startAdapters(
+        fixture: Fixture,
+        startup: RecoveryTransportStartup,
+        wrapWifiReady: ((ConnectionAttempt) -> Unit) -> ((ConnectionAttempt) -> Unit) = { it }
+    ): StartedAdapters {
+        var installedWifi: FakeWifiAdapter? = null
+        var installedLan: FakeLanAdapter? = null
+        var wifiInstalledBeforeStart = false
+        var lanInstalledBeforeStart = false
+
+        startup.start(
+            plannedTransports = setOf(Transport.LAN, Transport.WIFI_DIRECT),
+            createWifiDirect = { onReady ->
+                FakeWifiAdapter(
+                    WifiDirectStartupReadiness(
+                        startupAttempt = fixture.recovering.attempt,
+                        clock = fixture.clock,
+                        onReady = wrapWifiReady(onReady)
+                    )
+                )
+            },
+            installWifiDirect = { installedWifi = it },
+            startWifiDirect = { wifiInstalledBeforeStart = installedWifi === it },
+            createLan = ::FakeLanAdapter,
+            installLan = { installedLan = it },
+            startLan = {
+                lanInstalledBeforeStart = installedLan === it
+                true
+            }
+        )
+
+        return StartedAdapters(
+            wifi = requireNotNull(installedWifi),
+            wifiInstalledBeforeStart = wifiInstalledBeforeStart,
+            lanInstalledBeforeStart = lanInstalledBeforeStart
+        )
     }
 
     private fun fixture(lastTransport: Transport): Fixture {
@@ -174,6 +241,18 @@ class RecoveryTransportStartupOrderingTest {
         val coordinator: SignalingControlCoordinator,
         val recovering: IntercomState.Recovering,
         val milestone: AttemptMilestone.FallbackTransport
+    )
+
+    private data class FakeWifiAdapter(
+        val readiness: WifiDirectStartupReadiness
+    )
+
+    private class FakeLanAdapter
+
+    private data class StartedAdapters(
+        val wifi: FakeWifiAdapter,
+        val wifiInstalledBeforeStart: Boolean,
+        val lanInstalledBeforeStart: Boolean
     )
 
     private companion object {

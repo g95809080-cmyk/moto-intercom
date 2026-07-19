@@ -31,15 +31,34 @@ private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
 internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
     if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
 
-internal class RecoveryTransportReadinessRouter(
+internal class RecoveryTransportStartup(
     private val expectedAttempt: ConnectionAttempt?,
     private val dispatch: (SessionEvent.RecoveryTransportReady) -> Unit
 ) {
-    fun reportReady(transport: Transport) {
-        expectedAttempt?.let { reportReady(it, transport) }
+    fun <WifiDirectAdapter, LanAdapter> start(
+        plannedTransports: Set<Transport>,
+        createWifiDirect: ((ConnectionAttempt) -> Unit) -> WifiDirectAdapter,
+        installWifiDirect: (WifiDirectAdapter) -> Unit,
+        startWifiDirect: (WifiDirectAdapter) -> Unit,
+        createLan: () -> LanAdapter,
+        installLan: (LanAdapter) -> Unit,
+        startLan: (LanAdapter) -> Boolean
+    ) {
+        if (Transport.WIFI_DIRECT in plannedTransports) {
+            val adapter = createWifiDirect { reportReady(it, Transport.WIFI_DIRECT) }
+            installWifiDirect(adapter)
+            startWifiDirect(adapter)
+        }
+        if (Transport.LAN in plannedTransports) {
+            val adapter = createLan()
+            installLan(adapter)
+            if (startLan(adapter)) {
+                expectedAttempt?.let { reportReady(it, Transport.LAN) }
+            }
+        }
     }
 
-    fun reportReady(attempt: ConnectionAttempt, transport: Transport) {
+    private fun reportReady(attempt: ConnectionAttempt, transport: Transport) {
         val expected = expectedAttempt ?: return
         if (attempt != expected || transport !in expected.channelPlan) return
         dispatch(SessionEvent.RecoveryTransportReady(expected, transport))
@@ -413,12 +432,14 @@ class IntercomService : Service() {
         targetAttempt: ConnectionAttempt? = null
     ) {
         publishStatus(SEARCHING_STATUS)
-        val recoveryReadiness = RecoveryTransportReadinessRouter(targetAttempt) { event ->
+        val recoveryStartup = RecoveryTransportStartup(targetAttempt) { event ->
             postForSession(token) { orchestrator.dispatch(event) }
         }
         val plannedTransports = plannedDiscoveryTransports(targetAttempt)
-        if (Transport.WIFI_DIRECT in plannedTransports) {
-        val tunnel = WifiDirectTunnel(
+        recoveryStartup.start(
+            plannedTransports = plannedTransports,
+            createWifiDirect = { onStartupReady ->
+                WifiDirectTunnel(
             context = this,
             onControlChannelReady = { session ->
                 registerControlChannel(token, session)
@@ -467,17 +488,15 @@ class IntercomService : Service() {
                     )
                 }
             },
-            onStartupReady = { attempt ->
-                recoveryReadiness.reportReady(attempt, Transport.WIFI_DIRECT)
-            },
+            onStartupReady = onStartupReady,
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt
         )
-        wifiTunnel = tunnel
-        tunnel.start()
-        }
-        if (Transport.LAN in plannedTransports) {
-        val discovery = LanDiscoveryCoordinator(
+            },
+            installWifiDirect = { wifiTunnel = it },
+            startWifiDirect = { it.start() },
+            createLan = {
+                LanDiscoveryCoordinator(
             context = this,
             token = token,
             isSessionCurrent = ::isSessionCurrent,
@@ -518,9 +537,10 @@ class IntercomService : Service() {
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt
         )
-        lanDiscovery = discovery
-        if (discovery.start()) recoveryReadiness.reportReady(Transport.LAN)
-        }
+            },
+            installLan = { lanDiscovery = it },
+            startLan = { it.start() }
+        )
     }
 
     private fun registerControlChannel(

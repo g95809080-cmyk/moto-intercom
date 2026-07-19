@@ -43,8 +43,10 @@
   Linear while KUM-9 remains In Progress and KUM-34 remains Todo.
 - [x] 5.2 Replace aggregate rebuilt-adapter readiness with exact per-transport
   readiness and preserve immutable T+3/T+10 ownership.
-- [x] 5.3 Add production routing regression coverage for asynchronous Wi-Fi
-  Direct startup cleanup, independent LAN readiness, and due fallback opening.
+- [x] 5.3 Add production `RecoveryTransportStartup` and
+  `WifiDirectStartupReadiness` seam coverage for adapter installation before
+  start, asynchronous Wi-Fi Direct cleanup, independent LAN readiness, and due
+  fallback opening.
 - [ ] 5.4 Complete fixed-SHA read-only architecture review and remediate any
   in-scope P0/P1 until APPROVED with P0=0 and P1=0.
 - [ ] 5.5 Mark the PR Ready, merge with a merge commit, verify exact-main CI,

@@ -54,7 +54,10 @@ hot audio ownership.
    and opens it immediately when that adapter later reports ready. This avoids
    an implicit Service timing policy, prevents startup cleanup from being
    invalidated by a premature targeted open, and does not block LAN on Wi-Fi
-   Direct initialization.
+   Direct initialization. The production `RecoveryTransportStartup` seam owns
+   create -> install Service field -> start ordering for both adapters, while
+   `WifiDirectStartupReadiness` exposes the one-shot post-DNS-SD readiness gate
+   to deterministic fake-startup tests.
 
 4. **Keep media-only recovery on the direct path.** When adapters remain valid,
    the Coordinator emits the preferred open and T+3 schedule immediately. No

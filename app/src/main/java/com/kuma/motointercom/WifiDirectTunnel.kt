@@ -39,6 +39,26 @@ import java.net.Socket
  *
  * 语音采集、3A、Opus、RTP/UDP 交给 WebRTC，别在这里手写。
  */
+internal class WifiDirectStartupReadiness(
+    private val startupAttempt: ConnectionAttempt?,
+    private val clock: MonotonicClock,
+    private val onReady: (ConnectionAttempt) -> Unit
+) {
+    private var reported = false
+
+    fun reportServiceDiscoveryReady(currentIngressAttempt: ConnectionAttempt?): Boolean {
+        val attempt = startupAttempt?.takeIf {
+            it.trigger == ConnectionTrigger.RECOVERY &&
+                currentIngressAttempt == it &&
+                it.remainingMillis(clock) > 0L
+        } ?: return false
+        if (reported) return false
+        reported = true
+        onReady(attempt)
+        return true
+    }
+}
+
 internal class WifiDirectTunnel(
     context: Context,
     private val onControlChannelReady: (SignalingSessionV2) -> Unit,
@@ -100,7 +120,6 @@ internal class WifiDirectTunnel(
     private val setupRecoveryGate = WifiDirectSetupRecoveryGate()
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private val peerClaims = linkedMapOf<String, DiscoveryIdentityClaim>()
-    private val startupAttempt = initialTargetAttempt
     @Volatile private var ingressAttempt: ConnectionAttempt? = initialTargetAttempt
     @Volatile private var targetAttempt: ConnectionAttempt? = null
     @Volatile private var targetAddress: String? = null
@@ -112,7 +131,11 @@ internal class WifiDirectTunnel(
     private var groupRemovalGeneration = 0
     private var lifecycleGeneration = 0
     private var serviceDiscoveryReady = false
-    private var startupReadyReported = false
+    private val startupReadiness = WifiDirectStartupReadiness(
+        startupAttempt = initialTargetAttempt,
+        clock = monotonicClock,
+        onReady = onStartupReady
+    )
     private val closeLock = Any()
     private val closeCallbacks = mutableListOf<() -> Unit>()
     private val receiver = object : BroadcastReceiver() {
@@ -669,7 +692,7 @@ internal class WifiDirectTunnel(
                         m.addServiceRequest(c, request, setupAction(setup, "添加 MotoCom 服务请求失败", onSuccess = {
                             serviceDiscoveryReady = true
                             Log.d(TAG, "service request add success type=$SERVICE_TYPE")
-                            if (reportStartupReady()) {
+                            if (startupReadiness.reportServiceDiscoveryReady(ingressAttempt)) {
                                 mainHandler.post {
                                     if (running && serviceDiscoveryReady) discoverPeers()
                                 }
@@ -683,18 +706,6 @@ internal class WifiDirectTunnel(
         } catch (t: Throwable) {
             postError(t)
         }
-    }
-
-    private fun reportStartupReady(): Boolean {
-        val attempt = startupAttempt?.takeIf {
-            it.trigger == ConnectionTrigger.RECOVERY &&
-                ingressAttempt == it &&
-                it.remainingMillis(monotonicClock) > 0L
-        } ?: return false
-        if (startupReadyReported) return false
-        startupReadyReported = true
-        onStartupReady(attempt)
-        return true
     }
 
     private fun handleTxtRecord(record: Map<String, String>, device: WifiP2pDevice) {
