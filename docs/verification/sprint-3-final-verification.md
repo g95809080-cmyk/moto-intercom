@@ -1,6 +1,6 @@
 # Sprint 3 Final Verification
 
-Status: **KUM-30 AUTOMATED GATE PASSED - DRAFT PR PENDING**
+Status: **KUM-30 ARCHITECTURE APPROVED - FINAL REPORT CI PENDING**
 
 Evidence state: 2026-07-19
 
@@ -8,10 +8,11 @@ Evidence state: 2026-07-19
 
 - Repository: `g95809080-cmyk/moto-intercom`
 - Branch: `feat/kum-30-cancel-glare-stale-callbacks`
-- Pull request: pending
+- Pull request: [#7](https://github.com/g95809080-cmyk/moto-intercom/pull/7) - Draft
 - PR base and review base: `6f1839748307cb6b62d25d9fc5d613d679f9ffad`
 - Verified KUM-30 source head: `ebcf3f19d3e13b7c68c88aca7281193c74300783`
-- KUM-30 GitHub Actions: pending until the branch is pushed
+- Reviewed KUM-30 PR head: `ea0c72fff7e6882b0a7f25836e926cb747757edb`
+- KUM-30 GitHub Actions: [run 29683765394](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29683765394) - success
 - Baseline main GitHub Actions: [run 29681780079](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29681780079) - success
 - Linear: KUM-8 In Progress; KUM-27 Done; KUM-28 Done; KUM-29 Done;
   KUM-30 In Progress; KUM-31 Todo
@@ -148,7 +149,7 @@ owner, loser cleanup, actual winner transport, and recovery scheduling.
 | Debug APK | `ebcf3f1` | PASS | `assembleDebug` |
 | Android test APK | `ebcf3f1` | PASS | `assembleDebugAndroidTest` |
 | Rasen strict validation | `ebcf3f1` | PASS | 1/1 |
-| GitHub Actions | `ebcf3f1` | PENDING | Required after branch push |
+| GitHub Actions | `ea0c72f` | PASS | run `29683765394` |
 
 ## KUM-27 emulator matrix
 
@@ -289,7 +290,20 @@ instrumentation, network, process, and log results.
 
 ## KUM-30 architecture review
 
-Pending fixed Base/Head read-only review after the Draft PR is created.
+```text
+Base SHA: 6f1839748307cb6b62d25d9fc5d613d679f9ffad
+Head SHA: ea0c72fff7e6882b0a7f25836e926cb747757edb
+Result: APPROVED
+P0: 0
+P1: 0
+KUM-30 complete: YES
+KUM-31 allowed after merge and green main CI: YES
+```
+
+The reviewer confirmed all six Exit Criteria, no production-source change, one
+product-state writer, one Coordinator, one media owner, fail-closed stale media,
+deterministic mailbox concurrency, and honest exclusion of black ATD screenshots.
+The only non-blocking finding was this report/tasks synchronization.
 
 ## Physical acceptance queue
 
@@ -319,10 +333,10 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-28 Exit Criteria | PASS |
 | KUM-29 Exit Criteria | PASS |
 | KUM-30 automated gate | PASS |
-| Known KUM-30 P0 / P1 | Pending independent review |
-| KUM-30 Draft PR may open | YES |
-| KUM-30 PR may become Ready | NO until PR CI and architecture review pass |
-| KUM-30 PR may merge | NO until the unchanged final gate passes |
+| Known KUM-30 P0 / P1 | 0 / 0 |
+| KUM-30 Draft PR | OPEN - #7 |
+| KUM-30 PR may become Ready | YES after report-only Head CI succeeds |
+| KUM-30 PR may merge | YES by merge commit after the final unchanged gate |
 | KUM-30 may move to Done | NO until merge and green `main` CI |
 | Sprint 3 may close | NO while KUM-30 delivery and KUM-31 gate synchronization remain open |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
@@ -332,11 +346,13 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 - KUM-27 B6 elapsed: 1h15m from the recorded B6 start to fixed-SHA approval.
 - KUM-28 elapsed: approximately 2 hours from Linear start to fixed-SHA approval.
 - KUM-29 elapsed: approximately 1h26m from Linear start to green main CI.
-- KUM-30 elapsed to source commit: approximately 52 minutes.
-- Workers: one write worker; two sequential read-only reviewer instances, with
-  the first executor stopped after failing to return a conclusion.
-- Completed KUM-30 architecture review rounds: 0; fixed-SHA review pending.
+- KUM-30 elapsed to fixed-SHA approval: approximately 1h22m.
+- Workers: one write worker; two sequential read-only reviewer instances. The
+  first was stopped after failing to return a conclusion; the second completed.
+- Completed KUM-30 architecture review rounds: 1.
 - Runtime handoffs inherited during KUM-30: 1.
+- Goal-runtime cumulative token usage at KUM-30 approval: 6,289,417; a
+  KUM-30-only split was not exposed.
 - Repeated full-repository rescans: 0.
 
 ## Residual risk

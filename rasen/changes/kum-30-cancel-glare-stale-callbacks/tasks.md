@@ -41,8 +41,8 @@
 
 - [x] 5.1 Update the authoritative Sprint 3 verification report with bound SHA,
   exact automated evidence, and deferred physical rows.
-- [ ] 5.2 Commit atomically, push, and open the KUM-30 Draft PR.
-- [ ] 5.3 Complete fixed-SHA read-only architecture review and remediate any
+- [x] 5.2 Commit atomically, push, and open the KUM-30 Draft PR.
+- [x] 5.3 Complete fixed-SHA read-only architecture review and remediate any
   in-scope P0/P1 until APPROVED with P0=0 and P1=0.
 - [ ] 5.4 Synchronize the final pre-merge PR and Linear evidence while KUM-8
   remains In Progress and KUM-31 remains Todo.
