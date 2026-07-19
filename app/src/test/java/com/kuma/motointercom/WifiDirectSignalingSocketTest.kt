@@ -118,6 +118,42 @@ class WifiDirectSignalingSocketTest {
         }
     }
 
+    @Test
+    fun exactAttemptDeadlineClosesAcceptedSocketWithoutReadyOrFailure() {
+        var now = 0L
+        val ready = CountDownLatch(1)
+        val failed = CountDownLatch(1)
+        val attempt = ConnectionAttemptFixture.create(
+            clock = FakeMonotonicClock(MonotonicTimestamp(0L)),
+            preferredTransport = Transport.WIFI_DIRECT,
+            timeoutMs = 100L
+        )
+        val port = ServerSocket(0).use { it.localPort }
+        val transport = WifiDirectSignalingSocket(
+            port = port,
+            readyTimeoutMillis = 5_000L,
+            connectTimeoutMillis = 500,
+            retryDelayMillis = 10L,
+            isSessionCurrent = { true },
+            onReady = { _, _, socket -> ready.countDown(); socket.close() },
+            onFailure = { failed.countDown() },
+            clock = MonotonicClock { MonotonicTimestamp(now) },
+            attemptContext = AttemptTaskContext(attempt, generation = 1)
+        )
+        val loopback = InetAddress.getLoopbackAddress()
+        try {
+            transport.startServer(loopback) {
+                now = 100L
+                true
+            }
+            assertTrue(waitUntil(1_000) { canConnect(loopback, port) })
+            assertFalse(ready.await(200, TimeUnit.MILLISECONDS))
+            assertFalse(failed.await(200, TimeUnit.MILLISECONDS))
+        } finally {
+            transport.close()
+        }
+    }
+
     private fun canConnect(address: InetAddress, port: Int): Boolean =
         runCatching { Socket(address, port).use { } }.isSuccess
 

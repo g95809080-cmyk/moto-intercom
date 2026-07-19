@@ -41,12 +41,11 @@ sealed interface IntercomState {
     }
 
     data class IncomingConfirmation(
-        val attempt: ConnectionAttempt,
+        override val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
         val peer: PeerIdentity
     ) : IntercomState {
         override val kind = SessionState.INCOMING_CONFIRMATION
-        override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
-        val attemptId: ConnectionAttemptId = attempt.id
     }
 
     data class Connecting(
@@ -105,7 +104,7 @@ sealed interface IntercomState {
 }
 
 internal fun IntercomState.connectionAttemptOrNull(): ConnectionAttempt? = when (this) {
-    is IntercomState.IncomingConfirmation -> attempt
+    is IntercomState.IncomingConfirmation -> null
     is IntercomState.Connecting -> attempt
     is IntercomState.Optimizing -> attempt
     is IntercomState.Connected -> attempt

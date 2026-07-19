@@ -16,7 +16,6 @@ class IntercomStateMachineTest {
         isDeviceIdVerified = true
     )
     private val attempt = attempt("attempt-current")
-    private val recovery = RecoveryAttemptSpec(ConnectionAttemptId("attempt-recovery"), 20_000L)
 
     @Test
     fun exposesTheNineProductStates() {
@@ -37,43 +36,9 @@ class IntercomStateMachineTest {
     }
 
     @Test
-    fun followsLegalConnectRecoverResetAndStopLifecycle() {
+    fun followsLegalServiceStartAndStopLifecycle() {
         var state: IntercomState = IntercomState.Offline
         state = requireNotNull(nextIntercomState(state, SessionEvent.RuntimeStarted(runtime)))
-        state = requireNotNull(
-            nextIntercomState(state, SessionEvent.ConnectRequested(attempt))
-        )
-        state = requireNotNull(
-            nextIntercomState(
-                state,
-                SessionEvent.RemoteIdentityReceived(runtime, attempt.id, peer)
-            )
-        )
-        state = requireNotNull(
-            nextIntercomState(state, SessionEvent.TransportOptimizing(runtime, attempt.id))
-        )
-        state = requireNotNull(
-            nextIntercomState(
-                state,
-                SessionEvent.WebRtcStateChanged(
-                    runtime,
-                    attempt.id,
-                    WebRtcConnectionState.CONNECTED,
-                    100L,
-                    recovery
-                )
-            )
-        )
-        state = requireNotNull(
-            nextIntercomState(
-                state,
-                SessionEvent.SignalingDisconnected(runtime, attempt.id, recovery)
-            )
-        )
-        state = requireNotNull(
-            nextIntercomState(state, SessionEvent.RecoveryExhausted(runtime, recovery.id))
-        )
-        state = requireNotNull(nextIntercomState(state, SessionEvent.ResetCompleted(runtime)))
         state = requireNotNull(nextIntercomState(state, SessionEvent.StopRequested(runtime)))
         state = requireNotNull(nextIntercomState(state, SessionEvent.RuntimeStopped(runtime)))
 
@@ -81,87 +46,67 @@ class IntercomStateMachineTest {
     }
 
     @Test
-    fun presenceSelectionCreatesTargetLockBeforeOpeningTransport() {
-        val transition = requireNotNull(
+    fun presenceSelectionIsReservedForCoordinator() {
+        assertNull(
             reduceIntercomState(
                 IntercomState.Discovering(runtime),
                 SessionEvent.ConnectPresenceRequested(
                     runtimeSessionId = runtime,
-                    attemptId = ConnectionAttemptId("attempt-presence"),
                     targetDeviceId = "peer-b",
                     targetSessionId = RuntimeSessionId("peer-b-session"),
-                    availableTransports = setOf(Transport.WIFI_DIRECT, Transport.LAN),
-                    deadlineElapsedRealtimeMs = 10_000L
+                    availableTransports = setOf(Transport.WIFI_DIRECT, Transport.LAN)
                 )
             )
         )
 
-        val connecting = transition.state as IntercomState.Connecting
-        val effect = transition.effects.single() as SessionEffect.OpenTargetedTransport
-        assertEquals(TargetLock("peer-b", RuntimeSessionId("peer-b-session")), connecting.attempt.targetLock)
-        assertEquals(ChannelPlan.single(Transport.LAN), connecting.attempt.channelPlan)
-        assertNull(connecting.peer)
-        assertEquals(connecting.attempt, effect.attempt)
     }
 
     @Test
-    fun connectedThenDisconnectedMovesToRecovering() {
-        var state: IntercomState = IntercomState.Connecting(attempt, peer)
-        state = requireNotNull(
+    fun webRtcTerminalEventsAreReservedForCoordinator() {
+        val connecting = IntercomState.Connecting(attempt, peer)
+        assertNull(
             nextIntercomState(
-                state,
+                connecting,
                 SessionEvent.WebRtcStateChanged(
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.CONNECTED,
-                    1L,
-                    recovery
+                    1L
                 )
             )
         )
-        state = requireNotNull(
+        assertNull(
             nextIntercomState(
-                state,
+                connecting,
                 SessionEvent.WebRtcStateChanged(
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.DISCONNECTED,
-                    2L,
-                    recovery
+                    2L
                 )
             )
         )
 
-        assertTrue(state is IntercomState.Recovering)
-        assertEquals(recovery.id, (state as IntercomState.Recovering).attemptId)
     }
 
     @Test
-    fun signalingDisconnectOutputsRecoveryAttemptOwnedByReducer() {
+    fun signalingDisconnectIsReservedForCoordinator() {
         val connected = IntercomState.Connected(
             attempt = attempt,
             peer = peer.copy(isDeviceIdVerified = true),
             connectedAt = 1L
         )
 
-        val transition = requireNotNull(
+        assertNull(
             reduceIntercomState(
                 connected,
-                SessionEvent.SignalingDisconnected(runtime, attempt.id, recovery)
+                SessionEvent.SignalingDisconnected(runtime, attempt.id)
             )
         )
-        val effect = transition.effects.single() as SessionEffect.RestartDiscovery
-
-        assertTrue(transition.state is IntercomState.Recovering)
-        assertEquals(recovery.id, effect.attempt.id)
-        assertEquals("peer-a", effect.attempt.targetDeviceId)
-        assertEquals(ConnectionTrigger.RECOVERY, effect.attempt.trigger)
-        assertEquals(setOf(Transport.LAN), plannedDiscoveryTransports(effect.attempt))
-        assertEquals(setOf(Transport.LAN, Transport.WIFI_DIRECT), plannedDiscoveryTransports(null))
     }
 
     @Test
-    fun connectionPhaseTerminalStatesOutputAttemptAbortEffect() {
+    fun connectionPhaseTerminalStatesAreReservedForCoordinator() {
         val connectionStates = listOf<IntercomState>(
             IntercomState.Connecting(attempt, peer),
             IntercomState.Optimizing(attempt, peer)
@@ -174,36 +119,26 @@ class IntercomStateMachineTest {
 
         connectionStates.forEach { connectionState ->
             terminalStates.forEach { terminalState ->
-                val transition = requireNotNull(
+                assertNull(
                     reduceIntercomState(
                         connectionState,
                         SessionEvent.WebRtcStateChanged(
                             runtime,
                             attempt.id,
                             terminalState,
-                            1L,
-                            recovery
+                            1L
                         )
                     )
                 )
 
-                assertTrue(transition.state is IntercomState.Discovering)
-                assertEquals(
-                    SessionEffect.AbortAttemptAndResumeDiscovery(runtime, attempt.id),
-                    transition.effects.single()
-                )
             }
         }
 
-        val signalingTransition = requireNotNull(
+        assertNull(
             reduceIntercomState(
                 IntercomState.Connecting(attempt, peer),
-                SessionEvent.SignalingDisconnected(runtime, attempt.id, recovery)
+                SessionEvent.SignalingDisconnected(runtime, attempt.id)
             )
-        )
-        assertEquals(
-            SessionEffect.AbortAttemptAndResumeDiscovery(runtime, attempt.id),
-            signalingTransition.effects.single()
         )
     }
 
@@ -213,8 +148,7 @@ class IntercomStateMachineTest {
             runtime,
             attempt.id,
             WebRtcConnectionState.CONNECTED,
-            1L,
-            recovery
+            1L
         )
         assertNull(nextIntercomState(IntercomState.Offline, connected))
         assertNull(nextIntercomState(IntercomState.Offline, SessionEvent.StopRequested(runtime)))
@@ -293,9 +227,9 @@ class IntercomStateMachineTest {
     }
 
     @Test
-    fun openFailureAndTimeoutAbortOnlyTheCurrentAttempt() {
+    fun openFailureAndTimeoutAreReservedForCoordinator() {
         val connecting = IntercomState.Connecting(attempt)
-        val openFailure = requireNotNull(
+        assertNull(
             reduceIntercomState(
                 connecting,
                 SessionEvent.TargetedTransportOpenFailed(
@@ -306,13 +240,7 @@ class IntercomStateMachineTest {
                 )
             )
         )
-        assertTrue(openFailure.state is IntercomState.Discovering)
-        assertEquals(
-            SessionEffect.AbortAttemptAndResumeDiscovery(runtime, attempt.id),
-            openFailure.effects.single()
-        )
-
-        val timeout = requireNotNull(
+        assertNull(
             reduceIntercomState(
                 connecting,
                 SessionEvent.AttemptTimedOut(
@@ -322,7 +250,6 @@ class IntercomStateMachineTest {
                 )
             )
         )
-        assertTrue(timeout.state is IntercomState.Discovering)
         assertNull(
             reduceIntercomState(
                 connecting,
@@ -374,8 +301,7 @@ class IntercomStateMachineTest {
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.CONNECTED,
-                    1L,
-                    recovery
+                    1L
                 )
             )
         )

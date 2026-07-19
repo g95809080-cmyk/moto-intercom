@@ -11,11 +11,6 @@ enum class WebRtcConnectionState {
 internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
-    data class IncomingRequest(
-        val attempt: ConnectionAttempt,
-        val peer: PeerIdentity
-    ) : SessionEvent
-
     data class IncomingAccepted(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -36,11 +31,9 @@ internal sealed interface SessionEvent {
 
     data class ConnectPresenceRequested(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
         val targetDeviceId: String,
         val targetSessionId: RuntimeSessionId,
-        val availableTransports: Set<Transport>,
-        val deadlineElapsedRealtimeMs: Long
+        val availableTransports: Set<Transport>
     ) : SessionEvent
 
     data class AttemptReplaced(val attempt: ConnectionAttempt) : SessionEvent
@@ -95,8 +88,7 @@ internal sealed interface SessionEvent {
         val attemptId: ConnectionAttemptId,
         val channelId: ControlChannelId,
         val wireRequestKey: WireRequestKey,
-        val reason: DisconnectReason,
-        val recovery: RecoveryAttemptSpec
+        val reason: DisconnectReason
     ) : SessionEvent
 
     data class MediaChannelSelected(
@@ -125,7 +117,6 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val channelId: ControlChannelId,
         val wireRequestKey: WireRequestKey,
-        val recovery: RecoveryAttemptSpec,
         val reason: String
     ) : SessionEvent
 
@@ -133,7 +124,6 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val channelId: ControlChannelId,
         val wireRequestKey: WireRequestKey,
-        val recovery: RecoveryAttemptSpec,
         val reason: String
     ) : SessionEvent
 
@@ -185,14 +175,12 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
         val state: WebRtcConnectionState,
-        val occurredAt: Long,
-        val recovery: RecoveryAttemptSpec
+        val occurredAt: Long
     ) : SessionEvent
 
     data class SignalingDisconnected(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId,
-        val recovery: RecoveryAttemptSpec
+        val attemptId: ConnectionAttemptId
     ) : SessionEvent
 
     data class RecoveryExhausted(
@@ -226,7 +214,7 @@ internal sealed interface SessionEffect {
         val attempt: ConnectionAttempt
     ) : SessionEffect
 
-    data class RescheduleAttemptDeadline(
+    data class ScheduleAttemptDeadline(
         val attempt: ConnectionAttempt
     ) : SessionEffect
 
@@ -286,7 +274,8 @@ internal sealed interface SessionEffect {
     data class CloseControlChannel(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
-        val channelId: ControlChannelId
+        val channelId: ControlChannelId,
+        val targetLock: TargetLock
     ) : SessionEffect
 
     data class PublishIncomingConfirmation(
@@ -318,40 +307,12 @@ internal fun reduceIntercomState(
         transition(IntercomState.Discovering(event.runtimeSessionId))
             .takeIf { current == IntercomState.Offline }
 
-    is SessionEvent.IncomingRequest ->
-        transition(IntercomState.IncomingConfirmation(event.attempt, event.peer))
-            .takeIf {
-                current is IntercomState.Discovering &&
-                    current.matches(event.attempt.runtimeSessionId)
-            }
-
-    is SessionEvent.IncomingAccepted ->
-        (current as? IntercomState.IncomingConfirmation)
-            ?.takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let { transition(IntercomState.Connecting(it.attempt, it.peer)) }
-
-    is SessionEvent.IncomingRejected ->
-        (current as? IntercomState.IncomingConfirmation)
-            ?.takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let { transition(IntercomState.Discovering(event.runtimeSessionId)) }
-
     is SessionEvent.ConnectRequested ->
         transition(IntercomState.Connecting(event.attempt))
             .takeIf {
                 current is IntercomState.Discovering &&
                     current.matches(event.attempt.runtimeSessionId)
             }
-
-    is SessionEvent.ConnectPresenceRequested ->
-        event.toAttemptOrNull()?.let { attempt ->
-            transition(
-                IntercomState.Connecting(attempt),
-                listOf(SessionEffect.OpenTargetedTransport(attempt))
-            ).takeIf {
-                current is IntercomState.Discovering &&
-                    current.matches(event.runtimeSessionId)
-            }
-        }
 
     is SessionEvent.AttemptReplaced -> replaceAttempt(current, event.attempt)
 
@@ -368,27 +329,18 @@ internal fun reduceIntercomState(
     is SessionEvent.SignalingSendFailed,
     is SessionEvent.ChannelClosed,
     is SessionEvent.ProtocolViolation,
+    is SessionEvent.IncomingAccepted,
+    is SessionEvent.IncomingRejected,
     is SessionEvent.ConfirmationAvailabilityChanged,
     is SessionEvent.IncomingDecisionTimedOut,
-    is SessionEvent.ConfirmationSurfaceUnavailable -> null
-
-    is SessionEvent.TargetedTransportOpenFailed ->
-        current.connectionAttemptOrNull()
-            ?.takeIf {
-                it.runtimeSessionId == event.runtimeSessionId &&
-                    it.id == event.attemptId &&
-                    it.channelPlan.transport == event.transport
-            }
-            ?.let { terminateAttempt(current, event.runtimeSessionId, event.attemptId) }
-
-    is SessionEvent.AttemptTimedOut ->
-        current.connectionAttemptOrNull()
-            ?.takeIf {
-                it.runtimeSessionId == event.runtimeSessionId &&
-                    it.id == event.attemptId &&
-                    it.deadlineElapsedRealtimeMs == event.scheduledDeadlineElapsedRealtimeMs
-            }
-            ?.let { terminateAttempt(current, event.runtimeSessionId, event.attemptId) }
+    is SessionEvent.ConfirmationSurfaceUnavailable,
+    is SessionEvent.ConnectPresenceRequested,
+    is SessionEvent.TargetedTransportOpenFailed,
+    is SessionEvent.AttemptTimedOut,
+    is SessionEvent.WebRtcStateChanged,
+    is SessionEvent.SignalingDisconnected,
+    is SessionEvent.RecoveryExhausted,
+    is SessionEvent.DisconnectRequested -> null
 
     is SessionEvent.TransportOptimizing ->
         (current as? IntercomState.Connecting)
@@ -397,45 +349,10 @@ internal fun reduceIntercomState(
 
     is SessionEvent.RemoteIdentityReceived -> reduceRemoteIdentity(current, event)
 
-    is SessionEvent.WebRtcStateChanged -> reduceWebRtcState(current, event)
-
-    is SessionEvent.SignalingDisconnected -> reduceDisconnect(
-        current = current,
-        runtimeSessionId = event.runtimeSessionId,
-        attemptId = event.attemptId,
-        recovery = event.recovery,
-        restartConnectedDiscovery = true
-    )
-
-    is SessionEvent.RecoveryExhausted ->
-        (current as? IntercomState.Recovering)
-            ?.takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let {
-                transition(
-                    IntercomState.Resetting(event.runtimeSessionId, it.targetDeviceId)
-                )
-            }
-
     is SessionEvent.ResetCompleted ->
         (current as? IntercomState.Resetting)
             ?.takeIf { it.matches(event.runtimeSessionId) }
             ?.let { transition(IntercomState.Discovering(event.runtimeSessionId)) }
-
-    is SessionEvent.DisconnectRequested -> when (current) {
-        is IntercomState.Connecting -> current.takeIf {
-            it.matches(event.runtimeSessionId, event.attemptId)
-        }
-        is IntercomState.Optimizing -> current.takeIf {
-            it.matches(event.runtimeSessionId, event.attemptId)
-        }
-        is IntercomState.Connected -> current.takeIf {
-            it.matches(event.runtimeSessionId, event.attemptId)
-        }
-        is IntercomState.Recovering -> current.takeIf {
-            it.matches(event.runtimeSessionId, event.attemptId)
-        }
-        else -> null
-    }?.let { transition(IntercomState.Discovering(event.runtimeSessionId)) }
 
     is SessionEvent.StopRequested ->
         transition(IntercomState.Stopping(event.runtimeSessionId)).takeIf {
@@ -457,7 +374,6 @@ private fun replaceAttempt(
     if (!current.matches(attempt.runtimeSessionId)) return null
     return when (current) {
         is IntercomState.Discovering,
-        is IntercomState.IncomingConfirmation,
         is IntercomState.Connecting,
         is IntercomState.Optimizing ->
             transition(IntercomState.Connecting(attempt))
@@ -513,18 +429,6 @@ private fun reduceRemoteIdentity(
         event.peer.isVerifiedFor(attempt.targetLock)
 
     return when (current) {
-        is IntercomState.IncomingConfirmation -> current
-            .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
-            ?.let {
-                if (!matchesTarget(it.attempt)) return null
-                transition(
-                    IntercomState.IncomingConfirmation(
-                        it.attempt,
-                        mergePeer(it.peer, event.peer) ?: event.peer
-                    )
-                )
-            }
-
         is IntercomState.Connecting -> current
             .takeIf { it.matches(event.runtimeSessionId, event.attemptId) }
             ?.let {
@@ -566,143 +470,6 @@ private fun reduceRemoteIdentity(
     }
 }
 
-private fun reduceWebRtcState(
-    current: IntercomState,
-    event: SessionEvent.WebRtcStateChanged
-): SessionTransition? = when (event.state) {
-    WebRtcConnectionState.CONNECTED -> when (current) {
-        is IntercomState.Connecting -> current
-            .takeIf {
-                it.matches(event.runtimeSessionId, event.attemptId) &&
-                    it.peer?.isVerifiedFor(it.attempt.targetLock) == true
-            }
-            ?.let { transition(it.toConnected(event.occurredAt)) }
-
-        is IntercomState.Optimizing -> current
-            .takeIf {
-                it.matches(event.runtimeSessionId, event.attemptId) &&
-                    it.peer?.isVerifiedFor(it.attempt.targetLock) == true
-            }
-            ?.let { transition(it.toConnected(event.occurredAt)) }
-
-        is IntercomState.Recovering -> current
-            .takeIf {
-                it.matches(event.runtimeSessionId, event.attemptId) &&
-                    it.peer.isVerifiedFor(it.attempt.targetLock)
-            }
-            ?.let { transition(it.toConnected(event.occurredAt)) }
-
-        else -> null
-    }
-
-    WebRtcConnectionState.DISCONNECTED,
-    WebRtcConnectionState.FAILED,
-    WebRtcConnectionState.CLOSED -> reduceDisconnect(
-        current = current,
-        runtimeSessionId = event.runtimeSessionId,
-        attemptId = event.attemptId,
-        recovery = event.recovery,
-        restartConnectedDiscovery = false
-    )
-
-    WebRtcConnectionState.OTHER -> null
-}
-
-private fun reduceDisconnect(
-    current: IntercomState,
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId,
-    recovery: RecoveryAttemptSpec,
-    restartConnectedDiscovery: Boolean
-): SessionTransition? = when (current) {
-    is IntercomState.Connecting -> current
-        .takeIf { it.matches(runtimeSessionId, attemptId) }
-        ?.let {
-            transition(
-                IntercomState.Discovering(runtimeSessionId),
-                listOf(
-                    SessionEffect.AbortAttemptAndResumeDiscovery(runtimeSessionId, attemptId)
-                )
-            )
-        }
-
-    is IntercomState.Optimizing -> current
-        .takeIf { it.matches(runtimeSessionId, attemptId) }
-        ?.let {
-            transition(
-                IntercomState.Discovering(runtimeSessionId),
-                listOf(
-                    SessionEffect.AbortAttemptAndResumeDiscovery(runtimeSessionId, attemptId)
-                )
-            )
-        }
-
-    is IntercomState.Connected -> current
-        .takeIf { it.matches(runtimeSessionId, attemptId) }
-        ?.let {
-            val recoveryAttempt = it.attempt.toRecovery(recovery)
-            transition(
-                IntercomState.Recovering(recoveryAttempt, it.peer),
-                restartEffect(runtimeSessionId, recoveryAttempt, restartConnectedDiscovery)
-            )
-        }
-
-    is IntercomState.Recovering -> current
-        .takeIf {
-            it.runtimeSessionId == runtimeSessionId &&
-                (it.attemptId == attemptId || it.attemptId == recovery.id)
-        }
-        ?.let {
-            transition(
-                it,
-                restartEffect(runtimeSessionId, it.attempt, restartConnectedDiscovery)
-            )
-        }
-
-    else -> null
-}
-
-private fun terminateAttempt(
-    current: IntercomState,
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId
-): SessionTransition? = when (current) {
-    is IntercomState.Connecting -> current.takeIf {
-        it.matches(runtimeSessionId, attemptId)
-    }
-    is IntercomState.Optimizing -> current.takeIf {
-        it.matches(runtimeSessionId, attemptId)
-    }
-    is IntercomState.Recovering -> current.takeIf {
-        it.matches(runtimeSessionId, attemptId)
-    }
-    else -> null
-}?.let {
-    transition(
-        IntercomState.Discovering(runtimeSessionId),
-        listOf(SessionEffect.AbortAttemptAndResumeDiscovery(runtimeSessionId, attemptId))
-    )
-}
-
-private fun ConnectionAttempt.toRecovery(spec: RecoveryAttemptSpec): ConnectionAttempt =
-    ConnectionAttempt(
-        id = spec.id,
-        runtimeSessionId = runtimeSessionId,
-        targetLock = targetLock,
-        trigger = ConnectionTrigger.RECOVERY,
-        channelPlan = channelPlan,
-        deadlineElapsedRealtimeMs = spec.deadlineElapsedRealtimeMs
-    )
-
-private fun IntercomState.Connecting.toConnected(connectedAt: Long): IntercomState.Connected =
-    IntercomState.Connected(attempt, requireNotNull(peer), connectedAt)
-
-private fun IntercomState.Optimizing.toConnected(connectedAt: Long): IntercomState.Connected =
-    IntercomState.Connected(attempt, requireNotNull(peer), connectedAt)
-
-private fun IntercomState.Recovering.toConnected(connectedAt: Long): IntercomState.Connected =
-    IntercomState.Connected(attempt, peer, connectedAt)
-
 private fun mergePeer(first: PeerIdentity?, second: PeerIdentity?): PeerIdentity? = when {
     first == null -> second
     second == null -> first
@@ -715,33 +482,6 @@ private fun mergePeer(first: PeerIdentity?, second: PeerIdentity?): PeerIdentity
     )
 }
 
-private fun SessionEvent.ConnectPresenceRequested.toAttemptOrNull(): ConnectionAttempt? {
-    if (targetDeviceId.isBlank() || deadlineElapsedRealtimeMs <= 0L) return null
-    val transport = when {
-        Transport.LAN in availableTransports -> Transport.LAN
-        Transport.WIFI_DIRECT in availableTransports -> Transport.WIFI_DIRECT
-        else -> return null
-    }
-    return ConnectionAttempt(
-        id = attemptId,
-        runtimeSessionId = runtimeSessionId,
-        targetLock = TargetLock(targetDeviceId, targetSessionId),
-        trigger = ConnectionTrigger.USER,
-        channelPlan = ChannelPlan.single(transport),
-        deadlineElapsedRealtimeMs = deadlineElapsedRealtimeMs
-    )
-}
-
-private fun restartEffect(
-    runtimeSessionId: RuntimeSessionId,
-    attempt: ConnectionAttempt,
-    enabled: Boolean
-): List<SessionEffect> = if (enabled) {
-    listOf(SessionEffect.RestartDiscovery(runtimeSessionId, attempt))
-} else {
-    emptyList()
-}
-
 private fun transition(
     state: IntercomState,
     effects: List<SessionEffect> = emptyList()
@@ -749,11 +489,6 @@ private fun transition(
 
 private fun IntercomState.matches(runtimeSessionId: RuntimeSessionId): Boolean =
     this.runtimeSessionId == runtimeSessionId
-
-private fun IntercomState.IncomingConfirmation.matches(
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId
-): Boolean = this.runtimeSessionId == runtimeSessionId && this.attemptId == attemptId
 
 private fun IntercomState.Connecting.matches(
     runtimeSessionId: RuntimeSessionId,

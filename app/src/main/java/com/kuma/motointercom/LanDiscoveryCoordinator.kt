@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
-import android.os.SystemClock
 import org.json.JSONObject
 import java.io.Closeable
 import java.io.IOException
@@ -33,7 +32,10 @@ internal class LanDiscoveryCoordinator(
     private val onDevicesChanged: (List<LanRiderDevice>) -> Unit,
     private val onControlChannelReady: (SignalingSessionV2) -> Unit,
     private val onLog: (String) -> Unit,
-    private val onError: (Throwable) -> Unit
+    private val onError: (Throwable) -> Unit,
+    private val monotonicClock: MonotonicClock = MonotonicClock {
+        MonotonicTimestamp(System.nanoTime() / 1_000_000L)
+    }
 ) : Closeable {
     private val context = context.applicationContext
     private val closed = AtomicBoolean(false)
@@ -65,7 +67,11 @@ internal class LanDiscoveryCoordinator(
     }
 
     fun connect(attempt: ConnectionAttempt): Boolean {
-        if (!isActive() || attempt.channelPlan.transport != Transport.LAN) return false
+        if (
+            !isActive() ||
+            attempt.channelPlan.transport != Transport.LAN ||
+            attempt.remainingMillis(monotonicClock) <= 0L
+        ) return false
         targetAttempt.bind(attempt)
         connectTargetIfAvailable()
         return true
@@ -79,6 +85,7 @@ internal class LanDiscoveryCoordinator(
 
     private fun connectTargetIfAvailable() {
         val attempt = targetAttempt.current ?: return
+        if (!isAttemptCurrent(attempt)) return
         val device = deviceRegistry.find(attempt.targetLock) ?: return
         if (!clientConnecting.compareAndSet(false, true)) return
         log("正在点名连接车友：${device.name} / ${device.ip}")
@@ -217,12 +224,13 @@ internal class LanDiscoveryCoordinator(
                         socket = socket,
                         transport = Transport.LAN,
                         physicalRole = PhysicalSocketRole.ACCEPTOR,
-                        openedAtElapsedMs = SystemClock.elapsedRealtime(),
+                        openedAtElapsedMs = monotonicClock.now().elapsedRealtimeMs,
                         localDeviceId = nodeId,
                         localRuntimeSessionId = runtimeSessionId,
                         localNickname = riderName,
                         localDeviceName = deviceName,
-                        originatingAttempt = attempt
+                        originatingAttempt = attempt,
+                        monotonicClock = monotonicClock
                     )
                 } catch (t: Throwable) {
                     log("Rejected LAN v2 HELLO: ${t.message}")
@@ -230,7 +238,7 @@ internal class LanDiscoveryCoordinator(
                     acceptedSocket = null
                     continue
                 }
-                if (targetAttempt.current != attempt) {
+                if (!isAttemptCurrentOrPassive(attempt)) {
                     session.close()
                     acceptedSocket = null
                     continue
@@ -322,22 +330,34 @@ internal class LanDiscoveryCoordinator(
     ) {
         var socket: Socket? = null
         try {
-            if (!isActive() || targetAttempt.current != attempt) return
+            if (!isAttemptCurrent(attempt)) {
+                clientConnecting.set(false)
+                return
+            }
+            val connectTimeoutMillis = attempt.boundedTimeoutMillis(
+                monotonicClock,
+                LAN_CONNECT_TIMEOUT_MS.toLong()
+            )
+            if (connectTimeoutMillis <= 0L) {
+                clientConnecting.set(false)
+                return
+            }
             socket = Socket()
-            socket.connect(InetSocketAddress(ip, port), LAN_CONNECT_TIMEOUT_MS)
+            socket.connect(InetSocketAddress(ip, port), connectTimeoutMillis.toInt())
             val connected = socket
             val session = SignalingSessionV2.establish(
                 socket = connected,
                 transport = Transport.LAN,
                 physicalRole = PhysicalSocketRole.OPENER,
-                openedAtElapsedMs = SystemClock.elapsedRealtime(),
+                openedAtElapsedMs = monotonicClock.now().elapsedRealtimeMs,
                 localDeviceId = nodeId,
                 localRuntimeSessionId = runtimeSessionId,
                 localNickname = riderName,
                 localDeviceName = deviceName,
-                originatingAttempt = attempt
+                originatingAttempt = attempt,
+                monotonicClock = monotonicClock
             )
-            if (targetAttempt.current != attempt) {
+            if (!isAttemptCurrent(attempt)) {
                 clientConnecting.set(false)
                 session.close()
                 return
@@ -349,7 +369,8 @@ internal class LanDiscoveryCoordinator(
             }
         } catch (t: Throwable) {
             clientConnecting.set(false)
-            if (reportFailure) error(t) else log("局域网连接失败：${t.message}")
+            if (reportFailure && isAttemptCurrent(attempt)) error(t)
+            else log("局域网连接失败：${t.message}")
         } finally {
             closeQuietly(socket)
         }
@@ -398,7 +419,7 @@ internal class LanDiscoveryCoordinator(
     ): Boolean {
         if (
             !isActive() ||
-            targetAttempt.current != expectedAttempt ||
+            !isAttemptCurrentOrPassive(expectedAttempt) ||
             !session.peer.isVerifiedFor(session.targetLock)
         ) {
             session.close()
@@ -421,6 +442,15 @@ internal class LanDiscoveryCoordinator(
     private fun error(t: Throwable) {
         if (isActive()) onError(t)
     }
+
+    private fun isAttemptCurrent(attempt: ConnectionAttempt): Boolean =
+        isActive() &&
+            attempt.remainingMillis(monotonicClock) > 0L &&
+            targetAttempt.current?.hasSameImmutableIdentity(attempt) == true
+
+    private fun isAttemptCurrentOrPassive(attempt: ConnectionAttempt?): Boolean =
+        if (attempt == null) isActive() && targetAttempt.current == null
+        else isAttemptCurrent(attempt)
 
     override fun close() {
         synchronized(lifecycleLock) {

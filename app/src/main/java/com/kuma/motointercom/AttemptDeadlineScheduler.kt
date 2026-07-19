@@ -14,6 +14,7 @@ internal class AttemptDeadlineScheduler(
     private var scheduled: ScheduledAttempt? = null
 
     fun schedule(attempt: ConnectionAttempt) {
+        if (scheduled?.attempt?.id == attempt.id) return
         cancel()
         lateinit var callback: Runnable
         callback = Runnable {

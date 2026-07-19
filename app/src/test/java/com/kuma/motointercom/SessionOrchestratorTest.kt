@@ -14,7 +14,7 @@ class SessionOrchestratorTest {
 
     @Test
     fun connectedThenImmediateDisconnectCannotRemainStaleConnected() = runBlocking {
-        val orchestrator = orchestrator()
+        val orchestrator = orchestrator(elapsedRealtime = { 0L })
         val attempt = attempt("attempt-current", "peer-a", Transport.LAN)
         val peer = PeerIdentity(
             deviceId = "peer-a",
@@ -23,7 +23,6 @@ class SessionOrchestratorTest {
             runtimeSessionId = RuntimeSessionId("session-peer-a"),
             isDeviceIdVerified = true
         )
-        val recovery = recovery("attempt-recovery")
         try {
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(attempt)))
@@ -39,8 +38,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attempt.id,
                         WebRtcConnectionState.CONNECTED,
-                        100L,
-                        recovery
+                        100L
                     )
                 )
             )
@@ -50,8 +48,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attempt.id,
                         WebRtcConnectionState.DISCONNECTED,
-                        101L,
-                        recovery
+                        101L
                     )
                 )
             )
@@ -77,8 +74,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attempt.id,
                         WebRtcConnectionState.CONNECTED,
-                        100L,
-                        recovery("attempt-recovery")
+                        100L
                     )
                 )
             )
@@ -92,8 +88,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attempt.id,
                         WebRtcConnectionState.CONNECTED,
-                        101L,
-                        recovery("attempt-recovery-after-offline")
+                        101L
                     )
                 )
             )
@@ -120,8 +115,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attemptA.id,
                         WebRtcConnectionState.CONNECTED,
-                        1L,
-                        recovery("recovery-a")
+                        1L
                     )
                 )
             )
@@ -131,8 +125,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attemptA.id,
                         WebRtcConnectionState.FAILED,
-                        2L,
-                        recovery("recovery-a-2")
+                        2L
                     )
                 )
             )
@@ -144,8 +137,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attemptB.id,
                         WebRtcConnectionState.FAILED,
-                        3L,
-                        recovery("recovery-b")
+                        3L
                     )
                 )
             )
@@ -186,10 +178,9 @@ class SessionOrchestratorTest {
             assertTrue(orchestrator.state.value is IntercomState.Discovering)
 
             assertFalse(
-                canActivateTunnel(
+                canApplyAttemptCallback(
                     accepted = tunnelAccepted,
                     sessionCurrent = true,
-                    tunnelClaimed = true,
                     currentAttempt = orchestrator.currentAttempt,
                     expectedAttempt = attempt
                 )
@@ -200,9 +191,37 @@ class SessionOrchestratorTest {
     }
 
     @Test
+    fun restartDiscoveryEffectRequiresItsExactRecoveryAttempt() {
+        val recovery = attempt("attempt-recovery", "peer-a", Transport.LAN)
+        val replacement = attempt("attempt-replacement", "peer-b", Transport.LAN)
+        val peer = PeerIdentity(
+            deviceId = "peer-a",
+            nickname = "Rider A",
+            runtimeSessionId = RuntimeSessionId("session-peer-a"),
+            isDeviceIdVerified = true
+        )
+        val effect = SessionEffect.RestartDiscovery(runtime, recovery)
+
+        assertTrue(
+            canExecuteRestartDiscoveryEffect(
+                effect,
+                IntercomState.Recovering(recovery, peer),
+                recovery
+            )
+        )
+        assertFalse(
+            canExecuteRestartDiscoveryEffect(
+                effect,
+                IntercomState.Connecting(replacement),
+                replacement
+            )
+        )
+    }
+
+    @Test
     fun p2pVerifiedIdentityIsPersistedOnlyAfterConnected() = runBlocking {
         val repository = RecordingPairingRepository()
-        val orchestrator = orchestrator(repository)
+        val orchestrator = orchestrator(repository, elapsedRealtime = { 0L })
         val attempt = attempt(
             "attempt-p2p",
             "peer-p2p",
@@ -233,8 +252,7 @@ class SessionOrchestratorTest {
                     runtime,
                     attempt.id,
                     WebRtcConnectionState.CONNECTED,
-                    100L,
-                    recovery("recovery-p2p")
+                    100L
                 )
             )
 
@@ -278,8 +296,7 @@ class SessionOrchestratorTest {
                         runtime,
                         attempt.id,
                         WebRtcConnectionState.CONNECTED,
-                        100L,
-                        recovery("recovery-unknown")
+                        100L
                     )
                 )
             )
@@ -328,8 +345,7 @@ class SessionOrchestratorTest {
                         runtime,
                         unverified.id,
                         WebRtcConnectionState.CONNECTED,
-                        100L,
-                        recovery("recovery-unverified")
+                        100L
                     )
                 )
             )
@@ -367,8 +383,7 @@ class SessionOrchestratorTest {
                         runtime,
                         discoveryAttempt.id,
                         WebRtcConnectionState.CONNECTED,
-                        100L,
-                        recovery("recovery-lan-legacy")
+                        100L
                     )
                 )
             )
@@ -382,7 +397,7 @@ class SessionOrchestratorTest {
     @Test
     fun lanMatchingSocketIdentityIsPersistedAfterConnected() = runBlocking {
         val repository = RecordingPairingRepository()
-        val orchestrator = orchestrator(repository)
+        val orchestrator = orchestrator(repository, elapsedRealtime = { 0L })
         val lanAttempt = attempt("attempt-lan-verified", "peer-lan", Transport.LAN)
         val verifiedPeer = PeerIdentity(
             deviceId = "peer-lan",
@@ -406,8 +421,7 @@ class SessionOrchestratorTest {
                     runtime,
                     lanAttempt.id,
                     WebRtcConnectionState.CONNECTED,
-                    100L,
-                    recovery("recovery-lan-verified")
+                    100L
                 )
             )
 
@@ -420,8 +434,14 @@ class SessionOrchestratorTest {
 
     private fun orchestrator(
         repository: RecordingPairingRepository = RecordingPairingRepository(),
-        onLog: (String) -> Unit = {}
-    ) = SessionOrchestrator(repository, Dispatchers.Unconfined, onLog = onLog)
+        onLog: (String) -> Unit = {},
+        elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L }
+    ) = SessionOrchestrator(
+        repository,
+        Dispatchers.Unconfined,
+        onLog = onLog,
+        elapsedRealtime = elapsedRealtime
+    )
 
     private fun attempt(
         id: String,
@@ -435,11 +455,6 @@ class SessionOrchestratorTest {
         trigger = ConnectionTrigger.USER,
         channelPlan = ChannelPlan.single(transport),
         deadlineElapsedRealtimeMs = 10_000L
-    )
-
-    private fun recovery(id: String) = RecoveryAttemptSpec(
-        id = ConnectionAttemptId(id),
-        deadlineElapsedRealtimeMs = 20_000L
     )
 
     private class RecordingPairingRepository : PairingRepository {

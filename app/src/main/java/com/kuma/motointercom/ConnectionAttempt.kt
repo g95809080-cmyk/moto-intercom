@@ -21,17 +21,22 @@ data class TargetLock(
     }
 }
 
-data class ChannelPlan(
-    val plannedTransports: Set<Transport>
-) {
+class ChannelPlan(plannedTransports: Set<Transport>) {
     init {
         require(plannedTransports.size == 1) {
             "Sprint 2 connection attempts must plan exactly one transport"
         }
     }
 
-    val transport: Transport
-        get() = plannedTransports.single()
+    val transport: Transport = plannedTransports.single()
+    val plannedTransports: Set<Transport> = setOf(transport)
+
+    override fun equals(other: Any?): Boolean =
+        this === other || other is ChannelPlan && transport == other.transport
+
+    override fun hashCode(): Int = transport.hashCode()
+
+    override fun toString(): String = "ChannelPlan(plannedTransports=$plannedTransports)"
 
     companion object {
         fun single(transport: Transport): ChannelPlan = ChannelPlan(setOf(transport))
@@ -54,17 +59,22 @@ data class ConnectionAttempt(
 
     val targetDeviceId: String
         get() = targetLock.targetDeviceId
-}
 
-data class RecoveryAttemptSpec(
-    val id: ConnectionAttemptId,
-    val deadlineElapsedRealtimeMs: Long
-) {
-    init {
-        require(deadlineElapsedRealtimeMs > 0L) {
-            "Recovery attempt deadline must be positive"
-        }
-    }
+    val preferredTransport: Transport
+        get() = channelPlan.transport
+
+    val deadlineAt: MonotonicTimestamp
+        get() = MonotonicTimestamp(deadlineElapsedRealtimeMs)
+
+    fun isExpiredAt(now: MonotonicTimestamp): Boolean =
+        now.elapsedRealtimeMs >= deadlineElapsedRealtimeMs
+
+    fun accepts(event: ConnectionAttemptEventContext): Boolean =
+        event.attemptId == id &&
+            event.targetDeviceId == targetDeviceId &&
+            !isExpiredAt(event.observedAt)
+
+    fun isStale(event: ConnectionAttemptEventContext): Boolean = !accepts(event)
 }
 
 internal fun plannedDiscoveryTransports(attempt: ConnectionAttempt?): Set<Transport> =

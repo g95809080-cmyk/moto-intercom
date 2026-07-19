@@ -188,14 +188,14 @@ class Kum26LogicalNodeAcceptanceTest {
     }
 
     @Test
-    fun staleAcceptedActivationClosesOldSocketReleasesClaimAndKeepsCurrentAttempt() = runBlocking {
+    fun delayedCleanupCannotReleaseReplacementAttemptResources() = runBlocking {
         val oldAttempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B)
         val newAttempt = attempt(ATTEMPT_NEW, DEVICE_B, SESSION_B)
         val repository = RecordingPairingRepository()
         val harness = OrchestratorHarness(
             SessionOrchestrator(repository, Dispatchers.Unconfined)
         )
-        val resources = ResourceProbe(tunnelClaimed = true)
+        val resources = ResourceProbe(mediaLocated = true)
 
         establishedPair(oldAttempt, DEVICE_B, SESSION_B).use { oldPair ->
             advanceRequesterToAccepted(oldPair)
@@ -220,9 +220,29 @@ class Kum26LogicalNodeAcceptanceTest {
                         )
                     )
                 )
-                assertTrue(harness.nextEffect() is SessionEffect.AbortAttemptAndResumeDiscovery)
-                resources.abort(oldPair.requester)
+                val cleanup =
+                    harness.nextEffect() as SessionEffect.AbortAttemptAndResumeDiscovery
+                assertTrue(
+                    canExecuteAbortAttemptEffect(
+                        cleanup,
+                        harness.orchestrator.state.value,
+                        harness.orchestrator.currentAttempt,
+                        harness.orchestrator.activeControlAttempt,
+                        harness.orchestrator.pendingInboundRequest,
+                        harness.orchestrator.terminalOutcome(oldAttempt.id)
+                    )
+                )
                 assertTrue(harness.orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(newAttempt)))
+                val cleanupStillCurrent = canExecuteAbortAttemptEffect(
+                    cleanup,
+                    harness.orchestrator.state.value,
+                    harness.orchestrator.currentAttempt,
+                    harness.orchestrator.activeControlAttempt,
+                    harness.orchestrator.pendingInboundRequest,
+                    harness.orchestrator.terminalOutcome(oldAttempt.id)
+                )
+                assertFalse(cleanupStillCurrent)
+                if (cleanupStillCurrent) resources.abort(oldPair.requester)
 
                 assertFalse(
                     canStartWebRtc(
@@ -236,7 +256,7 @@ class Kum26LogicalNodeAcceptanceTest {
                 oldPair.requester.close()
 
                 assertTrue(oldPair.requester.isClosed)
-                assertFalse(resources.tunnelClaimed)
+                assertTrue(resources.mediaLocated)
                 assertEquals(newAttempt, harness.orchestrator.currentAttempt)
                 assertTrue(repository.saved.isEmpty())
             } finally {
@@ -349,66 +369,89 @@ class Kum26LogicalNodeAcceptanceTest {
     }
 
     @Test
-    fun recoveryRetainsTargetAndPlanRejectsRolloverAndExitsDeterministically() {
+    fun recoveryRetainsTargetAndPlanRejectsRolloverAndExitsDeterministically() = runBlocking {
         val attempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B)
-        val recovery = RecoveryAttemptSpec(
-            ConnectionAttemptId(ATTEMPT_RECOVERY),
-            deadlineElapsedRealtimeMs = 20_000L
-        )
-        val connected = IntercomState.Connected(
-            attempt,
-            verifiedPeer(DEVICE_B, SESSION_B),
-            connectedAt = 1L
-        )
-        val transition = requireNotNull(
-            reduceIntercomState(
-                connected,
-                SessionEvent.SignalingDisconnected(RUNTIME_A, attempt.id, recovery)
+        val harness = OrchestratorHarness(
+            SessionOrchestrator(
+                RecordingPairingRepository(),
+                Dispatchers.Unconfined,
+                elapsedRealtime = { 0L },
+                attemptIdFactory = { ConnectionAttemptId(ATTEMPT_RECOVERY) }
             )
         )
-        val recovering = transition.state as IntercomState.Recovering
-        val recoveryAttempt = recovering.attempt
+        harness.use {
+            harness.start(attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteIdentityReceived(
+                        RUNTIME_A,
+                        attempt.id,
+                        verifiedPeer(DEVICE_B, SESSION_B)
+                    )
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        attempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        1L
+                    )
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingDisconnected(RUNTIME_A, attempt.id)
+                )
+            )
+            val recovering = harness.orchestrator.state.value as IntercomState.Recovering
+            val recoveryAttempt = recovering.attempt
 
-        assertEquals(attempt.targetLock, recoveryAttempt.targetLock)
-        assertEquals(attempt.channelPlan, recoveryAttempt.channelPlan)
-        assertEquals(setOf(Transport.LAN), plannedDiscoveryTransports(recoveryAttempt))
-        assertNull(
-            reduceIntercomState(
-                recovering,
-                SessionEvent.ConnectPresenceRequested(
-                    runtimeSessionId = RUNTIME_A,
-                    attemptId = ConnectionAttemptId.create(),
-                    targetDeviceId = DEVICE_C,
-                    targetSessionId = RuntimeSessionId(SESSION_C),
-                    availableTransports = setOf(Transport.LAN),
-                    deadlineElapsedRealtimeMs = 30_000L
+            assertEquals(ConnectionAttemptId(ATTEMPT_RECOVERY), recoveryAttempt.id)
+            assertEquals(attempt.targetLock, recoveryAttempt.targetLock)
+            assertEquals(attempt.channelPlan, recoveryAttempt.channelPlan)
+            assertEquals(setOf(Transport.LAN), plannedDiscoveryTransports(recoveryAttempt))
+            assertTrue(harness.nextEffect() is SessionEffect.RestartDiscovery)
+            assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ConnectPresenceRequested(
+                        runtimeSessionId = RUNTIME_A,
+                        targetDeviceId = DEVICE_C,
+                        targetSessionId = RuntimeSessionId(SESSION_C),
+                        availableTransports = setOf(Transport.LAN)
+                    )
                 )
             )
-        )
-        assertNull(
-            reduceIntercomState(
-                recovering,
-                SessionEvent.RemoteIdentityReceived(
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteIdentityReceived(
+                        RUNTIME_A,
+                        recoveryAttempt.id,
+                        verifiedPeer(DEVICE_B, SESSION_OLD)
+                    )
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.TargetedTransportOpenFailed(
+                        RUNTIME_A,
+                        recoveryAttempt.id,
+                        Transport.LAN,
+                        "recovery adapter failed"
+                    )
+                )
+            )
+            assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+            assertEquals(
+                SessionEffect.AbortAttemptAndResumeDiscovery(
                     RUNTIME_A,
-                    recoveryAttempt.id,
-                    verifiedPeer(DEVICE_B, SESSION_OLD)
-                )
+                    recoveryAttempt.id
+                ),
+                harness.nextEffect()
             )
-        )
-
-        val failed = requireNotNull(
-            reduceIntercomState(
-                recovering,
-                SessionEvent.TargetedTransportOpenFailed(
-                    RUNTIME_A,
-                    recoveryAttempt.id,
-                    Transport.LAN,
-                    "recovery adapter failed"
-                )
-            )
-        )
-        assertTrue(failed.state is IntercomState.Discovering)
-        assertTrue(failed.effects.single() is SessionEffect.AbortAttemptAndResumeDiscovery)
+        }
     }
 
     private fun orchestrator(
@@ -463,7 +506,8 @@ class Kum26LogicalNodeAcceptanceTest {
             localNickname = localDeviceId,
             localDeviceName = localDeviceId,
             originatingAttempt = originatingAttempt,
-            expectedRemoteTargetLock = expectedRemoteTargetLock
+            expectedRemoteTargetLock = expectedRemoteTargetLock,
+            monotonicClock = MonotonicClock { MonotonicTimestamp(0L) }
         )
     }
 
@@ -568,7 +612,7 @@ class Kum26LogicalNodeAcceptanceTest {
         }
     }
 
-    private class ResourceProbe(var tunnelClaimed: Boolean = false) {
+    private class ResourceProbe(var mediaLocated: Boolean = false) {
         fun abort(session: SignalingSessionV2) {
             AttemptResourceController(
                 runtimeSessionId = RUNTIME_A,
@@ -576,7 +620,7 @@ class Kum26LogicalNodeAcceptanceTest {
                 closeLanDiscovery = {},
                 closeWifiDirect = { it() },
                 closeAudioRoute = {},
-                releaseTunnel = { tunnelClaimed = false },
+                clearMediaLocator = { mediaLocated = false },
                 clearConnectionState = {},
                 resumeDiscovery = {}
             ).abortAndResumeDiscovery()

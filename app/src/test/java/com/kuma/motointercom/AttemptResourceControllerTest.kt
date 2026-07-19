@@ -11,7 +11,7 @@ class AttemptResourceControllerTest {
     fun failedAttemptReleasesResourcesBeforeSameRuntimeAcceptsNextAttempt() {
         val runtime = RuntimeSessionId("runtime-current")
         val closed = mutableListOf<String>()
-        var tunnelClaimed = true
+        var mediaLocated = true
         var physicalLinkReady = true
         var mediaConnected = true
         var wifiCloseCompletion: (() -> Unit)? = null
@@ -26,7 +26,7 @@ class AttemptResourceControllerTest {
                 wifiCloseCompletion = completion
             },
             closeAudioRoute = { closed += "audio" },
-            releaseTunnel = { tunnelClaimed = false },
+            clearMediaLocator = { mediaLocated = false },
             clearConnectionState = {
                 physicalLinkReady = false
                 mediaConnected = false
@@ -35,7 +35,7 @@ class AttemptResourceControllerTest {
         ).abortAndResumeDiscovery()
 
         assertEquals(listOf("intercom-and-socket", "lan", "audio", "wifi"), closed)
-        assertFalse(tunnelClaimed)
+        assertFalse(mediaLocated)
         assertFalse(physicalLinkReady)
         assertFalse(mediaConnected)
         assertNull(restartedRuntime)
@@ -43,8 +43,8 @@ class AttemptResourceControllerTest {
         wifiCloseCompletion?.invoke()
 
         assertEquals(runtime, restartedRuntime)
-        val attemptBClaimed = if (!tunnelClaimed) {
-            tunnelClaimed = true
+        val attemptBClaimed = if (!mediaLocated) {
+            mediaLocated = true
             true
         } else {
             false

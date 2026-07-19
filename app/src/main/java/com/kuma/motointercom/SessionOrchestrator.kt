@@ -22,7 +22,8 @@ internal class SessionOrchestrator(
     private val onLog: (String) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
     elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
-    attemptTimeoutMs: Long = 10_000L
+    attemptTimeoutMs: Long = 10_000L,
+    attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create
 ) : Closeable {
     private data class QueuedEvent(
         val event: SessionEvent,
@@ -34,7 +35,11 @@ internal class SessionOrchestrator(
     private val events = Channel<QueuedEvent>(Channel.UNLIMITED)
     private val effectChannel = Channel<SessionEffect>(Channel.UNLIMITED)
     private val mutableState = MutableStateFlow<IntercomState>(IntercomState.Offline)
-    private val signalingControl = SignalingControlCoordinator(elapsedRealtime, attemptTimeoutMs)
+    private val signalingControl = SignalingControlCoordinator(
+        clock = MonotonicClock { MonotonicTimestamp(elapsedRealtime()) },
+        attemptTimeoutMs = attemptTimeoutMs,
+        attemptIdFactory = attemptIdFactory
+    )
     private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
 
     val state: StateFlow<IntercomState> = mutableState.asStateFlow()
@@ -71,10 +76,17 @@ internal class SessionOrchestrator(
     }
 
     internal val currentAttempt: ConnectionAttempt?
-        get() = mutableState.value.connectionAttemptOrNull()
+        get() = signalingControl.currentAttempt
+
+    internal fun terminalOutcome(
+        attemptId: ConnectionAttemptId
+    ): ConnectionAttemptTerminalOutcome? = signalingControl.terminalOutcome(attemptId)
 
     internal val activeControlAttempt: AttemptChannelSet?
         get() = signalingControl.activeAttempt
+
+    internal val pendingInboundRequest: PendingInboundRequest?
+        get() = signalingControl.pendingInboundRequest
 
     private suspend fun handle(event: SessionEvent): Boolean {
         val previous = mutableState.value

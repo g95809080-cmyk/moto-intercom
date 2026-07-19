@@ -140,7 +140,8 @@ internal class SignalingSessionV2 private constructor(
             localNickname: String,
             localDeviceName: String,
             originatingAttempt: ConnectionAttempt?,
-            expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock
+            expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
+            monotonicClock: MonotonicClock
         ): SignalingSessionV2 {
             val previousTimeout = socket.soTimeout
             try {
@@ -166,10 +167,30 @@ internal class SignalingSessionV2 private constructor(
                 ) {
                     throw SignalingV2Exception("outbound attempt runtime does not match local HELLO")
                 }
+                if (
+                    originatingAttempt != null &&
+                    originatingAttempt.remainingMillis(monotonicClock) <= 0L
+                ) {
+                    throw SignalingV2Exception("outbound attempt deadline expired before HELLO")
+                }
 
                 val localDevice = DeviceId.parse(localDeviceId)
                 requireCanonicalUuid(localRuntimeSessionId.value, "localSessionId")
-                socket.soTimeout = HELLO_READ_TIMEOUT_MS
+                val beforeHelloRead = {
+                    val helloTimeoutMillis =
+                        if (originatingAttempt != null) {
+                            originatingAttempt.boundedTimeoutMillis(
+                                monotonicClock,
+                                HELLO_READ_TIMEOUT_MS.toLong()
+                            )
+                        } else {
+                            HELLO_READ_TIMEOUT_MS.toLong()
+                        }
+                    if (helloTimeoutMillis <= 0L) {
+                        throw SignalingV2Exception("HELLO has no remaining attempt budget")
+                    }
+                    socket.soTimeout = helloTimeoutMillis.toInt()
+                }
                 val codec = SignalingV2Codec()
                 val input = DataInputStream(socket.getInputStream())
                 val output = DataOutputStream(socket.getOutputStream())
@@ -186,7 +207,8 @@ internal class SignalingSessionV2 private constructor(
                         localSession = localRuntimeSessionId,
                         localNickname = localNickname,
                         localDeviceName = localDeviceName,
-                        expectedRemoteTargetLock = expectedRemoteTargetLock
+                        expectedRemoteTargetLock = expectedRemoteTargetLock,
+                        beforeHelloRead = beforeHelloRead
                     )
                 } else {
                     exchangeAsRequester(
@@ -198,8 +220,16 @@ internal class SignalingSessionV2 private constructor(
                         localSession = localRuntimeSessionId,
                         localNickname = localNickname,
                         localDeviceName = localDeviceName,
-                        attempt = originatingAttempt
+                        attempt = originatingAttempt,
+                        beforeHelloRead = beforeHelloRead
                     )
+                }
+
+                if (
+                    originatingAttempt != null &&
+                    originatingAttempt.remainingMillis(monotonicClock) <= 0L
+                ) {
+                    throw SignalingV2Exception("outbound attempt deadline expired during HELLO")
                 }
 
                 return SignalingSessionV2(
@@ -233,7 +263,8 @@ internal class SignalingSessionV2 private constructor(
             localSession: RuntimeSessionId,
             localNickname: String,
             localDeviceName: String,
-            attempt: ConnectionAttempt
+            attempt: ConnectionAttempt,
+            beforeHelloRead: () -> Unit
         ): HelloExchangeResult {
             val expectedRemoteDevice = DeviceId.parse(attempt.targetLock.targetDeviceId)
             val localKey = WireRequestKey(
@@ -261,7 +292,7 @@ internal class SignalingSessionV2 private constructor(
             localPinned.requireOutgoing(requesterHello)
             writeHello(codec, output, phaseMachine, requesterHello)
 
-            val firstRemote = readHello(codec, input)
+            val firstRemote = readHello(codec, input, beforeHelloRead)
             requireRemoteEndpoint(
                 firstRemote.envelope,
                 localDevice,
@@ -284,7 +315,8 @@ internal class SignalingSessionV2 private constructor(
                     localDeviceName = localDeviceName,
                     localKey = localKey,
                     localPinned = localPinned,
-                    remoteRequester = firstRemote
+                    remoteRequester = firstRemote,
+                    beforeHelloRead = beforeHelloRead
                 )
             }
         }
@@ -300,7 +332,8 @@ internal class SignalingSessionV2 private constructor(
             localDeviceName: String,
             localKey: WireRequestKey,
             localPinned: PinnedChannelIdentity,
-            remoteRequester: DecodedHello
+            remoteRequester: DecodedHello,
+            beforeHelloRead: () -> Unit
         ): HelloExchangeResult {
             phaseMachine.onFrame(FrameDirection.INBOUND, remoteRequester.message)
             val remoteKey = remoteRequester.envelope.requesterKey()
@@ -308,7 +341,7 @@ internal class SignalingSessionV2 private constructor(
             val localWins = localKey < remoteKey
             phaseMachine.resolveGlare(localWins)
             if (localWins) {
-                val response = readHello(codec, input)
+                val response = readHello(codec, input, beforeHelloRead)
                 if (response.message.requestRole != RequestRole.RESPONDER) {
                     throw SignalingV2Exception("expected responder HELLO after glare")
                 }
@@ -352,9 +385,10 @@ internal class SignalingSessionV2 private constructor(
             localSession: RuntimeSessionId,
             localNickname: String,
             localDeviceName: String,
-            expectedRemoteTargetLock: TargetLock?
+            expectedRemoteTargetLock: TargetLock?,
+            beforeHelloRead: () -> Unit
         ): HelloExchangeResult {
-            val requester = readHello(codec, input)
+            val requester = readHello(codec, input, beforeHelloRead)
             if (requester.message.requestRole != RequestRole.REQUESTER) {
                 throw SignalingV2Exception("first inbound HELLO must be requester")
             }
@@ -393,7 +427,12 @@ internal class SignalingSessionV2 private constructor(
             phaseMachine.onFrame(FrameDirection.OUTBOUND, envelope.message)
         }
 
-        private fun readHello(codec: SignalingV2Codec, input: DataInputStream): DecodedHello {
+        private fun readHello(
+            codec: SignalingV2Codec,
+            input: DataInputStream,
+            beforeHelloRead: () -> Unit
+        ): DecodedHello {
+            beforeHelloRead()
             val envelope = codec.decode(SignalingV2Framing.read(input))
             val message = envelope.message as? SignalingMessageV2.Hello
                 ?: throw SignalingV2Exception("expected HELLO frame")
