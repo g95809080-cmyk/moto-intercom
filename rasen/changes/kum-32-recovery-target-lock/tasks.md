@@ -31,5 +31,5 @@
 - [x] 5.3 Run the applicable reusable three-emulator matrix and preserve fresh evidence without representing hardware-only rows as PASS.
 - [x] 5.4 Update the Sprint 4 verification index and Release Candidate physical queue with KUM-32 evidence/deferrals.
 - [x] 5.5 Commit atomically, push, open the KUM-32 Draft PR, and synchronize Linear while KUM-33 remains Todo.
-- [ ] 5.6 Complete fixed-SHA read-only architecture review and remediate in-scope P0/P1 until APPROVED with P0=0 and P1=0.
+- [x] 5.6 Complete fixed-SHA read-only architecture review and remediate in-scope P0/P1 until APPROVED with P0=0 and P1=0.
 - [ ] 5.7 Mark the PR Ready, merge with a merge commit, verify main CI, close KUM-32, and keep the remote branch before starting KUM-33.

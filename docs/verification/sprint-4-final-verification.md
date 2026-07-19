@@ -1,6 +1,6 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-32 AUTOMATED/CI GATE PASS - ARCHITECTURE REVIEW PENDING**
+Status: **KUM-32 APPROVED - READY FOR INTERMEDIATE MERGE**
 
 Evidence state: 2026-07-19
 
@@ -33,6 +33,7 @@ Evidence state: 2026-07-19
 - KUM-37 final fixed-SHA review: APPROVED, P0=0, P1=0
 - KUM-32 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - KUM-32 second fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
+- KUM-32 third fixed-SHA review: APPROVED, P0=0, P1=0 at `5f1d1d6`
 - Linear: KUM-9 In Progress; KUM-37 Done; KUM-32 In Review; KUM-33 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
@@ -212,8 +213,11 @@ both C and stale-B-runtime HELLO frames and prove failure reaches the cleanup
 callback; the production route retains the existing current-context checks that
 prevent stale callbacks from removing a newer group.
 
-Third fixed-SHA read-only review is pending. No KUM-32 closure, Ready
-transition, or merge is allowed until APPROVED with P0=0 and P1=0.
+The third fixed-SHA read-only review at `5f1d1d6` is APPROVED with P0=0 and
+P1=0. It verified both remediation paths, the fixed evidence, clean Git state,
+and that KUM-33 behavior is absent. KUM-32 is ready for its authorized
+intermediate merge; KUM-33 remains blocked until the merge commit and main CI
+are green.
 
 ## Physical acceptance queue
 
@@ -240,8 +244,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-37 may move to Done | YES - merged as `76fa554`, main CI `29691482967` passed, Linear Done |
 | KUM-32 may start | YES - active on `feat/kum-32-recovery-target-lock` from `76fa554` |
 | KUM-32 implementation/automated gate | PASS at `ba649e3`; CI `29697109471` and emulator matrix `20260720-013122-all` passed |
-| KUM-32 architecture review | REQUEST CHANGES at `9bb61cc`, P0=0/P1=1; HELLO-cleanup remediation complete, third fixed-SHA review pending |
-| KUM-32 may move to Done | NO - fixed-SHA architecture review and final delivery gates pending |
+| KUM-32 architecture review | APPROVED at `5f1d1d6`; P0=0/P1=0 |
+| KUM-32 may move to Done | After merge commit and green main CI |
 | KUM-33 may start | NO |
 | Sprint 4 may close | NO - KUM-32 through KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
