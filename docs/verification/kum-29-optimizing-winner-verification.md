@@ -1,6 +1,6 @@
 # KUM-29 Optimizing Winner Verification
 
-Status: **AUTOMATED GATE PASSED - REVIEW AND CI PENDING**
+Status: **P1 REMEDIATED - COMMIT, CI, AND RE-REVIEW PENDING**
 
 Evidence state: 2026-07-19
 
@@ -9,7 +9,8 @@ Evidence state: 2026-07-19
 - Repository: `g95809080-cmyk/moto-intercom`
 - Certification branch: `feat/kum-29-optimizing-winner-commit`
 - Certification base: `657d5264d0967259000359ccbc6a22bceb133ed4`
-- Certification Head: pending delivery commit
+- Initial certification Head: `554ead24b1f53a8fc663ad6a3afbf385725d1b38`
+- Remediation Head: pending remediation commit
 - Runtime implementation PR: [#5](https://github.com/g95809080-cmyk/moto-intercom/pull/5)
 - Runtime implementation source Head: `f96ba4d0a536b6bfc226d111c5a843cf622f1d75`
 - Runtime implementation final PR Head: `1d2d4b6395d172b2765271dd167b33bc22462ac6`
@@ -17,9 +18,10 @@ Evidence state: 2026-07-19
 - Main implementation CI: [29679007580](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29679007580) - success
 - Linear: KUM-8 In Progress; KUM-29 In Progress; KUM-30 Todo; KUM-31 Todo
 
-The KUM-29 runtime behavior was already delivered by PR #5. This certification
-change adds an issue-scoped Rasen contract and evidence only. The certification
-branch has no diff under `app/src/` relative to its base.
+PR #5 delivered most KUM-29 runtime behavior. The first fixed-SHA certification
+review found two P1 gaps, both within KUM-29 scope: exact optimization expiry was
+mailbox-order dependent, and loser closure had no deadline independent of a
+signaling writer callback. This branch now hardens those boundaries.
 
 ## Architecture boundary
 
@@ -28,6 +30,10 @@ branch has no diff under `app/src/` relative to its base.
   selection phase, media-owner claim, terminal ordering, and cleanup decisions.
 - `IntercomService` inspects exact current candidates, chooses from the supplied
   immutable cohort, executes effects, and never writes product state directly.
+- Selection cohorts are frozen once optimization expires or selection starts;
+  preferred arrival at exact expiry cannot replace the fallback candidate.
+- Every superseded channel has an exact runtime/attempt/channel monotonic close
+  deadline independent of reject-send completion.
 - Only the selected current channel can emit `StartWebRtc`.
 - The one-second optimization window is capped by the immutable ten-second total
   attempt deadline; neither decision can rebase that deadline.
@@ -40,11 +46,11 @@ branch has no diff under `app/src/` relative to its base.
 | --- | --- | --- |
 | Fallback-first enters `OPTIMIZING` | `beginMediaSelection` creates `MediaOptimization` when no preferred channel is ready | `preferredArrivalDuringOptimizationWinsAndCleansFallback` |
 | Preferred wins inside one second | Current same-attempt preferred channel advances selection immediately | `preferredArrivalDuringOptimizationWinsAndCleansFallback` advances 999 ms |
-| Fallback wins at exact expiry | Monotonic milestone dispatch selects the bounded cohort once | `fallbackWinsExactlyAtOptimizationExpiryAndRecordsItsTransport` advances 1,000 ms |
-| Total deadline remains authoritative | `optimizationAt` uses the minimum of window end and immutable deadline | `totalDeadlineBeatsAnOptimizationDecisionAtTheSameTimestamp` |
+| Fallback wins at exact expiry | The cohort freezes at expiry and late preferred events are rejected regardless of mailbox order | `fallbackWinsExactlyAtOptimizationExpiryAndRecordsItsTransport`; `preferredAtOptimizationExpiryCannotJoinTheFrozenFallbackCohort` |
+| Total deadline remains authoritative | Owner selection rechecks the immutable deadline before claim | `totalDeadlineBeatsAnOptimizationDecisionAtTheSameTimestamp`; `mediaSelectionAtTheTotalDeadlineCannotClaimAnOwner` |
 | One winner and one media owner | `mediaChannelSelected` rejects a second claim and records one `mediaOwnerChannelId` | `preferredArrivalDuringOptimizationWinsAndCleansFallback`; `duplicateOwnerAcceptIsIdempotent` |
 | Only winner starts WebRTC | Responder starts media only after the owner `CONNECT_ACCEPT` send completes | `responderAcceptMustBeSentBeforeWebRtcStarts`; `failedAcceptSendNeverStartsWebRtc` |
-| Loser cleanup is bounded | Losers receive reject/close effects and are removed from the active cohort | `preferredArrivalDuringOptimizationWinsAndCleansFallback`; `sentSupersededChannelIsRemovedFromTheActiveAttempt` |
+| Loser cleanup is bounded | Normal reject completion closes immediately; an independent exact-context watchdog force-closes by one second | `preferredArrivalDuringOptimizationWinsAndCleansFallback`; `ControlChannelCloseDeadlineSchedulerTest` |
 | Single-success cleanup | Winner remains current while queued race milestones become stale | `preferredWinnerSuppressesTheQueuedFallbackMilestone`; `fallbackWinsExactlyAtOptimizationExpiryAndRecordsItsTransport` |
 | All-failure cleanup | Final planned-path failure records one terminal outcome and aborts the attempt | `attemptFailsOnlyAfterEveryOpenedPlannedTransportFails` |
 | Cancel/deadline cleanup | Terminal ordering clears candidates and invalidates the queued optimization decision | `cancelDuringOptimizationInvalidatesTheQueuedWinnerDecision`; `timeoutWinsOverLateTransportFailure` |
@@ -53,21 +59,23 @@ branch has no diff under `app/src/` relative to its base.
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| KUM-29 targeted JVM | PASS | 63 tests; 3 suites; 0 failures, errors, or skipped |
-| Full JVM gate | PASS | 230 tests; 34 suites; 0 failures, errors, or skipped |
+| KUM-29 targeted JVM | PASS | 67 tests; 4 suites; 0 failures, errors, or skipped |
+| Full JVM gate | PASS | 234 tests; 35 suites; 0 failures, errors, or skipped |
 | Lint | PASS | 0 Fatal, 0 Error, 34 existing warnings |
 | Debug APK | PASS | `assembleDebug` |
 | Android test APK | PASS | `assembleDebugAndroidTest` |
 | Rasen strict validation | PASS | 1/1 |
-| Three-emulator `all` matrix | PASS | `build/emulator-results/20260719-161937-all` |
-| Emulator evidence | CAPTURED | `build/emulator-evidence/20260719-162021.zip` |
-| Evidence SHA-256 | RECORDED | `0357E86A099DD4876C96FBF781554CF7CC04BA141F6C9D460139A3FD3E65E559` |
-| Fixed-SHA architecture review | PENDING | Certification Base/Head will be bound after commit |
-| Pull-request CI | PENDING | Required before Ready/merge |
+| Pre-remediation emulator matrix | HISTORICAL PASS | `build/emulator-results/20260719-161937-all`; not final evidence after runtime edits |
+| Post-remediation emulator matrix | PASS | `build/emulator-results/20260719-165130-all` |
+| Post-remediation evidence | CAPTURED | `build/emulator-evidence/20260719-165211.zip` |
+| Post-remediation SHA-256 | RECORDED | `2F94B25AE09E8E32784B9CAEA7DFD6FA19F65EF2F8DD5CC81B0CF21C0C3280A2` |
+| Fixed-SHA architecture review round 1 | REQUEST CHANGES | P0=0, P1=2 at `554ead24` |
+| Fixed-SHA architecture re-review | PENDING | Remediation Base/Head will be bound after commit |
+| Initial PR-head CI | PASS | run `29679762746` at `554ead24`; final Head CI still required |
 | Main merge CI | PENDING | Required before KUM-29 Done |
 
-The emulator matrix used only `emulator-5554`, `emulator-5556`, and
-`emulator-5558`. The connected MI 6 was explicitly excluded.
+All emulator matrices use emulator serials only. The connected MI 6 remains
+explicitly excluded.
 
 ## Release Candidate deferral
 
@@ -87,6 +95,6 @@ Release Candidate acceptance is completed.
 
 ## Gate
 
-Automated evidence is complete. The remaining gates are the atomic delivery
-commit, Draft PR, PR CI, fixed-SHA read-only architecture review with P0=0 and
-P1=0, merge commit, and green main CI.
+The P1 fixes, JVM/build gate, and fresh three-emulator evidence are complete. The
+remaining gates are the remediation commit and push, final PR-head CI, fixed-SHA
+read-only re-review with P0=0 and P1=0, merge commit, and green main CI.

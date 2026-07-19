@@ -1,10 +1,11 @@
 ## Context
 
-PR #5 already implemented the KUM-29 behavior while delivering KUM-28. The
-current coordinator uses a monotonic `AttemptMilestone.MediaOptimization`,
-serializes winner selection through `SessionOrchestrator`, and delegates channel
-inspection and resource effects to `IntercomService`. KUM-29 therefore requires
-an issue-scoped contract and independent evidence, not a second implementation.
+PR #5 implemented most KUM-29 behavior while delivering KUM-28. The Coordinator
+uses a monotonic `AttemptMilestone.MediaOptimization`, serializes winner selection
+through `SessionOrchestrator`, and delegates physical effects to
+`IntercomService`. Fixed-SHA review found that exact expiry still admitted a
+preferred channel according to mailbox order and that a blocked reject writer
+could keep a loser channel open indefinitely.
 
 ## Goals / Non-Goals
 
@@ -22,40 +23,50 @@ an issue-scoped contract and independent evidence, not a second implementation.
 
 **Non-Goals:**
 
-- No runtime, protocol, transport, database, UI, notification, or release code
-  changes.
+- No protocol schema, transport algorithm, database, UI, notification, or release
+  code changes.
 - No KUM-30 glare/cancellation expansion beyond regression evidence already
   required to ensure KUM-29 remains safe.
 - No physical OEM, RF, Bluetooth, acoustic, power, or thermal acceptance.
 
 ## Decisions
 
-1. **Reuse the existing coordinator implementation.**
-   `SignalingControlCoordinator.beginMediaSelection` already creates the bounded
-   monotonic milestone, `mediaChannelSelected` records one owner, and
-   `signalingMessageSent` is the only responder transition that emits
-   `StartWebRtc`. Reimplementation would create duplicate ownership risk.
+1. **Harden the existing Coordinator rather than adding another owner.**
+   `handleDuplicateActiveRequest` admits a preferred candidate only while the
+   monotonic clock is strictly before the optimization milestone. Once selection
+   starts, its cohort is frozen. `mediaChannelSelected` rechecks the immutable
+   total deadline immediately before claiming an owner.
 
 2. **Treat `SessionOrchestrator` dispatch as the serialization boundary.**
    `IntercomService` computes an eligible channel from an immutable selection
    cohort and sends the result back as `MediaChannelSelected`; it does not write
    product state or independently start media.
 
-3. **Use existing deterministic JVM tests as executable evidence.**
-   The tests already exercise 999 ms, exact 1,000 ms, exact-deadline precedence,
-   duplicate winner rejection, winner transport persistence, reject-before-close,
-   and full attempt cleanup. The KUM-29 delivery adds a verification map rather
-   than duplicating those scenarios in another fixture.
+3. **Keep reject-before-close with an independent physical cleanup bound.**
+   A superseded-channel reject schedules an exact runtime/attempt/channel close
+   deadline at one monotonic second. Normal send completion still closes through
+   the existing Coordinator event. If the writer blocks, the Service closes the
+   exact Socket and reports send failure so Coordinator state is cleaned. The
+   scheduler is separate from race milestones, so starting WebRTC cannot cancel
+   loser cleanup.
 
-4. **Keep physical-only checks deferred.**
+4. **Add deterministic boundary evidence.**
+   JVM tests cover preferred at 999 ms, preferred at exact 1,000 ms, frozen
+   selection cohorts, owner claim at the total deadline, close-deadline
+   replacement, exact-channel cancellation, and runtime cancellation.
+
+5. **Keep physical-only checks deferred.**
    Real OEM concurrency, RF, and acoustic behavior remain
    `DEFERRED_TO_RELEASE_CANDIDATE`; automated semantics are the development gate.
 
 ## Risks / Trade-offs
 
-- **Risk: Issue traceability is weaker because implementation predates this PR.**
-  → Bind the report to PR #5 source Head, merge SHA, exact test methods, and the
-  fixed Base/Head review for this certification PR.
+- **Risk: A close watchdog could affect a replacement channel.**
+  → Bind every deadline to exact runtime, attempt, and channel identity; cancel it
+  on normal close and invalidate replacement callbacks deterministically.
+- **Risk: Reject delivery can still block at the peer.**
+  → Preserve a full second for normal delivery, then prefer local resource safety;
+  a late writer callback cannot reclaim the closed channel.
 - **Risk: Documentation-only drift could misstate behavior.**
   → Run targeted and full automated gates against the current branch and require
   a read-only architecture review with P0=0 and P1=0.
@@ -66,14 +77,14 @@ an issue-scoped contract and independent evidence, not a second implementation.
 ## Migration Plan
 
 1. Add and strictly validate the KUM-29 Rasen contract.
-2. Add the issue-scoped verification map.
-3. Run targeted JVM tests, full unit tests, Lint, debug builds, and emulator
-   regression where applicable.
-4. Review fixed Base/Head, merge with a merge commit after green CI, then require
-   green main CI before marking KUM-29 Done.
+2. Apply strict optimization-expiry guards and the bounded loser-close watchdog.
+3. Add deterministic scheduler and Coordinator boundary tests.
+4. Run targeted JVM tests, full unit tests, Lint, debug builds, and the emulator
+   regression.
+5. Re-review fixed Base/Head, merge with a merge commit after green CI, then
+   require green main CI before marking KUM-29 Done.
 
-Rollback is a single revert of the certification merge commit; runtime behavior
-is unchanged because this change adds only planning and verification artifacts.
+Rollback is a single revert of the KUM-29 merge commit.
 
 ## Open Questions
 

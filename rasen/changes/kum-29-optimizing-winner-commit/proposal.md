@@ -1,9 +1,9 @@
 ## Why
 
-KUM-29 remains open even though PR #5 already introduced the approved one-second
-`OPTIMIZING` arbitration and single-media-owner behavior. The behavior needs an
-issue-scoped contract and independently traceable evidence before the Sprint can
-advance without duplicating the runtime implementation.
+KUM-29 remains open after PR #5 introduced the approved one-second `OPTIMIZING`
+arbitration and single-media-owner behavior. Independent review found two bounded
+correctness gaps: exact-expiry selection depended on mailbox order, and loser
+closure depended indefinitely on a signaling writer callback.
 
 ## What Changes
 
@@ -12,8 +12,11 @@ advance without duplicating the runtime implementation.
 - Verify that only the selected channel can start Signaling/WebRTC media.
 - Verify bounded loser and terminal-path cleanup for dual-success, single-success,
   all-failure, cancellation, and deadline cases.
-- Add KUM-29-specific Rasen and verification evidence without changing Android
-  runtime behavior.
+- Freeze the selection cohort at exact optimization expiry and reject late owner
+  claims before they can start media.
+- Add an exact-context monotonic one-second loser-close watchdog that preserves
+  reject-before-close when the writer completes normally.
+- Add KUM-29-specific deterministic and emulator regression evidence.
 
 ## Capabilities
 
@@ -28,7 +31,7 @@ None.
 
 ## Impact
 
-- Rasen planning artifacts and issue-scoped verification documentation.
-- Existing coordinator, signaling, media-selection, and cleanup tests are reused as
-  the executable evidence.
-- No protocol, database, UI, Android framework, dependency, or release-path change.
+- Coordinator duplicate-channel and media-selection deadline guards.
+- Service-owned physical loser-close scheduling and its pure JVM scheduler.
+- Rasen planning artifacts, deterministic tests, and issue-scoped verification.
+- No protocol schema, database, UI, dependency, or release-path change.

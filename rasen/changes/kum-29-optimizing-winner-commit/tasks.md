@@ -16,21 +16,34 @@
   cancellation, stale milestone, and deadline terminal paths.
 - [x] 2.4 Confirm the certification branch has no Android runtime behavior diff.
 
-## 3. Automated Gate
+## 3. Review Remediation
 
-- [x] 3.1 Run KUM-29 targeted deterministic JVM tests.
-- [x] 3.2 Run the complete `testDebugUnitTest` gate.
-- [x] 3.3 Run `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest`.
-- [x] 3.4 Run the applicable reusable emulator regression and preserve evidence.
+- [x] 3.1 Validate the exact-expiry mailbox-order finding and freeze the selection
+  cohort at or after the monotonic optimization milestone.
+- [x] 3.2 Recheck the immutable total deadline immediately before a media-owner
+  claim can be committed.
+- [x] 3.3 Validate the unbounded loser-close finding and add an exact-context
+  monotonic one-second physical close watchdog.
+- [x] 3.4 Add deterministic exact-expiry, total-deadline, scheduler replacement,
+  channel cancellation, and runtime cancellation tests.
 
-## 4. Delivery And Review
+## 4. Automated Gate
 
-- [x] 4.1 Add the issue-scoped verification report with exact commands, results,
+- [x] 4.1 Run KUM-29 targeted deterministic JVM tests.
+- [x] 4.2 Run the complete `testDebugUnitTest` gate.
+- [x] 4.3 Run `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest`.
+- [x] 4.4 Re-run the reusable three-emulator matrix after runtime remediation and
+  preserve fresh evidence.
+
+## 5. Delivery And Review
+
+- [x] 5.1 Add the issue-scoped verification report with exact commands, results,
   source SHA traceability, and deferred physical rows.
-- [ ] 4.2 Commit atomically, push, and open a Draft PR bound to fixed Base/Head.
-- [ ] 4.3 Complete read-only architecture review; remediate any in-scope P0/P1,
+- [ ] 5.2 Commit atomically, push, and update the Draft PR to a fixed remediation
+  Base/Head.
+- [ ] 5.3 Complete read-only architecture re-review; remediate any in-scope P0/P1,
   rerun gates, and repeat review until P0=0 and P1=0.
-- [ ] 4.4 Turn Ready and merge with a merge commit after PR CI succeeds; retain
+- [ ] 5.4 Turn Ready and merge with a merge commit after PR CI succeeds; retain
   the remote branch and require green main CI.
-- [ ] 4.5 Synchronize final evidence and KUM-29 Done in Linear while KUM-8 stays
+- [ ] 5.5 Synchronize final evidence and KUM-29 Done in Linear while KUM-8 stays
   In Progress and KUM-30/KUM-31 remain unstarted.

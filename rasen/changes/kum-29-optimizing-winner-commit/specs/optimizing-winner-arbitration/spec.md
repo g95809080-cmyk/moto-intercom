@@ -14,6 +14,10 @@ later than the immutable total attempt deadline.
 - **WHEN** the optimization milestone elapses while only a valid fallback candidate remains selection-ready
 - **THEN** the system selects the fallback candidate and does not extend the optimization window
 
+#### Scenario: Preferred candidate arrives at exact expiry
+- **WHEN** a preferred candidate event is processed at or after the optimization milestone timestamp
+- **THEN** it cannot join the frozen selection cohort or replace the fallback winner regardless of mailbox order
+
 #### Scenario: Total deadline and optimization coincide
 - **WHEN** the immutable attempt deadline is reached at the same monotonic timestamp as the optimization decision
 - **THEN** timeout wins, no media candidate is selected, and all attempt resources are cleaned
@@ -41,8 +45,8 @@ attempt without leaving a second Socket, Wi-Fi Direct group owner, delayed race
 task, or media session under the completed attempt.
 
 #### Scenario: Winner selected from two candidates
-- **WHEN** one candidate becomes the committed media owner
-- **THEN** every other candidate is rejected and closed through bounded effects while the winner remains current
+- **WHEN** one candidate becomes the committed media owner and a loser reject writer completes or blocks
+- **THEN** every other candidate is closed no later than its independent one-second monotonic close deadline while the winner remains current
 
 #### Scenario: All opened paths fail
 - **WHEN** all opened planned transports fail before any winner is committed

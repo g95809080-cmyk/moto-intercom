@@ -91,6 +91,33 @@ class IntercomService : Service() {
             orchestrator.dispatch(SessionEvent.AttemptMilestoneElapsed(milestone))
         }
     )
+    private val controlChannelCloseDeadlineScheduler = ControlChannelCloseDeadlineScheduler(
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        onTimedOut = onTimedOut@ { deadline ->
+            val session = signalingSessions[deadline.channelId]
+                ?.takeIf {
+                    !it.isClosed &&
+                        it.matchesControlHandle(
+                            deadline.runtimeSessionId,
+                            deadline.attemptId,
+                            deadline.channelId
+                        )
+                }
+                ?: return@onTimedOut
+            closeControlChannel(session)
+            orchestrator.dispatch(
+                SessionEvent.SignalingSendFailed(
+                    deadline.runtimeSessionId,
+                    deadline.attemptId,
+                    deadline.channelId,
+                    SignalingMessageTypeV2.CONNECT_REJECT,
+                    "superseded channel close deadline elapsed"
+                )
+            )
+        }
+    )
     private val incomingConfirmationScheduler = IncomingConfirmationDeadlineScheduler(
         elapsedRealtime = SystemClock::elapsedRealtime,
         postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
@@ -651,6 +678,11 @@ class IntercomService : Service() {
     }
 
     private fun closeControlChannel(session: SignalingSessionV2) {
+        controlChannelCloseDeadlineScheduler.cancel(
+            session.pinnedIdentity.localSessionId,
+            session.wireRequestKey.attemptId,
+            session.channel.channelId
+        )
         if (signalingSessions[session.channel.channelId] === session) {
             signalingSessions.remove(session.channel.channelId)
             removePendingMediaMessages(session)
@@ -869,6 +901,7 @@ class IntercomService : Service() {
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         attemptMilestoneScheduler.cancelRuntime(runtimeSessionId)
+        controlChannelCloseDeadlineScheduler.cancelRuntime(runtimeSessionId)
         val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
         val generation = ++recoveryGeneration
         markDiscoveryUnavailable()
@@ -972,6 +1005,7 @@ class IntercomService : Service() {
         recoveryGeneration++
         attemptDeadlineScheduler.cancel()
         attemptMilestoneScheduler.cancel()
+        controlChannelCloseDeadlineScheduler.cancel()
         cancelAllIncomingConfirmationSurfaces()
         sessions.invalidate()
         activeSession = null
@@ -1116,12 +1150,27 @@ class IntercomService : Service() {
                     deviceName = Build.MODEL.orEmpty()
                 )
             )
-            is SessionEffect.SendConnectReject -> sendControlMessage(
-                effect.runtimeSessionId,
-                effect.attemptId,
-                effect.channelId,
-                SignalingMessageV2.ConnectReject(effect.reason, effect.retryable)
-            )
+            is SessionEffect.SendConnectReject -> {
+                if (effect.reason == RejectReason.SUPERSEDED_CHANNEL) {
+                    controlChannelCloseDeadlineScheduler.schedule(
+                        ControlChannelCloseDeadline(
+                            effect.runtimeSessionId,
+                            effect.attemptId,
+                            effect.channelId,
+                            Math.addExact(
+                                SystemClock.elapsedRealtime(),
+                                LOSER_CHANNEL_CLOSE_TIMEOUT_MS
+                            )
+                        )
+                    )
+                }
+                sendControlMessage(
+                    effect.runtimeSessionId,
+                    effect.attemptId,
+                    effect.channelId,
+                    SignalingMessageV2.ConnectReject(effect.reason, effect.retryable)
+                )
+            }
             is SessionEffect.SendBusy -> sendControlMessage(
                 effect.runtimeSessionId,
                 effect.attemptId,
@@ -1638,6 +1687,7 @@ class IntercomService : Service() {
 
     companion object {
         private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
+        private const val LOSER_CHANNEL_CLOSE_TIMEOUT_MS = 1_000L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
         const val ACTION_ACCEPT_INCOMING = "com.kuma.motointercom.action.ACCEPT_INCOMING"
