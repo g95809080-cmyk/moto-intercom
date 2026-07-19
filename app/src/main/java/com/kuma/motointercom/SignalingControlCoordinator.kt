@@ -712,6 +712,13 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         context: AttemptChannelSet
     ): SignalingControlDecision {
+        if (
+            channel.channelId in context.channelIds &&
+            channel.targetLock == context.attempt.targetLock &&
+            channel.peer == context.peer
+        ) {
+            return accepted(state = current)
+        }
         val reject = {
             accepted(
             effects = listOf(

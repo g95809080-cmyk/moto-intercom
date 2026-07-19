@@ -39,6 +39,10 @@ media session.
 - **WHEN** a selection callback carries an old attempt, wrong target, wrong wire request, or non-current channel
 - **THEN** it cannot claim media ownership or start WebRTC
 
+#### Scenario: Current owner request is repeated
+- **WHEN** the exact channel already registered in the active attempt repeats its connect request before or after owner commitment
+- **THEN** the request is idempotent and cannot emit a loser reject, schedule owner cleanup, or start a second WebRTC session
+
 ### Requirement: Bounded loser and terminal cleanup
 The system SHALL close every non-winning channel and terminate every no-winner
 attempt without leaving a second Socket, Wi-Fi Direct group owner, delayed race
@@ -47,6 +51,10 @@ task, or media session under the completed attempt.
 #### Scenario: Winner selected from two candidates
 - **WHEN** one candidate becomes the committed media owner and a loser reject writer completes or blocks
 - **THEN** every other candidate is closed no later than its independent one-second monotonic close deadline while the winner remains current
+
+#### Scenario: Loser request is repeated
+- **WHEN** repeated superseded-channel rejects target the same runtime, attempt, and channel
+- **THEN** the earliest scheduled close deadline is preserved and cannot be extended
 
 #### Scenario: All opened paths fail
 - **WHEN** all opened planned transports fail before any winner is committed

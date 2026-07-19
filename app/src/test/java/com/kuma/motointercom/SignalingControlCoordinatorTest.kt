@@ -215,6 +215,59 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun duplicateRequestOnTheCurrentOwnerIsIdempotent() = runBlocking {
+        harness().use { harness ->
+            val owner = responderChannel(CHANNEL_A)
+            harness.startRuntime()
+            registerIncomingRequest(harness, owner)
+            assertTrue(acceptIncoming(harness))
+            val attempt = requireNotNull(harness.orchestrator.currentAttempt)
+            val select = harness.nextEffect() as SessionEffect.SelectMediaChannel
+            assertEquals(setOf(owner.channelId), select.cohort.channelIds)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.MediaChannelSelected(
+                        RUNTIME_B,
+                        attempt.id,
+                        owner.wireRequestKey,
+                        owner.channelId
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectAccept)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_B,
+                        attempt.id,
+                        owner.channelId,
+                        SignalingMessageTypeV2.CONNECT_ACCEPT
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        RequestTrigger.USER,
+                        null,
+                        101L
+                    )
+                )
+            )
+            assertFalse(harness.hasPendingEffect())
+            assertEquals(
+                owner.channelId,
+                harness.orchestrator.activeControlAttempt?.mediaOwnerChannelId
+            )
+        }
+    }
+
+    @Test
     fun sentSupersededChannelIsRemovedFromTheActiveAttempt() = runBlocking {
         harness().use { harness ->
             val owner = responderChannel(CHANNEL_A)

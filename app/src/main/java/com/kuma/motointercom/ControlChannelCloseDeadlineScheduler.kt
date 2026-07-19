@@ -35,7 +35,12 @@ internal class ControlChannelCloseDeadlineScheduler(
     fun schedule(deadline: ControlChannelCloseDeadline) {
         val key = deadline.key()
         val existing = scheduled[key]
-        if (existing?.deadline == deadline) return
+        if (
+            existing != null &&
+            existing.deadline.scheduledAtElapsedMs <= deadline.scheduledAtElapsedMs
+        ) {
+            return
+        }
         if (existing != null) {
             scheduled.remove(key)
             removeCallbacks(existing.callback)

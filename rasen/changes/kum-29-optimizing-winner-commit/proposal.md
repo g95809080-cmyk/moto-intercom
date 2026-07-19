@@ -16,6 +16,8 @@ closure depended indefinitely on a signaling writer callback.
   claims before they can start media.
 - Add an exact-context monotonic one-second loser-close watchdog that preserves
   reject-before-close when the writer completes normally.
+- Treat repeated requests on an exact active channel as idempotent and preserve
+  the earliest watchdog deadline across repeated loser rejects.
 - Add KUM-29-specific deterministic and emulator regression evidence.
 
 ## Capabilities

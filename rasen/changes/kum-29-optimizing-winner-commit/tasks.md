@@ -26,6 +26,10 @@
   monotonic one-second physical close watchdog.
 - [x] 3.4 Add deterministic exact-expiry, total-deadline, scheduler replacement,
   channel cancellation, and runtime cancellation tests.
+- [x] 3.5 Validate the duplicate-owner watchdog finding and make repeated requests
+  on an exact active channel idempotent without a reject or cleanup effect.
+- [x] 3.6 Preserve the earliest exact-key loser-close deadline so repeated rejects
+  cannot postpone cleanup, with deterministic regression coverage.
 
 ## 4. Automated Gate
 

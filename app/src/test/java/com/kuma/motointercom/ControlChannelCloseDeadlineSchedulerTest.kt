@@ -6,28 +6,30 @@ import org.junit.Test
 
 class ControlChannelCloseDeadlineSchedulerTest {
     @Test
-    fun exactDeadlineAndReplacementInvalidateTheOldCallback() {
+    fun laterDuplicateCannotRebaseAndEarlierDeadlineReplaces() {
         var now = 100L
         val posted = mutableListOf<Pair<Runnable, Long>>()
         val removed = mutableListOf<Runnable>()
         val timedOut = mutableListOf<ControlChannelCloseDeadline>()
         val scheduler = scheduler(now = { now }, posted, removed, timedOut)
         val first = deadline(CHANNEL_A, scheduledAt = 1_100L)
-        val replacement = first.copy(scheduledAtElapsedMs = 1_500L)
+        val later = first.copy(scheduledAtElapsedMs = 1_500L)
+        val earlier = first.copy(scheduledAtElapsedMs = 900L)
 
         scheduler.schedule(first)
-        scheduler.schedule(first)
+        scheduler.schedule(later)
         assertEquals(listOf(1_000L), posted.map { it.second })
+        assertTrue(removed.isEmpty())
 
         now = 200L
-        scheduler.schedule(replacement)
-        assertEquals(listOf(1_000L, 1_300L), posted.map { it.second })
+        scheduler.schedule(earlier)
+        assertEquals(listOf(1_000L, 700L), posted.map { it.second })
         assertEquals(listOf(posted.first().first), removed)
 
         posted.first().first.run()
         assertTrue(timedOut.isEmpty())
         posted.last().first.run()
-        assertEquals(listOf(replacement), timedOut)
+        assertEquals(listOf(earlier), timedOut)
     }
 
     @Test

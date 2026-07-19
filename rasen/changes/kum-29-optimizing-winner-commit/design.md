@@ -50,12 +50,19 @@ could keep a loser channel open indefinitely.
    scheduler is separate from race milestones, so starting WebRTC cannot cancel
    loser cleanup.
 
-4. **Add deterministic boundary evidence.**
+4. **Make exact-channel requests idempotent and deadlines non-rebasable.**
+   A repeated request on a channel already owned by the active attempt emits no
+   reject or cleanup effect, including after that channel becomes media owner.
+   Repeated superseded-channel rejects preserve the earliest exact-key close
+   deadline; they may tighten the bound but cannot move it later.
+
+5. **Add deterministic boundary evidence.**
    JVM tests cover preferred at 999 ms, preferred at exact 1,000 ms, frozen
    selection cohorts, owner claim at the total deadline, close-deadline
-   replacement, exact-channel cancellation, and runtime cancellation.
+   non-rebasing/replacement, exact-channel cancellation, runtime cancellation,
+   and duplicate requests on the current owner.
 
-5. **Keep physical-only checks deferred.**
+6. **Keep physical-only checks deferred.**
    Real OEM concurrency, RF, and acoustic behavior remain
    `DEFERRED_TO_RELEASE_CANDIDATE`; automated semantics are the development gate.
 
@@ -67,6 +74,12 @@ could keep a loser channel open indefinitely.
 - **Risk: Reject delivery can still block at the peer.**
   → Preserve a full second for normal delivery, then prefer local resource safety;
   a late writer callback cannot reclaim the closed channel.
+- **Risk: Duplicate requests could classify the winner as a loser.**
+  → Recognize exact channels already in the active attempt before loser
+  classification and treat their repeated request as idempotent.
+- **Risk: Repeated loser requests could extend cleanup indefinitely.**
+  → The scheduler keeps the earliest deadline for an exact key and accepts only a
+  strictly earlier replacement.
 - **Risk: Documentation-only drift could misstate behavior.**
   → Run targeted and full automated gates against the current branch and require
   a read-only architecture review with P0=0 and P1=0.
