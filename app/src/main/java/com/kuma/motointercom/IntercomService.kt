@@ -175,7 +175,10 @@ class IntercomService : Service() {
         )
         serviceScope.launch {
             orchestrator.state.collect { state ->
-                dispatchOnMain { listener?.onIntercomStateChanged(state) }
+                dispatchOnMain {
+                    listener?.onIntercomStateChanged(state)
+                    if (running) updateNotification()
+                }
             }
         }
         serviceScope.launch {
@@ -441,7 +444,8 @@ class IntercomService : Service() {
                     )
                 }
             },
-            onError = { error -> postForSession(token) { handleError(error) } }
+            onError = { error -> postForSession(token) { handleError(error) } },
+            initialTargetAttempt = targetAttempt
         ).also { it.start() }
         }
         if (Transport.LAN in plannedTransports) {
@@ -483,7 +487,8 @@ class IntercomService : Service() {
                 registerControlChannel(token, session)
             },
             onLog = { message -> postForSession(token) { publishLog(message) } },
-            onError = { error -> postForSession(token) { handleError(error) } }
+            onError = { error -> postForSession(token) { handleError(error) } },
+            initialTargetAttempt = targetAttempt
         ).also { it.start() }
         }
         targetAttempt?.let { beginTargetedTransport(it, it.preferredTransport) }
@@ -494,15 +499,27 @@ class IntercomService : Service() {
         session: SignalingSessionV2
     ) {
         dispatchOnMain {
+            val currentAttempt = orchestrator.currentAttempt
+            val currentState = orchestrator.state.value
             if (
                 !canInstallControlSession(
                     sessionCurrent = isSessionCurrent(token),
-                    currentAttempt = orchestrator.currentAttempt,
+                    currentAttempt = currentAttempt,
                     existingSession = signalingSessions[session.channel.channelId],
-                    session = session
+                    session = session,
+                    currentState = currentState
                 )
             ) {
                 session.close()
+                if (
+                    session.channel.transport == Transport.WIFI_DIRECT &&
+                    isNonTargetRecoveryChannel(currentState, session.targetLock)
+                ) {
+                    wifiTunnel?.rejectNonTargetGroup(
+                        (currentState as IntercomState.Recovering).attempt,
+                        session.targetLock
+                    )
+                }
                 return@dispatchOnMain
             }
 
@@ -1468,6 +1485,12 @@ class IntercomService : Service() {
         transport: Transport
     ): Boolean {
         if (activeRuntimeSessionId != attempt.runtimeSessionId) return false
+        if (Transport.LAN in attempt.channelPlan) {
+            lanDiscovery?.restrictIngress(attempt)
+        }
+        if (Transport.WIFI_DIRECT in attempt.channelPlan) {
+            wifiTunnel?.restrictIngress(attempt)
+        }
         return openPlannedTransport(
             attempt,
             transport,
@@ -1611,6 +1634,10 @@ class IntercomService : Service() {
 
     private fun buildNotification(): Notification {
         ensureNotificationChannel()
+        val notificationText = foregroundNotificationText(
+            orchestrator.state.value,
+            lastStatus
+        )
 
         val contentIntent = PendingIntent.getActivity(
             this,
@@ -1627,8 +1654,8 @@ class IntercomService : Service() {
         }
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("摩声")
-            .setContentText("正在后台运行中")
-            .setStyle(Notification.BigTextStyle().bigText(lastStatus))
+            .setContentText(notificationText)
+            .setStyle(Notification.BigTextStyle().bigText(notificationText))
             .setOngoing(running)
             .setContentIntent(contentIntent)
             .build()
@@ -1800,11 +1827,17 @@ internal fun canApplyAttemptCallback(
 internal fun canRegisterControlChannel(
     sessionCurrent: Boolean,
     currentAttempt: ConnectionAttempt?,
-    session: SignalingSessionV2
+    session: SignalingSessionV2,
+    currentState: IntercomState? = null
 ): Boolean {
     val attempt = session.originatingAttempt
+    val recoveryAttempt = (currentState as? IntercomState.Recovering)?.attempt
     return !session.isClosed &&
         sessionCurrent &&
+        (
+            recoveryAttempt == null ||
+                (currentAttempt == recoveryAttempt && !isNonTargetRecoveryChannel(currentState, session.targetLock))
+            ) &&
         (attempt == null || currentAttempt == attempt) &&
         (attempt == null || session.channel.transport in attempt.channelPlan) &&
         (attempt == null || attempt.targetLock == session.targetLock) &&
@@ -1815,9 +1848,18 @@ internal fun canInstallControlSession(
     sessionCurrent: Boolean,
     currentAttempt: ConnectionAttempt?,
     existingSession: SignalingSessionV2?,
-    session: SignalingSessionV2
+    session: SignalingSessionV2,
+    currentState: IntercomState? = null
 ): Boolean = existingSession == null &&
-    canRegisterControlChannel(sessionCurrent, currentAttempt, session)
+    canRegisterControlChannel(sessionCurrent, currentAttempt, session, currentState)
+
+internal fun isNonTargetRecoveryChannel(
+    currentState: IntercomState?,
+    targetLock: TargetLock
+): Boolean = (currentState as? IntercomState.Recovering)
+    ?.attempt
+    ?.targetLock
+    ?.let { it != targetLock } == true
 
 internal fun canExecuteAbortAttemptEffect(
     effect: SessionEffect.AbortAttemptAndResumeDiscovery,

@@ -128,6 +128,49 @@ class ConnectionAttemptCoordinatorOwnershipTest {
     }
 
     @Test
+    fun fasterThirdPresenceCannotReplaceTheRecoveryTarget() {
+        val coordinator = coordinator(
+            RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery")
+        )
+        val connecting = requireNotNull(
+            coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
+        ).state as IntercomState.Connecting
+        val connected = IntercomState.Connected(
+            connecting.attempt,
+            verifiedPeer(),
+            connectedAt = 5L,
+            transport = Transport.LAN
+        )
+        val recovering = requireNotNull(
+            coordinator.handle(
+                connected,
+                SessionEvent.WebRtcStateChanged(
+                    runtimeSessionId = runtime,
+                    attemptId = connecting.attempt.id,
+                    state = WebRtcConnectionState.DISCONNECTED,
+                    occurredAt = 6L
+                )
+            )
+        ).state as IntercomState.Recovering
+
+        val cDecision = requireNotNull(
+            coordinator.handle(
+                recovering,
+                SessionEvent.ConnectPresenceRequested(
+                    runtimeSessionId = runtime,
+                    targetDeviceId = "peer-c",
+                    targetSessionId = RuntimeSessionId("runtime-peer-c"),
+                    availableTransports = setOf(Transport.LAN, Transport.WIFI_DIRECT)
+                )
+            )
+        )
+
+        assertFalse(cDecision.accepted)
+        assertEquals("peer-a", recovering.targetDeviceId)
+        assertEquals(recovering.attempt, coordinator.currentAttempt)
+    }
+
+    @Test
     fun signalingRecoveryClearsOldResourcesBeforeSchedulingNewDeadline() {
         val coordinator = coordinator(
             RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery")

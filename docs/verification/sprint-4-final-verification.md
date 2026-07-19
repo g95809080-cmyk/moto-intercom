@@ -1,22 +1,26 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-37 REVIEW APPROVED - FINAL EVIDENCE-SYNC CI PENDING**
+Status: **KUM-37 COMPLETE AND MERGED - KUM-32 IN PROGRESS**
 
 Evidence state: 2026-07-19
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
-- Branch: `feat/kum-37-audio-session-lifecycle`
-- Pull request: pending
+- Branch: `main`; KUM-32 branch `feat/kum-32-recovery-target-lock`
+- Pull request: [#9](https://github.com/g95809080-cmyk/moto-intercom/pull/9) merged
 - Sprint 4 base: `bd35ea69955001dc175f376f58ab4e6b84d9c223`
 - Verified KUM-37 source head: `1977e7eec466aeb439f4bc3714ba855d6a11d2d9`
 - Reviewed KUM-37 head: `b3811243a93fad258702301de22c51d5229fec37`
+- Final KUM-37 PR head: `38f1c6ffda738415ee437550c03a01553e621b8c`
+- KUM-37 merge commit: `76fa55428306fa9d5d859cb936fede989e92546b`
 - Initial GitHub Actions: run `29689536790` at `b31175e` - success
 - Reviewed-head GitHub Actions: run `29690610503` - success
+- Final PR-head GitHub Actions: run `29691274257` - success
+- Post-merge main GitHub Actions: run `29691482967` - success
 - Initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=3
 - Final fixed-SHA review: APPROVED, P0=0, P1=0
-- Linear: KUM-9 In Progress; KUM-37 In Progress; KUM-32 through KUM-36 Todo
+- Linear: KUM-9 In Progress; KUM-37 Done; KUM-32 In Progress; KUM-33 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -58,7 +62,8 @@ implemented.
 | Rasen strict validation | `1977e7e` | PASS | 1/1 |
 | PowerShell compatibility | `1977e7e` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
 | Reviewed-head GitHub Actions | `b381124` | PASS | run `29690610503` |
-| Final evidence-sync GitHub Actions | pending | PENDING | run pending |
+| Final evidence-sync GitHub Actions | `38f1c6f` | PASS | run `29691274257` |
+| Post-merge main GitHub Actions | `76fa554` | PASS | run `29691482967` |
 
 The full clean gate ran `testDebugUnitTest`, `lintDebug`, `assembleDebug`, and
 `assembleDebugAndroidTest` in one invocation with the installed Android SDK and
@@ -136,8 +141,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-37 automated/emulator gate | PASS |
 | KUM-37 architecture review | APPROVED - P0=0, P1=0 at `b381124` |
 | KUM-37 reviewed-head CI | PASS - run `29690610503` |
-| KUM-37 may move to Done | NO - final evidence-sync CI, merge, and main CI pending |
-| KUM-32 may start | NO |
+| KUM-37 may move to Done | YES - merged as `76fa554`, main CI `29691482967` passed, Linear Done |
+| KUM-32 may start | YES - active on `feat/kum-32-recovery-target-lock` from `76fa554` |
 | Sprint 4 may close | NO - KUM-32 through KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 

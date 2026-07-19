@@ -8,6 +8,15 @@ import org.junit.Test
 
 class LanAttemptLeaseTest {
     @Test
+    fun recoveryAttemptIsBoundBeforeAdapterStarts() {
+        val attempt = attempt("10000000-0000-4000-8000-000000000001")
+
+        val lease = LanAttemptLease(attempt)
+
+        assertEquals(attempt, lease.current)
+    }
+
+    @Test
     fun completedAttemptReleasesTargetForPassiveIngress() {
         val lease = LanAttemptLease()
         val attempt = attempt("10000000-0000-4000-8000-000000000001")

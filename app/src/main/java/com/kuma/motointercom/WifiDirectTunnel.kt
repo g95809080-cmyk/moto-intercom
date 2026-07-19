@@ -52,6 +52,7 @@ internal class WifiDirectTunnel(
     private val onDisconnected: () -> Unit = {},
     private val onTargetedOverlapUnavailable: (ConnectionAttempt) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
+    initialTargetAttempt: ConnectionAttempt? = null,
     private val monotonicClock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(SystemClock.elapsedRealtime())
     }
@@ -98,6 +99,7 @@ internal class WifiDirectTunnel(
     private val setupRecoveryGate = WifiDirectSetupRecoveryGate()
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private val peerClaims = linkedMapOf<String, DiscoveryIdentityClaim>()
+    @Volatile private var ingressAttempt: ConnectionAttempt? = initialTargetAttempt
     @Volatile private var targetAttempt: ConnectionAttempt? = null
     @Volatile private var targetAddress: String? = null
     private var targetAttemptGeneration = 0
@@ -198,12 +200,18 @@ internal class WifiDirectTunnel(
         }
     }
 
-    fun connect(attempt: ConnectionAttempt): Boolean {
+    fun restrictIngress(attempt: ConnectionAttempt): Boolean {
         if (
             !running ||
             Transport.WIFI_DIRECT !in attempt.channelPlan ||
             attempt.remainingMillis(monotonicClock) <= 0L
         ) return false
+        ingressAttempt = attempt
+        return true
+    }
+
+    fun connect(attempt: ConnectionAttempt): Boolean {
+        if (!restrictIngress(attempt)) return false
         groupValidationGate.cancel()
         validatingGroup = false
         cancelConnectWatchdog()
@@ -225,6 +233,9 @@ internal class WifiDirectTunnel(
             targetAttempt = null
             targetAddress = null
         }
+        if (ingressAttempt?.hasSameImmutableIdentity(completedAttempt) == true) {
+            ingressAttempt = null
+        }
         groupValidationGate.cancel()
         validatingGroup = false
         cancelPendingRetry()
@@ -245,11 +256,27 @@ internal class WifiDirectTunnel(
         if (!currentTarget.hasSameImmutableIdentity(completedAttempt)) return
         targetAttemptGeneration++
         targetAttempt = null
+        ingressAttempt = null
         targetAddress = null
         groupValidationGate.cancel()
         validatingGroup = false
         cancelPendingRetry()
         cancelConnectWatchdog()
+    }
+
+    fun rejectNonTargetGroup(
+        expectedAttempt: ConnectionAttempt,
+        actualTargetLock: TargetLock
+    ) {
+        if (!running || expectedAttempt.targetLock == actualTargetLock) return
+        ingressAttempt = expectedAttempt
+        groupValidationGate.cancel()
+        validatingGroup = false
+        removeGroupAndRediscover(
+            "verified Socket TargetLock mismatch: expected=${expectedAttempt.targetLock} " +
+                "actual=$actualTargetLock",
+            taskContext = currentTargetContext()
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -371,6 +398,7 @@ internal class WifiDirectTunnel(
         groupRemovalGeneration++
         targetAttemptGeneration++
         targetAttempt = null
+        ingressAttempt = null
         targetAddress = null
         peerSessionTracker.clear()
         setupRecoveryGate.cancel()
@@ -964,6 +992,7 @@ internal class WifiDirectTunnel(
             return
         }
         val connectionAttempt = taskContext?.attempt
+        val requiredAttempt = connectionAttempt ?: ingressAttempt
         val ownerDeviceAddress = group.owner?.deviceAddress
         val clientAddresses = group.clientList.map { it.deviceAddress }
         val groupRemoteAddress = if (info.isGroupOwner) {
@@ -973,10 +1002,13 @@ internal class WifiDirectTunnel(
         }
         val expectedAddress = taskContext?.targetAddress
             ?: targetAddress
+            ?: requiredAttempt?.let {
+                peerRegistry.findAcceptedAddress(peerClaims, it.targetLock)
+            }
             ?: groupRemoteAddress?.let(::normalizedAddress)
         val target = expectedAddress?.let(peerDevices::get)
         val claim = expectedAddress?.let(peerClaims::get)
-        val expectedTargetLock = connectionAttempt?.targetLock ?: claim?.toTargetLockOrNull()
+        val expectedTargetLock = requiredAttempt?.targetLock ?: claim?.toTargetLockOrNull()
         val membershipMatch = peerRegistry.matchGroup(
             expectedAddress,
             info.isGroupOwner,
@@ -1025,6 +1057,15 @@ internal class WifiDirectTunnel(
             rejectCurrentGroup(
                 "group owner/client 与 Target Lock 不匹配: owner=$ownerDeviceAddress " +
                     "clients=$clientAddresses target=$expectedAddress networkName=${group.networkName}",
+                taskContext
+            )
+            return
+        }
+        if (connectionAttempt == null && requiredAttempt != null) {
+            groupValidationGate.cancel()
+            validatingGroup = false
+            rejectCurrentGroup(
+                "recovery TargetLock matched before this transport was opened",
                 taskContext
             )
             return
