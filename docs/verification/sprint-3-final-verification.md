@@ -1,25 +1,26 @@
 # Sprint 3 Final Verification
 
-Status: **KUM-31 REVIEW APPROVED - FINAL EVIDENCE-SYNC CI PENDING**
+Status: **COMPLETE - PR #8 MERGED - MAIN CI GREEN**
 
 Evidence state: 2026-07-19
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
-- Branch: `feat/kum-31-fallback-verification`
-- Pull request: [#8](https://github.com/g95809080-cmyk/moto-intercom/pull/8) - Draft
-- KUM-31 base and current `main`: `830c5e6974f2c1ddca71f020db137a0d433978bc`
-- Verified KUM-31 source head: `5b3e1d1bf7dc8be5e066e95f9547e019d939941c`
-- Reviewed KUM-31 head: `1d0e2189ec06b949d1b507a3debc6afde57e2191`
-- Reviewed-head GitHub Actions: [run 29686642730](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29686642730) - success
+- Branch: `main`
+- Pull request: [#8](https://github.com/g95809080-cmyk/moto-intercom/pull/8) - merged
+- KUM-31 base: `830c5e6974f2c1ddca71f020db137a0d433978bc`
+- Final KUM-31 PR head: `61e179bf42537ed4c6bb066d5aa5eb5a6e1633b6`
+- Merge commit and current `main`: `bd35ea69955001dc175f376f58ab4e6b84d9c223`
+- Final PR GitHub Actions: [run 29687257851](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29687257851) - success
+- Post-merge main GitHub Actions: [run 29687457262](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29687457262) - success
 - Fixed-SHA architecture review: APPROVED, P0=0, P1=0
 - KUM-30 final PR head: `bf566bc154de4132bbe1594a08b5dd80a0254e61`
 - KUM-30 merge commit: `830c5e6974f2c1ddca71f020db137a0d433978bc`
 - KUM-30 final PR CI: [run 29684691731](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684691731) - success
 - Baseline main GitHub Actions: [run 29684877764](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684877764) - success
-- Linear: KUM-8 In Progress; KUM-27 Done; KUM-28 Done; KUM-29 Done;
-  KUM-30 Done; KUM-31 In Progress
+- Linear: KUM-8 Done; KUM-27 Done; KUM-28 Done; KUM-29 Done; KUM-30 Done;
+  KUM-31 Done
 
 This is the single Sprint 3 evidence index. Report-only commits that update this
 file do not change reviewed source heads. KUM-27 through KUM-31 evidence remains
@@ -429,14 +430,12 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-28 Exit Criteria | PASS |
 | KUM-29 Exit Criteria | PASS |
 | KUM-30 Exit Criteria | PASS - merged, main CI green, Done |
-| KUM-31 local automated gate | PASS |
+| KUM-31 automated gate | PASS |
 | KUM-31 architecture review | APPROVED - P0=0, P1=0 |
-| KUM-31 reviewed-head CI | PASS - run `29686642730` |
-| KUM-31 Draft PR | OPEN - #8 |
-| KUM-31 PR may become Ready | YES after final evidence-only Head CI succeeds |
-| KUM-31 PR may merge | YES by merge commit after the final unchanged gate |
-| KUM-31 may move to Done | NO - merge and green `main` CI pending |
-| Sprint 3 may close | NO - KUM-31 delivery remains open |
+| KUM-31 final PR CI | PASS - run `29687257851` |
+| KUM-31 PR | MERGED - #8, merge commit `bd35ea6` |
+| KUM-31 | DONE |
+| Sprint 3 | COMPLETE - post-merge main CI `29687457262` green |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Efficiency
