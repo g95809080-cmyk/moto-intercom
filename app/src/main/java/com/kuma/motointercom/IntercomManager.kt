@@ -1,6 +1,5 @@
 ﻿package com.kuma.motointercom
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -14,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Accept 后的 WebRTC 音频生命周期。Socket、framing 和协议顺序由 SignalingSessionV2 独占。
  */
 internal class IntercomManager(
-    context: Context,
+    private val audioSessionController: AudioSessionController,
     private val signalingSession: SignalingSessionV2,
     private val webRtcRole: WebRtcRole,
     private val onIntercomDisconnected: (IOException) -> Unit,
@@ -24,30 +23,27 @@ internal class IntercomManager(
     private val isSessionCurrent: () -> Boolean
 ) : Closeable {
 
-    private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private val disconnectedNotified = AtomicBoolean(false)
 
-    private var audioEngine: RiderAudioEngine? = null
+    private var mediaSession: RiderMediaSession? = null
 
     fun start() {
         if (closed.get()) return
         if (!started.compareAndSet(false, true)) return
 
         try {
-            require(RiderAudioEngine.hasRequiredPermissions(appContext)) {
-                "缺少 RECORD_AUDIO 运行时权限"
-            }
-            audioEngine = RiderAudioEngine(
-                context = appContext,
-                onLocalSdpGenerated = ::sendLocalSdp,
-                onLocalIceCandidateGenerated = ::sendLocalIceCandidate,
-                onConnectionStateChanged = onConnectionStateChanged,
-                onAudioLevelChanged = onAudioLevelChanged,
-                onError = ::onMediaFailure,
-                isSessionCurrent = { !closed.get() && isSessionCurrent() }
+            mediaSession = audioSessionController.openMediaSession(
+                RiderMediaSessionCallbacks(
+                    onLocalSdpGenerated = ::sendLocalSdp,
+                    onLocalIceCandidateGenerated = ::sendLocalIceCandidate,
+                    onConnectionStateChanged = onConnectionStateChanged,
+                    onAudioLevelChanged = onAudioLevelChanged,
+                    onError = ::onMediaFailure,
+                    isSessionCurrent = { !closed.get() && isSessionCurrent() }
+                )
             )
         } catch (t: Throwable) {
             postMain(
@@ -58,7 +54,7 @@ internal class IntercomManager(
         }
 
         if (webRtcRole == WebRtcRole.OFFERER) {
-            audioEngine?.createOffer()
+            mediaSession?.createOffer()
         }
     }
 
@@ -68,11 +64,11 @@ internal class IntercomManager(
             Log.d(TAG, "RX signaling frame: type=${message.type}")
             when (message) {
                 is SignalingMessageV2.Offer ->
-                    audioEngineOrThrow().createAnswer(message.sdpJson)
+                    mediaSessionOrThrow().createAnswer(message.sdpJson)
                 is SignalingMessageV2.Answer ->
-                    audioEngineOrThrow().setRemoteAnswer(message.sdpJson)
+                    mediaSessionOrThrow().setRemoteAnswer(message.sdpJson)
                 is SignalingMessageV2.Candidate ->
-                    audioEngineOrThrow().addRemoteIceCandidate(message.candidateJson)
+                    mediaSessionOrThrow().addRemoteIceCandidate(message.candidateJson)
                 else -> throw SignalingV2Exception(
                     "unexpected media signaling message: ${message.type}"
                 )
@@ -86,12 +82,12 @@ internal class IntercomManager(
         if (!closed.compareAndSet(false, true)) return
 
         try {
-            audioEngine?.close()
+            mediaSession?.let(audioSessionController::closeMediaSession)
         } catch (t: Throwable) {
             postError(t)
         }
         signalingSession.close()
-        audioEngine = null
+        mediaSession = null
     }
 
     private fun sendLocalSdp(sdpJson: String) {
@@ -129,8 +125,8 @@ internal class IntercomManager(
         }
     }
 
-    private fun audioEngineOrThrow(): RiderAudioEngine =
-        audioEngine ?: throw IOException("音频引擎未初始化")
+    private fun mediaSessionOrThrow(): RiderMediaSession =
+        mediaSession ?: throw IOException("WebRTC media session 未初始化")
 
     private fun notifyDisconnected(e: IOException) {
         if (!disconnectedNotified.compareAndSet(false, true)) return

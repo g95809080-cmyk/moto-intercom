@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("smoke", "nsd", "synthetic-audio", "network-fault", "restart", "all")]
+    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "network-fault", "restart", "all")]
     [string]$Scenario = "all",
     [string[]]$Serials = @(),
     [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
@@ -156,6 +156,15 @@ function Run-SyntheticAudio {
     }
 }
 
+function Run-AudioLifecycle {
+    $output = Invoke-AdbText $Serials[0] "audio-lifecycle" @(
+        "shell", "am", "instrument", "-w", "-r",
+        "-e", "class", "com.kuma.motointercom.RiderAudioEngineHotSessionTest",
+        $runner
+    )
+    Assert-InstrumentationPassed $output "hot audio session lifecycle"
+}
+
 function Run-Nsd {
     if ($Serials.Count -lt 2) { throw "NSD integration requires two emulators" }
     $server = $Serials[0]
@@ -244,9 +253,17 @@ switch ($Scenario) {
     "smoke" { Run-Smoke }
     "nsd" { Run-Nsd }
     "synthetic-audio" { Run-SyntheticAudio }
+    "audio-lifecycle" { Run-AudioLifecycle }
     "network-fault" { Run-NetworkFault }
     "restart" { Run-Restart }
-    "all" { Run-Smoke; Run-Nsd; Run-SyntheticAudio; Run-NetworkFault; Run-Restart }
+    "all" {
+        Run-Smoke
+        Run-Nsd
+        Run-SyntheticAudio
+        Run-AudioLifecycle
+        Run-NetworkFault
+        Run-Restart
+    }
 }
 
 [pscustomobject]@{

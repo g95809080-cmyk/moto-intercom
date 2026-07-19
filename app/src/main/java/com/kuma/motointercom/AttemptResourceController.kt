@@ -7,7 +7,6 @@ internal class AttemptResourceController(
     private val closeIntercomAndSocket: () -> Unit,
     private val closeLanDiscovery: () -> Unit,
     private val closeWifiDirect: ((() -> Unit) -> Unit),
-    private val closeAudioRoute: () -> Unit,
     private val clearMediaLocator: () -> Unit,
     private val clearConnectionState: () -> Unit,
     private val resumeDiscovery: (RuntimeSessionId) -> Unit,
@@ -17,7 +16,6 @@ internal class AttemptResourceController(
         closeSafely(clearMediaLocator)
         closeSafely(closeIntercomAndSocket)
         closeSafely(closeLanDiscovery)
-        closeSafely(closeAudioRoute)
         closeSafely(clearConnectionState)
 
         val resumed = AtomicBoolean(false)

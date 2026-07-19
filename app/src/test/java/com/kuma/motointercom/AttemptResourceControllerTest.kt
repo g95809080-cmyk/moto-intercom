@@ -8,7 +8,7 @@ import org.junit.Test
 
 class AttemptResourceControllerTest {
     @Test
-    fun failedAttemptReleasesResourcesBeforeSameRuntimeAcceptsNextAttempt() {
+    fun failedAttemptReleasesAttemptResourcesWithoutClosingOnlineAudioOwner() {
         val runtime = RuntimeSessionId("runtime-current")
         val closed = mutableListOf<String>()
         var mediaLocated = true
@@ -25,7 +25,6 @@ class AttemptResourceControllerTest {
                 closed += "wifi"
                 wifiCloseCompletion = completion
             },
-            closeAudioRoute = { closed += "audio" },
             clearMediaLocator = { mediaLocated = false },
             clearConnectionState = {
                 physicalLinkReady = false
@@ -34,7 +33,7 @@ class AttemptResourceControllerTest {
             resumeDiscovery = { restartedRuntime = it }
         ).abortAndResumeDiscovery()
 
-        assertEquals(listOf("intercom-and-socket", "lan", "audio", "wifi"), closed)
+        assertEquals(listOf("intercom-and-socket", "lan", "wifi"), closed)
         assertFalse(mediaLocated)
         assertFalse(physicalLinkReady)
         assertFalse(mediaConnected)

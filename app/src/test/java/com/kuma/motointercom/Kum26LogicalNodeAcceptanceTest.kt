@@ -619,7 +619,6 @@ class Kum26LogicalNodeAcceptanceTest {
                 closeIntercomAndSocket = session::close,
                 closeLanDiscovery = {},
                 closeWifiDirect = { it() },
-                closeAudioRoute = {},
                 clearMediaLocator = { mediaLocated = false },
                 clearConnectionState = {},
                 resumeDiscovery = {}

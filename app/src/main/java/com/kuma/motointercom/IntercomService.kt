@@ -136,7 +136,7 @@ class IntercomService : Service() {
     )
 
     private var listener: Listener? = null
-    private var audioRouteController: AudioRouteController? = null
+    private var audioSessionController: AudioSessionController? = null
     private var wifiTunnel: WifiDirectTunnel? = null
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
@@ -336,7 +336,7 @@ class IntercomService : Service() {
                     if (activeRuntimeSessionId != runtimeSessionId) return@postForSession
                     localDeviceId = deviceId
                     requestedRiderName = nickname
-                    startAudioRoute(token)
+                    startAudioSession(runtimeSessionId)
                     startDiscoveryTransports(token, deviceId, runtimeSessionId)
                 }
             } catch (t: Throwable) {
@@ -348,11 +348,12 @@ class IntercomService : Service() {
         }
     }
 
-    private fun startAudioRoute(token: SessionGeneration.Token) {
-        audioRouteController = AudioRouteController(
+    private fun startAudioSession(runtimeSessionId: RuntimeSessionId) {
+        if (audioSessionController != null) return
+        audioSessionController = AudioSessionController.start(
             context = this,
             onScoConnected = { deviceName ->
-                postForSession(token) {
+                postForRuntime(runtimeSessionId) {
                     bluetoothReady = true
                     publishAudioSource("当前音频源：蓝牙耳机 ($deviceName)", bluetooth = true)
                     publishToast("头盔蓝牙已连线，对讲音频已就绪")
@@ -360,7 +361,7 @@ class IntercomService : Service() {
                 }
             },
             onScoDisconnected = {
-                postForSession(token) {
+                postForRuntime(runtimeSessionId) {
                     bluetoothReady = false
                     publishToast(BLUETOOTH_RETRY_STATUS)
                     publishLog(BLUETOOTH_RETRY_STATUS)
@@ -368,15 +369,18 @@ class IntercomService : Service() {
                 }
             },
             onSpeakerFallback = { noBluetooth ->
-                postForSession(token) {
+                postForRuntime(runtimeSessionId) {
                     bluetoothReady = false
                     publishAudioSource(AUDIO_SPEAKER_STATUS, bluetooth = false)
                     if (noBluetooth) publishToast("未检测到头盔蓝牙，已切换至手机外放")
                     updateStageStatus()
                 }
             },
-            onError = { error -> postForSession(token) { handleError(error) } }
-        ).also { it.switchToBluetoothSco() }
+            onError = { error -> postForRuntime(runtimeSessionId) { handleError(error) } },
+            isRuntimeCurrent = {
+                running && activeRuntimeSessionId == runtimeSessionId
+            }
+        )
     }
 
     private fun startDiscoveryTransports(
@@ -777,6 +781,12 @@ class IntercomService : Service() {
             if (session != null && candidate != null) closeControlChannel(session)
             return
         }
+        val audioController = audioSessionController
+        if (audioController == null) {
+            handleError(IllegalStateException("online audio session is unavailable"))
+            closeControlChannel(session)
+            return
+        }
         if (
             intercomManager != null &&
             activeMediaContext == candidate &&
@@ -812,7 +822,7 @@ class IntercomService : Service() {
         publishStatus(SIGNALING_CONNECTED_STATUS)
 
         intercomManager = IntercomManager(
-            context = this,
+            audioSessionController = audioController,
             signalingSession = session,
             webRtcRole = effect.role,
             onIntercomDisconnected = {
@@ -920,12 +930,10 @@ class IntercomService : Service() {
         val managerToClose = intercomManager
         val lanToClose = lanDiscovery
         val wifiToClose = wifiTunnel
-        val audioToClose = audioRouteController
         val signalingToClose = drainSignalingSessions()
         intercomManager = null
         lanDiscovery = null
         wifiTunnel = null
-        audioRouteController = null
 
         AttemptResourceController(
             runtimeSessionId = runtimeSessionId,
@@ -937,17 +945,14 @@ class IntercomService : Service() {
             closeWifiDirect = { onClosed ->
                 if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
             },
-            closeAudioRoute = { audioToClose?.close() },
             clearMediaLocator = {
                 activeMediaContext = null
                 activeMediaSession = null
             },
             clearConnectionState = {
-                bluetoothReady = false
                 physicalLinkReady = false
                 mediaConnected = false
                 remoteRiderName = null
-                publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
                 publishStatus(SIGNAL_LOST_STATUS)
             },
             resumeDiscovery = { resumedRuntimeSessionId ->
@@ -973,7 +978,6 @@ class IntercomService : Service() {
                     val recoveryToken = sessions.start()
                     activeSession = recoveryToken
                     publishLog("重新启动车友发现")
-                    startAudioRoute(recoveryToken)
                     if (
                         !canRestartRecoveryAttempt(
                             expectedAttempt = nextAttempt,
@@ -981,8 +985,6 @@ class IntercomService : Service() {
                             now = MonotonicTimestamp(SystemClock.elapsedRealtime())
                         )
                     ) {
-                        audioRouteController?.close()
-                        audioRouteController = null
                         activeSession = null
                         sessions.invalidate()
                         return@postDelayed
@@ -1038,13 +1040,13 @@ class IntercomService : Service() {
             handleError(t)
         }
         try {
-            audioRouteController?.close()
+            audioSessionController?.close()
         } catch (t: Throwable) {
             handleError(t)
         }
         intercomManager = null
         wifiTunnel = null
-        audioRouteController = null
+        audioSessionController = null
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false
@@ -1078,6 +1080,12 @@ class IntercomService : Service() {
 
     private fun dispatchOnMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else mainHandler.post(action)
+    }
+
+    private fun postForRuntime(runtimeSessionId: RuntimeSessionId, action: () -> Unit) {
+        dispatchOnMain {
+            if (running && activeRuntimeSessionId == runtimeSessionId) action()
+        }
     }
 
     private fun postForSession(token: SessionGeneration.Token, action: () -> Unit) {
