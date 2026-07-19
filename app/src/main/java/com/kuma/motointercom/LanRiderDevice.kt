@@ -16,7 +16,7 @@ internal data class LanRiderDevice(
 }
 
 internal fun ConnectionAttempt?.acceptsLanPreflightDevice(remoteDeviceId: String?): Boolean =
-    this != null && channelPlan.transport == Transport.LAN && targetDeviceId == remoteDeviceId
+    this != null && Transport.LAN in channelPlan && targetDeviceId == remoteDeviceId
 
 internal class LanDiscoveryDeviceRegistry {
     private val devicesByServiceName = linkedMapOf<String, LanRiderDevice>()

@@ -198,7 +198,7 @@ class ConnectionAttemptDomainTest {
         source.clear()
         source += Transport.WIFI_DIRECT
 
-        assertEquals(Transport.LAN, plan.transport)
+        assertEquals(Transport.LAN, plan.preferredTransport)
         assertEquals(setOf(Transport.LAN), plan.plannedTransports)
         assertEquals(ChannelPlan.single(Transport.LAN), plan)
     }

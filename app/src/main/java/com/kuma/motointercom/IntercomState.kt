@@ -71,12 +71,17 @@ sealed interface IntercomState {
     data class Connected(
         val attempt: ConnectionAttempt,
         val peer: PeerIdentity,
-        val connectedAt: Long
+        val connectedAt: Long,
+        val transport: Transport
     ) : IntercomState {
+        init {
+            require(transport in attempt.channelPlan) {
+                "Connected transport must belong to the immutable attempt plan"
+            }
+        }
         override val kind = SessionState.CONNECTED
         override val runtimeSessionId: RuntimeSessionId = attempt.runtimeSessionId
         val attemptId: ConnectionAttemptId = attempt.id
-        val transport: Transport = attempt.channelPlan.transport
     }
 
     data class Recovering(

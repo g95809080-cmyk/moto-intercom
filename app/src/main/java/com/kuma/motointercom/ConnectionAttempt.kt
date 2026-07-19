@@ -1,5 +1,7 @@
 package com.kuma.motointercom
 
+import java.util.Collections
+
 enum class ConnectionTrigger {
     USER,
     AUTO_PAIRED,
@@ -21,25 +23,53 @@ data class TargetLock(
     }
 }
 
-class ChannelPlan(plannedTransports: Set<Transport>) {
+class ChannelPlan private constructor(
+    val preferredTransport: Transport,
+    val fallbackTransport: Transport?
+) {
+    constructor(plannedTransports: Set<Transport>) : this(
+        preferredTransport = requireSingleTransport(plannedTransports),
+        fallbackTransport = null
+    )
+
     init {
-        require(plannedTransports.size == 1) {
-            "Sprint 2 connection attempts must plan exactly one transport"
+        require(fallbackTransport == null || fallbackTransport != preferredTransport) {
+            "Fallback transport must differ from preferred transport"
         }
     }
 
-    val transport: Transport = plannedTransports.single()
-    val plannedTransports: Set<Transport> = setOf(transport)
+    val plannedTransports: Set<Transport> = Collections.unmodifiableSet(
+        fallbackTransport?.let {
+            linkedSetOf(preferredTransport, it)
+        } ?: linkedSetOf(preferredTransport)
+    )
 
-    override fun equals(other: Any?): Boolean =
-        this === other || other is ChannelPlan && transport == other.transport
+    operator fun contains(transport: Transport): Boolean = transport in plannedTransports
 
-    override fun hashCode(): Int = transport.hashCode()
+    override fun equals(other: Any?): Boolean = this === other ||
+        other is ChannelPlan &&
+        preferredTransport == other.preferredTransport &&
+        fallbackTransport == other.fallbackTransport
+
+    override fun hashCode(): Int = 31 * preferredTransport.hashCode() +
+        (fallbackTransport?.hashCode() ?: 0)
 
     override fun toString(): String = "ChannelPlan(plannedTransports=$plannedTransports)"
 
     companion object {
-        fun single(transport: Transport): ChannelPlan = ChannelPlan(setOf(transport))
+        fun single(transport: Transport): ChannelPlan = ChannelPlan(transport, null)
+
+        fun race(
+            preferredTransport: Transport,
+            fallbackTransport: Transport
+        ): ChannelPlan = ChannelPlan(preferredTransport, fallbackTransport)
+
+        private fun requireSingleTransport(plannedTransports: Set<Transport>): Transport {
+            require(plannedTransports.size == 1) {
+                "An unordered ChannelPlan constructor accepts exactly one transport"
+            }
+            return plannedTransports.first()
+        }
     }
 }
 
@@ -61,7 +91,7 @@ data class ConnectionAttempt(
         get() = targetLock.targetDeviceId
 
     val preferredTransport: Transport
-        get() = channelPlan.transport
+        get() = channelPlan.preferredTransport
 
     val deadlineAt: MonotonicTimestamp
         get() = MonotonicTimestamp(deadlineElapsedRealtimeMs)
@@ -82,9 +112,24 @@ internal fun plannedDiscoveryTransports(attempt: ConnectionAttempt?): Set<Transp
 
 internal fun openPlannedTransport(
     attempt: ConnectionAttempt,
+    transport: Transport,
     openLan: (ConnectionAttempt) -> Boolean,
     openWifiDirect: (ConnectionAttempt) -> Boolean
-): Boolean = when (attempt.channelPlan.transport) {
-    Transport.LAN -> openLan(attempt)
-    Transport.WIFI_DIRECT -> openWifiDirect(attempt)
+): Boolean {
+    if (transport !in attempt.channelPlan) return false
+    return when (transport) {
+        Transport.LAN -> openLan(attempt)
+        Transport.WIFI_DIRECT -> openWifiDirect(attempt)
+    }
 }
+
+internal fun openPlannedTransport(
+    attempt: ConnectionAttempt,
+    openLan: (ConnectionAttempt) -> Boolean,
+    openWifiDirect: (ConnectionAttempt) -> Boolean
+): Boolean = openPlannedTransport(
+    attempt,
+    attempt.preferredTransport,
+    openLan,
+    openWifiDirect
+)

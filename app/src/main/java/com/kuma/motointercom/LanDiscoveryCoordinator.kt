@@ -43,6 +43,7 @@ internal class LanDiscoveryCoordinator(
     private val lifecycleLock = Any()
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
+    private val targetedClientSocket = AtomicReference<Socket?>()
     private val targetAttempt = LanAttemptLease()
     private val clientConnecting = AtomicBoolean(false)
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
@@ -69,7 +70,7 @@ internal class LanDiscoveryCoordinator(
     fun connect(attempt: ConnectionAttempt): Boolean {
         if (
             !isActive() ||
-            attempt.channelPlan.transport != Transport.LAN ||
+            Transport.LAN !in attempt.channelPlan ||
             attempt.remainingMillis(monotonicClock) <= 0L
         ) return false
         targetAttempt.bind(attempt)
@@ -79,6 +80,7 @@ internal class LanDiscoveryCoordinator(
 
     fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
         if (targetAttempt.release(completedAttempt)) {
+            closeQuietly(targetedClientSocket.getAndSet(null))
             clientConnecting.set(false)
         }
     }
@@ -342,9 +344,15 @@ internal class LanDiscoveryCoordinator(
                 clientConnecting.set(false)
                 return
             }
-            socket = Socket()
-            socket.connect(InetSocketAddress(ip, port), connectTimeoutMillis.toInt())
-            val connected = socket
+            val candidate = Socket()
+            socket = candidate
+            targetedClientSocket.set(candidate)
+            if (!isAttemptCurrent(attempt)) {
+                clientConnecting.set(false)
+                return
+            }
+            candidate.connect(InetSocketAddress(ip, port), connectTimeoutMillis.toInt())
+            val connected = candidate
             val session = SignalingSessionV2.establish(
                 socket = connected,
                 transport = Transport.LAN,
@@ -363,6 +371,7 @@ internal class LanDiscoveryCoordinator(
                 return
             }
             if (handoff(session, attempt)) {
+                targetedClientSocket.compareAndSet(candidate, null)
                 socket = null
             } else {
                 clientConnecting.set(false)
@@ -372,6 +381,7 @@ internal class LanDiscoveryCoordinator(
             if (reportFailure && isAttemptCurrent(attempt)) error(t)
             else log("局域网连接失败：${t.message}")
         } finally {
+            socket?.let { targetedClientSocket.compareAndSet(it, null) }
             closeQuietly(socket)
         }
     }
@@ -457,6 +467,7 @@ internal class LanDiscoveryCoordinator(
             if (!closed.compareAndSet(false, true)) return
             closeQuietly(udpSocket.getAndSet(null))
             closeQuietly(serverSocket.getAndSet(null))
+            closeQuietly(targetedClientSocket.getAndSet(null))
         }
         stopNsdDiscovery()
         executor.shutdownNow()
