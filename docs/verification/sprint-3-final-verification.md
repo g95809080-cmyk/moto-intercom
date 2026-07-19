@@ -108,6 +108,8 @@ serials when unrelated emulators are present. The current accepted runs did so.
 
 ## Physical acceptance queue
 
+The validation timing is governed by the accepted
+[development/Release Candidate gate decision](../decisions/2026-07-19-development-validation-release-candidate-gate.md).
 The authoritative procedure is
 [`release-candidate-physical-plan.md`](release-candidate-physical-plan.md).
 Every row below remains mandatory before production release and is not claimed

@@ -2,6 +2,8 @@
 
 Status: Active from 2026-07-19
 
+Decision: [Development Validation and Release Candidate Physical Gate](../decisions/2026-07-19-development-validation-release-candidate-gate.md)
+
 ## Development gate order
 
 1. Deterministic JVM tests.
