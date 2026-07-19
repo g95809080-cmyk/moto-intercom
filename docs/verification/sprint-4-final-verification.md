@@ -1,13 +1,13 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-32 MERGED; KUM-33 IN PROGRESS**
+Status: **KUM-33 AUTOMATED GATE PASSED - ARCHITECTURE REVIEW PENDING**
 
 Evidence state: 2026-07-19
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
-- Branch: `main`; KUM-32 branch `feat/kum-32-recovery-target-lock`
+- Branch: `main`; active KUM-33 branch `feat/kum-33-three-second-recovery-fallback`
 - Pull request: [#9](https://github.com/g95809080-cmyk/moto-intercom/pull/9) merged
 - Sprint 4 base: `bd35ea69955001dc175f376f58ab4e6b84d9c223`
 - Verified KUM-37 source head: `1977e7eec466aeb439f4bc3714ba855d6a11d2d9`
@@ -38,6 +38,9 @@ Evidence state: 2026-07-19
 - KUM-32 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - KUM-32 second fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - KUM-32 third fixed-SHA review: APPROVED, P0=0, P1=0 at `5f1d1d6`
+- KUM-33 base: `5c49a53db45ecaa5b9f449af5f04d28250f3f772`
+- KUM-33 implementation source: `616c22fcc270e98c276a0fb8e3a3943101334492`
+- KUM-33 Rasen change: `kum-33-three-second-recovery-fallback`
 - Linear: KUM-9 In Progress; KUM-37/KUM-32 Done; KUM-33 In Progress; KUM-34 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
@@ -221,9 +224,73 @@ prevent stale callbacks from removing a newer group.
 
 The third fixed-SHA read-only review at `5f1d1d6` is APPROVED with P0=0 and
 P1=0. It verified both remediation paths, the fixed evidence, clean Git state,
-and that KUM-33 behavior is absent. KUM-32 is ready for its authorized
-intermediate merge; KUM-33 remains blocked until the merge commit and main CI
-are green.
+and that KUM-33 behavior was absent at that reviewed head. KUM-32 subsequently
+merged as `5c49a53`; exact-main CI `29698415621` passed and Linear is Done.
+
+## KUM-33 delivery boundary
+
+KUM-33 changes only recovery ordering and timing inside the existing ownership
+model:
+
+- a fresh recovery attempt retains the same TargetLock and transport set but
+  makes `Connected.transport` the preferred path;
+- the existing Coordinator schedules recovery fallback at monotonic T+3 while
+  normal attempts retain T+5 and every attempt retains immutable T+10;
+- media-only recovery opens the preferred transport immediately on existing
+  adapters;
+- signaling-loss recovery completes mandatory cleanup, rebuilds only planned
+  adapters, then reports exact-attempt readiness to the Coordinator with no
+  additional recovery backoff;
+- if cleanup consumed T+3, the Coordinator opens preferred then the already-due
+  alternate without resetting either clock; and
+- KUM-32 target admission, KUM-31 overlap fallback, KUM-37 hot audio, and the
+  single `StartWebRtc` owner remain unchanged.
+
+KUM-34 repeated-failure `RESETTING`, KUM-35 active disconnect, KUM-36 final
+acceptance, protocol/database/pairing changes, signing, deployment, and release
+remain unimplemented.
+
+## KUM-33 automated evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Targeted JVM | `616c22f` | PASS | 88 tests across recovery ownership, signaling, transport race, logical A/B/C acceptance, and cleanup; 0 failures/errors/skipped |
+| Full JVM gate | `616c22f` | PASS | 263 tests; 39 suites; 0 failures, errors, or skipped |
+| Lint | `616c22f` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `616c22f` | PASS | `assembleDebug`; SHA-256 `C42BDED42C74A53AFE7C4A56F4646BECD6779EE2C62A8DDE546BB8C98CA528BD` |
+| Android test APK | `616c22f` | PASS | `assembleDebugAndroidTest`; SHA-256 `8CFDDA1E17263DDEA30232532F6B3FFD71C7A91A5CAA8AC0E40A3D1EC7E49CE3` |
+| Recovery timing instrumentation | `616c22f` | PASS | 2/2 on each of three API 36 emulators; 6/6 total |
+| Rasen strict validation | `616c22f` | PASS | 1/1; 4/4 artifacts complete |
+| PowerShell compatibility | `616c22f` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
+
+The first emulator run correctly failed because the new test fixture used a
+non-canonical runtime ID at the `WireRequestKey` trust boundary. Replacing the
+fixture values with canonical UUIDs made the unchanged production scenario pass
+on all three nodes. This was a test-data defect, not a production fallback.
+
+## KUM-33 emulator matrix
+
+- Emulator: 36.6.11; API 36 AOSP ATD x86_64
+- Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
+- KUM-33 timing result: `build/emulator-results/20260720-025658-recovery-timing` - PASS
+- Full matrix: `build/emulator-results/20260720-025801-all` - PASS
+- Evidence archive: `build/emulator-evidence/20260720-025849.zip`
+- Archive SHA-256: `3CEC85F2BB048F38BB1FBF87684AB31DBFBCBD57029D764CE26182B471AEE6A2`
+
+Every node logged the same immutable attempt/target/deadline evidence:
+
+- at 2999 ms, preferred Wi-Fi Direct became the final transport and the late
+  fallback was inert;
+- at 3000 ms, alternate LAN became the final transport; and
+- the recovery total deadline remained 10000 ms.
+
+The full matrix also passed app smoke/UI hierarchy, pairwise shared networking,
+NSD/Socket exchange, deterministic synthetic PCM metrics and transfer, hot
+audio lifecycle, network fault/recovery, process restart, evidence collection,
+and bounded shutdown. The connected MI 6 was excluded from every command.
+
+ATD screenshots remained all black on visual inspection and are
+`UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
 
 ## Physical acceptance queue
 
@@ -253,7 +320,11 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-32 architecture review | APPROVED at `5f1d1d6`; P0=0/P1=0 |
 | KUM-32 may move to Done | YES - merged as `5c49a53`, exact-main CI `29698415621` passed, Linear Done |
 | KUM-33 may start | YES - active on `feat/kum-33-three-second-recovery-fallback` from `5c49a53` |
-| Sprint 4 may close | NO - KUM-32 through KUM-36 remain Todo |
+| KUM-33 implementation/automated gate | PASS at source `616c22f`; emulator matrix `20260720-025801-all` passed |
+| KUM-33 architecture review | PENDING fixed-SHA review |
+| KUM-33 may move to Done | NO - Draft PR, CI, APPROVED review, merge, and main CI remain |
+| KUM-34 may start | NO |
+| Sprint 4 may close | NO - KUM-33 is In Progress; KUM-34 through KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Residual risk

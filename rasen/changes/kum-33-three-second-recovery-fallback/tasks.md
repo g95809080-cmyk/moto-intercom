@@ -32,9 +32,9 @@
 - [x] 4.1 Run KUM-33 targeted JVM tests and strict Rasen validation.
 - [x] 4.2 Run full JVM, `lintDebug`, `assembleDebug`, and
   `assembleDebugAndroidTest` and record exact totals.
-- [ ] 4.3 Run applicable instrumentation and the reusable three-emulator matrix;
+- [x] 4.3 Run applicable instrumentation and the reusable three-emulator matrix;
   preserve fresh evidence and do not treat ATD black frames as visual PASS.
-- [ ] 4.4 Update the Sprint 4 verification index and Release Candidate queue,
+- [x] 4.4 Update the Sprint 4 verification index and Release Candidate queue,
   keeping OEM/RF/audio/power/background rows `DEFERRED_TO_RELEASE_CANDIDATE`.
 
 ## 5. Review And Delivery
