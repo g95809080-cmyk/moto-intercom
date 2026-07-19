@@ -27,6 +27,7 @@ import org.junit.Test
 class Kum26LogicalNodeAcceptanceTest {
     @Test
     fun recoveryAdmissionRejectsCFasterThenBAloneOwnsMediaOnReusedAdapters() = runBlocking {
+        var elapsedRealtimeMs = 0L
         val originalAttempt = attempt(ATTEMPT_A, DEVICE_B, SESSION_B).copy(
             channelPlan = ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT)
         )
@@ -34,7 +35,7 @@ class Kum26LogicalNodeAcceptanceTest {
             SessionOrchestrator(
                 RecordingPairingRepository(),
                 Dispatchers.Unconfined,
-                elapsedRealtime = { 0L },
+                elapsedRealtime = { elapsedRealtimeMs },
                 attemptIdFactory = { ConnectionAttemptId(ATTEMPT_RECOVERY) }
             )
         )
@@ -98,6 +99,11 @@ class Kum26LogicalNodeAcceptanceTest {
             val recoveryAttempt = recovering.attempt
             val recoveryEffects = List(3) { harness.nextEffect() }
             assertFalse(recoveryEffects.any { it is SessionEffect.RestartDiscovery })
+            val recoveryFallback = (
+                recoveryEffects.single { it is SessionEffect.ScheduleAttemptMilestone }
+                    as SessionEffect.ScheduleAttemptMilestone
+                ).milestone as AttemptMilestone.FallbackTransport
+            assertEquals(MonotonicTimestamp(3_000L), recoveryFallback.scheduledAt)
 
             val lanIngress = mutableListOf<ConnectionAttempt>()
             val wifiDirectIngress = mutableListOf<ConnectionAttempt>()
@@ -224,6 +230,25 @@ class Kum26LogicalNodeAcceptanceTest {
                             expectedRole = startWebRtc.role
                         )
                     )
+                    elapsedRealtimeMs = 2_999L
+                    assertTrue(
+                        harness.orchestrator.dispatchAndAwait(
+                            SessionEvent.WebRtcStateChanged(
+                                RUNTIME_A,
+                                recoveryAttempt.id,
+                                WebRtcConnectionState.CONNECTED,
+                                occurredAt = elapsedRealtimeMs
+                            )
+                        )
+                    )
+                    assertTrue(harness.orchestrator.state.value is IntercomState.Connected)
+                    elapsedRealtimeMs = 3_000L
+                    assertFalse(
+                        harness.orchestrator.dispatchAndAwait(
+                            SessionEvent.AttemptMilestoneElapsed(recoveryFallback)
+                        )
+                    )
+                    assertFalse(harness.hasPendingEffect())
                 }
             }
         }
@@ -618,6 +643,15 @@ class Kum26LogicalNodeAcceptanceTest {
             assertEquals(setOf(Transport.LAN), plannedDiscoveryTransports(recoveryAttempt))
             assertTrue(harness.nextEffect() is SessionEffect.RestartDiscovery)
             assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RecoveryTransportReady(recoveryAttempt, Transport.LAN)
+                )
+            )
+            assertEquals(
+                SessionEffect.OpenTargetedTransport(recoveryAttempt, Transport.LAN),
+                harness.nextEffect()
+            )
             assertFalse(
                 harness.orchestrator.dispatchAndAwait(
                     SessionEvent.ConnectPresenceRequested(

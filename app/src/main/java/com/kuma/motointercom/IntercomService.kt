@@ -26,6 +26,45 @@ import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
 
+private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
+
+internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
+    if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
+
+internal class RecoveryTransportStartup(
+    private val expectedAttempt: ConnectionAttempt?,
+    private val dispatch: (SessionEvent.RecoveryTransportReady) -> Unit
+) {
+    fun <WifiDirectAdapter, LanAdapter> start(
+        plannedTransports: Set<Transport>,
+        createWifiDirect: ((ConnectionAttempt) -> Unit) -> WifiDirectAdapter,
+        installWifiDirect: (WifiDirectAdapter) -> Unit,
+        startWifiDirect: (WifiDirectAdapter) -> Unit,
+        createLan: () -> LanAdapter,
+        installLan: (LanAdapter) -> Unit,
+        startLan: (LanAdapter) -> Boolean
+    ) {
+        if (Transport.WIFI_DIRECT in plannedTransports) {
+            val adapter = createWifiDirect { reportReady(it, Transport.WIFI_DIRECT) }
+            installWifiDirect(adapter)
+            startWifiDirect(adapter)
+        }
+        if (Transport.LAN in plannedTransports) {
+            val adapter = createLan()
+            installLan(adapter)
+            if (startLan(adapter)) {
+                expectedAttempt?.let { reportReady(it, Transport.LAN) }
+            }
+        }
+    }
+
+    private fun reportReady(attempt: ConnectionAttempt, transport: Transport) {
+        val expected = expectedAttempt ?: return
+        if (attempt != expected || transport !in expected.channelPlan) return
+        dispatch(SessionEvent.RecoveryTransportReady(expected, transport))
+    }
+}
+
 /**
  * 后台免死对讲服务。
  *
@@ -393,9 +432,14 @@ class IntercomService : Service() {
         targetAttempt: ConnectionAttempt? = null
     ) {
         publishStatus(SEARCHING_STATUS)
+        val recoveryStartup = RecoveryTransportStartup(targetAttempt) { event ->
+            postForSession(token) { orchestrator.dispatch(event) }
+        }
         val plannedTransports = plannedDiscoveryTransports(targetAttempt)
-        if (Transport.WIFI_DIRECT in plannedTransports) {
-        wifiTunnel = WifiDirectTunnel(
+        recoveryStartup.start(
+            plannedTransports = plannedTransports,
+            createWifiDirect = { onStartupReady ->
+                WifiDirectTunnel(
             context = this,
             onControlChannelReady = { session ->
                 registerControlChannel(token, session)
@@ -444,12 +488,15 @@ class IntercomService : Service() {
                     )
                 }
             },
+            onStartupReady = onStartupReady,
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt
-        ).also { it.start() }
-        }
-        if (Transport.LAN in plannedTransports) {
-        lanDiscovery = LanDiscoveryCoordinator(
+        )
+            },
+            installWifiDirect = { wifiTunnel = it },
+            startWifiDirect = { it.start() },
+            createLan = {
+                LanDiscoveryCoordinator(
             context = this,
             token = token,
             isSessionCurrent = ::isSessionCurrent,
@@ -489,9 +536,11 @@ class IntercomService : Service() {
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt
-        ).also { it.start() }
-        }
-        targetAttempt?.let { beginTargetedTransport(it, it.preferredTransport) }
+        )
+            },
+            installLan = { lanDiscovery = it },
+            startLan = { it.start() }
+        )
     }
 
     private fun registerControlChannel(
@@ -1005,7 +1054,7 @@ class IntercomService : Service() {
                         resumedRuntimeSessionId,
                         nextAttempt
                     )
-                }, PEER_RECONNECT_BACKOFF_MS)
+                }, restartDiscoveryDelayMillis(nextAttempt))
             },
             onError = ::handleError
         ).abortAndResumeDiscovery()
@@ -1745,7 +1794,6 @@ class IntercomService : Service() {
     }
 
     companion object {
-        private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         private const val LOSER_CHANNEL_CLOSE_TIMEOUT_MS = 1_000L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"

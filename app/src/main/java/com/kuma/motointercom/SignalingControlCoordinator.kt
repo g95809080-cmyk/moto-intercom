@@ -16,15 +16,18 @@ private data class TerminalAttemptRecord(
 private data class TargetedTransportRace(
     val attempt: ConnectionAttempt,
     val openedTransports: Set<Transport>,
+    val readyTransports: Set<Transport>,
     val failedTransports: Set<Transport> = emptySet(),
     val retiredTransports: Set<Transport> = emptySet(),
-    val fallbackMilestone: AttemptMilestone.FallbackTransport? = null
+    val fallbackMilestone: AttemptMilestone.FallbackTransport? = null,
+    val fallbackDue: Boolean = false
 )
 
 internal class SignalingControlCoordinator(
     private val clock: MonotonicClock,
     private val attemptTimeoutMs: Long,
     private val fallbackDelayMs: Long = 5_000L,
+    private val recoveryFallbackDelayMs: Long = 3_000L,
     private val optimizationWindowMs: Long = 1_000L,
     private val confirmationTimeoutMs: Long = 15_000L,
     private val actionNonce: () -> String = { UUID.randomUUID().toString() },
@@ -35,9 +38,15 @@ internal class SignalingControlCoordinator(
         require(fallbackDelayMs in 1 until attemptTimeoutMs) {
             "Fallback delay must be inside the total attempt timeout"
         }
+        require(recoveryFallbackDelayMs in 1 until attemptTimeoutMs) {
+            "Recovery fallback delay must be inside the total attempt timeout"
+        }
         require(optimizationWindowMs > 0L) { "Optimization window must be positive" }
         require(fallbackDelayMs + optimizationWindowMs <= attemptTimeoutMs) {
             "Fallback plus optimization must fit inside the total attempt timeout"
+        }
+        require(recoveryFallbackDelayMs + optimizationWindowMs <= attemptTimeoutMs) {
+            "Recovery fallback plus optimization must fit inside the total attempt timeout"
         }
         require(confirmationTimeoutMs > 0L) { "Confirmation timeout must be positive" }
     }
@@ -109,6 +118,7 @@ internal class SignalingControlCoordinator(
             )
             is SessionEvent.TargetedTransportOverlapUnavailable ->
                 targetedTransportOverlapUnavailable(current, event)
+            is SessionEvent.RecoveryTransportReady -> recoveryTransportReady(current, event)
             is SessionEvent.AttemptTimedOut -> attemptTimedOut(current, event)
             is SessionEvent.AttemptMilestoneElapsed -> attemptMilestoneElapsed(current, event)
             is SessionEvent.WebRtcStateChanged -> webRtcStateChanged(current, event)
@@ -350,18 +360,70 @@ internal class SignalingControlCoordinator(
             return rejected()
         }
         if (
+            race.fallbackDue ||
             milestone.transport in race.openedTransports ||
             active?.takeIf { it.attempt == attempt }?.mediaOwnerChannelId != null ||
             terminalOutcome(attempt.id) != null
         ) {
             return rejected()
         }
+        if (milestone.transport !in race.readyTransports) {
+            targetedTransportRace = race.copy(fallbackDue = true)
+            return accepted(state = current)
+        }
         targetedTransportRace = race.copy(
-            openedTransports = race.openedTransports + milestone.transport
+            openedTransports = race.openedTransports + milestone.transport,
+            fallbackDue = true
         )
         return accepted(
             state = current,
             effects = listOf(SessionEffect.OpenTargetedTransport(attempt, milestone.transport))
+        )
+    }
+
+    private fun recoveryTransportReady(
+        current: IntercomState,
+        event: SessionEvent.RecoveryTransportReady
+    ): SignalingControlDecision {
+        val recovering = current as? IntercomState.Recovering ?: return rejected()
+        val now = clock.now()
+        val attempt = ownedAttempt?.takeIf {
+            it == event.attempt &&
+                recovering.attempt == it &&
+                it.trigger == ConnectionTrigger.RECOVERY &&
+                event.transport in it.channelPlan &&
+                !it.isExpiredAt(now) &&
+                terminalOutcome(it.id) == null
+        } ?: return rejected()
+        val race = targetedTransportRace?.takeIf {
+            it.attempt == attempt && event.transport !in it.readyTransports
+        } ?: return rejected()
+        val fallbackMilestone = race.fallbackMilestone
+        val fallbackDue = race.fallbackDue || fallbackMilestone?.let {
+            now.elapsedRealtimeMs >= it.scheduledAt.elapsedRealtimeMs
+        } == true
+        val readyTransports = race.readyTransports + event.transport
+        val transportsToOpen = buildSet {
+            if (
+                attempt.preferredTransport in readyTransports &&
+                attempt.preferredTransport !in race.openedTransports
+            ) {
+                add(attempt.preferredTransport)
+            }
+            fallbackMilestone?.transport?.takeIf {
+                fallbackDue && it in readyTransports && it !in race.openedTransports
+            }?.let(::add)
+        }
+        targetedTransportRace = race.copy(
+            openedTransports = race.openedTransports + transportsToOpen,
+            readyTransports = readyTransports,
+            fallbackDue = fallbackDue
+        )
+        return accepted(
+            state = current,
+            effects = transportsToOpen.map {
+                SessionEffect.OpenTargetedTransport(attempt, it)
+            }
         )
     }
 
@@ -537,17 +599,21 @@ internal class SignalingControlCoordinator(
         }
         val recoveryAttemptId = attemptIdFactory()
         if (terminalOutcome(recoveryAttemptId) != null) return rejected()
+        val recoveryPlan = current.attempt.channelPlan.orderedForRecovery(current.transport)
         val recoveryAttempt = ConnectionAttempt(
             id = recoveryAttemptId,
             runtimeSessionId = current.attempt.runtimeSessionId,
             targetLock = current.attempt.targetLock,
             trigger = ConnectionTrigger.RECOVERY,
-            channelPlan = current.attempt.channelPlan,
+            channelPlan = recoveryPlan,
             deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
         )
         if (existingOutcome == null) recordTerminal(current.attempt, outcome)
         ownedAttempt = recoveryAttempt
-        targetedTransportRace = createTargetedTransportRace(recoveryAttempt)
+        targetedTransportRace = createTargetedTransportRace(
+            recoveryAttempt,
+            preferredTransportOpened = !restartConnectedDiscovery
+        )
         val fallbackMilestone = targetedTransportRace?.fallbackMilestone
         return accepted(
             state = IntercomState.Recovering(recoveryAttempt, current.peer),
@@ -2387,7 +2453,8 @@ internal class SignalingControlCoordinator(
     }
 
     private fun createTargetedTransportRace(
-        attempt: ConnectionAttempt
+        attempt: ConnectionAttempt,
+        preferredTransportOpened: Boolean = true
     ): TargetedTransportRace {
         val fallbackMilestone = attempt.channelPlan.fallbackTransport?.let {
             AttemptMilestone.FallbackTransport(
@@ -2398,7 +2465,16 @@ internal class SignalingControlCoordinator(
         }
         return TargetedTransportRace(
             attempt = attempt,
-            openedTransports = setOf(attempt.preferredTransport),
+            openedTransports = if (preferredTransportOpened) {
+                setOf(attempt.preferredTransport)
+            } else {
+                emptySet()
+            },
+            readyTransports = if (preferredTransportOpened) {
+                attempt.channelPlan.plannedTransports
+            } else {
+                emptySet()
+            },
             fallbackMilestone = fallbackMilestone
         )
     }
@@ -2408,7 +2484,12 @@ internal class SignalingControlCoordinator(
             attempt.deadlineElapsedRealtimeMs,
             attemptTimeoutMs
         )
-        return MonotonicTimestamp(Math.addExact(startedAt, fallbackDelayMs))
+        val delayMs = if (attempt.trigger == ConnectionTrigger.RECOVERY) {
+            recoveryFallbackDelayMs
+        } else {
+            fallbackDelayMs
+        }
+        return MonotonicTimestamp(Math.addExact(startedAt, delayMs))
     }
 
     private fun recordTerminal(

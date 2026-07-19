@@ -55,11 +55,12 @@ internal class LanDiscoveryCoordinator(
     private var nsdDiscoveryListener: NsdManager.DiscoveryListener? = null
     private var nsdServiceName = ""
 
-    fun start() {
-        if (!isActive()) return
-        val localIp = localWifiIp() ?: return
+    fun start(): Boolean {
+        if (!isActive()) return false
+        val localIp = localWifiIp() ?: return false
         startLanDiscovery(localIp)
         startNsdDiscovery()
+        return true
     }
 
     private fun startLanDiscovery(localIp: String) {
