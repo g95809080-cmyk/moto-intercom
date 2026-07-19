@@ -50,6 +50,7 @@ internal class WifiDirectTunnel(
     private val onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {},
     private val onDiscoveryStatus: (String) -> Unit = {},
     private val onDisconnected: () -> Unit = {},
+    private val onTargetedOverlapUnavailable: (ConnectionAttempt) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
     private val monotonicClock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(SystemClock.elapsedRealtime())
@@ -1557,6 +1558,10 @@ internal class WifiDirectTunnel(
             override fun onFailure(reason: Int) {
                 if (!isCurrent()) return
                 onFailed()
+                val attempt = taskContext?.attempt
+                if (shouldReportSequentialFallback(reason == WifiP2pManager.BUSY, attempt)) {
+                    onTargetedOverlapUnavailable(requireNotNull(attempt))
+                }
                 if (reason == WifiP2pManager.BUSY) {
                     postError(IllegalStateException(BUSY_STATUS), taskContext)
                     onBusy()
@@ -1815,3 +1820,10 @@ internal class WifiDirectTunnel(
         }
     }
 }
+
+internal fun shouldReportSequentialFallback(
+    busy: Boolean,
+    attempt: ConnectionAttempt?
+): Boolean = busy &&
+    attempt?.preferredTransport == Transport.LAN &&
+    attempt.channelPlan.fallbackTransport == Transport.WIFI_DIRECT

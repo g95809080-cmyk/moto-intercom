@@ -133,3 +133,17 @@ internal fun openPlannedTransport(
     openLan,
     openWifiDirect
 )
+
+internal fun retirePlannedTransport(
+    attempt: ConnectionAttempt,
+    transport: Transport,
+    retireLan: (ConnectionAttempt) -> Unit,
+    retireWifiDirect: (ConnectionAttempt) -> Unit
+): Boolean {
+    if (transport !in attempt.channelPlan) return false
+    when (transport) {
+        Transport.LAN -> retireLan(attempt)
+        Transport.WIFI_DIRECT -> retireWifiDirect(attempt)
+    }
+    return true
+}
