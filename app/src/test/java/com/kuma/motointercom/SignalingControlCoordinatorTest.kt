@@ -215,6 +215,59 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun duplicateRequestOnTheCurrentOwnerIsIdempotent() = runBlocking {
+        harness().use { harness ->
+            val owner = responderChannel(CHANNEL_A)
+            harness.startRuntime()
+            registerIncomingRequest(harness, owner)
+            assertTrue(acceptIncoming(harness))
+            val attempt = requireNotNull(harness.orchestrator.currentAttempt)
+            val select = harness.nextEffect() as SessionEffect.SelectMediaChannel
+            assertEquals(setOf(owner.channelId), select.cohort.channelIds)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.MediaChannelSelected(
+                        RUNTIME_B,
+                        attempt.id,
+                        owner.wireRequestKey,
+                        owner.channelId
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectAccept)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_B,
+                        attempt.id,
+                        owner.channelId,
+                        SignalingMessageTypeV2.CONNECT_ACCEPT
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        RequestTrigger.USER,
+                        null,
+                        101L
+                    )
+                )
+            )
+            assertFalse(harness.hasPendingEffect())
+            assertEquals(
+                owner.channelId,
+                harness.orchestrator.activeControlAttempt?.mediaOwnerChannelId
+            )
+        }
+    }
+
+    @Test
     fun sentSupersededChannelIsRemovedFromTheActiveAttempt() = runBlocking {
         harness().use { harness ->
             val owner = responderChannel(CHANNEL_A)
@@ -868,6 +921,154 @@ class SignalingControlCoordinatorTest {
                 )
             )
             assertFalse(harness.hasPendingEffect())
+        }
+    }
+
+    @Test
+    fun preferredAtOptimizationExpiryCannotJoinTheFrozenFallbackCohort() = runBlocking {
+        harness(pairedDeviceIds = setOf(DEVICE_A)).use { harness ->
+            harness.startRuntime()
+            val fallback = responderChannel(CHANNEL_A, transport = Transport.WIFI_DIRECT)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_B, fallback)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        fallback.channelId,
+                        fallback.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+            val milestone = (
+                harness.nextEffect() as SessionEffect.ScheduleAttemptMilestone
+                ).milestone as AttemptMilestone.MediaOptimization
+            val attempt = requireNotNull(harness.orchestrator.currentAttempt)
+
+            harness.advanceBy(1_000L)
+            val preferred = responderChannel(CHANNEL_B, transport = Transport.LAN)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_B, preferred)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        preferred.channelId,
+                        preferred.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        1_100L
+                    )
+                )
+            )
+            val reject = harness.nextEffect() as SessionEffect.SendConnectReject
+            assertEquals(preferred.channelId, reject.channelId)
+            assertTrue(harness.orchestrator.state.value is IntercomState.Optimizing)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AttemptMilestoneElapsed(milestone)
+                )
+            )
+            val select = harness.nextEffect() as SessionEffect.SelectMediaChannel
+            assertEquals(setOf(fallback.channelId), select.cohort.channelIds)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.MediaChannelSelected(
+                        RUNTIME_B,
+                        attempt.id,
+                        fallback.wireRequestKey,
+                        fallback.channelId
+                    )
+                )
+            )
+            assertEquals(
+                fallback.channelId,
+                (harness.nextEffect() as SessionEffect.SendConnectAccept).channelId
+            )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.MediaChannelSelected(
+                        RUNTIME_B,
+                        attempt.id,
+                        preferred.wireRequestKey,
+                        preferred.channelId
+                    )
+                )
+            )
+            assertEquals(
+                fallback.channelId,
+                harness.orchestrator.activeControlAttempt?.mediaOwnerChannelId
+            )
+        }
+    }
+
+    @Test
+    fun mediaSelectionAtTheTotalDeadlineCannotClaimAnOwner() = runBlocking {
+        harness(pairedDeviceIds = setOf(DEVICE_A)).use { harness ->
+            harness.startRuntime()
+            val fallback = responderChannel(CHANNEL_A, transport = Transport.WIFI_DIRECT)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_B, fallback)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_B,
+                        fallback.channelId,
+                        fallback.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+            val milestone = (
+                harness.nextEffect() as SessionEffect.ScheduleAttemptMilestone
+                ).milestone as AttemptMilestone.MediaOptimization
+            val attempt = requireNotNull(harness.orchestrator.currentAttempt)
+
+            harness.advanceBy(1_000L)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AttemptMilestoneElapsed(milestone)
+                )
+            )
+            val select = harness.nextEffect() as SessionEffect.SelectMediaChannel
+            harness.advanceBy(
+                attempt.deadlineElapsedRealtimeMs - milestone.scheduledAt.elapsedRealtimeMs
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.MediaChannelSelected(
+                        RUNTIME_B,
+                        attempt.id,
+                        fallback.wireRequestKey,
+                        select.cohort.channelIds.single()
+                    )
+                )
+            )
+            val cleanup = listOf(harness.nextEffect(), harness.nextEffect())
+            assertTrue(cleanup.any { it is SessionEffect.CloseControlChannel })
+            assertTrue(cleanup.any { it is SessionEffect.AbortAttemptAndResumeDiscovery })
+            assertFalse(cleanup.any { it is SessionEffect.SendConnectAccept })
+            assertEquals(
+                ConnectionAttemptTerminalOutcome.TIMED_OUT,
+                harness.orchestrator.terminalOutcome(attempt.id)
+            )
         }
     }
 

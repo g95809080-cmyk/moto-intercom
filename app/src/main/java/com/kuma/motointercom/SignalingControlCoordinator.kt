@@ -712,6 +712,13 @@ internal class SignalingControlCoordinator(
         channel: VerifiedControlChannel,
         context: AttemptChannelSet
     ): SignalingControlDecision {
+        if (
+            channel.channelId in context.channelIds &&
+            channel.targetLock == context.attempt.targetLock &&
+            channel.peer == context.peer
+        ) {
+            return accepted(state = current)
+        }
         val reject = {
             accepted(
             effects = listOf(
@@ -728,15 +735,18 @@ internal class SignalingControlCoordinator(
         val existingTransports = context.channelIds.mapNotNullTo(linkedSetOf()) {
             channels[it]?.transport
         }
+        val now = clock.now()
+        val optimizationMilestone = context.optimizationMilestone
         if (
             channel.transport !in context.attempt.channelPlan ||
             channel.transport in existingTransports ||
+            channel.transport != context.attempt.preferredTransport ||
             channel.targetLock != context.attempt.targetLock ||
             channel.peer != context.peer ||
-            context.phase !in setOf(
-                SignalingAttemptPhase.OPTIMIZING_MEDIA,
-                SignalingAttemptPhase.SELECTING_MEDIA
-            )
+            context.phase != SignalingAttemptPhase.OPTIMIZING_MEDIA ||
+            optimizationMilestone == null ||
+            now.elapsedRealtimeMs >= optimizationMilestone.scheduledAt.elapsedRealtimeMs ||
+            context.attempt.isExpiredAt(now)
         ) {
             return reject()
         }
@@ -746,24 +756,13 @@ internal class SignalingControlCoordinator(
             channelIds,
             nowElapsedRealtimeMs()
         )
-        val preferredArrived = channel.transport == context.attempt.preferredTransport
         active = context.copy(
             channelIds = channelIds,
-            phase = if (preferredArrived) {
-                SignalingAttemptPhase.SELECTING_MEDIA
-            } else {
-                context.phase
-            },
+            phase = SignalingAttemptPhase.SELECTING_MEDIA,
             selectionCohort = cohort,
-            optimizationMilestone = if (preferredArrived) null else context.optimizationMilestone
+            optimizationMilestone = null
         )
-        return if (
-            preferredArrived || context.phase == SignalingAttemptPhase.SELECTING_MEDIA
-        ) {
-            accepted(state = current, effects = listOf(selectEffect(context.attempt, cohort)))
-        } else {
-            accepted(state = current)
-        }
+        return accepted(state = current, effects = listOf(selectEffect(context.attempt, cohort)))
     }
 
     private fun beginInboundConfirmation(
@@ -1113,6 +1112,13 @@ internal class SignalingControlCoordinator(
                     it.wireRequestKey == event.wireRequestKey
             }
             ?: return rejected()
+        if (context.attempt.isExpiredAt(clock.now())) {
+            return terminateOwnedAttempt(
+                current,
+                context.attempt,
+                ConnectionAttemptTerminalOutcome.TIMED_OUT
+            )
+        }
         val cohort = context.selectionCohort ?: return rejected()
         val selected = event.channelId
         if (selected == null || selected !in cohort.channelIds || selected !in channels) {
