@@ -1,6 +1,6 @@
 # Sprint 3 Final Verification
 
-Status: **KUM-30 ARCHITECTURE APPROVED - FINAL REPORT CI PENDING**
+Status: **KUM-30 PRE-MERGE GATE COMPLETE - FINAL TASK SYNC CI PENDING**
 
 Evidence state: 2026-07-19
 
@@ -12,10 +12,12 @@ Evidence state: 2026-07-19
 - PR base and review base: `6f1839748307cb6b62d25d9fc5d613d679f9ffad`
 - Verified KUM-30 source head: `ebcf3f19d3e13b7c68c88aca7281193c74300783`
 - Reviewed KUM-30 PR head: `ea0c72fff7e6882b0a7f25836e926cb747757edb`
-- KUM-30 GitHub Actions: [run 29683765394](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29683765394) - success
+- Pre-task-sync KUM-30 report head: `304f73c042959c8b698b87b11a7c75b311e7a590`
+- Reviewed-head GitHub Actions: [run 29683765394](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29683765394) - success
+- Report-head GitHub Actions: [run 29684514194](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29684514194) - success
 - Baseline main GitHub Actions: [run 29681780079](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29681780079) - success
 - Linear: KUM-8 In Progress; KUM-27 Done; KUM-28 Done; KUM-29 Done;
-  KUM-30 In Progress; KUM-31 Todo
+  KUM-30 In Review; KUM-31 Todo
 
 This is the single Sprint 3 evidence index. Report-only commits that update this
 file do not change reviewed source heads. KUM-27 through KUM-30 evidence remains
@@ -335,7 +337,7 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-30 automated gate | PASS |
 | Known KUM-30 P0 / P1 | 0 / 0 |
 | KUM-30 Draft PR | OPEN - #7 |
-| KUM-30 PR may become Ready | YES after report-only Head CI succeeds |
+| KUM-30 PR may become Ready | YES after final tasks-only Head CI succeeds |
 | KUM-30 PR may merge | YES by merge commit after the final unchanged gate |
 | KUM-30 may move to Done | NO until merge and green `main` CI |
 | Sprint 3 may close | NO while KUM-30 delivery and KUM-31 gate synchronization remain open |
