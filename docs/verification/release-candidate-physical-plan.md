@@ -22,6 +22,7 @@ as passed by JVM, fake, emulator, or CI evidence.
 | OEM Wi-Fi Direct | Two phones per supported OEM family; discover, form group, connect, disconnect, and repeat after radio toggle | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | RF/range/interference | Validate near, normal riding distance, weak signal, and controlled interference without deadline extension | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | OEM background limits | Lock screen, background, screen-off, process pressure, and notification action on Xiaomi and another OEM | `DEFERRED_TO_RELEASE_CANDIDATE` |
+| Hot audio recovery lifecycle | Establish audio on two phones, interrupt only the active media/transport path, verify the same SCO/communication route and capture/VOX platform remain active without remote send or local loopback, reconnect with exactly one media stream, then verify full Stop releases the route and microphone | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Bluetooth SCO | Connect/disconnect headset before and during a session; verify route recovery and one media stream | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Microphone/speaker | Bidirectional spoken phrases, mute/cancel/disconnect, and no audio after stop | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Hardware AEC | Speaker-mode speech with echo observation on both endpoints | `DEFERRED_TO_RELEASE_CANDIDATE` |

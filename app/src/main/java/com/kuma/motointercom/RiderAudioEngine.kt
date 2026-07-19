@@ -34,22 +34,49 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.log10
 import kotlin.math.sqrt
 
+internal data class RiderMediaSessionCallbacks(
+    val onLocalSdpGenerated: (sdpJson: String) -> Unit,
+    val onLocalIceCandidateGenerated: (candidateJson: String) -> Unit,
+    val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
+    val onRemoteAudioTrack: (AudioTrack) -> Unit = {},
+    val onAudioLevelChanged: (Float) -> Unit = {},
+    val onError: (Throwable) -> Unit = {},
+    val isSessionCurrent: () -> Boolean
+)
+
+internal interface RiderMediaSession : Closeable {
+    fun createOffer()
+    fun createAnswer(remoteSdpJson: String)
+    fun setRemoteAnswer(remoteSdpJson: String)
+    fun addRemoteIceCandidate(candidateJson: String)
+}
+
+internal interface RiderMediaEngine : Closeable {
+    fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
+}
+
+internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
+    var failure: Throwable? = null
+    steps.forEach { step ->
+        runCatching(step).exceptionOrNull()?.let {
+            if (failure == null) failure = it else failure?.addSuppressed(it)
+        }
+    }
+    failure?.let { throw it }
+}
+
 /**
- * 前后座全双工语音媒体层。
+ * Online-runtime audio platform owner with one replaceable WebRTC media session.
  *
- * 第一阶段的 WifiDirectTunnel 只负责 TCP 信令通道；这里用 WebRTC 负责麦克风采集、
- * 3A、Opus 编码、RTP/UDP 传输和远端播放。
+ * The audio device module, factory, local source/track, and VOX state stay alive
+ * until the online runtime stops. PeerConnection and signaling callbacks belong
+ * to the current [RiderMediaSession].
  */
-class RiderAudioEngine(
+internal class RiderAudioEngine(
     context: Context,
-    private val onLocalSdpGenerated: (sdpJson: String) -> Unit,
-    private val onLocalIceCandidateGenerated: (candidateJson: String) -> Unit,
-    private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
-    private val onRemoteAudioTrack: (AudioTrack) -> Unit = {},
-    private val onAudioLevelChanged: (Float) -> Unit = {},
-    private val onError: (Throwable) -> Unit = {},
-    private val isSessionCurrent: () -> Boolean
-) : Closeable {
+    private val onEngineError: (Throwable) -> Unit = {},
+    private val isRuntimeCurrent: () -> Boolean = { true }
+) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -68,6 +95,8 @@ class RiderAudioEngine(
     private var engineState = EngineState.INITIALIZING
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
+    private val sessionLock = Any()
+    private var activeSession: MediaSession? = null
 
     init {
         runRtc { initializeRtc() }
@@ -77,45 +106,71 @@ class RiderAudioEngine(
         try {
             require(hasRequiredPermissions(appContext)) { "缺少 RECORD_AUDIO 运行时权限" }
             initFactory()
-            createPeerConnection()
             createLocalAudioTrack()
             engineState = EngineState.READY
         } catch (t: Throwable) {
             engineState = EngineState.FAILED
-            runCatching(::disposeRtcResources).exceptionOrNull()?.let(t::addSuppressed)
-            postError(t)
+            runCatching(::disposePlatformResources).exceptionOrNull()?.let(t::addSuppressed)
+            postEngineError(t)
         }
     }
 
-    fun createOffer() {
-        runRtc {
-            requireReady()
+    override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
+        check(!closed.get()) { "WebRTC engine is closed" }
+        val session = MediaSession(callbacks)
+        synchronized(sessionLock) {
+            check(activeSession == null) { "a WebRTC media session is already active" }
+            activeSession = session
+        }
+        runRtc(onFailure = session::postError) {
+            initializeMediaSession(session)
+        }
+        return session
+    }
+
+    private fun initializeMediaSession(session: MediaSession) {
+        if (!isActiveSession(session)) return
+        try {
+            requireEngineReady()
+            createPeerConnection(session)
+            attachLocalAudioTrack()
+            session.state = MediaSessionState.READY
+        } catch (t: Throwable) {
+            session.state = MediaSessionState.FAILED
+            runCatching(::disposeMediaSessionResources).exceptionOrNull()?.let(t::addSuppressed)
+            session.postError(t)
+        }
+    }
+
+    private fun createOffer(session: MediaSession) {
+        runSession(session) {
+            requireSessionReady(session)
             Log.i(TAG, "createOffer 开始")
-            peerConnectionOrThrow().createOffer(localSdpObserver(), sdpConstraints())
+            peerConnectionOrThrow().createOffer(localSdpObserver(session), sdpConstraints())
         }
     }
 
-    fun createAnswer(remoteSdpJson: String) {
-        runRtc {
-            requireReady()
+    private fun createAnswer(session: MediaSession, remoteSdpJson: String) {
+        runSession(session) {
+            requireSessionReady(session)
             Log.i(TAG, "createAnswer 收到远端 Offer")
-            setRemoteDescription(remoteSdpJson) {
+            setRemoteDescription(session, remoteSdpJson) {
                 Log.i(TAG, "createAnswer 开始")
-                peerConnectionOrThrow().createAnswer(localSdpObserver(), sdpConstraints())
+                peerConnectionOrThrow().createAnswer(localSdpObserver(session), sdpConstraints())
             }
         }
     }
 
-    fun setRemoteAnswer(remoteSdpJson: String) {
-        runRtc {
-            requireReady()
-            setRemoteDescription(remoteSdpJson) {}
+    private fun setRemoteAnswer(session: MediaSession, remoteSdpJson: String) {
+        runSession(session) {
+            requireSessionReady(session)
+            setRemoteDescription(session, remoteSdpJson) {}
         }
     }
 
-    fun addRemoteIceCandidate(candidateJson: String) {
-        runRtc {
-            requireReady()
+    private fun addRemoteIceCandidate(session: MediaSession, candidateJson: String) {
+        runSession(session) {
+            requireSessionReady(session)
             try {
                 val candidate = candidateFromJson(candidateJson)
                 Log.i(TAG, "收到远端 ICE candidate: ${candidateSummary(candidate)}")
@@ -137,10 +192,17 @@ class RiderAudioEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        runRtc(allowClosed = true) {
+        val session = synchronized(sessionLock) {
+            activeSession.also { activeSession = null }
+        }
+        session?.markClosed()
+        runRtc(allowClosed = true, onFailure = ::postEngineError) {
             try {
                 engineState = EngineState.CLOSED
-                disposeRtcResources()
+                runAllCleanupSteps(
+                    ::disposeMediaSessionResources,
+                    ::disposePlatformResources
+                )
             } catch (t: Throwable) {
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
@@ -149,20 +211,24 @@ class RiderAudioEngine(
         }
     }
 
-    private fun disposeRtcResources() {
+    private fun disposeMediaSessionResources() {
         val peer = peerConnection
+        peerConnection = null
+        localAudioSender = null
+        remoteDescriptionSet = false
+        pendingRemoteCandidates.clear()
+        peer?.dispose()
+    }
+
+    private fun disposePlatformResources() {
         val track = localAudioTrack
         val source = audioSource
         val connectionFactory = factory
         val deviceModule = audioDeviceModule
-        peerConnection = null
         localAudioTrack = null
-        localAudioSender = null
         audioSource = null
         factory = null
         audioDeviceModule = null
-        remoteDescriptionSet = false
-        pendingRemoteCandidates.clear()
 
         var failure: Throwable? = null
         fun dispose(action: () -> Unit) {
@@ -170,7 +236,6 @@ class RiderAudioEngine(
                 if (failure == null) failure = it else failure?.addSuppressed(it)
             }
         }
-        peer?.let { dispose(it::dispose) }
         track?.let { dispose(it::dispose) }
         source?.let { dispose(it::dispose) }
         connectionFactory?.let { dispose(it::dispose) }
@@ -178,21 +243,41 @@ class RiderAudioEngine(
         failure?.let { throw it }
     }
 
-    private fun requireReady() {
+    private fun requireEngineReady() {
         check(engineState == EngineState.READY) { "WebRTC engine state=$engineState" }
     }
 
-    private fun runRtc(allowClosed: Boolean = false, block: () -> Unit) {
+    private fun requireSessionReady(session: MediaSession) {
+        requireEngineReady()
+        check(session.state == MediaSessionState.READY) {
+            "WebRTC media session state=${session.state}"
+        }
+    }
+
+    private fun runSession(session: MediaSession, block: () -> Unit) {
+        runRtc(onFailure = session::postError) {
+            if (isActiveSession(session)) block()
+        }
+    }
+
+    private fun isActiveSession(session: MediaSession): Boolean =
+        !session.closed.get() && synchronized(sessionLock) { activeSession === session }
+
+    private fun runRtc(
+        allowClosed: Boolean = false,
+        onFailure: (Throwable) -> Unit = ::postEngineError,
+        block: () -> Unit
+    ) {
         try {
             rtc.execute {
                 try {
                     if (allowClosed || !closed.get()) block()
                 } catch (t: Throwable) {
-                    postError(t)
+                    onFailure(t)
                 }
             }
         } catch (t: Throwable) {
-            postError(t)
+            onFailure(t)
         }
     }
 
@@ -220,7 +305,8 @@ class RiderAudioEngine(
             .createPeerConnectionFactory()
     }
 
-    private fun createPeerConnection() = mediaStep("PeerConnection 创建") {
+    private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
+        check(peerConnection == null) { "previous PeerConnection is still active" }
         val config = PeerConnection.RTCConfiguration(emptyList()).apply {
             // 无公网、无服务器：只产出 Wi-Fi Direct 局域网 host candidate。
             iceServers = emptyList()
@@ -232,7 +318,7 @@ class RiderAudioEngine(
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
 
-        peerConnection = factoryOrThrow().createPeerConnection(config, observer())
+        peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
         peerConnection!!.setAudioRecording(true)
         peerConnection!!.setAudioPlayout(true)
@@ -264,7 +350,13 @@ class RiderAudioEngine(
                 "trackEnabled=true volume=${if (VOX_GATE_ENABLED) VOX_MUTED_VOLUME else VOX_OPEN_VOLUME}"
         )
 
-        localAudioSender = peerConnectionOrThrow().addTrack(localAudioTrack, listOf(STREAM_ID))
+    }
+
+    private fun attachLocalAudioTrack() = mediaStep("local audio track attach") {
+        localAudioSender = peerConnectionOrThrow().addTrack(
+            localAudioTrack ?: error("local audio track 尚未初始化"),
+            listOf(STREAM_ID)
+        )
         setOpusBitrate(localAudioSender)
     }
 
@@ -320,7 +412,8 @@ class RiderAudioEngine(
         if (now - lastAudioLevelAt < AUDIO_LEVEL_INTERVAL_MS) return
         lastAudioLevelAt = now
         val level = (db / PCM_DBFS_TO_APPROX_SPL_OFFSET).toFloat().coerceIn(0f, 1f)
-        postMain { onAudioLevelChanged(level) }
+        val session = synchronized(sessionLock) { activeSession } ?: return
+        postSessionMain(session) { session.callbacks.onAudioLevelChanged(level) }
     }
 
     private fun calculateApproxDb(samples: JavaAudioDeviceModule.AudioSamples): Double? {
@@ -350,49 +443,57 @@ class RiderAudioEngine(
             .coerceAtLeast(0.0)
     }
 
-    private fun localSdpObserver(): SdpObserver = object : SdpObserver {
+    private fun localSdpObserver(session: MediaSession): SdpObserver = object : SdpObserver {
         override fun onCreateSuccess(sdp: SessionDescription) {
-            runRtc {
-                requireReady()
+            runSession(session) {
+                requireSessionReady(session)
                 Log.i(TAG, "${sdp.type} 创建成功: ${sdpSummary(sdp.description)}")
                 val local = SessionDescription(sdp.type, forceOpus32k(sdp.description))
                 peerConnectionOrThrow().setLocalDescription(object : SimpleSdpObserver() {
                     override fun onSetSuccess() {
-                        runRtc {
-                            if (engineState != EngineState.READY) return@runRtc
+                        runSession(session) {
+                            if (session.state != MediaSessionState.READY) return@runSession
                             Log.i(TAG, "setLocalDescription ${local.type} 成功: ${sdpSummary(local.description)}")
-                            postMain { onLocalSdpGenerated(local.toJson()) }
+                            postSessionMain(session) {
+                                session.callbacks.onLocalSdpGenerated(local.toJson())
+                            }
                         }
                     }
 
                     override fun onSetFailure(error: String) {
-                        runRtc { reportSdpFailure("setLocalDescription ${local.type} 失败: $error") }
+                        runSession(session) {
+                            reportSdpFailure(session, "setLocalDescription ${local.type} 失败: $error")
+                        }
                     }
                 }, local)
             }
         }
 
         override fun onSetSuccess() {
-            runRtc { Unit }
+            runSession(session) { Unit }
         }
 
         override fun onCreateFailure(error: String) {
-            runRtc { reportSdpFailure("创建 SDP 失败: $error") }
+            runSession(session) { reportSdpFailure(session, "创建 SDP 失败: $error") }
         }
 
         override fun onSetFailure(error: String) {
-            runRtc { reportSdpFailure("设置 SDP 失败: $error") }
+            runSession(session) { reportSdpFailure(session, "设置 SDP 失败: $error") }
         }
     }
 
-    private fun setRemoteDescription(remoteSdpJson: String, onSet: () -> Unit) {
+    private fun setRemoteDescription(
+        session: MediaSession,
+        remoteSdpJson: String,
+        onSet: () -> Unit
+    ) {
         try {
             val remote = sessionDescriptionFromJson(remoteSdpJson)
             Log.i(TAG, "setRemoteDescription ${remote.type} 开始: ${sdpSummary(remote.description)}")
             peerConnectionOrThrow().setRemoteDescription(object : SimpleSdpObserver() {
                 override fun onSetSuccess() {
-                    runRtc {
-                        if (engineState != EngineState.READY) return@runRtc
+                    runSession(session) {
+                        if (session.state != MediaSessionState.READY) return@runSession
                         Log.i(TAG, "setRemoteDescription 成功")
                         remoteDescriptionSet = true
                         pendingRemoteCandidates.forEach {
@@ -408,7 +509,9 @@ class RiderAudioEngine(
                 }
 
                 override fun onSetFailure(error: String) {
-                    runRtc { reportSdpFailure("setRemoteDescription 失败: $error") }
+                    runSession(session) {
+                        reportSdpFailure(session, "setRemoteDescription 失败: $error")
+                    }
                 }
             }, remote)
         } catch (t: Throwable) {
@@ -417,82 +520,100 @@ class RiderAudioEngine(
         }
     }
 
-    private fun observer(): PeerConnection.Observer = object : PeerConnection.Observer {
+    private fun observer(session: MediaSession): PeerConnection.Observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) {
-            runRtc {
-                if (engineState != EngineState.READY) return@runRtc
+            runSession(session) {
+                if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "生成本地 ICE candidate: ${candidateSummary(candidate)}")
-                postMain { onLocalIceCandidateGenerated(candidate.toJson()) }
+                postSessionMain(session) {
+                    session.callbacks.onLocalIceCandidateGenerated(candidate.toJson())
+                }
             }
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
-            runRtc {
-                if (engineState != EngineState.READY) return@runRtc
+            runSession(session) {
+                if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "PeerConnection state=$newState")
-                postMain { onConnectionStateChanged(newState) }
+                postSessionMain(session) {
+                    session.callbacks.onConnectionStateChanged(newState)
+                }
             }
         }
 
         override fun onTrack(transceiver: RtpTransceiver) {
-            runRtc {
-                if (engineState == EngineState.READY) enableRemoteTrack(transceiver.receiver.track())
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) {
+                    enableRemoteTrack(session, transceiver.receiver.track())
+                }
             }
         }
 
         override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
-            runRtc {
-                if (engineState == EngineState.READY) enableRemoteTrack(receiver.track())
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) {
+                    enableRemoteTrack(session, receiver.track())
+                }
             }
         }
 
         override fun onAddStream(stream: MediaStream) {
-            runRtc {
-                if (engineState == EngineState.READY) stream.audioTracks.forEach { enableRemoteTrack(it) }
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) {
+                    stream.audioTracks.forEach { enableRemoteTrack(session, it) }
+                }
             }
         }
 
         override fun onSignalingChange(state: PeerConnection.SignalingState) {
-            runRtc { if (engineState == EngineState.READY) Log.i(TAG, "Signaling state=$state") }
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) Log.i(TAG, "Signaling state=$state")
+            }
         }
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
-            runRtc { if (engineState == EngineState.READY) Log.i(TAG, "ICE connection state=$state") }
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) Log.i(TAG, "ICE connection state=$state")
+            }
         }
 
         override fun onIceConnectionReceivingChange(receiving: Boolean) {
-            runRtc { if (engineState == EngineState.READY) Log.i(TAG, "ICE receiving=$receiving") }
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) Log.i(TAG, "ICE receiving=$receiving")
+            }
         }
 
         override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {
-            runRtc { if (engineState == EngineState.READY) Log.i(TAG, "ICE gathering state=$state") }
+            runSession(session) {
+                if (session.state == MediaSessionState.READY) Log.i(TAG, "ICE gathering state=$state")
+            }
         }
         override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {
-            runRtc { if (engineState == EngineState.READY) Unit }
+            runSession(session) { if (session.state == MediaSessionState.READY) Unit }
         }
         override fun onRemoveStream(stream: MediaStream) {
-            runRtc { if (engineState == EngineState.READY) Unit }
+            runSession(session) { if (session.state == MediaSessionState.READY) Unit }
         }
         override fun onDataChannel(dataChannel: DataChannel) {
-            runRtc { if (engineState == EngineState.READY) Unit }
+            runSession(session) { if (session.state == MediaSessionState.READY) Unit }
         }
         override fun onRenegotiationNeeded() {
-            runRtc { if (engineState == EngineState.READY) Unit }
+            runSession(session) { if (session.state == MediaSessionState.READY) Unit }
         }
     }
 
-    private fun enableRemoteTrack(track: MediaStreamTrack?) {
+    private fun enableRemoteTrack(session: MediaSession, track: MediaStreamTrack?) {
         if (track is AudioTrack) {
             track.setEnabled(true)
-            postMain { onRemoteAudioTrack(track) }
+            postSessionMain(session) { session.callbacks.onRemoteAudioTrack(track) }
         }
     }
 
-    private fun reportSdpFailure(message: String) {
-        if (engineState != EngineState.READY) return
+    private fun reportSdpFailure(session: MediaSession, message: String) {
+        if (engineState != EngineState.READY || session.state != MediaSessionState.READY) return
         val failure = IllegalStateException(message)
         Log.e(TAG, failure.message, failure)
-        postError(failure)
+        session.postError(failure)
     }
 
     private fun sdpConstraints(): MediaConstraints = MediaConstraints().apply {
@@ -556,14 +677,27 @@ class RiderAudioEngine(
     private fun peerConnectionOrThrow(): PeerConnection =
         peerConnection ?: error("PeerConnection 尚未初始化")
 
-    private fun postError(t: Throwable) {
-        Log.e(TAG, "WebRTC 媒体层错误", t)
-        postMain { onError(t) }
+    private fun postEngineError(t: Throwable) {
+        Log.e(TAG, "WebRTC audio platform error", t)
+        postRuntimeMain { onEngineError(t) }
     }
 
-    private fun postMain(block: () -> Unit) {
+    private fun postRuntimeMain(block: () -> Unit) {
         mainHandler.post {
-            if (!closed.get() && isSessionCurrent()) block()
+            if (!closed.get() && isRuntimeCurrent()) block()
+        }
+    }
+
+    private fun postSessionMain(session: MediaSession, block: () -> Unit) {
+        mainHandler.post {
+            if (
+                !closed.get() &&
+                isRuntimeCurrent() &&
+                isActiveSession(session) &&
+                session.callbacks.isSessionCurrent()
+            ) {
+                block()
+            }
         }
     }
 
@@ -621,6 +755,51 @@ class RiderAudioEngine(
         )
     }
 
+    private inner class MediaSession(
+        val callbacks: RiderMediaSessionCallbacks
+    ) : RiderMediaSession {
+        val closed = AtomicBoolean(false)
+        @Volatile var state = MediaSessionState.INITIALIZING
+
+        override fun createOffer() = this@RiderAudioEngine.createOffer(this)
+
+        override fun createAnswer(remoteSdpJson: String) =
+            this@RiderAudioEngine.createAnswer(this, remoteSdpJson)
+
+        override fun setRemoteAnswer(remoteSdpJson: String) =
+            this@RiderAudioEngine.setRemoteAnswer(this, remoteSdpJson)
+
+        override fun addRemoteIceCandidate(candidateJson: String) =
+            this@RiderAudioEngine.addRemoteIceCandidate(this, candidateJson)
+
+        override fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            state = MediaSessionState.CLOSED
+            val shouldDispose = synchronized(sessionLock) {
+                if (activeSession === this) {
+                    activeSession = null
+                    true
+                } else {
+                    false
+                }
+            }
+            if (shouldDispose) {
+                runRtc(allowClosed = true, onFailure = ::postEngineError) {
+                    disposeMediaSessionResources()
+                }
+            }
+        }
+
+        fun markClosed() {
+            if (closed.compareAndSet(false, true)) state = MediaSessionState.CLOSED
+        }
+
+        fun postError(t: Throwable) {
+            Log.e(TAG, "WebRTC media session error", t)
+            postSessionMain(this) { callbacks.onError(t) }
+        }
+    }
+
     private open inner class SimpleSdpObserver : SdpObserver {
         override fun onCreateSuccess(sdp: SessionDescription) {
             runRtc { Unit }
@@ -640,6 +819,13 @@ class RiderAudioEngine(
     }
 
     private enum class EngineState {
+        INITIALIZING,
+        READY,
+        FAILED,
+        CLOSED
+    }
+
+    private enum class MediaSessionState {
         INITIALIZING,
         READY,
         FAILED,
