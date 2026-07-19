@@ -39,7 +39,7 @@
 
 ## 5. Delivery And Review
 
-- [ ] 5.1 Update the authoritative Sprint 3 verification report with bound SHA,
+- [x] 5.1 Update the authoritative Sprint 3 verification report with bound SHA,
   exact automated evidence, and deferred physical rows.
 - [ ] 5.2 Commit atomically, push, and open the KUM-30 Draft PR.
 - [ ] 5.3 Complete fixed-SHA read-only architecture review and remediate any

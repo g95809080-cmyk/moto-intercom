@@ -1,6 +1,6 @@
 # KUM-29 Optimizing Winner Verification
 
-Status: **APPROVED - READY FOR MERGE**
+Status: **MERGED - MAIN CI GREEN**
 
 Evidence state: 2026-07-19
 
@@ -13,13 +13,21 @@ Evidence state: 2026-07-19
 - Round-1 remediation Head: `e51e696b6162fc7531fc4f0ac63674d6ba9f6993`
 - Round-2 remediation Head: `678c89ee7688b7b74110efc325da133cdb6c0f63`
 - Reviewed source Head: `678c89ee7688b7b74110efc325da133cdb6c0f63`
-- Final evidence commit: report-only follow-up after reviewed source Head
+- Final evidence commit: `687b9d823f1f715e5495d6625a72cf0c5f662198`
+- Pull request: [#6](https://github.com/g95809080-cmyk/moto-intercom/pull/6)
+- Merge commit: `6f1839748307cb6b62d25d9fc5d613d679f9ffad`
+- Final PR CI: [29681601138](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29681601138) - success
+- Main merge CI: [29681780079](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29681780079) - success
 - Runtime implementation PR: [#5](https://github.com/g95809080-cmyk/moto-intercom/pull/5)
 - Runtime implementation source Head: `f96ba4d0a536b6bfc226d111c5a843cf622f1d75`
 - Runtime implementation final PR Head: `1d2d4b6395d172b2765271dd167b33bc22462ac6`
 - Runtime implementation merge: `657d5264d0967259000359ccbc6a22bceb133ed4`
 - Main implementation CI: [29679007580](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/29679007580) - success
-- Linear: KUM-8 In Progress; KUM-29 In Progress; KUM-30 Todo; KUM-31 Todo
+- Linear: KUM-8 In Progress; KUM-29 Done; KUM-30 In Progress; KUM-31 Todo
+
+The authoritative ongoing Sprint 3 evidence index is
+[`sprint-3-final-verification.md`](sprint-3-final-verification.md). This file
+retains KUM-29's detailed fixed-SHA review history.
 
 PR #5 delivered most KUM-29 runtime behavior. The first fixed-SHA certification
 review found two P1 gaps, both within KUM-29 scope: exact optimization expiry was
@@ -85,7 +93,8 @@ move the close deadline later. This branch now hardens all four boundaries.
 | Initial PR-head CI | PASS | run `29679762746` at `554ead24`; final Head CI still required |
 | Round-1 remediation CI | PASS | run `29680625383` at `e51e696b` |
 | Current-head CI | PASS | run `29681237026` at `678c89ee` |
-| Main merge CI | PENDING | Required before KUM-29 Done |
+| Final PR CI | PASS | run `29681601138` at `687b9d8` |
+| Main merge CI | PASS | run `29681780079` at `6f18397` |
 
 All emulator matrices use emulator serials only. The connected MI 6 remains
 explicitly excluded.
@@ -108,7 +117,6 @@ Release Candidate acceptance is completed.
 
 ## Gate
 
-The round-2 P0/P1 fixes, JVM/build gate, fresh three-emulator evidence, current
-Head CI, and fixed-SHA round-3 review are complete. The remaining delivery gates
-are turning the Draft PR Ready, merging with a merge commit, requiring green main
-CI, and synchronizing final Linear evidence.
+The round-2 P0/P1 fixes, JVM/build gate, fresh three-emulator evidence, fixed-SHA
+round-3 review, final PR CI, merge commit, green main CI, and Linear evidence are
+complete. KUM-29 is Done; KUM-30 is the active Sprint 3 issue.

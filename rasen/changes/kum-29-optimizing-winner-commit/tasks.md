@@ -48,7 +48,7 @@
   Base/Head.
 - [x] 5.3 Complete read-only architecture re-review; remediate any in-scope P0/P1,
   rerun gates, and repeat review until P0=0 and P1=0.
-- [ ] 5.4 Turn Ready and merge with a merge commit after PR CI succeeds; retain
+- [x] 5.4 Turn Ready and merge with a merge commit after PR CI succeeds; retain
   the remote branch and require green main CI.
-- [ ] 5.5 Synchronize final evidence and KUM-29 Done in Linear while KUM-8 stays
-  In Progress and KUM-30/KUM-31 remain unstarted.
+- [x] 5.5 Synchronize final evidence and KUM-29 Done in Linear while KUM-8
+  remains In Progress; KUM-30 then starts and KUM-31 remains Todo.
