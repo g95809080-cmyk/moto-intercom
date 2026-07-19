@@ -43,6 +43,26 @@ function Assert-InstrumentationPassed {
     }
 }
 
+function Stop-PairedServer {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [string]$Serial
+    )
+    if ($null -eq $Process -or $Process.HasExited) { return }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $Adb -s $Serial shell am force-stop $targetPackage 2>$null | Out-Null
+        $null = $Process.WaitForExit(5000)
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if (-not $Process.HasExited) {
+        Stop-Process -Id $Process.Id -Force
+    }
+}
+
 function Get-SharedAddress {
     param([string]$Serial)
     $output = Invoke-AdbText $Serial "shared-ip" @(
@@ -102,22 +122,24 @@ function Run-SyntheticAudio {
     $serverProcess = Start-Process -FilePath $Adb -ArgumentList $serverArgs `
         -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr `
         -WindowStyle Hidden -PassThru
-    Start-Sleep -Seconds 2
+    try {
+        Start-Sleep -Seconds 2
+        $clientOutput = Invoke-AdbText $client "synthetic-client" @(
+            "shell", "am", "instrument", "-w", "-r",
+            "-e", "class", "com.kuma.motointercom.SyntheticAudioNetworkTest#exchange",
+            "-e", "role", "client", "-e", "host", $serverIp,
+            "-e", "port", "$port", $runner
+        )
+        Assert-InstrumentationPassed $clientOutput "synthetic network client"
 
-    $clientOutput = Invoke-AdbText $client "synthetic-client" @(
-        "shell", "am", "instrument", "-w", "-r",
-        "-e", "class", "com.kuma.motointercom.SyntheticAudioNetworkTest#exchange",
-        "-e", "role", "client", "-e", "host", $serverIp,
-        "-e", "port", "$port", $runner
-    )
-    Assert-InstrumentationPassed $clientOutput "synthetic network client"
-
-    if (-not $serverProcess.WaitForExit(60000)) {
-        Stop-Process -Id $serverProcess.Id -Force
-        throw "Synthetic network server timed out"
+        if (-not $serverProcess.WaitForExit(60000)) {
+            throw "Synthetic network server timed out"
+        }
+        $serverOutput = Get-Content -LiteralPath $serverOut -Raw -Encoding UTF8
+        Assert-InstrumentationPassed $serverOutput "synthetic network server"
+    } finally {
+        Stop-PairedServer $serverProcess $server
     }
-    $serverOutput = Get-Content -LiteralPath $serverOut -Raw -Encoding UTF8
-    Assert-InstrumentationPassed $serverOutput "synthetic network server"
 }
 
 function Run-Nsd {
@@ -134,21 +156,23 @@ function Run-Nsd {
     $serverProcess = Start-Process -FilePath $Adb -ArgumentList $serverArgs `
         -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr `
         -WindowStyle Hidden -PassThru
-    Start-Sleep -Seconds 3
+    try {
+        Start-Sleep -Seconds 3
+        $clientOutput = Invoke-AdbText $client "nsd-client" @(
+            "shell", "am", "instrument", "-w", "-r",
+            "-e", "class", "com.kuma.motointercom.SharedNetworkNsdTest#exchange",
+            "-e", "role", "client", $runner
+        )
+        Assert-InstrumentationPassed $clientOutput "shared-network NSD client"
 
-    $clientOutput = Invoke-AdbText $client "nsd-client" @(
-        "shell", "am", "instrument", "-w", "-r",
-        "-e", "class", "com.kuma.motointercom.SharedNetworkNsdTest#exchange",
-        "-e", "role", "client", $runner
-    )
-    Assert-InstrumentationPassed $clientOutput "shared-network NSD client"
-
-    if (-not $serverProcess.WaitForExit(60000)) {
-        Stop-Process -Id $serverProcess.Id -Force
-        throw "Shared-network NSD server timed out"
+        if (-not $serverProcess.WaitForExit(60000)) {
+            throw "Shared-network NSD server timed out"
+        }
+        $serverOutput = Get-Content -LiteralPath $serverOut -Raw -Encoding UTF8
+        Assert-InstrumentationPassed $serverOutput "shared-network NSD server"
+    } finally {
+        Stop-PairedServer $serverProcess $server
     }
-    $serverOutput = Get-Content -LiteralPath $serverOut -Raw -Encoding UTF8
-    Assert-InstrumentationPassed $serverOutput "shared-network NSD server"
 }
 
 function Run-Restart {
