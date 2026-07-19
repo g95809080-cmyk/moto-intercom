@@ -50,4 +50,22 @@ class AttemptResourceControllerTest {
         }
         assertTrue(attemptBClaimed)
     }
+
+    @Test
+    fun recoveryRestartAddsNoBackoffButOrdinaryDiscoveryKeepsItsDelay() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(100L))
+        val recovery = ConnectionAttemptFixture.create(
+            clock = clock,
+            trigger = ConnectionTrigger.RECOVERY
+        )
+        val ordinary = ConnectionAttemptFixture.create(
+            clock = clock,
+            id = ConnectionAttemptId("attempt-ordinary"),
+            trigger = ConnectionTrigger.USER
+        )
+
+        assertEquals(0L, restartDiscoveryDelayMillis(recovery))
+        assertEquals(1_500L, restartDiscoveryDelayMillis(ordinary))
+        assertEquals(1_500L, restartDiscoveryDelayMillis(null))
+    }
 }

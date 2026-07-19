@@ -1,6 +1,6 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-32 APPROVED - READY FOR INTERMEDIATE MERGE**
+Status: **KUM-32 MERGED; KUM-33 IN PROGRESS**
 
 Evidence state: 2026-07-19
 
@@ -24,17 +24,21 @@ Evidence state: 2026-07-19
 - KUM-32 review-remediation source head: `b7006befa43ff627f301224f1ebd02d8f81487af`
 - KUM-32 second review head: `9bb61ccb15f87479df5170ac80eea42a305993cd`
 - KUM-32 HELLO-cleanup remediation source head: `ba649e330175595806d9ee285b6baa302611f66e`
-- KUM-32 pull request: [#10](https://github.com/g95809080-cmyk/moto-intercom/pull/10) - Draft
+- KUM-32 pull request: [#10](https://github.com/g95809080-cmyk/moto-intercom/pull/10) - merged
 - KUM-32 initial GitHub Actions: run `29693572908` - success
 - KUM-32 initial evidence GitHub Actions: run `29693863050` - success
 - KUM-32 review-remediation GitHub Actions: run `29695549022` - success
 - KUM-32 HELLO-cleanup remediation GitHub Actions: run `29697109471` - success
+- KUM-32 final PR-head GitHub Actions: run `29697904226` - success
+- KUM-32 merge commit: `5c49a53db45ecaa5b9f449af5f04d28250f3f772`
+- KUM-32 exact-main GitHub Actions: run `29698415621` - success via
+  `workflow_dispatch` after the expected push event did not materialize
 - KUM-37 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=3
 - KUM-37 final fixed-SHA review: APPROVED, P0=0, P1=0
 - KUM-32 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - KUM-32 second fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - KUM-32 third fixed-SHA review: APPROVED, P0=0, P1=0 at `5f1d1d6`
-- Linear: KUM-9 In Progress; KUM-37 Done; KUM-32 In Review; KUM-33 through KUM-36 Todo
+- Linear: KUM-9 In Progress; KUM-37/KUM-32 Done; KUM-33 In Progress; KUM-34 through KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -166,6 +170,8 @@ disconnect, and KUM-36 final acceptance remain unimplemented.
 | Initial GitHub Actions | `dba5155` | PASS | run `29693572908` |
 | Review-remediation GitHub Actions | `b7006be` | PASS | run `29695549022` |
 | HELLO-cleanup remediation GitHub Actions | `ba649e3` | PASS | run `29697109471` |
+| Final PR-head GitHub Actions | `467a242` | PASS | run `29697904226` |
+| Exact-main GitHub Actions | `5c49a53` | PASS | run `29698415621`; manual workflow dispatch recorded explicitly |
 
 The final clean gate initially encountered a Windows lock on Gradle's generated
 `classes.jar`. Stopping the Gradle daemon and rerunning the identical clean gate
@@ -245,8 +251,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-32 may start | YES - active on `feat/kum-32-recovery-target-lock` from `76fa554` |
 | KUM-32 implementation/automated gate | PASS at `ba649e3`; CI `29697109471` and emulator matrix `20260720-013122-all` passed |
 | KUM-32 architecture review | APPROVED at `5f1d1d6`; P0=0/P1=0 |
-| KUM-32 may move to Done | After merge commit and green main CI |
-| KUM-33 may start | NO |
+| KUM-32 may move to Done | YES - merged as `5c49a53`, exact-main CI `29698415621` passed, Linear Done |
+| KUM-33 may start | YES - active on `feat/kum-33-three-second-recovery-fallback` from `5c49a53` |
 | Sprint 4 may close | NO - KUM-32 through KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 

@@ -71,7 +71,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
     }
 
     @Test
-    fun coordinatorCreatesRecoveryWithFreshIdentityAndPreservedTargetPlan() {
+    fun coordinatorCreatesRecoveryWithFreshIdentityAndLastSuccessfulTransportPlan() {
         val ids = RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery")
         val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
         val coordinator = coordinator(ids, clock)
@@ -103,7 +103,11 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(ConnectionAttemptId("attempt-recovery"), recovering.attempt.id)
         assertNotEquals(first.attempt.id, recovering.attempt.id)
         assertEquals(first.attempt.targetLock, recovering.attempt.targetLock)
-        assertEquals(first.attempt.channelPlan, recovering.attempt.channelPlan)
+        assertEquals(first.attempt.channelPlan.plannedTransports, recovering.attempt.channelPlan.plannedTransports)
+        assertEquals(
+            ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT),
+            recovering.attempt.channelPlan
+        )
         assertEquals(ConnectionTrigger.RECOVERY, recovering.attempt.trigger)
         assertEquals(12_500L, recovering.attempt.deadlineElapsedRealtimeMs)
         assertEquals(recovering.attempt, coordinator.currentAttempt)
@@ -115,7 +119,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
                     AttemptMilestone.FallbackTransport(
                         recovering.attempt,
                         Transport.WIFI_DIRECT,
-                        MonotonicTimestamp(7_500L)
+                        MonotonicTimestamp(5_500L)
                     )
                 )
             ),
@@ -125,6 +129,79 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             ConnectionAttemptTerminalOutcome.DISCONNECTED,
             coordinator.terminalOutcome(first.attempt.id)
         )
+    }
+
+    @Test
+    fun recoveryPrefersLastSuccessfulWifiDirectAndFallsBackToLanAtT3() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
+        val coordinator = coordinator(
+            RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery"),
+            clock
+        )
+        val connecting = requireNotNull(
+            coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
+        ).state as IntercomState.Connecting
+        val connected = IntercomState.Connected(
+            connecting.attempt,
+            verifiedPeer(),
+            connectedAt = 5L,
+            transport = Transport.WIFI_DIRECT
+        )
+
+        val recovery = requireNotNull(
+            coordinator.handle(
+                connected,
+                SessionEvent.WebRtcStateChanged(
+                    runtime,
+                    connecting.attempt.id,
+                    WebRtcConnectionState.DISCONNECTED,
+                    occurredAt = 6L
+                )
+            )
+        )
+        val recovering = recovery.state as IntercomState.Recovering
+        val milestone = AttemptMilestone.FallbackTransport(
+            recovering.attempt,
+            Transport.LAN,
+            MonotonicTimestamp(3_500L)
+        )
+
+        assertEquals(
+            ChannelPlan.race(Transport.WIFI_DIRECT, Transport.LAN),
+            recovering.attempt.channelPlan
+        )
+        assertEquals(10_500L, recovering.attempt.deadlineElapsedRealtimeMs)
+        assertEquals(
+            listOf(
+                SessionEffect.ScheduleAttemptDeadline(recovering.attempt),
+                SessionEffect.OpenTargetedTransport(
+                    recovering.attempt,
+                    Transport.WIFI_DIRECT
+                ),
+                SessionEffect.ScheduleAttemptMilestone(milestone)
+            ),
+            recovery.effects
+        )
+
+        clock.advanceBy(2_999L)
+        assertFalse(
+            requireNotNull(
+                coordinator.handle(
+                    recovering,
+                    SessionEvent.AttemptMilestoneElapsed(milestone)
+                )
+            ).accepted
+        )
+        clock.advanceBy(1L)
+        val due = requireNotNull(
+            coordinator.handle(recovering, SessionEvent.AttemptMilestoneElapsed(milestone))
+        )
+        assertTrue(due.accepted)
+        assertEquals(
+            listOf(SessionEffect.OpenTargetedTransport(recovering.attempt, Transport.LAN)),
+            due.effects
+        )
+        assertEquals(10_500L, recovering.attempt.deadlineElapsedRealtimeMs)
     }
 
     @Test
@@ -196,14 +273,164 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         assertEquals(
             listOf(
                 SessionEffect.RestartDiscovery(runtime, recovery),
-                SessionEffect.ScheduleAttemptDeadline(recovery),
+                SessionEffect.ScheduleAttemptDeadline(recovery)
+            ),
+            decision.effects
+        )
+
+        val ready = requireNotNull(
+            coordinator.handle(
+                decision.state as IntercomState.Recovering,
+                SessionEvent.RecoveryTransportsReady(recovery)
+            )
+        )
+        assertTrue(ready.accepted)
+        assertEquals(
+            listOf(
+                SessionEffect.OpenTargetedTransport(recovery, Transport.LAN),
                 SessionEffect.ScheduleAttemptMilestone(
                     AttemptMilestone.FallbackTransport(
                         recovery,
                         Transport.WIFI_DIRECT,
-                        MonotonicTimestamp(5_500L)
+                        MonotonicTimestamp(3_500L)
                     )
                 )
+            ),
+            ready.effects
+        )
+    }
+
+    @Test
+    fun delayedRecoveryReadinessOpensPreferredThenAlreadyDueFallbackOnce() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
+        val coordinator = coordinator(
+            RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery"),
+            clock
+        )
+        val connecting = requireNotNull(
+            coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
+        ).state as IntercomState.Connecting
+        val connected = IntercomState.Connected(
+            connecting.attempt,
+            verifiedPeer(),
+            connectedAt = 5L,
+            transport = Transport.LAN
+        )
+        val recoveryDecision = requireNotNull(
+            coordinator.handle(
+                connected,
+                SessionEvent.SignalingDisconnected(runtime, connecting.attempt.id)
+            )
+        )
+        val recovering = recoveryDecision.state as IntercomState.Recovering
+
+        clock.advanceBy(3_000L)
+        val ready = requireNotNull(
+            coordinator.handle(
+                recovering,
+                SessionEvent.RecoveryTransportsReady(recovering.attempt)
+            )
+        )
+        assertTrue(ready.accepted)
+        assertEquals(
+            listOf(
+                SessionEffect.OpenTargetedTransport(recovering.attempt, Transport.LAN),
+                SessionEffect.OpenTargetedTransport(
+                    recovering.attempt,
+                    Transport.WIFI_DIRECT
+                )
+            ),
+            ready.effects
+        )
+        assertFalse(
+            requireNotNull(
+                coordinator.handle(
+                    recovering,
+                    SessionEvent.RecoveryTransportsReady(recovering.attempt)
+                )
+            ).accepted
+        )
+        assertFalse(
+            requireNotNull(
+                coordinator.handle(
+                    recovering,
+                    SessionEvent.RecoveryTransportsReady(connecting.attempt)
+                )
+            ).accepted
+        )
+    }
+
+    @Test
+    fun recoveryReadinessAtTheTotalDeadlineIsRejected() {
+        val clock = FakeMonotonicClock(MonotonicTimestamp(500L))
+        val coordinator = coordinator(
+            RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery"),
+            clock
+        )
+        val connecting = requireNotNull(
+            coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
+        ).state as IntercomState.Connecting
+        val recoveryDecision = requireNotNull(
+            coordinator.handle(
+                IntercomState.Connected(
+                    connecting.attempt,
+                    verifiedPeer(),
+                    connectedAt = 5L,
+                    transport = Transport.LAN
+                ),
+                SessionEvent.SignalingDisconnected(runtime, connecting.attempt.id)
+            )
+        )
+        val recovering = recoveryDecision.state as IntercomState.Recovering
+
+        clock.advanceBy(10_000L)
+
+        assertFalse(
+            requireNotNull(
+                coordinator.handle(
+                    recovering,
+                    SessionEvent.RecoveryTransportsReady(recovering.attempt)
+                )
+            ).accepted
+        )
+    }
+
+    @Test
+    fun singleTransportRecoveryHasNoFallbackMilestone() {
+        val coordinator = coordinator(
+            RecordingAttemptIdFactory("attempt-outbound", "attempt-recovery")
+        )
+        val connecting = requireNotNull(
+            coordinator.handle(
+                IntercomState.Discovering(runtime),
+                singleTransportOutboundIntent()
+            )
+        ).state as IntercomState.Connecting
+        val connected = IntercomState.Connected(
+            connecting.attempt,
+            verifiedPeer(),
+            connectedAt = 5L,
+            transport = Transport.LAN
+        )
+
+        val decision = requireNotNull(
+            coordinator.handle(
+                connected,
+                SessionEvent.WebRtcStateChanged(
+                    runtime,
+                    connecting.attempt.id,
+                    WebRtcConnectionState.DISCONNECTED,
+                    occurredAt = 6L
+                )
+            )
+        )
+        val recovering = decision.state as IntercomState.Recovering
+
+        assertEquals(ChannelPlan.single(Transport.LAN), recovering.attempt.channelPlan)
+        assertEquals(
+            listOf(
+                SessionEffect.ScheduleAttemptDeadline(recovering.attempt),
+                SessionEffect.OpenTargetedTransport(recovering.attempt, Transport.LAN)
             ),
             decision.effects
         )

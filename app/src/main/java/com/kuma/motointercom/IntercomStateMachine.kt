@@ -159,6 +159,10 @@ internal sealed interface SessionEvent {
         val transport: Transport
     ) : SessionEvent
 
+    data class RecoveryTransportsReady(
+        val attempt: ConnectionAttempt
+    ) : SessionEvent
+
     data class AttemptTimedOut(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -356,6 +360,7 @@ internal fun reduceIntercomState(
     is SessionEvent.ConnectPresenceRequested,
     is SessionEvent.TargetedTransportOpenFailed,
     is SessionEvent.TargetedTransportOverlapUnavailable,
+    is SessionEvent.RecoveryTransportsReady,
     is SessionEvent.AttemptTimedOut,
     is SessionEvent.AttemptMilestoneElapsed,
     is SessionEvent.WebRtcStateChanged,

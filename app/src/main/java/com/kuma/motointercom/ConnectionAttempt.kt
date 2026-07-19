@@ -110,6 +110,20 @@ data class ConnectionAttempt(
 internal fun plannedDiscoveryTransports(attempt: ConnectionAttempt?): Set<Transport> =
     attempt?.channelPlan?.plannedTransports ?: Transport.entries.toSet()
 
+internal fun ChannelPlan.orderedForRecovery(
+    lastSuccessfulTransport: Transport
+): ChannelPlan {
+    require(lastSuccessfulTransport in this) {
+        "Last successful transport must belong to the connected attempt plan"
+    }
+    val alternate = plannedTransports.firstOrNull { it != lastSuccessfulTransport }
+    return if (alternate == null) {
+        ChannelPlan.single(lastSuccessfulTransport)
+    } else {
+        ChannelPlan.race(lastSuccessfulTransport, alternate)
+    }
+}
+
 internal fun bindPlannedAdapterIngress(
     attempt: ConnectionAttempt,
     bindLan: (ConnectionAttempt) -> Unit,

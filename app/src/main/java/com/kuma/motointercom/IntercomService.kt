@@ -26,6 +26,11 @@ import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
 
+private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
+
+internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
+    if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
+
 /**
  * 后台免死对讲服务。
  *
@@ -491,7 +496,7 @@ class IntercomService : Service() {
             initialTargetAttempt = targetAttempt
         ).also { it.start() }
         }
-        targetAttempt?.let { beginTargetedTransport(it, it.preferredTransport) }
+        targetAttempt?.let { orchestrator.dispatch(SessionEvent.RecoveryTransportsReady(it)) }
     }
 
     private fun registerControlChannel(
@@ -1005,7 +1010,7 @@ class IntercomService : Service() {
                         resumedRuntimeSessionId,
                         nextAttempt
                     )
-                }, PEER_RECONNECT_BACKOFF_MS)
+                }, restartDiscoveryDelayMillis(nextAttempt))
             },
             onError = ::handleError
         ).abortAndResumeDiscovery()
@@ -1745,7 +1750,6 @@ class IntercomService : Service() {
     }
 
     companion object {
-        private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
         private const val LOSER_CHANNEL_CLOSE_TIMEOUT_MS = 1_000L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
