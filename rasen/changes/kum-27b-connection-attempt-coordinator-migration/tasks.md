@@ -171,7 +171,7 @@ evidence while keeping KUM-27 In Progress. B5 may start only after this gate.
 - [x] 5.7 Add deterministic regressions for expiry boundaries, replacement
   during LAN/P2P/Socket work, stale cleanup, exact deadline, and no KUM-28
   behavior.
-- [ ] 5.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+- [x] 5.8 Run targeted tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
   strict Rasen validation, GitHub CI, and fixed-SHA read-only architecture
   review.
 
@@ -179,6 +179,43 @@ Delivery gate after apply: deliver B5 as one atomic implementation commit on
 Draft PR #4, complete fixed-SHA review with P0=0/P1=0, and synchronize Linear
 evidence while keeping KUM-27 In Progress. B6 may start only after this gate.
 
-## 6. B6: Full Regression And Physical Verification
+### B5 Gate Record
 
-Deferred until the B5 gate and contains no executable tasks in this checkpoint.
+- Fixed Base `529d611a6ba24ffe7b1c1b28c6d4e9da49b7c2dd`, Head
+  `932c81c5ce30ae5087134db1591f48c6fd3d6ae1`.
+- Verification: 212 JVM tests passed; Lint 0 Fatal/0 Error with 34 existing
+  warnings; `assembleDebug` passed; strict Rasen validation 1/1; GitHub CI
+  `29653796709` succeeded; worktree clean and remote synchronized.
+- 2026-07-19 fixed-SHA re-review: APPROVED, P0=0, P1=0, B5 complete YES,
+  B6 allowed YES.
+- Physical evidence: `DEFERRED_TO_RELEASE_CANDIDATE` under the authorized
+  development-validation policy; it is not claimed as passed.
+- Full repository rescans: 0; maximum concurrent write workers: 1.
+
+## 6. B6: Full Automated Regression, Emulator Matrix, And Release Plan
+
+- [x] 6.1 Freeze the B6 automated/emulator/release-candidate boundary in
+  proposal, specs, design, tasks, and verification strategy documents.
+- [x] 6.2 Add reusable Emulator 36.5+ cluster scripts for version/AVD checks,
+  shared-network startup, installation, named scenarios, fault injection,
+  result collection, and bounded shutdown.
+- [x] 6.3 Add Android instrumentation support plus test-only
+  `SyntheticAudioSource` and `TestAudioSink` with deterministic PCM metrics.
+- [x] 6.4 Add regressions for frame count, RMS, frequency, loss, first-frame
+  latency, recovery, exactly-one stream, stop behavior, and test-source
+  isolation from release code.
+- [x] 6.5 Execute the two-to-three emulator matrix for APK install/launch,
+  shared LAN reachability, synthetic PCM exchange, process restart, bounded
+  network fault/recovery, and evidence collection.
+- [x] 6.6 Document every emulator limitation and a complete Release Candidate
+  physical matrix with all hardware-only rows marked
+  `DEFERRED_TO_RELEASE_CANDIDATE`.
+- [ ] 6.7 Run targeted tests, `testDebugUnitTest`, instrumentation tests,
+  `lintDebug`, `assembleDebug`, strict Rasen validation, and GitHub CI.
+- [ ] 6.8 Complete fixed-SHA read-only architecture review, remediate all P0/P1,
+  synchronize PR/Linear evidence, and prove KUM-28 remains absent.
+
+Delivery gate after apply: B6 may close KUM-27 only when automated and emulator
+evidence passes, architecture review is APPROVED with P0=0/P1=0, deferred
+physical checks have a complete Release Candidate plan, and PR #4 remains the
+single KUM-27 branch/PR. No production deployment is authorized.

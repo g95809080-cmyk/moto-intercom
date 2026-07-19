@@ -328,3 +328,62 @@ regression and physical verification remain B6 work.
 - **WHEN** the fixed B5 diff is reviewed
 - **THEN** it contains only remaining-budget and stale adapter-task migration
   plus direct tests and artifacts
+
+### Requirement: B6 uses automated and emulator development gates
+B6 SHALL complete the full deterministic JVM regression and a reusable
+two-to-three Android emulator matrix. Development-time physical-device evidence
+SHALL NOT block B6, KUM-27 closure, or the intermediate PR. Every unavailable
+physical-only check SHALL be recorded as `DEFERRED_TO_RELEASE_CANDIDATE` and
+MUST NOT be reported as passed.
+
+#### Scenario: No physical devices are connected during B6
+- **WHEN** the automated and emulator gates pass with no physical Android phone
+  attached
+- **THEN** B6 may complete while the Release Candidate physical queue remains
+  explicit and unpassed
+
+### Requirement: Emulator cluster is deterministic and isolated
+The B6 scripts SHALL verify Emulator 36.5 or newer, start only emulator serials
+on explicit ports, join them to the emulator shared network, install the bound
+debug APK, run named scenarios, capture per-node results, and stop only the
+cluster they started.
+
+#### Scenario: A cluster node cannot boot or join the matrix
+- **WHEN** a requested emulator does not become ready within the bounded startup
+  window
+- **THEN** the scenario fails with node-specific evidence and no physical device
+  is selected as an implicit replacement
+
+### Requirement: Synthetic PCM stays outside release code
+`SyntheticAudioSource` and `TestAudioSink` SHALL exist only in test source sets.
+They SHALL verify PCM frame count, RMS, dominant frequency, loss rate, first
+frame latency, recovery after interruption, exactly one active media stream,
+and no frames after stop.
+
+#### Scenario: Release assembly is built
+- **WHEN** `assembleDebug` and the release source-set dependency check run
+- **THEN** synthetic audio helpers are absent from the production source path
+  and no runtime component can activate them
+
+### Requirement: Emulator limitations fail open for development only
+B6 SHALL treat unreliable emulator reproduction of Wi-Fi Direct group
+formation, OEM background restrictions, Bluetooth SCO, RF interference, or
+acoustic behavior as a development-only capability limitation. It MUST retain
+deterministic fake coverage, document the exact limitation, and add the
+hardware check to the Release Candidate queue.
+
+#### Scenario: Wi-Fi Direct hardware semantics are unavailable
+- **WHEN** emulator capability inspection shows that real P2P group behavior is
+  unsupported or non-deterministic
+- **THEN** callback/deadline/resource behavior is validated with fakes, the OEM
+  behavior is marked `DEFERRED_TO_RELEASE_CANDIDATE`, and remaining B6 work
+  continues
+
+### Requirement: B6 does not implement KUM-28
+B6 SHALL preserve one transport per attempt and SHALL NOT add T+5 fallback,
+dual-transport racing, a one-second optimization window, or `OPTIMIZING`.
+
+#### Scenario: B6 fixed-SHA review
+- **WHEN** the completed B6 diff is reviewed
+- **THEN** it contains validation infrastructure, evidence, and KUM-27
+  regressions only, with no KUM-28 runtime behavior

@@ -1,0 +1,219 @@
+[CmdletBinding()]
+param(
+    [ValidateSet("smoke", "nsd", "synthetic-audio", "network-fault", "restart", "all")]
+    [string]$Scenario = "all",
+    [string[]]$Serials = @(),
+    [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
+    [string]$ResultsRoot = "build\emulator-results"
+)
+
+$ErrorActionPreference = "Stop"
+$targetPackage = "com.kuma.motointercom"
+$runner = "$targetPackage.test/androidx.test.runner.AndroidJUnitRunner"
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+if ($Serials.Count -eq 0) {
+    $Serials = @(& $Adb devices | Select-String -Pattern "^emulator-\d+\s+device$" |
+        ForEach-Object { ($_ -split "\s+")[0] })
+}
+if ($Serials.Count -eq 0) { throw "No ready emulator serials found" }
+if ($Serials | Where-Object { $_ -notmatch "^emulator-\d+$" }) {
+    throw "Only emulator serials are allowed"
+}
+
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$resultDir = Join-Path $ResultsRoot "$stamp-$Scenario"
+New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
+
+function Invoke-AdbText {
+    param([string]$Serial, [string]$Name, [string[]]$Arguments)
+    $output = & $Adb -s $Serial @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    $path = Join-Path $resultDir "$Serial-$Name.txt"
+    @($output) | Set-Content -LiteralPath $path -Encoding UTF8
+    if ($exitCode -ne 0) { throw "ADB command failed: $Serial $Name" }
+    return ($output -join [Environment]::NewLine)
+}
+
+function Assert-InstrumentationPassed {
+    param([string]$Output, [string]$Label)
+    if ($Output -match "FAILURES!!!" -or $Output -match "INSTRUMENTATION_FAILED" -or
+        $Output -notmatch "OK \(") {
+        throw "Instrumentation failed: $Label"
+    }
+}
+
+function Get-SharedAddress {
+    param([string]$Serial)
+    $output = Invoke-AdbText $Serial "shared-ip" @(
+        "shell", "ip", "-o", "-4", "addr", "show", "wlan0"
+    )
+    $match = [regex]::Match($output, "inet\s+(?<address>\d+\.\d+\.\d+\.\d+)/")
+    if (-not $match.Success) { throw "Shared network address missing: $Serial" }
+    return $match.Groups["address"].Value
+}
+
+function Run-Smoke {
+    foreach ($serial in $Serials) {
+        Invoke-AdbText $serial "force-stop" @("shell", "am", "force-stop", $targetPackage) | Out-Null
+        $activity = Invoke-AdbText $serial "resolve-activity" @(
+            "shell", "cmd", "package", "resolve-activity", "--brief", $targetPackage
+        )
+        $component = ($activity -split "\r?\n" | Select-Object -Last 1).Trim()
+        if ($component -notlike "$targetPackage/*") {
+            throw "Launcher activity did not resolve: $serial output=$activity"
+        }
+        Invoke-AdbText $serial "launch" @("shell", "am", "start", "-W", "-n", $component) | Out-Null
+        Invoke-AdbText $serial "ui" @("exec-out", "uiautomator", "dump", "/dev/tty") | Out-Null
+    }
+
+    $addresses = @{}
+    foreach ($serial in $Serials) { $addresses[$serial] = Get-SharedAddress $serial }
+    foreach ($source in $Serials) {
+        foreach ($target in $Serials) {
+            if ($source -eq $target) { continue }
+            Invoke-AdbText $source "ping-$target" @(
+                "shell", "ping", "-c", "1", "-W", "2", $addresses[$target]
+            ) | Out-Null
+        }
+    }
+}
+
+function Run-SyntheticAudio {
+    $local = Invoke-AdbText $Serials[0] "synthetic-metrics" @(
+        "shell", "am", "instrument", "-w", "-r",
+        "-e", "class", "com.kuma.motointercom.SyntheticAudioMetricsTest",
+        $runner
+    )
+    Assert-InstrumentationPassed $local "single-node synthetic metrics"
+
+    if ($Serials.Count -lt 2) { throw "Synthetic network audio requires two emulators" }
+    $server = $Serials[0]
+    $client = $Serials[1]
+    $serverIp = Get-SharedAddress $server
+    $port = 39027
+    $serverOut = Join-Path $resultDir "$server-synthetic-server.txt"
+    $serverErr = Join-Path $resultDir "$server-synthetic-server.err.txt"
+    $serverArgs = @(
+        "-s", $server, "shell", "am", "instrument", "-w", "-r",
+        "-e", "class", "com.kuma.motointercom.SyntheticAudioNetworkTest#exchange",
+        "-e", "role", "server", "-e", "port", "$port", $runner
+    )
+    $serverProcess = Start-Process -FilePath $Adb -ArgumentList $serverArgs `
+        -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr `
+        -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 2
+
+    $clientOutput = Invoke-AdbText $client "synthetic-client" @(
+        "shell", "am", "instrument", "-w", "-r",
+        "-e", "class", "com.kuma.motointercom.SyntheticAudioNetworkTest#exchange",
+        "-e", "role", "client", "-e", "host", $serverIp,
+        "-e", "port", "$port", $runner
+    )
+    Assert-InstrumentationPassed $clientOutput "synthetic network client"
+
+    if (-not $serverProcess.WaitForExit(60000)) {
+        Stop-Process -Id $serverProcess.Id -Force
+        throw "Synthetic network server timed out"
+    }
+    $serverOutput = Get-Content -LiteralPath $serverOut -Raw -Encoding UTF8
+    Assert-InstrumentationPassed $serverOutput "synthetic network server"
+}
+
+function Run-Nsd {
+    if ($Serials.Count -lt 2) { throw "NSD integration requires two emulators" }
+    $server = $Serials[0]
+    $client = $Serials[1]
+    $serverOut = Join-Path $resultDir "$server-nsd-server.txt"
+    $serverErr = Join-Path $resultDir "$server-nsd-server.err.txt"
+    $serverArgs = @(
+        "-s", $server, "shell", "am", "instrument", "-w", "-r",
+        "-e", "class", "com.kuma.motointercom.SharedNetworkNsdTest#exchange",
+        "-e", "role", "server", $runner
+    )
+    $serverProcess = Start-Process -FilePath $Adb -ArgumentList $serverArgs `
+        -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr `
+        -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 3
+
+    $clientOutput = Invoke-AdbText $client "nsd-client" @(
+        "shell", "am", "instrument", "-w", "-r",
+        "-e", "class", "com.kuma.motointercom.SharedNetworkNsdTest#exchange",
+        "-e", "role", "client", $runner
+    )
+    Assert-InstrumentationPassed $clientOutput "shared-network NSD client"
+
+    if (-not $serverProcess.WaitForExit(60000)) {
+        Stop-Process -Id $serverProcess.Id -Force
+        throw "Shared-network NSD server timed out"
+    }
+    $serverOutput = Get-Content -LiteralPath $serverOut -Raw -Encoding UTF8
+    Assert-InstrumentationPassed $serverOutput "shared-network NSD server"
+}
+
+function Run-Restart {
+    foreach ($serial in $Serials) {
+        Invoke-AdbText $serial "restart-stop" @("shell", "am", "force-stop", $targetPackage) | Out-Null
+        $activity = Invoke-AdbText $serial "restart-resolve" @(
+            "shell", "cmd", "package", "resolve-activity", "--brief", $targetPackage
+        )
+        $component = ($activity -split "\r?\n" | Select-Object -Last 1).Trim()
+        Invoke-AdbText $serial "restart-launch" @("shell", "am", "start", "-W", "-n", $component) | Out-Null
+        $appProcessId = Invoke-AdbText $serial "restart-pid" @(
+            "shell", "pidof", "-s", $targetPackage
+        )
+        if ([string]::IsNullOrWhiteSpace($appProcessId)) {
+            throw "App did not restart: $serial"
+        }
+    }
+}
+
+function Run-NetworkFault {
+    if ($Serials.Count -lt 2) { throw "Network fault recovery requires two emulators" }
+    $source = $Serials[0]
+    $target = $Serials[1]
+    $targetIp = Get-SharedAddress $target
+    $faultScript = Join-Path $scriptRoot "inject-network-fault.ps1"
+
+    & $faultScript -Serial $target -Mode offline -Adb $Adb |
+        Set-Content -LiteralPath (Join-Path $resultDir "$target-fault-offline.json") -Encoding UTF8
+    try {
+        Start-Sleep -Seconds 2
+        $offlineOutput = & $Adb -s $source shell ping -c 1 -W 2 $targetIp 2>&1
+        @($offlineOutput) | Set-Content -LiteralPath (
+            Join-Path $resultDir "$source-offline-ping-$target.txt"
+        ) -Encoding UTF8
+        if ($LASTEXITCODE -eq 0) { throw "Shared network stayed reachable after offline fault" }
+    } finally {
+        & $faultScript -Serial $target -Mode online -Adb $Adb |
+            Set-Content -LiteralPath (Join-Path $resultDir "$target-fault-online.json") -Encoding UTF8
+    }
+
+    $deadline = (Get-Date).AddSeconds(30)
+    $recovered = $false
+    do {
+        Start-Sleep -Seconds 2
+        $onlineOutput = & $Adb -s $source shell ping -c 1 -W 2 $targetIp 2>&1
+        $recovered = $LASTEXITCODE -eq 0
+    } while (-not $recovered -and (Get-Date) -lt $deadline)
+    @($onlineOutput) | Set-Content -LiteralPath (
+        Join-Path $resultDir "$source-recovered-ping-$target.txt"
+    ) -Encoding UTF8
+    if (-not $recovered) { throw "Shared network did not recover within 30 seconds" }
+}
+
+switch ($Scenario) {
+    "smoke" { Run-Smoke }
+    "nsd" { Run-Nsd }
+    "synthetic-audio" { Run-SyntheticAudio }
+    "network-fault" { Run-NetworkFault }
+    "restart" { Run-Restart }
+    "all" { Run-Smoke; Run-Nsd; Run-SyntheticAudio; Run-NetworkFault; Run-Restart }
+}
+
+[pscustomobject]@{
+    scenario = $Scenario
+    serials = $Serials
+    resultDirectory = (Resolve-Path -LiteralPath $resultDir).Path
+    status = "PASS"
+} | ConvertTo-Json -Depth 4

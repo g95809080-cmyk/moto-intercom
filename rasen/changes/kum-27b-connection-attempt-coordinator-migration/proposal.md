@@ -49,7 +49,11 @@ attempt budget and reject stale adapter tasks.
 - Clamp each targeted local cap or delay to the remaining total budget; cleanup
   may finish after terminal revocation but cannot revive or mutate a replacement
   attempt.
-- Keep B6 full regression/physical verification deferred and KUM-28 absent.
+- Complete B6 with the full automated regression, a reusable two-to-three
+  emulator matrix, deterministic synthetic-PCM verification, and a release
+  physical-test plan. Physical execution is explicitly deferred to the Release
+  Candidate and is never reported as passed during development.
+- Keep KUM-28 transport fallback/racing behavior absent from this change.
 
 ## Capabilities
 
@@ -81,4 +85,7 @@ None. The approved KUM-27A ownership contract remains authoritative.
 - Changes targeted LAN/P2P/Socket timeout and retry execution only by clamping
   existing local caps to the immutable remaining attempt budget and adding
   stale task checks. TargetLock, UI, database, pairing, identity, notification,
-  Gradle, permissions, and dependencies remain unchanged.
+  permissions, and release dependencies remain unchanged.
+- B6 adds Android test-runner dependencies, test-only synthetic audio helpers,
+  emulator orchestration scripts, and verification documents. None of these
+  classes or harnesses are packaged in the release application code path.

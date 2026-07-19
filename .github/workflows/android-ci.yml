@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Test, lint, and assemble
+    name: Test, lint, assemble, and test APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -39,7 +39,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Verify Android project
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 
       - name: Upload verification reports
         if: always()
@@ -50,5 +50,6 @@ jobs:
             app/build/reports/
             app/build/test-results/
             app/build/outputs/apk/debug/
+            app/build/outputs/apk/androidTest/debug/
           if-no-files-found: warn
           retention-days: 14

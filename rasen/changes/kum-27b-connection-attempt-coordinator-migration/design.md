@@ -315,9 +315,68 @@ attempt authority.
 B5 changes timing/context plumbing only. It preserves the 10-second total
 budget, current single-transport behavior, existing local caps when enough
 budget remains, Signaling v2 and TargetLock semantics, and all product-state
-policy. B6 owns the consolidated regression and physical-device matrix. B5
-does not add T+5 fallback, dual-transport racing, an optimization window, or
-`OPTIMIZING`.
+policy. B6 owns consolidated automated regression, the multi-emulator matrix,
+and the release physical-test plan. Development-time physical execution is
+marked `DEFERRED_TO_RELEASE_CANDIDATE`; it is neither required for B6 nor
+reported as passed. B5 does not add T+5 fallback, dual-transport racing, an
+optimization window, or `OPTIMIZING`.
+
+### 22. B6 validation layers
+
+B6 validates the complete KUM-27 ownership migration in this order:
+
+1. deterministic JVM tests with fake clock, fake callbacks, and logical
+   transport/resource fixtures;
+2. Android instrumentation tests that contain their own synthetic PCM source
+   and sink under `app/src/androidTest`;
+3. two-to-three emulator orchestration on Emulator 36.5 or newer;
+4. Gradle unit, Lint, assemble, connected-test where available, and GitHub CI;
+5. a fixed-SHA read-only architecture review.
+
+No emulator or fake result is reclassified as physical-device evidence.
+
+### 23. B6 emulator topology and scripts
+
+`scripts/emulator` owns version checks, AVD provisioning, cluster startup,
+installation, scenario execution, network-fault injection, evidence capture,
+and cluster shutdown. The default API 36 AOSP ATD x86_64 AVD starts on ports
+5554, 5556, and 5558 with distinct `-shared-net-id` values. The harness reads
+the actual IPv4 address from each node's shared `wlan0` interface instead of
+assuming an emulator-version-specific subnet.
+
+The scripts fail closed when the emulator is older than 36.5, the requested AVD
+or APK is absent, a node fails to boot, or instrumentation reports failure. They
+never select a physical ADB serial unless explicitly supplied.
+
+### 24. B6 synthetic audio boundary
+
+`SyntheticAudioSource` and `TestAudioSink` exist only in the Android test APK.
+They generate and inspect deterministic PCM16 frames without using the real
+microphone, speaker, Bluetooth SCO, or release `RiderAudioEngine` capture path.
+The tests measure frame count, RMS, dominant frequency, sequence loss, first
+frame latency, recovery after a controlled interruption, exactly one active
+stream, and no delivery after stop.
+
+This proves the automated harness and network framing used by the emulator
+matrix. It does not claim real WebRTC acoustic quality, hardware echo
+cancellation, or human listening acceptance.
+
+### 25. B6 emulator limitations
+
+Android Emulator shared networking is suitable for LAN sockets, deterministic
+protocol exchange, process lifecycle, and synthetic PCM traffic. Wi-Fi Direct
+group formation, OEM background policy, Bluetooth SCO, real RF interference,
+and real acoustic behavior are not reliable emulator capabilities. Their
+domain and callback ordering remain covered by deterministic fakes, while the
+hardware behavior is recorded as `DEFERRED_TO_RELEASE_CANDIDATE`.
+
+### 26. B6 completion and handoff
+
+B6 completes when JVM, instrumentation/multi-emulator scenarios, Lint,
+assemble, CI, and architecture review pass with P0=0/P1=0; the working tree and
+remote are synchronized; and every physical-only item has an explicit Release
+Candidate procedure and deferred status. Completion authorizes KUM-27 issue
+closure and PR merge, but not KUM-28 behavior or production release.
 
 ## Risks / Trade-offs
 
@@ -329,8 +388,9 @@ does not add T+5 fallback, dual-transport racing, an optimization window, or
 - [A pure event predicate could be mistaken for completed callback migration]
   -> Keep it unused by production call paths in B1 and state that routing is
   deferred.
-- [A test fake could leak into production] -> Keep it under `app/src/test` and
-  verify release assembly plus source imports.
+- [A test fake could leak into production] -> Keep JVM fakes under
+  `app/src/test`, synthetic PCM under `app/src/androidTest`, and verify release
+  assembly plus source-set imports.
 - [A pending inbound request can accidentally become a live attempt] -> Store it
   separately, expose no `currentAttempt`, emit no attempt schedule, and test all
   reject/timeout/channel-loss exits.
@@ -374,7 +434,11 @@ does not add T+5 fallback, dual-transport racing, an optimization window, or
 10. B5: add the pure remaining-budget contract, then atomically migrate LAN and
     HELLO, P2P task tokens, Socket loops, and delayed recovery restart.
 11. Run B5 targeted/full gates and fixed-SHA read-only review.
-12. B6 remains deferred until B5 approval; KUM-28 remains absent.
+12. B6: add the automated validation strategy, emulator cluster scripts,
+    synthetic PCM instrumentation, and Release Candidate physical plan.
+13. Run the full JVM and emulator matrix, strict validation, CI, and fixed-SHA
+    read-only review; remediate P0/P1 before closing KUM-27.
+14. Keep KUM-28 absent until KUM-27 merges and main CI succeeds.
 
 Rollback is commit-level to the approved B1 head. B2 changes no schema,
 protocol, dependency, identity, pairing, database, permission, or persisted
@@ -382,6 +446,7 @@ data, and restoring B1 restores the previous production ownership paths.
 
 ## Open Questions
 
-None for B5. Adapter cleanup may complete after logical terminal revocation,
+None for B6. Adapter cleanup may complete after logical terminal revocation,
 but no old task may retry, rediscover, report failure for, hand off, or remove a
-replacement attempt.
+replacement attempt. Physical-only behavior remains explicit Release Candidate
+work and is not represented as development-time pass evidence.
