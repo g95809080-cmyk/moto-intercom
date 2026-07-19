@@ -8,7 +8,7 @@
 
 - [x] 2.1 Add recovery tests proving a fresh attempt retains B while Presence selection/order for C cannot replace the target.
 - [x] 2.2 Add verified-Socket tests proving responder B is eligible and responder C is rejected during recovery.
-- [x] 2.3 Add adapter-lease tests proving recovery ingress is target-bound before open work, active connect remains gated, and only the matching attempt releases it.
+- [x] 2.3 Add adapter-lease and real-HELLO tests proving recovery ingress is target-bound before open work, an accepted discovery claim cannot preserve a group after wrong/stale actual identity, active connect remains gated, and only the matching attempt releases it.
 - [x] 2.4 Add shared UI/notification text tests for named and fallback recovery peers.
 - [x] 2.5 Add a deterministic A/B/C race through the production admission seam proving C closes with P2P cleanup, B is admitted, exactly one `StartWebRtc` is emitted, and only B passes the media gate.
 
@@ -16,7 +16,7 @@
 
 - [x] 3.1 Seed separate LAN and Wi-Fi Direct ingress-validation leases with the immutable recovery attempt without opening fallback transport early.
 - [x] 3.2 Bind active adapter connect work only from the existing `OpenTargetedTransport` effect and release both matching leases on winner/cleanup.
-- [x] 3.3 Add the current-recovery `TargetLock` check to Service verified-control-channel installation, close rejected sessions, and remove a rejected non-target P2P group.
+- [x] 3.3 Add the current-recovery `TargetLock` check to Service verified-control-channel installation, close rejected sessions, and remove a non-target P2P group after either Service admission rejection or current-context HELLO establishment failure.
 - [x] 3.4 Preserve existing winner, deadline, retry, cleanup, product-state, and WebRTC ownership behavior.
 
 ## 4. Recovery Presentation

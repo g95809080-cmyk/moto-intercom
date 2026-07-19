@@ -59,7 +59,10 @@ KUM-35 disconnect, or KUM-36 final-matrix policy.
    before any preferred/fallback open through one shared production helper. The
    media-only recovery path therefore reuses the existing adapter instances,
    binds every transport in the immutable plan, and opens only the transport
-   named by `OpenTargetedTransport`.
+   named by `OpenTargetedTransport`. If a group passes discovery-claim validation
+   but the current Socket HELLO later reports a different device or runtime,
+   establishment failure is routed through the existing current-context Socket
+   failure path so the Socket closes and the group is removed before rediscovery.
 
 4. **Add a Service defense-in-depth target check.** The verified-control-channel
    installation gate receives the current product state. While `RECOVERING`, a
@@ -68,6 +71,8 @@ KUM-35 disconnect, or KUM-36 final-matrix policy.
    `IntercomService` returns an explicit non-target Wi-Fi Direct cleanup outcome,
    closes the rejected session before registry/Coordinator ownership, and tells
    the adapter to remove its current group and restart target-bound discovery.
+   The adapter applies the same fail-closed cleanup when actual HELLO identity
+   contradicts an earlier accepted discovery claim.
    This complements adapter validation; a Socket-only fix was rejected because
    it would leave the wrong P2P group alive.
 
@@ -79,9 +84,9 @@ KUM-35 disconnect, or KUM-36 final-matrix policy.
    recovery target text.
 
 6. **Use layered evidence.** JVM tests cover attempt retention, Presence
-   rejection, the production Socket admission seam, seeded/reused adapter
-   leases, presentation, and the A/B/C race through the Coordinator and media
-   gate. Existing instrumentation and the reusable three-emulator matrix cover
+   rejection, the production Socket admission seam, wrong/stale Wi-Fi Direct
+   HELLO cleanup, seeded/reused adapter leases, presentation, and the A/B/C race
+   through the Coordinator and media gate. Existing instrumentation and the reusable three-emulator matrix cover
    integration, process restart, networking, and resource evidence. Hardware-only
    observations remain Release Candidate work.
 

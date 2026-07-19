@@ -1622,27 +1622,32 @@ internal class WifiDirectTunnel(
         physicalRole: PhysicalSocketRole,
         socket: Socket
     ) {
-        val session = try {
-            SignalingSessionV2.establish(
-                socket = socket,
-                transport = Transport.WIFI_DIRECT,
-                physicalRole = physicalRole,
-                openedAtElapsedMs = monotonicClock.now().elapsedRealtimeMs,
-                localDeviceId = localDeviceId,
-                localRuntimeSessionId = sessionId,
-                localNickname = localNickname,
-                localDeviceName = localDeviceName,
-                originatingAttempt = taskContext?.attempt,
-                expectedRemoteTargetLock = expectedTargetLock,
-                monotonicClock = monotonicClock
-            )
-        } catch (t: Throwable) {
-            runCatching { socket.close() }
-            if (taskContext == null || isTargetedContextCurrent(taskContext)) {
-                postError(t, taskContext)
+        val session = establishWifiDirectSignalingSession(
+            socket = socket,
+            establish = {
+                SignalingSessionV2.establish(
+                    socket = socket,
+                    transport = Transport.WIFI_DIRECT,
+                    physicalRole = physicalRole,
+                    openedAtElapsedMs = monotonicClock.now().elapsedRealtimeMs,
+                    localDeviceId = localDeviceId,
+                    localRuntimeSessionId = sessionId,
+                    localNickname = localNickname,
+                    localDeviceName = localDeviceName,
+                    originatingAttempt = taskContext?.attempt,
+                    expectedRemoteTargetLock = expectedTargetLock,
+                    monotonicClock = monotonicClock
+                )
+            },
+            onFailure = { failure ->
+                postTransportFailure(
+                    generation,
+                    taskContext,
+                    failure as? IOException
+                        ?: IOException("Wi-Fi Direct signaling HELLO failed", failure)
+                )
             }
-            return
-        }
+        ) ?: return
         mainHandler.post {
             if (
                 taskContext != null &&
@@ -1860,6 +1865,18 @@ internal class WifiDirectTunnel(
             }
         }
     }
+}
+
+internal fun establishWifiDirectSignalingSession(
+    socket: Socket,
+    establish: () -> SignalingSessionV2,
+    onFailure: (Throwable) -> Unit
+): SignalingSessionV2? = try {
+    establish()
+} catch (failure: Throwable) {
+    runCatching { socket.close() }
+    onFailure(failure)
+    null
 }
 
 internal fun shouldReportSequentialFallback(

@@ -1,16 +1,78 @@
 package com.kuma.motointercom
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class WifiDirectSignalingSocketTest {
+    @Test
+    fun rejectedHelloClosesSocketAndRoutesCurrentGroupCleanup() {
+        listOf(
+            DEVICE_C to SESSION_C,
+            DEVICE_B to SESSION_OLD
+        ).forEach { (actualDeviceId, actualSessionId) ->
+            ServerSocket(0).use { server ->
+                val opener = Socket(InetAddress.getLoopbackAddress(), server.localPort)
+                val acceptor = server.accept()
+                val failures = mutableListOf<Throwable>()
+                var cleanupCalls = 0
+                val established = CompletableFuture.supplyAsync {
+                    establishWifiDirectSignalingSession(
+                        socket = acceptor,
+                        establish = {
+                            SignalingSessionV2.establish(
+                                socket = acceptor,
+                                transport = Transport.WIFI_DIRECT,
+                                physicalRole = PhysicalSocketRole.ACCEPTOR,
+                                openedAtElapsedMs = 0L,
+                                localDeviceId = DEVICE_A,
+                                localRuntimeSessionId = RuntimeSessionId(SESSION_A),
+                                localNickname = "Rider A",
+                                localDeviceName = "Phone A",
+                                originatingAttempt = null,
+                                expectedRemoteTargetLock = TargetLock(
+                                    DEVICE_B,
+                                    RuntimeSessionId(SESSION_B)
+                                ),
+                                monotonicClock = MonotonicClock {
+                                    MonotonicTimestamp(0L)
+                                }
+                            )
+                        },
+                        onFailure = {
+                            failures += it
+                            cleanupCalls += 1
+                        }
+                    )
+                }
+                try {
+                    SignalingV2Framing.write(
+                        DataOutputStream(opener.getOutputStream()),
+                        rawHello(actualDeviceId, actualSessionId)
+                    )
+
+                    assertNull(established.get(2, TimeUnit.SECONDS))
+                    assertTrue(acceptor.isClosed)
+                    assertEquals(1, cleanupCalls)
+                    assertTrue(failures.single() is SignalingV2Exception)
+                } finally {
+                    runCatching { opener.close() }
+                    runCatching { acceptor.close() }
+                }
+            }
+        }
+    }
+
     @Test
     fun staleSessionClosesSocketWithoutReadyCallback() {
         var active = true
@@ -164,5 +226,31 @@ class WifiDirectSignalingSocketTest {
             Thread.sleep(10)
         }
         return condition()
+    }
+
+    private fun rawHello(deviceId: String, sessionId: String): ByteArray = """
+        {
+          "protocolVersion": 2,
+          "type": "HELLO",
+          "attemptId": "$ATTEMPT_C",
+          "sourceDeviceId": "$deviceId",
+          "targetDeviceId": "$DEVICE_A",
+          "sourceSessionId": "$sessionId",
+          "payload": {
+            "requestRole": "REQUESTER",
+            "capabilities": []
+          }
+        }
+    """.trimIndent().toByteArray(Charsets.UTF_8)
+
+    private companion object {
+        const val DEVICE_A = "11111111-1111-4111-8111-111111111111"
+        const val DEVICE_B = "22222222-2222-4222-8222-222222222222"
+        const val DEVICE_C = "33333333-3333-4333-8333-333333333333"
+        const val SESSION_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const val SESSION_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        const val SESSION_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        const val SESSION_OLD = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const val ATTEMPT_C = "dddddddd-1111-4111-8111-dddddddddddd"
     }
 }
