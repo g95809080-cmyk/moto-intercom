@@ -449,13 +449,22 @@ with P0=0 and P1=4:
   attempt deadline; and
 - tests did not cover the combined production cleanup/deadline/adapter order.
 
-The remediation source `8157a89` adds cancellable per-step close watchdogs,
+The first remediation source `8157a89` adds cancellable per-step close watchdogs,
 coalesces cleanup-time retry/reset requests against the latest Coordinator
 state, clears active recovery channel context while rearming the unchanged
 deadline/fallback schedule, preserves the failure streak across identity
-updates, and adds deterministic production-seam coverage. A second fixed-SHA
-read-only review is pending after this evidence synchronization. KUM-34 remains
-In Review and PR #12 remains Draft until APPROVED with P0=0 and P1=0.
+updates, and adds deterministic production-seam coverage.
+
+The second fixed-SHA read-only review at `62166e8` returned REQUEST CHANGES with
+P0=0 and P1=1. It found that `removeGroup` BUSY retries were posted outside the
+close-step watchdog lifecycle, so an old delayed retry could call the old
+manager/channel after timeout advanced through close and discovery rebuild.
+Remediation source `b78ee8b` carries the owning step-active gate through every
+initial call, Android callback, and delayed retry. The deterministic timeout/
+BUSY race proves a queued retry becomes inert after the step advances. A third
+fixed-SHA read-only review is pending after this evidence synchronization.
+KUM-34 remains In Review and PR #12 remains Draft until APPROVED with P0=0 and
+P1=0.
 
 ## KUM-34 review-remediation evidence
 
@@ -475,6 +484,26 @@ No crash, ANR, instrumentation-failure, or test-failure marker was found. The
 connected MI 6 was excluded by explicit emulator serials from install,
 instrumentation, screenshots, and evidence collection. All three ATD
 screenshots are still identical black frames and remain
+`UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
+
+## KUM-34 second review-remediation evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Review-focused JVM | `b78ee8b` | PASS | 67 tests across four suites, including the delayed BUSY retry after step-timeout race; 0 failures/errors/skipped |
+| Full JVM gate | `b78ee8b` | PASS | 285 tests across 43 suites; 0 failures, errors, or skipped |
+| Lint | `b78ee8b` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `b78ee8b` | PASS | `assembleDebug`; SHA-256 `226E29C82276E59927004209FA954F6F4554170D126F7ABB93E19E6BDC94946A` |
+| Android test APK | `b78ee8b` | PASS | `assembleDebugAndroidTest`; SHA-256 `86287442D2CCC007A515A0C71C4132EDB02402A3BB4A8551511D370BFDC66CD3` |
+| Rasen strict validation | `b78ee8b` | PASS | 1/1; 4/4 artifacts complete; open findings 0 |
+| Focused reset instrumentation | `b78ee8b` | PASS | `build/emulator-results/20260720-092931-recovery-reset`; 2/2 on each of three explicit API 36 emulators, 6/6 total |
+| Full three-emulator matrix | `b78ee8b` | PASS | `build/emulator-results/20260720-092943-all` |
+| Evidence archive | `b78ee8b` | PASS | `build/emulator-evidence/20260720-093027.zip`; SHA-256 `C1C1EF7C3E516D6619236EDF0B38C0F35D541790E37D46B5680313B4B450EB35` |
+
+No crash, ANR, instrumentation-failure, or test-failure marker was found. The
+connected MI 6 and 2211133C physical devices were excluded by explicit emulator
+serials from install, instrumentation, screenshots, and evidence collection.
+All three ATD screenshots are identical black frames and remain
 `UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
 
 ## Physical acceptance queue
@@ -509,8 +538,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-33 architecture review | APPROVED at `29fd4ef`; P0=0/P1=0 after initial P1=2 and second P1=1 remediation rounds |
 | KUM-33 may move to Done | YES - merged as `34f715d`, exact-main CI `29703574642` passed, Linear Done |
 | KUM-34 may start | YES - active on `feat/kum-34-resetting-wireless-reset` from `34f715d` |
-| KUM-34 implementation/automated gate | PASS at remediation source `8157a89`; 284 JVM tests and emulator matrix `20260720-064846-all` passed |
-| KUM-34 architecture review | REQUEST CHANGES at `61f4add`, P0=0/P1=4; remediation complete, fixed-SHA re-review pending |
+| KUM-34 implementation/automated gate | PASS at second-remediation source `b78ee8b`; 285 JVM tests and emulator matrix `20260720-092943-all` passed |
+| KUM-34 architecture review | REQUEST CHANGES at `62166e8`, P0=0/P1=1 after the initial P1=4 remediation; second remediation complete, fixed-SHA re-review pending |
 | KUM-34 may move to Done | NO - Draft PR #12, exact-Head CI, APPROVED review, merge, and exact-main CI remain |
 | Sprint 4 may close | NO - KUM-34 is In Review; KUM-35/KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
