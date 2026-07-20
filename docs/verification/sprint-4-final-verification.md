@@ -1,6 +1,6 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-35 AUTOMATED GATE PASSED - DRAFT DELIVERY, CI, AND REVIEW PENDING**
+Status: **KUM-35 REVIEW REMEDIATION GATE PASSED - FIXED-SHA RE-REVIEW AND CI PENDING**
 
 Evidence state: 2026-07-20
 
@@ -74,9 +74,13 @@ Evidence state: 2026-07-20
 - KUM-34 exact-main GitHub Actions: run `29711575580` - success
 - KUM-35 base: `8dcb3f640e3c5b622da98bc1af68720502427ac8`
 - KUM-35 implementation source: `0dcf63da00adee38911b9bd944d57fc74bdd05cf`
+- KUM-35 initial Draft delivery head: `ebaf9a0bda1bc291d0e7f8bcf1abd775a10fd3cc`
+- KUM-35 initial exact-Head GitHub Actions: run `29713126973` - success
+- KUM-35 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
+- KUM-35 review-remediation source: `bb9991fd0bc9ec570718ee17c7e623cea47c2dc2`
 - KUM-35 pull request: [#13](https://github.com/g95809080-cmyk/moto-intercom/pull/13) - open Draft
 - KUM-35 Rasen change: `kum-35-active-disconnect-stay-online`
-- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34 Done; KUM-35 In Progress; KUM-36 Todo
+- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34 Done; KUM-35 In Review; KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -533,8 +537,10 @@ owner:
   incrementing the KUM-34 failure streak, retrying, or entering `RESETTING`;
 - unexpected signaling/channel/WebRTC loss retains the approved KUM-33/KUM-34
   target-locked recovery and reset behavior;
-- Service cancels only exact attempt schedules, closes exact signaling/WebRTC
-  ownership, and releases matching LAN/Wi-Fi Direct targeted leases;
+- Service always drains the Coordinator-authorized old attempt's exact schedules,
+  signaling/WebRTC ownership, and matching LAN/Wi-Fi Direct targeted leases
+  before later FIFO transport-open effects, even if logical replacement ownership
+  already exists; only idle searching-state finalization is replacement-gated;
 - Service, runtime/session generation, discovery adapters, presence, foreground
   notification, and the KUM-37 runtime audio owner remain online; and
 - the primary UI action disconnects the current rider only in attempt-bearing
@@ -558,6 +564,24 @@ KUM-36 remains unstarted.
 | Rasen strict validation | `0dcf63d` | PASS | 1/1; 4/4 artifacts complete; open findings 0 |
 | PowerShell compatibility | `0dcf63d` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
 
+The first fixed-SHA architecture review at Draft Head `ebaf9a0` found one P1:
+the exact old-attempt release and the idle searching-state finalization shared
+one gate, so a rapid logical replacement could suppress physical cleanup. Commit
+`bb9991f` splits those responsibilities. Same-runtime immutable cleanup now
+always drains in effect-channel FIFO order, while connection flags and searching
+status change only if Coordinator ownership is still idle. Replacement media,
+transport leases, and status remain identity-gated and untouched.
+
+| Review-remediation check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Focused JVM | `bb9991f` | PASS | 57 tests across the Coordinator and KUM-35 suites; 0 failures/errors/skipped |
+| Full JVM gate | `bb9991f` | PASS | 291 tests across 44 suites; 0 failures/errors/skipped |
+| Lint | `bb9991f` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `bb9991f` | PASS | `assembleDebug`; SHA-256 `7F5AB277289F5CC2356B8A12B1E6E125CD33AC555816E996DD7E93AF4C130076` |
+| Android test APK | `bb9991f` | PASS | `assembleDebugAndroidTest`; SHA-256 `E9BC26E85C66D5340751E537B6B815DA1950770C53555DF4854A1AD4557D14FB` |
+| Active-disconnect instrumentation | `bb9991f` | PASS | 2/2 on each of three API 36 emulators; 6/6 focused and 6/6 again in the full matrix |
+| Rasen strict validation | `bb9991f` | PASS | 1/1; 4/4 artifacts complete |
+
 The first Gradle invocation in this checkout lacked `ANDROID_HOME` and stopped
 before dependency resolution. The first compiled focused run then exposed one
 non-canonical UUID in the new test fixture and three old assertions that still
@@ -570,11 +594,11 @@ the final focused, full, lint, build, and emulator gates above are green.
 - Emulator: 36.6.11; API 36 AOSP ATD x86_64
 - Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
 - Focused active-disconnect run:
-  `build/emulator-results/20260720-103514-active-disconnect` - PASS
-- Full matrix: `build/emulator-results/20260720-103525-all` - PASS
-- Evidence archive: `build/emulator-evidence/20260720-103623.zip`
+  `build/emulator-results/20260720-105809-active-disconnect` - PASS
+- Full matrix: `build/emulator-results/20260720-105813-all` - PASS
+- Evidence archive: `build/emulator-evidence/20260720-105850.zip`
 - Archive SHA-256:
-  `144778F1956B19B26DAD409EB5C354CB03E152179B704B6DECD6AFD3A2F42075`
+  `A19A1A75E4142390BD4258CA8E5B3796D954A2A9C7996CD7D99A6103747553A8`
 
 Every node proved exact explicit-attempt release, retained runtime/discovery/
 audio owners, full-Stop action after returning to discovery, and unchanged
@@ -592,12 +616,14 @@ ATD screenshots are black on visual inspection and remain
 
 ## KUM-35 review and delivery
 
-The implementation is fixed at `0dcf63d`. Draft PR #13 is open and Linear
-KUM-35 is In Review with delivery evidence comment
-`f0da70b3-2085-4c97-9587-d8746772d1dc`. Exact-Head CI, fixed-SHA read-only
-architecture review, any in-scope remediation, merge commit, exact-main CI,
-and Linear completion remain pending. KUM-36 cannot start until those gates
-close.
+The implementation source is `0dcf63d`; first-review remediation is fixed at
+`bb9991f`. Draft PR #13 is open and Linear KUM-35 is In Review with delivery
+evidence comment `f0da70b3-2085-4c97-9587-d8746772d1dc`. Initial Draft Head
+`ebaf9a0` passed exact-Head CI `29713126973`; its fixed-SHA read-only review was
+`REQUEST CHANGES`, P0=0/P1=1. The P1 is remediated and all local automated gates
+above are green. Final delivery Head CI, fixed-SHA re-review, merge commit,
+exact-main CI, and Linear completion remain pending. KUM-36 cannot start until
+those gates close.
 
 ## Physical acceptance queue
 
@@ -635,8 +661,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-34 architecture review | APPROVED at `083585a`, P0=0/P1=0 after initial P1=4 and second P1=1 remediation rounds |
 | KUM-34 may move to Done | YES - merged as `8dcb3f6`, exact-main CI `29711575580` passed, Linear Done |
 | KUM-35 may start | YES - active on `feat/kum-35-active-disconnect-stay-online` from `8dcb3f6` |
-| KUM-35 implementation/automated gate | PASS at `0dcf63d`; 290 JVM tests and emulator matrix `20260720-103525-all` passed |
-| KUM-35 architecture review | PENDING - fixed-SHA review begins only after Draft PR delivery and exact-Head CI |
+| KUM-35 implementation/automated gate | PASS after review remediation `bb9991f`; 291 JVM tests and emulator matrix `20260720-105813-all` passed |
+| KUM-35 architecture review | REQUEST CHANGES at `ebaf9a0`, P0=0/P1=1; remediation `bb9991f` complete, fixed-SHA re-review pending |
 | KUM-35 may move to Done | NO - Draft PR, exact-Head CI, APPROVED review with P0=0/P1=0, merge, exact-main CI, and Linear completion remain |
 | Sprint 4 may close | NO - KUM-35 is In Progress; KUM-36 remains Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
