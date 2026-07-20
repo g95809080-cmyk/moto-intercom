@@ -5,7 +5,7 @@ import java.util.concurrent.TimeoutException
 
 internal class WifiDirectCloseSequence(
     private val cancelConnect: ((() -> Unit) -> Unit),
-    private val removeGroup: ((() -> Unit) -> Unit),
+    private val removeGroup: (complete: () -> Unit, isActive: () -> Boolean) -> Unit,
     private val clearServiceRequests: ((() -> Unit) -> Unit),
     private val clearLocalServices: ((() -> Unit) -> Unit),
     private val closeChannel: () -> Unit,
@@ -21,10 +21,17 @@ internal class WifiDirectCloseSequence(
     }
 
     fun start() {
-        runStep("cancelConnect", cancelConnect) {
+        runStep("cancelConnect", { complete, _ -> cancelConnect(complete) }) {
             runStep("removeGroup", removeGroup) {
-                runStep("clearServiceRequests", clearServiceRequests) {
-                    runStep("clearLocalServices", clearLocalServices, ::complete)
+                runStep(
+                    "clearServiceRequests",
+                    { complete, _ -> clearServiceRequests(complete) }
+                ) {
+                    runStep(
+                        "clearLocalServices",
+                        { complete, _ -> clearLocalServices(complete) },
+                        ::complete
+                    )
                 }
             }
         }
@@ -32,7 +39,7 @@ internal class WifiDirectCloseSequence(
 
     private fun runStep(
         label: String,
-        action: ((() -> Unit) -> Unit),
+        action: (complete: () -> Unit, isActive: () -> Boolean) -> Unit,
         next: () -> Unit
     ) {
         val advanced = AtomicBoolean(false)
@@ -49,7 +56,7 @@ internal class WifiDirectCloseSequence(
         }
         try {
             postDelayed(timeout, stepTimeoutMillis)
-            action { advance(null) }
+            action({ advance(null) }) { !advanced.get() }
         } catch (failure: Throwable) {
             advance(failure)
         }

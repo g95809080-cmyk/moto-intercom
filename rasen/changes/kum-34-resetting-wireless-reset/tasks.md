@@ -33,4 +33,6 @@
   - [x] Add bounded close-step watchdogs and deterministic never-callback coverage for every required Wi-Fi Direct action.
   - [x] Coalesce cleanup-time attempt/reset replacements, preserve immutable deadlines, rearm active recovery schedules, and cover exact adapter rebuild/reset completion.
   - [x] Re-run 284 JVM tests, lint/build/test-APK gates, focused reset instrumentation, and the full three-emulator matrix after remediation.
+  - [x] Validate the second review P1 for a `removeGroup` BUSY retry outliving the close-step watchdog.
+  - [x] Bind every delayed `removeGroup` retry to the owning step-active gate and add deterministic timeout/retry race coverage.
 - [ ] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-34 Done, and only then start KUM-35.

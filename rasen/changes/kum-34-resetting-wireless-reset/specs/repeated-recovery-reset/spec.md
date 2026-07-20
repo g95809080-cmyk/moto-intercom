@@ -64,6 +64,10 @@ While product state is `RESETTING`, Service SHALL invalidate old runtime callbac
 - **WHEN** `cancelConnect`, `removeGroup`, `clearServiceRequests`, or `clearLocalServices` never invokes its Android callback
 - **THEN** the bounded step watchdog records a timeout, advances exactly once, ignores any later callback, and still reaches channel close and discovery rebuild
 
+#### Scenario: Delayed removeGroup retry outlives its close step
+- **WHEN** `removeGroup` reports BUSY and its delayed retry becomes runnable after the close-step watchdog has already advanced
+- **THEN** the retry fails its owning step-activity gate and cannot call the old manager or channel after discovery rebuild
+
 #### Scenario: LAN and delayed work are retired before rebuild
 - **WHEN** reset begins
 - **THEN** old LAN server, NSD registration/discovery, UDP, targeted Socket, signaling sessions, attempt deadlines, milestones, and delayed callbacks are stopped or invalidated before fresh discovery ownership is installed

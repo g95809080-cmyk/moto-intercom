@@ -126,7 +126,7 @@ class RecoveryResetInstrumentationTest {
 
         WifiDirectCloseSequence(
             cancelConnect = action("cancelConnect"),
-            removeGroup = action("removeGroup"),
+            removeGroup = { complete, _ -> action("removeGroup")(complete) },
             clearServiceRequests = action("clearServiceRequests"),
             clearLocalServices = action("clearLocalServices"),
             closeChannel = { calls += "close" },

@@ -446,8 +446,14 @@ internal class WifiDirectTunnel(
                     onComplete = complete
                 )
             },
-            removeGroup = { complete ->
-                removeGroupForClose(m, c, attempt = 1, onComplete = complete)
+            removeGroup = { complete, isActive ->
+                removeGroupForClose(
+                    m = m,
+                    c = c,
+                    attempt = 1,
+                    isActive = isActive,
+                    onComplete = complete
+                )
             },
             clearServiceRequests = { complete ->
                 runCloseCleanupAction(
@@ -475,16 +481,20 @@ internal class WifiDirectTunnel(
         m: WifiP2pManager,
         c: WifiP2pManager.Channel,
         attempt: Int,
+        isActive: () -> Boolean,
         onComplete: () -> Unit
     ) {
+        if (!isActive()) return
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
+                    if (!isActive()) return
                     Log.d(TAG, "removeGroup success during close")
                     onComplete()
                 }
 
                 override fun onFailure(reason: Int) {
+                    if (!isActive()) return
                     Log.w(TAG, "removeGroup failure during close: ${reasonText(reason)}")
                     if (reason == WifiP2pManager.BUSY && attempt < REMOVE_GROUP_BUSY_RETRY_COUNT) {
                         Log.w(
@@ -493,7 +503,15 @@ internal class WifiDirectTunnel(
                                 "attempt=${attempt + 1}/$REMOVE_GROUP_BUSY_RETRY_COUNT"
                         )
                         mainHandler.postDelayed(
-                            { removeGroupForClose(m, c, attempt + 1, onComplete) },
+                            {
+                                removeGroupForClose(
+                                    m = m,
+                                    c = c,
+                                    attempt = attempt + 1,
+                                    isActive = isActive,
+                                    onComplete = onComplete
+                                )
+                            },
                             BUSY_RETRY_DELAY_MS
                         )
                     } else {

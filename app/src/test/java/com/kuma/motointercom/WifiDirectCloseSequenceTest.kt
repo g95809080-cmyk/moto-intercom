@@ -19,7 +19,7 @@ class WifiDirectCloseSequenceTest {
 
         WifiDirectCloseSequence(
             cancelConnect = action("cancelConnect"),
-            removeGroup = action("removeGroup"),
+            removeGroup = { complete, _ -> action("removeGroup")(complete) },
             clearServiceRequests = action("clearServiceRequests"),
             clearLocalServices = action("clearLocalServices"),
             closeChannel = { calls += "close" },
@@ -71,7 +71,7 @@ class WifiDirectCloseSequenceTest {
                 duplicateCancel = complete
                 complete()
             },
-            removeGroup = {
+            removeGroup = { _, _ ->
                 calls += "removeGroup"
                 throw IllegalStateException("manager unavailable")
             },
@@ -127,7 +127,7 @@ class WifiDirectCloseSequenceTest {
 
             WifiDirectCloseSequence(
                 cancelConnect = actions[0],
-                removeGroup = actions[1],
+                removeGroup = { complete, _ -> actions[1](complete) },
                 clearServiceRequests = actions[2],
                 clearLocalServices = actions[3],
                 closeChannel = { calls += "close" },
@@ -143,6 +143,38 @@ class WifiDirectCloseSequenceTest {
             assertEquals(1, errors.size)
             assertTrue(errors.single().message.orEmpty().contains(labels[stalledIndex]))
         }
+    }
+
+    @Test
+    fun removeGroupRetryBecomesInactiveAfterStepTimeout() {
+        val calls = mutableListOf<String>()
+        val scheduler = TestScheduler()
+
+        WifiDirectCloseSequence(
+            cancelConnect = { it() },
+            removeGroup = { complete, isActive ->
+                calls += "removeGroup"
+                scheduler.post(
+                    Runnable {
+                        if (isActive()) {
+                            calls += "removeGroupRetry"
+                            complete()
+                        }
+                    },
+                    2L
+                )
+            },
+            clearServiceRequests = { it() },
+            clearLocalServices = { it() },
+            closeChannel = { calls += "close" },
+            postDelayed = scheduler::post,
+            removeCallbacks = scheduler::remove,
+            stepTimeoutMillis = 1L
+        ).start()
+
+        scheduler.runAll()
+
+        assertEquals(listOf("removeGroup", "close"), calls)
     }
 
     private class TestScheduler {
