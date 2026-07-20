@@ -8,7 +8,7 @@
 
 - [x] 2.1 Add Coordinator tests for connected local disconnect ordering, send failure, duplicate/queued loss, and exact return to `DISCOVERING` without recovery.
 - [x] 2.2 Add Coordinator tests for connected and recovering peer `DISCONNECT`, wrong-owner/stale rejection, no recovery failure increment, and unchanged unexpected-loss recovery.
-- [x] 2.3 Add pure Service gate/seam tests for exact media/transport release, stale replacement rejection, retained runtime/discovery/audio owners, and full-stop-only teardown.
+- [x] 2.3 Add pure Service gate/seam tests for exact media/transport release, delayed old cleanup with replacement-state protection, retained runtime/discovery/audio owners, and full-stop-only teardown.
 - [x] 2.4 Add UI action/label and state-machine tests distinguishing disconnect, Stop, remote disconnect, and unexpected loss.
 
 ## 3. Coordinator, Service, And UI Implementation

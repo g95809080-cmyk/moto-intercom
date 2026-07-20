@@ -23,7 +23,7 @@ class Kum35ActiveDisconnectTest {
     )
 
     @Test
-    fun exactReleaseGateRejectsReplacementOrResidualCoordinatorOwnership() {
+    fun releaseFinalizationGateRejectsReplacementOrResidualCoordinatorOwnership() {
         val effect = SessionEffect.ReleaseActiveSessionAndContinueDiscovery(attempt)
         val channelId = ControlChannelId.parse("c1000000-0000-4000-8000-000000000035")
         val wireKey = WireRequestKey(
@@ -55,7 +55,7 @@ class Kum35ActiveDisconnectTest {
         )
 
         assertTrue(
-            canExecuteActiveSessionReleaseEffect(
+            canFinalizeActiveSessionReleaseEffect(
                 effect,
                 IntercomState.Discovering(runtime),
                 currentAttempt = null,
@@ -64,7 +64,7 @@ class Kum35ActiveDisconnectTest {
             )
         )
         assertFalse(
-            canExecuteActiveSessionReleaseEffect(
+            canFinalizeActiveSessionReleaseEffect(
                 effect,
                 IntercomState.Connecting(replacement, peer),
                 replacement,
@@ -73,7 +73,7 @@ class Kum35ActiveDisconnectTest {
             )
         )
         assertFalse(
-            canExecuteActiveSessionReleaseEffect(
+            canFinalizeActiveSessionReleaseEffect(
                 effect,
                 IntercomState.Discovering(runtime),
                 attempt,
@@ -82,7 +82,7 @@ class Kum35ActiveDisconnectTest {
             )
         )
         assertFalse(
-            canExecuteActiveSessionReleaseEffect(
+            canFinalizeActiveSessionReleaseEffect(
                 effect,
                 IntercomState.Discovering(runtime),
                 currentAttempt = null,
@@ -91,7 +91,7 @@ class Kum35ActiveDisconnectTest {
             )
         )
         assertFalse(
-            canExecuteActiveSessionReleaseEffect(
+            canFinalizeActiveSessionReleaseEffect(
                 effect,
                 IntercomState.Discovering(runtime),
                 currentAttempt = null,
@@ -99,6 +99,38 @@ class Kum35ActiveDisconnectTest {
                 pendingInbound = pending
             )
         )
+    }
+
+    @Test
+    fun oldReleaseStillCleansExactResourcesWithoutMutatingReplacementState() {
+        val calls = mutableListOf<String>()
+        var replacementMediaConnected = true
+        var replacementStatus = "connecting"
+
+        ActiveSessionResourceController(
+            attempt = attempt,
+            cancelAttemptSchedules = { calls += "cancel:${it.id.value}" },
+            closeSignalingAndMedia = { calls += "media:${it.id.value}" },
+            releaseLanAttempt = { calls += "lan:${it.id.value}" },
+            releaseWifiDirectAttempt = { calls += "wifi:${it.id.value}" },
+            clearConnectionState = {
+                replacementMediaConnected = false
+                replacementStatus = "cleared"
+            },
+            continueDiscovery = { replacementStatus = "searching" }
+        ).releaseAndContinueDiscovery(finalizeDiscovery = false)
+
+        assertEquals(
+            listOf(
+                "cancel:${attempt.id.value}",
+                "media:${attempt.id.value}",
+                "lan:${attempt.id.value}",
+                "wifi:${attempt.id.value}"
+            ),
+            calls
+        )
+        assertTrue(replacementMediaConnected)
+        assertEquals("connecting", replacementStatus)
     }
 
     @Test

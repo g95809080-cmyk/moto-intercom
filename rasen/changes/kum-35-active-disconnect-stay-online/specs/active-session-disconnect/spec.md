@@ -39,7 +39,7 @@ Intentional disconnect SHALL release only exact attempt signaling, WebRTC, media
 
 #### Scenario: Stale release follows replacement
 - **WHEN** an old release effect runs after a new attempt or active/pending channel ownership exists
-- **THEN** Service rejects the effect and cannot close replacement media, transport leases, discovery, or audio resources
+- **THEN** Service completes the old attempt's immutable-identity cleanup but skips connection-state/searching finalization, so replacement media, transport leases, status, discovery, and audio resources remain unchanged
 
 #### Scenario: No remote media after disconnect
 - **WHEN** intentional disconnect completes

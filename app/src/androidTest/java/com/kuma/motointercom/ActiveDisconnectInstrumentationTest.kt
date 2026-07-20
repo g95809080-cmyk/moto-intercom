@@ -28,7 +28,7 @@ class ActiveDisconnectInstrumentationTest {
             SessionEffect.ReleaseActiveSessionAndContinueDiscovery
         assertEquals(connecting.attempt, release.attempt)
         assertTrue(
-            canExecuteActiveSessionReleaseEffect(
+            canFinalizeActiveSessionReleaseEffect(
                 release,
                 requireNotNull(decision.state),
                 coordinator.currentAttempt,

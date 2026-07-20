@@ -10,11 +10,12 @@ internal class ActiveSessionResourceController(
     private val continueDiscovery: (RuntimeSessionId) -> Unit,
     private val onError: (Throwable) -> Unit = {}
 ) {
-    fun releaseAndContinueDiscovery() {
+    fun releaseAndContinueDiscovery(finalizeDiscovery: Boolean = true) {
         runSafely { cancelAttemptSchedules(attempt) }
         runSafely { closeSignalingAndMedia(attempt) }
         runSafely { releaseLanAttempt(attempt) }
         runSafely { releaseWifiDirectAttempt(attempt) }
+        if (!finalizeDiscovery) return
         runSafely(clearConnectionState)
         runSafely { continueDiscovery(attempt.runtimeSessionId) }
     }

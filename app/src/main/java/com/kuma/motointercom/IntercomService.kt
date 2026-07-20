@@ -837,17 +837,14 @@ class IntercomService : Service() {
         effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery
     ) {
         if (!running || activeRuntimeSessionId != effect.attempt.runtimeSessionId) return
-        if (
-            !canExecuteActiveSessionReleaseEffect(
-                effect,
-                orchestrator.state.value,
-                orchestrator.currentAttempt,
-                orchestrator.activeControlAttempt,
-                orchestrator.pendingInboundRequest
-            )
-        ) {
-            return
-        }
+        // Effects are FIFO: drain old exact resources before any later transport open.
+        val finalizeDiscovery = canFinalizeActiveSessionReleaseEffect(
+            effect,
+            orchestrator.state.value,
+            orchestrator.currentAttempt,
+            orchestrator.activeControlAttempt,
+            orchestrator.pendingInboundRequest
+        )
 
         ActiveSessionResourceController(
             attempt = effect.attempt,
@@ -870,7 +867,7 @@ class IntercomService : Service() {
                 }
             },
             onError = ::handleError
-        ).releaseAndContinueDiscovery()
+        ).releaseAndContinueDiscovery(finalizeDiscovery)
     }
 
     private fun closeSignalingAndMediaForAttempt(attempt: ConnectionAttempt) {
@@ -2107,7 +2104,7 @@ internal fun canExecuteAbortAttemptEffect(
     pendingInbound == null &&
     terminalOutcome != null
 
-internal fun canExecuteActiveSessionReleaseEffect(
+internal fun canFinalizeActiveSessionReleaseEffect(
     effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery,
     currentState: IntercomState,
     currentAttempt: ConnectionAttempt?,
