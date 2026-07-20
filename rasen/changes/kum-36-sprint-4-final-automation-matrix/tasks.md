@@ -27,6 +27,6 @@
 
 ## 5. Review And Delivery
 
-- [ ] 5.1 Commit atomically, push, open one KUM-36 Draft PR, and synchronize Linear while KUM-9 remains In Progress.
-- [ ] 5.2 Complete fixed Base/Head read-only architecture review and remediate all in-scope P0/P1 findings until APPROVED with P0=0 and P1=0.
+- [x] 5.1 Commit atomically, push, open one KUM-36 Draft PR, and synchronize Linear while KUM-9 remains In Progress.
+- [x] 5.2 Complete fixed Base/Head read-only architecture review and remediate all in-scope P0/P1 findings until APPROVED with P0=0 and P1=0.
 - [ ] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-36 and KUM-9 Done, and only then continue the next approved work item.
