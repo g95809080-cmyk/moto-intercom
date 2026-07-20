@@ -1,6 +1,6 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-35 REVIEW REMEDIATION GATE PASSED - FIXED-SHA RE-REVIEW AND CI PENDING**
+Status: **KUM-35 ARCHITECTURE APPROVED - FINAL DELIVERY HEAD CI PENDING**
 
 Evidence state: 2026-07-20
 
@@ -78,6 +78,8 @@ Evidence state: 2026-07-20
 - KUM-35 initial exact-Head GitHub Actions: run `29713126973` - success
 - KUM-35 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=1
 - KUM-35 review-remediation source: `bb9991fd0bc9ec570718ee17c7e623cea47c2dc2`
+- KUM-35 approved review head: `8c3face367ba11524f04a7b49749e110cbba64c9`
+- KUM-35 architecture review: APPROVED, P0=0, P1=0
 - KUM-35 pull request: [#13](https://github.com/g95809080-cmyk/moto-intercom/pull/13) - open Draft
 - KUM-35 Rasen change: `kum-35-active-disconnect-stay-online`
 - Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34 Done; KUM-35 In Review; KUM-36 Todo
@@ -620,10 +622,10 @@ The implementation source is `0dcf63d`; first-review remediation is fixed at
 `bb9991f`. Draft PR #13 is open and Linear KUM-35 is In Review with delivery
 evidence comment `f0da70b3-2085-4c97-9587-d8746772d1dc`. Initial Draft Head
 `ebaf9a0` passed exact-Head CI `29713126973`; its fixed-SHA read-only review was
-`REQUEST CHANGES`, P0=0/P1=1. The P1 is remediated and all local automated gates
-above are green. Final delivery Head CI, fixed-SHA re-review, merge commit,
-exact-main CI, and Linear completion remain pending. KUM-36 cannot start until
-those gates close.
+`REQUEST CHANGES`, P0=0/P1=1. The P1 is remediated, all local automated gates
+above are green, and the fixed Base `8dcb3f6` / Head `8c3face` re-review is
+`APPROVED`, P0=0/P1=0. Final delivery Head CI, merge commit, exact-main CI, and
+Linear completion remain pending. KUM-36 cannot start until those gates close.
 
 ## Physical acceptance queue
 
@@ -662,9 +664,9 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-34 may move to Done | YES - merged as `8dcb3f6`, exact-main CI `29711575580` passed, Linear Done |
 | KUM-35 may start | YES - active on `feat/kum-35-active-disconnect-stay-online` from `8dcb3f6` |
 | KUM-35 implementation/automated gate | PASS after review remediation `bb9991f`; 291 JVM tests and emulator matrix `20260720-105813-all` passed |
-| KUM-35 architecture review | REQUEST CHANGES at `ebaf9a0`, P0=0/P1=1; remediation `bb9991f` complete, fixed-SHA re-review pending |
+| KUM-35 architecture review | APPROVED at `8c3face`, P0=0/P1=0 after initial `ebaf9a0` P1=1 remediation |
 | KUM-35 may move to Done | NO - Draft PR, exact-Head CI, APPROVED review with P0=0/P1=0, merge, exact-main CI, and Linear completion remain |
-| Sprint 4 may close | NO - KUM-35 is In Progress; KUM-36 remains Todo |
+| Sprint 4 may close | NO - KUM-35 is In Review; KUM-36 remains Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Residual risk
