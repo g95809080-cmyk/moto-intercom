@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "recovery-timing", "recovery-reset", "network-fault", "restart", "all")]
+    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "recovery-timing", "recovery-reset", "active-disconnect", "network-fault", "restart", "all")]
     [string]$Scenario = "all",
     [string[]]$Serials = @(),
     [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
@@ -187,6 +187,17 @@ function Run-RecoveryReset {
     }
 }
 
+function Run-ActiveDisconnect {
+    foreach ($serial in $Serials) {
+        $output = Invoke-AdbText $serial "active-disconnect" @(
+            "shell", "am", "instrument", "-w", "-r",
+            "-e", "class", "com.kuma.motointercom.ActiveDisconnectInstrumentationTest",
+            $runner
+        )
+        Assert-InstrumentationPassed $output "KUM-35 active disconnect on $serial"
+    }
+}
+
 function Run-Nsd {
     if ($Serials.Count -lt 2) { throw "NSD integration requires two emulators" }
     $server = $Serials[0]
@@ -278,6 +289,7 @@ switch ($Scenario) {
     "audio-lifecycle" { Run-AudioLifecycle }
     "recovery-timing" { Run-RecoveryTiming }
     "recovery-reset" { Run-RecoveryReset }
+    "active-disconnect" { Run-ActiveDisconnect }
     "network-fault" { Run-NetworkFault }
     "restart" { Run-Restart }
     "all" {
@@ -287,6 +299,7 @@ switch ($Scenario) {
         Run-AudioLifecycle
         Run-RecoveryTiming
         Run-RecoveryReset
+        Run-ActiveDisconnect
         Run-NetworkFault
         Run-Restart
     }

@@ -236,6 +236,10 @@ internal sealed interface SessionEffect {
         val attemptId: ConnectionAttemptId
     ) : SessionEffect
 
+    data class ReleaseActiveSessionAndContinueDiscovery(
+        val attempt: ConnectionAttempt
+    ) : SessionEffect
+
     data class RestartDiscovery(
         val runtimeSessionId: RuntimeSessionId,
         val attempt: ConnectionAttempt,
