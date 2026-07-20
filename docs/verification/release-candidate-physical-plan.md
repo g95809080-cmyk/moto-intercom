@@ -27,6 +27,7 @@ as passed by JVM, fake, emulator, or CI evidence.
 | Three-second recovery fallback | Establish A-B over each transport, interrupt B under controlled RF/OEM conditions, prove the last successful transport owns the first 3 seconds, then prove the alternate starts without target/deadline replacement and exactly one media stream wins | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Three-failure wireless reset | Force three complete same-target recovery failures on at least two OEM/Android families; prove visible `RESETTING`, ordered cancel/removeGroup/clear requests/clear services/channel close, LAN/NSD/UDP/Socket retirement, no stale callback takeover, fresh discovery rebuild, and no audio-owner duplication | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Active disconnect stays online | Establish LAN and Wi-Fi Direct sessions in both directions, disconnect locally and from the peer, and prove signaling/WebRTC/current transport close while Service, discovery, foreground notification, presence, and the hot audio platform remain online with no remote media; then issue full Stop and prove complete teardown | `DEFERRED_TO_RELEASE_CANDIDATE` |
+| Sprint 4 composite acceptance | With A paired to B and C present, execute target-locked recovery, preferred T+3 fallback, immutable T+10, three final failures and wireless reset, stale callback rejection, intentional active disconnect, full Stop, and audio recovery; prove one B media owner throughout | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Bluetooth SCO | Connect/disconnect headset before and during a session; verify route recovery and one media stream | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Microphone/speaker | Bidirectional spoken phrases, mute/cancel/disconnect, and no audio after stop | `DEFERRED_TO_RELEASE_CANDIDATE` |
 | Hardware AEC | Speaker-mode speech with echo observation on both endpoints | `DEFERRED_TO_RELEASE_CANDIDATE` |
@@ -48,6 +49,11 @@ as passed by JVM, fake, emulator, or CI evidence.
    listening confirmation.
 
 ## Release decision
+
+KUM-36 automated evidence binds the development matrix to source `c5e9808` and
+does not convert any physical row to PASS. Emulator Wi-Fi Direct/RF/OEM gaps,
+ATD black framebuffers, real audio hardware, and long-duration behavior remain
+explicit Release Candidate work.
 
 Any failed mandatory row blocks production release. Unavailable hardware remains
 `NOT_RUN`, not accepted or passed, until the user explicitly approves a revised

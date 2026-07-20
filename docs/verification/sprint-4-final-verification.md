@@ -1,13 +1,13 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-35 ARCHITECTURE APPROVED - FINAL DELIVERY HEAD CI PENDING**
+Status: **KUM-36 ARCHITECTURE APPROVED - FINAL DELIVERY HEAD CI PENDING**
 
 Evidence state: 2026-07-20
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
-- Branch: active KUM-35 branch `feat/kum-35-active-disconnect-stay-online`
+- Branch: active KUM-36 branch `feat/kum-36-sprint-4-final-automation-matrix`
 - Pull request: [#9](https://github.com/g95809080-cmyk/moto-intercom/pull/9) merged
 - Sprint 4 base: `bd35ea69955001dc175f376f58ab4e6b84d9c223`
 - Verified KUM-37 source head: `1977e7eec466aeb439f4bc3714ba855d6a11d2d9`
@@ -80,9 +80,21 @@ Evidence state: 2026-07-20
 - KUM-35 review-remediation source: `bb9991fd0bc9ec570718ee17c7e623cea47c2dc2`
 - KUM-35 approved review head: `8c3face367ba11524f04a7b49749e110cbba64c9`
 - KUM-35 architecture review: APPROVED, P0=0, P1=0
-- KUM-35 pull request: [#13](https://github.com/g95809080-cmyk/moto-intercom/pull/13) - open Draft
+- KUM-35 final PR head: `3d79be109010a4686bf739697c0a6cfd293e4515`
+- KUM-35 final PR-head GitHub Actions: run `29713924106` - success
+- KUM-35 pull request: [#13](https://github.com/g95809080-cmyk/moto-intercom/pull/13) - merged
+- KUM-35 merge commit: `178e07652b3672a6834950fdd213dd37f5389284`
+- KUM-35 exact-main GitHub Actions: run `29714210007` - success
 - KUM-35 Rasen change: `kum-35-active-disconnect-stay-online`
-- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34 Done; KUM-35 In Review; KUM-36 Todo
+- KUM-36 base: `178e07652b3672a6834950fdd213dd37f5389284`
+- KUM-36 Rasen contract head: `8fefae8d7b0e706d311da471ccfe3f1b207a81bf`
+- KUM-36 automated source head: `c5e98087830979352e3e6f72f0be1318a8a43cf1`
+- KUM-36 initial Draft delivery head: `7aea7e623194e797450d6291c05ec655abafa5ad`
+- KUM-36 pull request: [#14](https://github.com/g95809080-cmyk/moto-intercom/pull/14) - open Draft
+- KUM-36 exact-Draft-Head GitHub Actions: run `29715323009` - success
+- KUM-36 architecture review: APPROVED at `7aea7e6`, P0=0, P1=0
+- KUM-36 Rasen change: `kum-36-sprint-4-final-automation-matrix`
+- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34/KUM-35 Done; KUM-36 In Review
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -619,13 +631,104 @@ ATD screenshots are black on visual inspection and remain
 ## KUM-35 review and delivery
 
 The implementation source is `0dcf63d`; first-review remediation is fixed at
-`bb9991f`. Draft PR #13 is open and Linear KUM-35 is In Review with delivery
+`bb9991f`. PR #13 delivery evidence was synchronized while Linear KUM-35 was In Review with delivery
 evidence comment `f0da70b3-2085-4c97-9587-d8746772d1dc`. Initial Draft Head
 `ebaf9a0` passed exact-Head CI `29713126973`; its fixed-SHA read-only review was
 `REQUEST CHANGES`, P0=0/P1=1. The P1 is remediated, all local automated gates
 above are green, and the fixed Base `8dcb3f6` / Head `8c3face` re-review is
-`APPROVED`, P0=0/P1=0. Final delivery Head CI, merge commit, exact-main CI, and
-Linear completion remain pending. KUM-36 cannot start until those gates close.
+`APPROVED`, P0=0/P1=0. Final Head `3d79be1` passed CI `29713924106`; PR #13
+merged as `178e076`, exact-main CI `29714210007` passed, and Linear KUM-35 is
+Done. These gates authorized KUM-36 from that exact main revision.
+
+## KUM-36 verification boundary
+
+KUM-36 is verification-only. It adds no production source or product behavior,
+does not introduce another state/attempt/target/deadline/winner/media owner, and
+does not change protocol, persistence, pairing, permissions, signing, deployment,
+or release behavior. Its bounded acceptance matrix composes the already approved
+KUM-32 through KUM-35 behavior:
+
+- retained B target lock while non-target C responds first;
+- visible same-target recovery, preferred T+3 fallback, and immutable T+10;
+- one B media winner and stale/non-target rejection;
+- two bounded retries followed by exact third-failure `RESETTING` and stale reset
+  completion rejection;
+- intentional cancellation winning queued timeout/failure races without recovery;
+- active disconnect retaining the online runtime and full Stop remaining separate;
+- KUM-37 hot-audio callback ownership without duplicate media; and
+- synthetic PCM, shared networking, fault/recovery, restart, and resource cleanup.
+
+## KUM-36 automated evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Focused JVM | `c5e9808` | PASS | 56 tests across 10 suites; 0 failures/errors/skipped |
+| Full JVM gate | `c5e9808` | PASS | 294 tests across 45 suites; 0 failures/errors/skipped |
+| Lint | `c5e9808` | PASS | 0 Fatal, 0 Error, 34 existing warnings |
+| Debug APK | `c5e9808` | PASS | `assembleDebug`; SHA-256 `DAABF1823519B53BCC612C502825AEAF355A8A41D09E0F0621B96A760A1B9621` |
+| Android test APK | `c5e9808` | PASS | `assembleDebugAndroidTest`; SHA-256 `81FEFE332FB8C11DB53B48AB1867A17B8855EEFE2EB0546A2A4908DD947920A5` |
+| Rasen strict validation | `c5e9808` | PASS | 1/1; 4/4 artifacts; open findings 0 |
+| PowerShell compatibility | `c5e9808` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
+| Exact-Draft-Head CI | `7aea7e6` | PASS | Android CI run `29715323009` |
+
+The only pre-compiled test correction renamed one constructor argument to the
+existing `occurredAtElapsedMs` API. No production source changed. The final
+compiled focused, full, lint, build, and emulator gates above are green.
+
+## KUM-36 emulator matrix
+
+- Emulator: 36.6.11; API 36 AOSP ATD x86_64
+- Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
+- Focused Sprint 4 final run:
+  `build/emulator-results/20260720-113808-sprint4-final` - PASS, 16 successful
+  instrumentation invocations
+- Full matrix: `build/emulator-results/20260720-113835-all` - PASS, 18 successful
+  instrumentation invocations
+- Evidence archive: `build/emulator-evidence/20260720-113912.zip`
+- Archive SHA-256:
+  `126D6D113FC0CF921821EE430B3419C6C5BC3C35335546877AF4771877371795`
+
+The focused and full matrices covered the composite Sprint 4 acceptance,
+KUM-33 recovery timing, KUM-34 reset, KUM-35 active disconnect, deterministic
+synthetic PCM transfer, shared networking/NSD, bounded network fault/recovery,
+process restart, and stop/resource cleanup. Application-targeted scans for
+crash, ANR, instrumentation failure, and test failure are zero. The only broad
+system-process matches were normal ATD WebViewLoader and Latin input-method
+process exits, not MotoIntercom failures. The connected MI 6 was
+excluded through explicit emulator serials, and all three emulators were stopped.
+
+All three screenshots were individually inspected and are identical black ATD
+framebuffers. They remain `UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
+Wi-Fi Direct radio/OEM behavior, real RF, SCO, microphones/speakers, hardware
+AEC, listening quality, power, thermal, and background survival remain
+`DEFERRED_TO_RELEASE_CANDIDATE`.
+
+## KUM-36 architecture review
+
+The read-only review fixed Base `178e07652b3672a6834950fdd213dd37f5389284`
+and Head `7aea7e623194e797450d6291c05ec655abafa5ad` after exact-Head CI
+`29715323009` succeeded. The reviewer did not author the KUM-36 implementation
+and made no file, GitHub, or Linear mutations while reaching the decision.
+
+```text
+Review result: APPROVED
+P0: 0
+P1: 0
+Non-blocking: ATD black framebuffers remain a documented evidence limitation;
+              broad system logs contain unrelated WebView/input-method exits.
+Base SHA: 178e07652b3672a6834950fdd213dd37f5389284
+Head SHA: 7aea7e623194e797450d6291c05ec655abafa5ad
+KUM-36 complete: YES
+Sprint 4 close allowed after merge + exact-main CI: YES
+Next gate: Sync review metadata, pass exact final-Head CI, then merge commit.
+```
+
+The review confirmed that no production source changed; the new JVM and
+instrumentation tests directly drive the production Coordinator rather than a
+shadow product model; existing socket-level, Service cleanup, recovery/reset,
+active-disconnect, hot-audio, and source-isolation suites remain in the focused
+or full gate; `sprint4-final` aggregates without removing prior `all` scenarios;
+and every hardware-only claim remains deferred.
 
 ## Physical acceptance queue
 
@@ -665,8 +768,12 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-35 may start | YES - active on `feat/kum-35-active-disconnect-stay-online` from `8dcb3f6` |
 | KUM-35 implementation/automated gate | PASS after review remediation `bb9991f`; 291 JVM tests and emulator matrix `20260720-105813-all` passed |
 | KUM-35 architecture review | APPROVED at `8c3face`, P0=0/P1=0 after initial `ebaf9a0` P1=1 remediation |
-| KUM-35 may move to Done | NO - Draft PR, exact-Head CI, APPROVED review with P0=0/P1=0, merge, exact-main CI, and Linear completion remain |
-| Sprint 4 may close | NO - KUM-35 is In Review; KUM-36 remains Todo |
+| KUM-35 may move to Done | YES - merged as `178e076`, exact-main CI `29714210007` passed, Linear Done |
+| KUM-36 may start | YES - active from exact KUM-35 main merge `178e076` |
+| KUM-36 automated/emulator gate | PASS at `c5e9808`; 294 JVM tests and focused/full three-emulator matrices passed |
+| KUM-36 architecture review | APPROVED at `7aea7e6`, P0=0/P1=0 |
+| KUM-36 may move to Done | NO - final evidence-only Head CI, Ready transition, merge commit, exact-main CI, and Linear completion remain |
+| Sprint 4 may close | NO - KUM-36 is In Progress and delivery gates remain |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Residual risk
