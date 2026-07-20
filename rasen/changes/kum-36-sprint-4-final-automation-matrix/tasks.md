@@ -15,15 +15,15 @@
 
 - [x] 3.1 Add androidTest-only KUM-36 acceptance evidence for target-locked third-node recovery, T+3 fallback/only-winner, three-failure reset, stale completion, and cancellation.
 - [x] 3.2 Add a `sprint4-final` emulator scenario with separately named results and include it in `all` without weakening existing scenarios.
-- [ ] 3.3 Verify synthetic PCM metrics/recovery/stop, shared networking, fault/recovery, process restart, and test-only source isolation.
-- [ ] 3.4 Keep emulator Wi-Fi Direct/RF/OEM limitations explicit and every hardware-only row `DEFERRED_TO_RELEASE_CANDIDATE`.
+- [x] 3.3 Verify synthetic PCM metrics/recovery/stop, shared networking, fault/recovery, process restart, and test-only source isolation.
+- [x] 3.4 Keep emulator Wi-Fi Direct/RF/OEM limitations explicit and every hardware-only row `DEFERRED_TO_RELEASE_CANDIDATE`.
 
 ## 4. Full Verification And Evidence
 
 - [x] 4.1 Run focused JVM and strict Rasen validation.
 - [x] 4.2 Run full `testDebugUnitTest`, `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest`; record totals and APK hashes.
-- [ ] 4.3 Run focused `sprint4-final` and full three-emulator matrices, scan all evidence, inspect screenshots, and hash the archive.
-- [ ] 4.4 Update Sprint 4 and RC verification documents with exact source, test, emulator, limitation, and deferred-physical evidence.
+- [x] 4.3 Run focused `sprint4-final` and full three-emulator matrices, scan all evidence, inspect screenshots, and hash the archive.
+- [x] 4.4 Update Sprint 4 and RC verification documents with exact source, test, emulator, limitation, and deferred-physical evidence.
 
 ## 5. Review And Delivery
 
