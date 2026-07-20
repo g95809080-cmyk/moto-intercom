@@ -1469,10 +1469,10 @@ internal class SignalingControlCoordinator(
             return removeChannelAndContinueOrTerminate(current, context, event.channelId)
         }
         remember(context.wireRequestKey, AttemptOutcome.DISCONNECTED, null)
-        return finishAttemptImmediately(
+        return finishActiveSessionDisconnect(
             current,
             context,
-            logicalOutcome = ConnectionAttemptTerminalOutcome.DISCONNECTED
+            logicalOutcome = ConnectionAttemptTerminalOutcome.CANCELED
         )
     }
 
@@ -1492,10 +1492,7 @@ internal class SignalingControlCoordinator(
             return accepted(
                 state = IntercomState.Discovering(attempt.runtimeSessionId),
                 effects = listOf(
-                    SessionEffect.AbortAttemptAndResumeDiscovery(
-                        attempt.runtimeSessionId,
-                        attempt.id
-                    )
+                    SessionEffect.ReleaseActiveSessionAndContinueDiscovery(attempt)
                 )
             )
         }
@@ -1514,7 +1511,7 @@ internal class SignalingControlCoordinator(
             ?.takeIf { it in context.channelIds && it in channels }
         if (owner == null) {
             remember(context.wireRequestKey, AttemptOutcome.CANCELED, null)
-            return finishAttemptImmediately(
+            return finishActiveSessionDisconnect(
                 current,
                 context,
                 logicalOutcome = ConnectionAttemptTerminalOutcome.CANCELED
@@ -2012,6 +2009,14 @@ internal class SignalingControlCoordinator(
         prefixEffects: List<SessionEffect> = emptyList(),
         logicalOutcome: ConnectionAttemptTerminalOutcome? = null
     ): SignalingControlDecision {
+        if (context.terminalOutcome == AttemptOutcome.DISCONNECTED) {
+            return finishActiveSessionDisconnect(
+                current,
+                context,
+                prefixEffects,
+                ConnectionAttemptTerminalOutcome.CANCELED
+            )
+        }
         val terminalOutcome = logicalOutcome ?: context.terminalOutcome?.toLogicalTerminalOutcome()
             ?: ConnectionAttemptTerminalOutcome.FAILED
         if (
@@ -2530,6 +2535,37 @@ internal class SignalingControlCoordinator(
                 emptySet()
             },
             fallbackMilestone = fallbackMilestone
+        )
+    }
+
+    private fun finishActiveSessionDisconnect(
+        current: IntercomState,
+        context: AttemptChannelSet,
+        prefixEffects: List<SessionEffect> = emptyList(),
+        logicalOutcome: ConnectionAttemptTerminalOutcome =
+            ConnectionAttemptTerminalOutcome.CANCELED
+    ): SignalingControlDecision {
+        if (current.connectionAttemptOrNull() != context.attempt) return rejected()
+        if (terminalOutcome(context.attempt.id) == null) {
+            recordTerminal(context.attempt, logicalOutcome)
+        }
+        rememberDisconnectedIfAccepted(context)
+        val channelIds = context.channelIds
+        channelIds.forEach(channels::remove)
+        if (active?.attempt == context.attempt) active = null
+        clearOwnedAttempt(context.attempt)
+        val closeEffects = channelIds.map {
+            closeEffect(
+                context.attempt.runtimeSessionId,
+                context.attempt.id,
+                it,
+                context.attempt.targetLock
+            )
+        }
+        return accepted(
+            state = IntercomState.Discovering(context.attempt.runtimeSessionId),
+            effects = prefixEffects + closeEffects +
+                SessionEffect.ReleaseActiveSessionAndContinueDiscovery(context.attempt)
         )
     }
 

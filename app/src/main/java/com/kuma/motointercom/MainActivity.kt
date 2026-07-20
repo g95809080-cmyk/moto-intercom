@@ -57,16 +57,20 @@ internal class MainActivity : Activity(), IntercomService.Listener {
             onToggleIntercom = {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastToggleElapsed < TOGGLE_DEBOUNCE_MS) return@MainScreen
-                when (intercomState) {
-                    IntercomState.Offline -> {
+                when (primaryIntercomAction(intercomState)) {
+                    PrimaryIntercomAction.START -> {
                         lastToggleElapsed = now
                         startIntercom()
                     }
-                    is IntercomState.Stopping -> Unit
-                    else -> {
+                    PrimaryIntercomAction.DISCONNECT_CURRENT -> {
+                        lastToggleElapsed = now
+                        intercomService?.requestDisconnectCurrent()
+                    }
+                    PrimaryIntercomAction.STOP_RUNTIME -> {
                         lastToggleElapsed = now
                         stopIntercom()
                     }
+                    PrimaryIntercomAction.NONE -> Unit
                 }
             },
             onConnectPresence = { presence ->

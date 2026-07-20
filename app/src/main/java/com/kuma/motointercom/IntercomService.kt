@@ -326,6 +326,22 @@ class IntercomService : Service() {
         }
     }
 
+    fun requestDisconnectCurrent() {
+        mainHandler.post {
+            if (!running) return@post
+            val runtimeSessionId = activeRuntimeSessionId ?: return@post
+            if (primaryIntercomAction(orchestrator.state.value) !=
+                PrimaryIntercomAction.DISCONNECT_CURRENT
+            ) {
+                return@post
+            }
+            val attempt = orchestrator.currentAttempt
+                ?.takeIf { it.runtimeSessionId == runtimeSessionId }
+                ?: return@post
+            orchestrator.dispatch(SessionEvent.DisconnectRequested(runtimeSessionId, attempt.id))
+        }
+    }
+
     internal fun connectToPresence(selectedPresence: RiderPresence) {
         mainHandler.post {
             if (activeSession == null) return@post
@@ -817,6 +833,67 @@ class IntercomService : Service() {
         runCatching { manager?.close() }.onFailure(::handleError)
     }
 
+    private fun releaseActiveSessionAndContinueDiscovery(
+        effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery
+    ) {
+        if (!running || activeRuntimeSessionId != effect.attempt.runtimeSessionId) return
+        if (
+            !canExecuteActiveSessionReleaseEffect(
+                effect,
+                orchestrator.state.value,
+                orchestrator.currentAttempt,
+                orchestrator.activeControlAttempt,
+                orchestrator.pendingInboundRequest
+            )
+        ) {
+            return
+        }
+
+        ActiveSessionResourceController(
+            attempt = effect.attempt,
+            cancelAttemptSchedules = { attempt ->
+                attemptDeadlineScheduler.cancel(attempt)
+                attemptMilestoneScheduler.cancel(attempt)
+            },
+            closeSignalingAndMedia = ::closeSignalingAndMediaForAttempt,
+            releaseLanAttempt = { lanDiscovery?.retainPassiveIngress(it) },
+            releaseWifiDirectAttempt = { wifiTunnel?.retainPassiveIngress(it) },
+            clearConnectionState = {
+                physicalLinkReady = false
+                mediaConnected = false
+                remoteRiderName = null
+                listener?.onRemoteRiderIdentified("")
+            },
+            continueDiscovery = { runtimeSessionId ->
+                if (running && activeRuntimeSessionId == runtimeSessionId) {
+                    publishStatus(SEARCHING_STATUS)
+                }
+            },
+            onError = ::handleError
+        ).releaseAndContinueDiscovery()
+    }
+
+    private fun closeSignalingAndMediaForAttempt(attempt: ConnectionAttempt) {
+        signalingSessions.values
+            .filter {
+                it.matchesControlHandle(
+                    attempt.runtimeSessionId,
+                    attempt.id,
+                    it.channel.channelId,
+                    attempt.targetLock
+                )
+            }
+            .toList()
+            .forEach(::closeControlChannel)
+
+        if (activeMediaContext?.attempt?.hasSameImmutableIdentity(attempt) == true) {
+            closeActiveMediaContext()
+        }
+        pendingMediaMessages.keys.removeAll {
+            it.attempt.hasSameImmutableIdentity(attempt)
+        }
+    }
+
     private fun startWebRtc(effect: SessionEffect.StartWebRtc) {
         val token = activeSession ?: return
         val controlAttempt = orchestrator.activeControlAttempt
@@ -1255,6 +1332,8 @@ class IntercomService : Service() {
                     abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
                 }
             }
+            is SessionEffect.ReleaseActiveSessionAndContinueDiscovery ->
+                releaseActiveSessionAndContinueDiscovery(effect)
             is SessionEffect.RestartDiscovery -> {
                 if (
                     canExecuteRestartDiscoveryEffect(
@@ -2027,6 +2106,17 @@ internal fun canExecuteAbortAttemptEffect(
     activeAttempt == null &&
     pendingInbound == null &&
     terminalOutcome != null
+
+internal fun canExecuteActiveSessionReleaseEffect(
+    effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = currentState == IntercomState.Discovering(effect.attempt.runtimeSessionId) &&
+    currentAttempt == null &&
+    activeAttempt == null &&
+    pendingInbound == null
 
 internal fun canDeliverRuntimeAudioCallback(
     running: Boolean,

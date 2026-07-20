@@ -68,11 +68,7 @@ internal class MainScreen(
             is IntercomState.Stopping -> false
             else -> true
         }
-        actionButton.text = when (state) {
-            IntercomState.Offline -> "启动摩声"
-            is IntercomState.Stopping -> "停止中..."
-            else -> "结束对讲"
-        }
+        actionButton.text = primaryIntercomActionLabel(state)
         if (state is IntercomState.Connected) setRemoteRider(state.peer.nickname)
         statusText.setTextColor(statusColor(state))
         statusDetailText.text = intercomStatusDetail(state)
