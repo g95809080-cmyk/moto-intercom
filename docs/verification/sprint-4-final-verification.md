@@ -74,6 +74,7 @@ Evidence state: 2026-07-20
 - KUM-34 exact-main GitHub Actions: run `29711575580` - success
 - KUM-35 base: `8dcb3f640e3c5b622da98bc1af68720502427ac8`
 - KUM-35 implementation source: `0dcf63da00adee38911b9bd944d57fc74bdd05cf`
+- KUM-35 pull request: [#13](https://github.com/g95809080-cmyk/moto-intercom/pull/13) - open Draft
 - KUM-35 Rasen change: `kum-35-active-disconnect-stay-online`
 - Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34 Done; KUM-35 In Progress; KUM-36 Todo
 
@@ -591,10 +592,12 @@ ATD screenshots are black on visual inspection and remain
 
 ## KUM-35 review and delivery
 
-The implementation is fixed at `0dcf63d`. Draft PR, exact-Head CI, fixed-SHA
-read-only architecture review, any in-scope remediation, merge commit,
-exact-main CI, and Linear completion remain pending. KUM-36 cannot start until
-those gates close.
+The implementation is fixed at `0dcf63d`. Draft PR #13 is open and Linear
+KUM-35 is In Review with delivery evidence comment
+`f0da70b3-2085-4c97-9587-d8746772d1dc`. Exact-Head CI, fixed-SHA read-only
+architecture review, any in-scope remediation, merge commit, exact-main CI,
+and Linear completion remain pending. KUM-36 cannot start until those gates
+close.
 
 ## Physical acceptance queue
 
