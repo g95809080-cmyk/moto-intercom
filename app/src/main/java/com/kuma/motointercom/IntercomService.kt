@@ -101,6 +101,11 @@ class IntercomService : Service() {
     private val binder = LocalBinder()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = SessionGeneration()
+    private val recoveryCleanupCoordinator = RecoveryCleanupCoordinator(
+        postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
+        removeCallbacks = mainHandler::removeCallbacks,
+        restart = ::restartAfterRecoveryCleanup
+    )
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val presenceAggregator = PresenceAggregator(SystemClock::elapsedRealtime)
 
@@ -199,7 +204,6 @@ class IntercomService : Service() {
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var localDeviceId = ""
-    private var recoveryGeneration = 0
     private var presenceExpiryGeneration = 0
 
     override fun onCreate() {
@@ -973,16 +977,38 @@ class IntercomService : Service() {
 
     private fun abortResourcesAndResumeDiscovery(
         runtimeSessionId: RuntimeSessionId,
-        nextAttempt: ConnectionAttempt?
+        nextAttempt: ConnectionAttempt?,
+        restartDelayMillis: Long = restartDiscoveryDelayMillis(nextAttempt),
+        resetEffect: SessionEffect.ResetWirelessEnvironment? = null
     ) {
+        if (!running || activeRuntimeSessionId != runtimeSessionId) return
+        if (
+            resetEffect != null &&
+            !canExecuteResetWirelessEnvironmentEffect(
+                resetEffect,
+                orchestrator.state.value,
+                orchestrator.currentAttempt,
+                orchestrator.activeControlAttempt,
+                orchestrator.pendingInboundRequest
+            )
+        ) {
+            return
+        }
+        val request = RecoveryCleanupRequest(
+            runtimeSessionId = runtimeSessionId,
+            nextAttempt = nextAttempt,
+            restartDelayMillis = restartDelayMillis,
+            resetEffect = resetEffect
+        )
+        if (recoveryCleanupCoordinator.updateIfActive(request)) return
         val token = activeSession ?: return
-        if (!isSessionCurrent(token) || activeRuntimeSessionId != runtimeSessionId) return
+        if (!isSessionCurrent(token)) return
+        if (localDeviceId.isBlank()) return
+        val cleanupToken = recoveryCleanupCoordinator.start(request)
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         attemptMilestoneScheduler.cancelRuntime(runtimeSessionId)
         controlChannelCloseDeadlineScheduler.cancelRuntime(runtimeSessionId)
-        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return
-        val generation = ++recoveryGeneration
         markDiscoveryUnavailable()
         sessions.invalidate()
         activeSession = null
@@ -1015,49 +1041,72 @@ class IntercomService : Service() {
                 publishStatus(SIGNAL_LOST_STATUS)
             },
             resumeDiscovery = { resumedRuntimeSessionId ->
-                mainHandler.postDelayed({
-                    if (
-                        !running ||
-                        generation != recoveryGeneration ||
-                        activeSession != null ||
-                        activeRuntimeSessionId != resumedRuntimeSessionId
-                    ) {
-                        return@postDelayed
-                    }
-                    if (
-                        !canRestartRecoveryAttempt(
-                            expectedAttempt = nextAttempt,
-                            currentAttempt = orchestrator.currentAttempt,
-                            now = MonotonicTimestamp(SystemClock.elapsedRealtime())
-                        )
-                    ) {
-                        publishLog("忽略已过期或已替换的恢复尝试")
-                        return@postDelayed
-                    }
-                    val recoveryToken = sessions.start()
-                    activeSession = recoveryToken
-                    publishLog("重新启动车友发现")
-                    if (
-                        !canRestartRecoveryAttempt(
-                            expectedAttempt = nextAttempt,
-                            currentAttempt = orchestrator.currentAttempt,
-                            now = MonotonicTimestamp(SystemClock.elapsedRealtime())
-                        )
-                    ) {
-                        activeSession = null
-                        sessions.invalidate()
-                        return@postDelayed
-                    }
-                    startDiscoveryTransports(
-                        recoveryToken,
-                        deviceId,
-                        resumedRuntimeSessionId,
-                        nextAttempt
-                    )
-                }, restartDiscoveryDelayMillis(nextAttempt))
+                if (resumedRuntimeSessionId == runtimeSessionId) {
+                    recoveryCleanupCoordinator.complete(cleanupToken)
+                }
             },
             onError = ::handleError
         ).abortAndResumeDiscovery()
+    }
+
+    private fun restartAfterRecoveryCleanup(request: RecoveryCleanupRequest): Boolean {
+        if (
+            !running ||
+            activeSession != null ||
+            activeRuntimeSessionId != request.runtimeSessionId
+        ) {
+            return true
+        }
+        val resetEffect = request.resetEffect
+        if (
+            resetEffect != null &&
+            !canExecuteResetWirelessEnvironmentEffect(
+                resetEffect,
+                orchestrator.state.value,
+                orchestrator.currentAttempt,
+                orchestrator.activeControlAttempt,
+                orchestrator.pendingInboundRequest
+            )
+        ) {
+            return false
+        }
+        if (
+            !canRestartRecoveryAttempt(
+                expectedAttempt = request.nextAttempt,
+                currentAttempt = orchestrator.currentAttempt,
+                now = MonotonicTimestamp(SystemClock.elapsedRealtime())
+            )
+        ) {
+            publishLog("忽略已过期或已替换的恢复尝试")
+            return false
+        }
+        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return false
+        val recoveryToken = sessions.start()
+        activeSession = recoveryToken
+        publishLog("重新启动车友发现")
+        if (
+            !canRestartRecoveryAttempt(
+                expectedAttempt = request.nextAttempt,
+                currentAttempt = orchestrator.currentAttempt,
+                now = MonotonicTimestamp(SystemClock.elapsedRealtime())
+            )
+        ) {
+            activeSession = null
+            sessions.invalidate()
+            return false
+        }
+        startDiscoveryTransports(
+            recoveryToken,
+            deviceId,
+            request.runtimeSessionId,
+            request.nextAttempt
+        )
+        resetEffect?.let {
+            orchestrator.dispatch(
+                SessionEvent.ResetCompleted(it.runtimeSessionId, it.failedAttemptId)
+            )
+        }
+        return true
     }
 
     private fun onAudioLevelChanged(
@@ -1073,7 +1122,7 @@ class IntercomService : Service() {
         if (runtimeSessionId != null) {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
-        recoveryGeneration++
+        recoveryCleanupCoordinator.cancel()
         attemptDeadlineScheduler.cancel()
         attemptMilestoneScheduler.cancel()
         controlChannelCloseDeadlineScheduler.cancel()
@@ -1214,7 +1263,33 @@ class IntercomService : Service() {
                         orchestrator.currentAttempt
                     )
                 ) {
-                    abortResourcesAndResumeDiscovery(effect.runtimeSessionId, effect.attempt)
+                    abortResourcesAndResumeDiscovery(
+                        runtimeSessionId = effect.runtimeSessionId,
+                        nextAttempt = effect.attempt,
+                        restartDelayMillis = effect.restartDelayMillis
+                    )
+                }
+            }
+            is SessionEffect.ResetWirelessEnvironment -> {
+                if (
+                    canExecuteResetWirelessEnvironmentEffect(
+                        effect,
+                        orchestrator.state.value,
+                        orchestrator.currentAttempt,
+                        orchestrator.activeControlAttempt,
+                        orchestrator.pendingInboundRequest
+                    )
+                ) {
+                    publishLog(
+                        "Resetting wireless environment after " +
+                            "${effect.consecutiveFinalFailures} final recovery failures"
+                    )
+                    abortResourcesAndResumeDiscovery(
+                        runtimeSessionId = effect.runtimeSessionId,
+                        nextAttempt = null,
+                        restartDelayMillis = 0L,
+                        resetEffect = effect
+                    )
                 }
             }
             is SessionEffect.ScheduleAttemptDeadline -> {
@@ -1967,6 +2042,21 @@ internal fun canExecuteRestartDiscoveryEffect(
     effect.runtimeSessionId == effect.attempt.runtimeSessionId &&
     currentState.attempt == effect.attempt &&
     currentAttempt == effect.attempt
+
+internal fun canExecuteResetWirelessEnvironmentEffect(
+    effect: SessionEffect.ResetWirelessEnvironment,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = currentState is IntercomState.Resetting &&
+    currentState.runtimeSessionId == effect.runtimeSessionId &&
+    currentState.targetDeviceId == effect.targetDeviceId &&
+    currentState.failedAttemptId == effect.failedAttemptId &&
+    currentState.consecutiveFinalFailures == effect.consecutiveFinalFailures &&
+    currentAttempt == null &&
+    activeAttempt == null &&
+    pendingInbound == null
 
 internal fun canRestartRecoveryAttempt(
     expectedAttempt: ConnectionAttempt?,

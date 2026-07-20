@@ -1,13 +1,13 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-33 APPROVED - FINAL DELIVERY CI PENDING**
+Status: **KUM-34 REVIEW REMEDIATION PASSED - RE-REVIEW AND CI PENDING**
 
 Evidence state: 2026-07-20
 
 ## Bound revision
 
 - Repository: `g95809080-cmyk/moto-intercom`
-- Branch: `main`; active KUM-33 branch `feat/kum-33-three-second-recovery-fallback`
+- Branch: active KUM-34 branch `feat/kum-34-resetting-wireless-reset`
 - Pull request: [#9](https://github.com/g95809080-cmyk/moto-intercom/pull/9) merged
 - Sprint 4 base: `bd35ea69955001dc175f376f58ab4e6b84d9c223`
 - Verified KUM-37 source head: `1977e7eec466aeb439f4bc3714ba855d6a11d2d9`
@@ -53,9 +53,22 @@ Evidence state: 2026-07-20
 - KUM-33 approved review/evidence head:
   `29fd4efd0d08955511ff65898abed3a6d51d3c2e`
 - KUM-33 approved-head GitHub Actions: run `29702981381` - success
-- KUM-33 pull request: [#11](https://github.com/g95809080-cmyk/moto-intercom/pull/11) - Draft
+- KUM-33 final PR head: `681c775bced59d87a9c18cc84d525411f558c7e8`
+- KUM-33 final PR-head GitHub Actions: run `29703230627` - success
+- KUM-33 pull request: [#11](https://github.com/g95809080-cmyk/moto-intercom/pull/11) - merged
+- KUM-33 merge commit: `34f715d77c80e492ce90ecdd7efc6d1603a74d8e`
+- KUM-33 exact-main GitHub Actions: run `29703574642` - success
 - KUM-33 Rasen change: `kum-33-three-second-recovery-fallback`
-- Linear: KUM-9 In Progress; KUM-37/KUM-32 Done; KUM-33 In Review; KUM-34 through KUM-36 Todo
+- KUM-34 base: `34f715d77c80e492ce90ecdd7efc6d1603a74d8e`
+- KUM-34 implementation source: `5b184a21efafccc72ccf1d71766c5b7e038c5c6b`
+- KUM-34 automated-evidence head: `1d4296b22de2aba6cf3503fd4a389f96adfd849a`
+- KUM-34 pull request: [#12](https://github.com/g95809080-cmyk/moto-intercom/pull/12) - open Draft
+- KUM-34 initial review/delivery head: `61f4add98366a01b0a629374b47c7eba053c1186`
+- KUM-34 initial review-head GitHub Actions: run `29705702507` - success
+- KUM-34 initial fixed-SHA review: REQUEST CHANGES, P0=0, P1=4
+- KUM-34 review-remediation source: `8157a895a929ec805d47e08a2e6e120fbf952f1c`
+- KUM-34 Rasen change: `kum-34-resetting-wireless-reset`
+- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33 Done; KUM-34 In Review; KUM-35/KUM-36 Todo
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -263,9 +276,9 @@ model:
 - KUM-32 target admission, KUM-31 overlap fallback, KUM-37 hot audio, and the
   single `StartWebRtc` owner remain unchanged.
 
-KUM-34 repeated-failure `RESETTING`, KUM-35 active disconnect, KUM-36 final
-acceptance, protocol/database/pairing changes, signing, deployment, and release
-remain unimplemented.
+KUM-34 repeated-failure `RESETTING` is implemented separately at `5b184a2`.
+KUM-35 active disconnect, KUM-36 final acceptance, protocol/database/pairing
+changes, signing, deployment, and release remain unimplemented.
 
 ## KUM-33 automated evidence
 
@@ -353,6 +366,151 @@ one-shot callback behavior, the unchanged single Coordinator/product-state
 ownership, and absence of KUM-34+ scope. Its only non-blocking note was stale
 delivery wording, corrected by this documentation-only synchronization.
 
+## KUM-34 delivery boundary
+
+KUM-34 connects the existing repeated-failure/reset skeleton without adding a
+second product-state or attempt owner:
+
+- `IntercomState.Recovering` carries an immutable target-scoped final-failure
+  count below the reset threshold;
+- only complete recovery-attempt terminal outcomes count; transport-local,
+  duplicate, stale, wrong-target, canceled, and glare events do not;
+- the first and second final failures create fresh recovery attempt IDs and
+  immutable T+10 deadlines while preserving the complete KUM-32 TargetLock and
+  KUM-33 transport order;
+- the existing 1.5-second reconnect backoff and cleanup consume the fresh
+  attempt budget rather than rebasing T+3 or T+10;
+- the third final failure clears attempt ownership and enters visible
+  `RESETTING` with the exhausted attempt ID as exact reset identity;
+- Service executes one reset effect through its existing resource owner,
+  invalidates old callback generations, closes signaling/WebRTC attempt
+  resources and LAN/NSD/UDP/Socket work, then rebuilds discovery;
+- the production Wi-Fi Direct close seam orders `cancelConnect`, `removeGroup`,
+  `clearServiceRequests`, `clearLocalServices`, and channel `close`, advancing
+  once across thrown or duplicate fake callbacks;
+- only matching runtime plus exhausted-attempt completion moves
+  `RESETTING -> DISCOVERING`; full Stop supersedes a late completion; and
+- UI and the foreground notification both expose the product `RESETTING` text.
+
+The KUM-37 runtime audio owner remains hot. KUM-35 active disconnect and KUM-36
+final acceptance remain unimplemented.
+
+## KUM-34 automated evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Focused JVM | `5b184a2` | PASS | 14 tests across Coordinator retry/reset ownership, active-channel terminal routing, exact completion, notification visibility, logical-node regression, and production Wi-Fi Direct close sequencing; 0 failures/errors/skipped |
+| Full JVM gate | `5b184a2` | PASS | 279 tests; 42 suites; 0 failures, errors, or skipped |
+| Lint | `5b184a2` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `5b184a2` | PASS | `assembleDebug`; SHA-256 `055D125FF22BA735CD10D6A086470D588BBDBEE7A2257512A55BD87B3F77B0AA` |
+| Android test APK | `5b184a2` | PASS | `assembleDebugAndroidTest`; SHA-256 `90440B77BB52F8F747EA446DC8277594616F981E529B697F63361C4F00E4C9EF` |
+| Recovery reset instrumentation | `5b184a2` | PASS | 2/2 on each of three API 36 emulators; 6/6 in the focused run and 6/6 again inside the full matrix |
+| Rasen strict validation | `5b184a2` | PASS | 1/1; 4/4 artifacts complete; open findings 0 |
+| PowerShell compatibility | `5b184a2` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
+
+The first focused Gradle invocation in the new temporary branch lacked
+`ANDROID_HOME`/`ANDROID_SDK_ROOT` and stopped before source compilation.
+Rerunning with the installed SDK passed; this was environment setup, not a
+source or test failure. One new active-channel fixture initially used a
+non-canonical attempt ID at the existing `WireRequestKey` trust boundary; the
+fixture was corrected to canonical UUIDs before the focused and full gates.
+
+## KUM-34 emulator matrix
+
+- Emulator: 36.6.11; API 36 AOSP ATD x86_64
+- Nodes: `emulator-5554`, `emulator-5556`, `emulator-5558`
+- Focused reset run: `build/emulator-results/20260720-055634-recovery-reset` - PASS
+- Full matrix: `build/emulator-results/20260720-055703-all` - PASS
+- Evidence archive: `build/emulator-evidence/20260720-055748.zip`
+- Archive SHA-256: `B365468D5B7E0B953CE043F78B5C462650C0294BF3C6734E0FF2E580150328FA`
+
+Every node logged count three, the exact exhausted attempt ID, and the required
+cleanup order. The full matrix also passed smoke/UI hierarchy, pairwise shared
+networking, NSD/Socket exchange, synthetic PCM metrics and transfer, KUM-37 hot
+audio lifecycle, KUM-33 recovery timing, network fault/recovery, process
+restart, and evidence collection. No app crash, ANR, instrumentation failure,
+or test-failure marker was found. The connected MI 6 was excluded from every
+install, instrumentation, network, screenshot, and collection command.
+
+ATD screenshots are identical black frames on visual inspection and remain
+`UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
+
+## KUM-34 architecture review
+
+The initial fixed-SHA read-only review at `61f4add` returned REQUEST CHANGES
+with P0=0 and P1=4:
+
+- Android Wi-Fi Direct close actions had no never-callback watchdog;
+- a retry deadline expiring during asynchronous cleanup could replace the
+  Coordinator attempt while Service had no active session to execute the new
+  restart/reset effect;
+- an active recovery signaling disconnect cleared Service schedules without
+  clearing the old Coordinator channel context or rearming the same immutable
+  attempt deadline; and
+- tests did not cover the combined production cleanup/deadline/adapter order.
+
+The first remediation source `8157a89` adds cancellable per-step close watchdogs,
+coalesces cleanup-time retry/reset requests against the latest Coordinator
+state, clears active recovery channel context while rearming the unchanged
+deadline/fallback schedule, preserves the failure streak across identity
+updates, and adds deterministic production-seam coverage.
+
+The second fixed-SHA read-only review at `62166e8` returned REQUEST CHANGES with
+P0=0 and P1=1. It found that `removeGroup` BUSY retries were posted outside the
+close-step watchdog lifecycle, so an old delayed retry could call the old
+manager/channel after timeout advanced through close and discovery rebuild.
+Remediation source `b78ee8b` carries the owning step-active gate through every
+initial call, Android callback, and delayed retry. The deterministic timeout/
+BUSY race proves a queued retry becomes inert after the step advances. The third
+fixed-SHA read-only review at `083585a` is APPROVED with P0=0 and P1=0. It
+verified the production retry gate across initial calls, callbacks, posted
+runnables, recursive retries, timeout, throw, and late completion while
+preserving the prior ownership and cleanup corrections. Exact-Head CI
+`29711081197` also passed. KUM-34 remains In Review and PR #12 remains Draft only
+until this documentation-only synchronization is reviewed and its exact-Head CI
+passes.
+
+## KUM-34 review-remediation evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Review-focused JVM | `8157a89` | PASS | 66 tests across four suites; every Wi-Fi Direct never-callback step, cleanup replacement through three deadlines, exact reset completion, active recovery rearm, and streak preservation; 0 failures/errors/skipped |
+| Full JVM gate | `8157a89` | PASS | 284 tests; 0 failures, errors, or skipped |
+| Lint | `8157a89` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `8157a89` | PASS | `assembleDebug`; SHA-256 `C5957490F6E015E3F3FE71C1970FBF99BFA5D05FA0650254CC6EB32230599DA4` |
+| Android test APK | `8157a89` | PASS | `assembleDebugAndroidTest`; SHA-256 `E56FFAB007E5E7DB4BDAB79BB2624672B51DC41D48D6DA1051F767A4614B6EC6` |
+| Rasen strict validation | `8157a89` | PASS | 1/1; 4/4 artifacts complete; open findings 0 |
+| Focused reset instrumentation | `8157a89` | PASS | `build/emulator-results/20260720-064827-recovery-reset`; 2/2 on each of three explicit API 36 emulators, 6/6 total |
+| Full three-emulator matrix | `8157a89` | PASS | `build/emulator-results/20260720-064846-all` |
+| Evidence archive | `8157a89` | PASS | `build/emulator-evidence/20260720-064931.zip`; SHA-256 `ADEABD9D9CF5E110873920EFCC2BE528D302725B17C0406D967FAB67592F93B0` |
+
+No crash, ANR, instrumentation-failure, or test-failure marker was found. The
+connected MI 6 was excluded by explicit emulator serials from install,
+instrumentation, screenshots, and evidence collection. All three ATD
+screenshots are still identical black frames and remain
+`UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
+
+## KUM-34 second review-remediation evidence
+
+| Check | Bound revision | Result | Evidence |
+| --- | --- | --- | --- |
+| Review-focused JVM | `b78ee8b` | PASS | 67 tests across four suites, including the delayed BUSY retry after step-timeout race; 0 failures/errors/skipped |
+| Full JVM gate | `b78ee8b` | PASS | 285 tests across 43 suites; 0 failures, errors, or skipped |
+| Lint | `b78ee8b` | PASS | 0 Fatal, 0 Error, 34 warnings |
+| Debug APK | `b78ee8b` | PASS | `assembleDebug`; SHA-256 `226E29C82276E59927004209FA954F6F4554170D126F7ABB93E19E6BDC94946A` |
+| Android test APK | `b78ee8b` | PASS | `assembleDebugAndroidTest`; SHA-256 `86287442D2CCC007A515A0C71C4132EDB02402A3BB4A8551511D370BFDC66CD3` |
+| Rasen strict validation | `b78ee8b` | PASS | 1/1; 4/4 artifacts complete; open findings 0 |
+| Focused reset instrumentation | `b78ee8b` | PASS | `build/emulator-results/20260720-092931-recovery-reset`; 2/2 on each of three explicit API 36 emulators, 6/6 total |
+| Full three-emulator matrix | `b78ee8b` | PASS | `build/emulator-results/20260720-092943-all` |
+| Evidence archive | `b78ee8b` | PASS | `build/emulator-evidence/20260720-093027.zip`; SHA-256 `C1C1EF7C3E516D6619236EDF0B38C0F35D541790E37D46B5680313B4B450EB35` |
+| Exact-Head CI | `083585a` | PASS | Android CI run `29711081197` |
+
+No crash, ANR, instrumentation-failure, or test-failure marker was found. The
+connected MI 6 and 2211133C physical devices were excluded by explicit emulator
+serials from install, instrumentation, screenshots, and evidence collection.
+All three ATD screenshots are identical black frames and remain
+`UNAVAILABLE_ATD_BLACK_FRAME`, not visual PASS.
+
 ## Physical acceptance queue
 
 The following rows remain mandatory Release Candidate work and are not claimed
@@ -383,9 +541,12 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-33 may start | YES - active on `feat/kum-33-three-second-recovery-fallback` from `5c49a53` |
 | KUM-33 implementation/automated gate | PASS at second-remediation source `b0cb6c7`; 266 JVM tests and emulator matrix `20260720-043350-all` passed |
 | KUM-33 architecture review | APPROVED at `29fd4ef`; P0=0/P1=0 after initial P1=2 and second P1=1 remediation rounds |
-| KUM-33 may move to Done | NO - documentation-only delivery CI, merge, and exact-main CI remain |
-| KUM-34 may start | NO |
-| Sprint 4 may close | NO - KUM-33 is In Progress; KUM-34 through KUM-36 remain Todo |
+| KUM-33 may move to Done | YES - merged as `34f715d`, exact-main CI `29703574642` passed, Linear Done |
+| KUM-34 may start | YES - active on `feat/kum-34-resetting-wireless-reset` from `34f715d` |
+| KUM-34 implementation/automated gate | PASS at second-remediation source `b78ee8b`; 285 JVM tests and emulator matrix `20260720-092943-all` passed |
+| KUM-34 architecture review | APPROVED at `083585a`, P0=0/P1=0 after initial P1=4 and second P1=1 remediation rounds |
+| KUM-34 may move to Done | NO - documentation-only Head CI/review, PR #12 merge commit, exact-main CI, and Linear completion remain |
+| Sprint 4 may close | NO - KUM-34 is In Review; KUM-35/KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
 ## Residual risk

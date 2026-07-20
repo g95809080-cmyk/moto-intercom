@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "recovery-timing", "network-fault", "restart", "all")]
+    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "recovery-timing", "recovery-reset", "network-fault", "restart", "all")]
     [string]$Scenario = "all",
     [string[]]$Serials = @(),
     [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
@@ -176,6 +176,17 @@ function Run-RecoveryTiming {
     }
 }
 
+function Run-RecoveryReset {
+    foreach ($serial in $Serials) {
+        $output = Invoke-AdbText $serial "recovery-reset" @(
+            "shell", "am", "instrument", "-w", "-r",
+            "-e", "class", "com.kuma.motointercom.RecoveryResetInstrumentationTest",
+            $runner
+        )
+        Assert-InstrumentationPassed $output "KUM-34 recovery reset on $serial"
+    }
+}
+
 function Run-Nsd {
     if ($Serials.Count -lt 2) { throw "NSD integration requires two emulators" }
     $server = $Serials[0]
@@ -266,6 +277,7 @@ switch ($Scenario) {
     "synthetic-audio" { Run-SyntheticAudio }
     "audio-lifecycle" { Run-AudioLifecycle }
     "recovery-timing" { Run-RecoveryTiming }
+    "recovery-reset" { Run-RecoveryReset }
     "network-fault" { Run-NetworkFault }
     "restart" { Run-Restart }
     "all" {
@@ -274,6 +286,7 @@ switch ($Scenario) {
         Run-SyntheticAudio
         Run-AudioLifecycle
         Run-RecoveryTiming
+        Run-RecoveryReset
         Run-NetworkFault
         Run-Restart
     }
