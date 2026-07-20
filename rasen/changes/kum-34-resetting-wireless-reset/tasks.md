@@ -36,4 +36,4 @@
   - [x] Validate the second review P1 for a `removeGroup` BUSY retry outliving the close-step watchdog.
   - [x] Bind every delayed `removeGroup` retry to the owning step-active gate and add deterministic timeout/retry race coverage.
   - [x] Complete the third fixed-SHA review at `083585a` with APPROVED, P0=0, P1=0, and exact-Head CI `29711081197` success.
-- [ ] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-34 Done, and only then start KUM-35.
+- [x] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-34 Done, and only then start KUM-35. Completed as merge `8dcb3f6` with exact-main CI `29711575580` success.

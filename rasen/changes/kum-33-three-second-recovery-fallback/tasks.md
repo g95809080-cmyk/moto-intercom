@@ -49,5 +49,6 @@
   fallback opening.
 - [x] 5.4 Complete fixed-SHA read-only architecture review and remediate any
   in-scope P0/P1 until APPROVED with P0=0 and P1=0.
-- [ ] 5.5 Mark the PR Ready, merge with a merge commit, verify exact-main CI,
-  close KUM-33, and retain the remote branch before starting KUM-34.
+- [x] 5.5 Mark the PR Ready, merge with a merge commit, verify exact-main CI,
+  close KUM-33, and retain the remote branch before starting KUM-34. Completed
+  as merge `34f715d` with exact-main CI `29703574642` success.
