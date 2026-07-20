@@ -788,7 +788,10 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 
 ## Ready for Release audit
 
-- Source is fixed at `main@c86c710d75708e1748cf29780c4cf590d58c657f`.
+- The release-candidate application source is anchored at
+  `c86c710d75708e1748cf29780c4cf590d58c657f`; KUM-39 changes no app or build
+  input, and both Base and Head resolve `app/` to tree
+  `8bffc1cee233332c61dc19a757e5da585fba9ca7`.
 - Exact-main Android CI `29717734064` passed and its downloadable artifact is
   fixed as `android-verification-91` / ID `8451237435`.
 - The artifact proves 294 JVM tests across 45 suites with zero failures, errors,
@@ -805,8 +808,10 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 - KUM-38 remains an unapproved Backlog technology-debt item and is not silently
   promoted into release scope. Linear onboarding samples KUM-1 through KUM-4
   are workspace tutorials, not MotoIntercom product issues.
-- Open pull requests: 0. Remote delivery branches remain retained. No force
-  push, branch deletion, deployment, signing, or production release occurred.
+- Open product/implementation pull requests before KUM-39 delivery: 0. KUM-39
+  is the sole evidence-only gate PR and must itself merge before Linear closure.
+  Remote delivery branches remain retained. No force push, branch deletion,
+  deployment, signing, or production release occurred.
 - Every real-device/OEM/RF/SCO/acoustic/power/background row remains
   `DEFERRED_TO_RELEASE_CANDIDATE` and is the only remaining release gate.
 

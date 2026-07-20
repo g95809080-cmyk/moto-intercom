@@ -15,7 +15,9 @@ as passed by JVM, fake, emulator, or CI evidence.
 
 Entry gate result: PASS.
 
-- Source: `main@c86c710d75708e1748cf29780c4cf590d58c657f`
+- Application source anchor: `c86c710d75708e1748cf29780c4cf590d58c657f`
+- App tree: `8bffc1cee233332c61dc19a757e5da585fba9ca7` (unchanged by the
+  KUM-39 evidence-only delivery)
 - Exact-main CI: `29717734064` - success
 - CI artifact: `android-verification-91` (artifact ID `8451237435`)
 - Debug APK SHA-256:
