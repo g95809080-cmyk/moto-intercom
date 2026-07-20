@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "recovery-timing", "recovery-reset", "active-disconnect", "network-fault", "restart", "all")]
+    [ValidateSet("smoke", "nsd", "synthetic-audio", "audio-lifecycle", "recovery-timing", "recovery-reset", "active-disconnect", "sprint4-final", "network-fault", "restart", "all")]
     [string]$Scenario = "all",
     [string[]]$Serials = @(),
     [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
@@ -198,6 +198,28 @@ function Run-ActiveDisconnect {
     }
 }
 
+function Run-Sprint4Acceptance {
+    foreach ($serial in $Serials) {
+        $output = Invoke-AdbText $serial "sprint4-final" @(
+            "shell", "am", "instrument", "-w", "-r",
+            "-e", "class", "com.kuma.motointercom.Sprint4FinalAcceptanceInstrumentationTest",
+            $runner
+        )
+        Assert-InstrumentationPassed $output "KUM-36 Sprint 4 final acceptance on $serial"
+    }
+}
+
+function Run-Sprint4Final {
+    Run-Sprint4Acceptance
+    Run-RecoveryTiming
+    Run-RecoveryReset
+    Run-ActiveDisconnect
+    Run-SyntheticAudio
+    Run-AudioLifecycle
+    Run-NetworkFault
+    Run-Restart
+}
+
 function Run-Nsd {
     if ($Serials.Count -lt 2) { throw "NSD integration requires two emulators" }
     $server = $Serials[0]
@@ -290,18 +312,13 @@ switch ($Scenario) {
     "recovery-timing" { Run-RecoveryTiming }
     "recovery-reset" { Run-RecoveryReset }
     "active-disconnect" { Run-ActiveDisconnect }
+    "sprint4-final" { Run-Sprint4Final }
     "network-fault" { Run-NetworkFault }
     "restart" { Run-Restart }
     "all" {
         Run-Smoke
         Run-Nsd
-        Run-SyntheticAudio
-        Run-AudioLifecycle
-        Run-RecoveryTiming
-        Run-RecoveryReset
-        Run-ActiveDisconnect
-        Run-NetworkFault
-        Run-Restart
+        Run-Sprint4Final
     }
 }
 
