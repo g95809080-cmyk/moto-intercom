@@ -461,10 +461,14 @@ close-step watchdog lifecycle, so an old delayed retry could call the old
 manager/channel after timeout advanced through close and discovery rebuild.
 Remediation source `b78ee8b` carries the owning step-active gate through every
 initial call, Android callback, and delayed retry. The deterministic timeout/
-BUSY race proves a queued retry becomes inert after the step advances. A third
-fixed-SHA read-only review is pending after this evidence synchronization.
-KUM-34 remains In Review and PR #12 remains Draft until APPROVED with P0=0 and
-P1=0.
+BUSY race proves a queued retry becomes inert after the step advances. The third
+fixed-SHA read-only review at `083585a` is APPROVED with P0=0 and P1=0. It
+verified the production retry gate across initial calls, callbacks, posted
+runnables, recursive retries, timeout, throw, and late completion while
+preserving the prior ownership and cleanup corrections. Exact-Head CI
+`29711081197` also passed. KUM-34 remains In Review and PR #12 remains Draft only
+until this documentation-only synchronization is reviewed and its exact-Head CI
+passes.
 
 ## KUM-34 review-remediation evidence
 
@@ -499,6 +503,7 @@ screenshots are still identical black frames and remain
 | Focused reset instrumentation | `b78ee8b` | PASS | `build/emulator-results/20260720-092931-recovery-reset`; 2/2 on each of three explicit API 36 emulators, 6/6 total |
 | Full three-emulator matrix | `b78ee8b` | PASS | `build/emulator-results/20260720-092943-all` |
 | Evidence archive | `b78ee8b` | PASS | `build/emulator-evidence/20260720-093027.zip`; SHA-256 `C1C1EF7C3E516D6619236EDF0B38C0F35D541790E37D46B5680313B4B450EB35` |
+| Exact-Head CI | `083585a` | PASS | Android CI run `29711081197` |
 
 No crash, ANR, instrumentation-failure, or test-failure marker was found. The
 connected MI 6 and 2211133C physical devices were excluded by explicit emulator
@@ -539,8 +544,8 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-33 may move to Done | YES - merged as `34f715d`, exact-main CI `29703574642` passed, Linear Done |
 | KUM-34 may start | YES - active on `feat/kum-34-resetting-wireless-reset` from `34f715d` |
 | KUM-34 implementation/automated gate | PASS at second-remediation source `b78ee8b`; 285 JVM tests and emulator matrix `20260720-092943-all` passed |
-| KUM-34 architecture review | REQUEST CHANGES at `62166e8`, P0=0/P1=1 after the initial P1=4 remediation; second remediation complete, fixed-SHA re-review pending |
-| KUM-34 may move to Done | NO - Draft PR #12, exact-Head CI, APPROVED review, merge, and exact-main CI remain |
+| KUM-34 architecture review | APPROVED at `083585a`, P0=0/P1=0 after initial P1=4 and second P1=1 remediation rounds |
+| KUM-34 may move to Done | NO - documentation-only Head CI/review, PR #12 merge commit, exact-main CI, and Linear completion remain |
 | Sprint 4 may close | NO - KUM-34 is In Review; KUM-35/KUM-36 remain Todo |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
 
