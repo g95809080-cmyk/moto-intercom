@@ -1,6 +1,6 @@
 # Sprint 4 Final Verification
 
-Status: **KUM-36 ARCHITECTURE APPROVED - FINAL DELIVERY HEAD CI PENDING**
+Status: **READY FOR RELEASE - PHYSICAL ACCEPTANCE PENDING**
 
 Evidence state: 2026-07-20
 
@@ -90,11 +90,16 @@ Evidence state: 2026-07-20
 - KUM-36 Rasen contract head: `8fefae8d7b0e706d311da471ccfe3f1b207a81bf`
 - KUM-36 automated source head: `c5e98087830979352e3e6f72f0be1318a8a43cf1`
 - KUM-36 initial Draft delivery head: `7aea7e623194e797450d6291c05ec655abafa5ad`
-- KUM-36 pull request: [#14](https://github.com/g95809080-cmyk/moto-intercom/pull/14) - open Draft
+- KUM-36 final delivery head: `af06e96d2847f41960e85b33940562e8f17b57ec`
+- KUM-36 pull request: [#14](https://github.com/g95809080-cmyk/moto-intercom/pull/14) - merged
 - KUM-36 exact-Draft-Head GitHub Actions: run `29715323009` - success
+- KUM-36 exact-final-Head GitHub Actions: run `29717517810` - success
 - KUM-36 architecture review: APPROVED at `7aea7e6`, P0=0, P1=0
+- KUM-36 merge commit: `c86c710d75708e1748cf29780c4cf590d58c657f`
+- KUM-36 exact-main GitHub Actions: run `29717734064` - success
+- Exact-main CI artifact: `android-verification-91`, artifact ID `8451237435`
 - KUM-36 Rasen change: `kum-36-sprint-4-final-automation-matrix`
-- Linear: KUM-9 In Progress; KUM-37/KUM-32/KUM-33/KUM-34/KUM-35 Done; KUM-36 In Review
+- Linear: KUM-5/KUM-6/KUM-7/KUM-8/KUM-9 and all approved product children Done
 
 This is the single Sprint 4 evidence index. Later Sprint 4 issues append their
 bound source, CI, review, emulator, and deferred physical evidence here.
@@ -670,6 +675,10 @@ KUM-32 through KUM-35 behavior:
 | Rasen strict validation | `c5e9808` | PASS | 1/1; 4/4 artifacts; open findings 0 |
 | PowerShell compatibility | `c5e9808` | PASS | all seven emulator scripts parse in Windows PowerShell 5.1 |
 | Exact-Draft-Head CI | `7aea7e6` | PASS | Android CI run `29715323009` |
+| Exact-final-Head CI | `af06e96` | PASS | Android CI run `29717517810` |
+| Exact-main CI | `c86c710` | PASS | Android CI run `29717734064`; 294 tests, 45 suites, 0 failures/errors/skipped; Lint 0 errors/36 warnings |
+| Exact-main debug APK | `c86c710` | FIXED | artifact `8451237435`; SHA-256 `A253F80775F250F9A34F96106F23614E32D6709BC748C09FC4F8EC357BF41A9C` |
+| Exact-main AndroidTest APK | `c86c710` | FIXED | artifact `8451237435`; SHA-256 `07F3EE89ECB9306FA9BFC4538FDA03ACC447F8913AD7249D22BB9478E77E2326` |
 
 The only pre-compiled test correction renamed one constructor argument to the
 existing `occurredAtElapsedMs` API. No production source changed. The final
@@ -772,9 +781,39 @@ Current status for every row: `DEFERRED_TO_RELEASE_CANDIDATE`.
 | KUM-36 may start | YES - active from exact KUM-35 main merge `178e076` |
 | KUM-36 automated/emulator gate | PASS at `c5e9808`; 294 JVM tests and focused/full three-emulator matrices passed |
 | KUM-36 architecture review | APPROVED at `7aea7e6`, P0=0/P1=0 |
-| KUM-36 may move to Done | NO - final evidence-only Head CI, Ready transition, merge commit, exact-main CI, and Linear completion remain |
-| Sprint 4 may close | NO - KUM-36 is In Progress and delivery gates remain |
+| KUM-36 may move to Done | YES - merged as `c86c710`, exact-main CI `29717734064` passed, Linear Done |
+| Sprint 4 may close | YES - KUM-9 and every approved Sprint 4 child are Done |
+| Ready for Release | YES - approved roadmap, automation, emulator, CI, review, evidence, and RC plan gates are complete |
 | Production deployment | NO - final physical Release Candidate gate and explicit authorization required |
+
+## Ready for Release audit
+
+- The release-candidate application source is anchored at
+  `c86c710d75708e1748cf29780c4cf590d58c657f`; KUM-39 changes no app or build
+  input, and both Base and Head resolve `app/` to tree
+  `8bffc1cee233332c61dc19a757e5da585fba9ca7`.
+- Exact-main Android CI `29717734064` passed and its downloadable artifact is
+  fixed as `android-verification-91` / ID `8451237435`.
+- The artifact proves 294 JVM tests across 45 suites with zero failures, errors,
+  or skipped tests; Lint reports 0 errors and 36 warnings; both APKs exist and
+  are bound by the SHA-256 values above.
+- Focused and full three-emulator matrices passed with 16 and 18 successful
+  instrumentation invocations, respectively; application crash/ANR/test-failure
+  markers are zero. ATD black framebuffers are not visual PASS.
+- Architecture review is APPROVED with P0=0 and P1=0.
+- Rasen strict validation passes 12/12 active changes, and every approved
+  change reports all tasks complete with no open finding.
+- Sprint 0 through Sprint 4 Epics and every approved product child issue are
+  Done. KUM-14 is Done through its explicit private-plan 403 exception path.
+- KUM-38 remains an unapproved Backlog technology-debt item and is not silently
+  promoted into release scope. Linear onboarding samples KUM-1 through KUM-4
+  are workspace tutorials, not MotoIntercom product issues.
+- Open product/implementation pull requests before KUM-39 delivery: 0. KUM-39
+  is the sole evidence-only gate PR and must itself merge before Linear closure.
+  Remote delivery branches remain retained. No force push, branch deletion,
+  deployment, signing, or production release occurred.
+- Every real-device/OEM/RF/SCO/acoustic/power/background row remains
+  `DEFERRED_TO_RELEASE_CANDIDATE` and is the only remaining release gate.
 
 ## Residual risk
 

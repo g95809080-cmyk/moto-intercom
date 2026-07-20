@@ -1,6 +1,6 @@
 # MotoIntercom Release Candidate Physical Acceptance Plan
 
-Status: Plan complete; execution `DEFERRED_TO_RELEASE_CANDIDATE`
+Status: **READY FOR RELEASE**; physical execution `DEFERRED_TO_RELEASE_CANDIDATE`
 
 This document is the required physical evidence queue. No row below is claimed
 as passed by JVM, fake, emulator, or CI evidence.
@@ -12,6 +12,25 @@ as passed by JVM, fake, emulator, or CI evidence.
 - P0=0 and P1=0.
 - Automated and emulator matrices are complete.
 - A release-candidate APK hash and source SHA are fixed.
+
+Entry gate result: PASS.
+
+- Application source anchor: `c86c710d75708e1748cf29780c4cf590d58c657f`
+- App tree: `8bffc1cee233332c61dc19a757e5da585fba9ca7` (unchanged by the
+  KUM-39 evidence-only delivery)
+- Exact-main CI: `29717734064` - success
+- CI artifact: `android-verification-91` (artifact ID `8451237435`)
+- Debug APK SHA-256:
+  `A253F80775F250F9A34F96106F23614E32D6709BC748C09FC4F8EC357BF41A9C`
+- AndroidTest APK SHA-256:
+  `07F3EE89ECB9306FA9BFC4538FDA03ACC447F8913AD7249D22BB9478E77E2326`
+- Automated result: 294/294 JVM tests; 45 suites; 0 failures/errors/skipped;
+  Lint 0 errors/36 warnings; focused/full emulator matrices PASS; architecture
+  review APPROVED with P0=0/P1=0
+
+The fixed debug APK is the physical-acceptance candidate, not a signed
+production release. Production signing and publication remain separately
+forbidden until this plan passes and the user explicitly authorizes release.
 
 ## Physical matrix
 
@@ -50,12 +69,12 @@ as passed by JVM, fake, emulator, or CI evidence.
 
 ## Release decision
 
-KUM-36 automated evidence binds the development matrix to source `c5e9808` and
-does not convert any physical row to PASS. Emulator Wi-Fi Direct/RF/OEM gaps,
-ATD black framebuffers, real audio hardware, and long-duration behavior remain
-explicit Release Candidate work.
+KUM-36 automated evidence and exact-main CI bind the development matrix to
+`c86c710`. This Ready for Release decision does not convert any physical row to
+PASS. Emulator Wi-Fi Direct/RF/OEM gaps, ATD black framebuffers, real audio
+hardware, and long-duration behavior remain explicit Release Candidate work.
 
-Any failed mandatory row blocks production release. Unavailable hardware remains
-`NOT_RUN`, not accepted or passed, until the user explicitly approves a revised
-Release Gate. Production release always requires a separate explicit user
-authorization.
+Any failed mandatory row blocks production release. At Release Candidate
+execution, unavailable hardware remains `NOT_RUN`, not accepted or passed,
+until the user explicitly approves a revised Release Gate. Production release
+always requires a separate explicit user authorization.

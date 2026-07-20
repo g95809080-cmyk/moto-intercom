@@ -29,4 +29,4 @@
 
 - [x] 5.1 Commit atomically, push, open one KUM-35 Draft PR, and synchronize Linear while KUM-9 remains In Progress and KUM-36 remains Todo.
 - [x] 5.2 Complete fixed Base/Head read-only architecture review and remediate all in-scope P0/P1 findings until APPROVED with P0=0 and P1=0.
-- [ ] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-35 Done, and only then start KUM-36.
+- [x] 5.3 Mark the PR Ready, merge with a merge commit, retain the remote branch, verify exact-main CI, set KUM-35 Done, and only then start KUM-36. Completed as merge `178e076` with exact-main CI `29714210007` success.
