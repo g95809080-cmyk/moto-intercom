@@ -180,8 +180,12 @@ class IntercomService : Service() {
     )
 
     private var listener: Listener? = null
+    private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
     private var wifiTunnel: WifiDirectTunnel? = null
+    private val wifiTunnelCloseOwner = PendingCloseOwner<WifiDirectTunnel> { tunnel, onComplete ->
+        tunnel.close(onComplete)
+    }
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
     private val signalingSessions = linkedMapOf<ControlChannelId, SignalingSessionV2>()
@@ -371,6 +375,15 @@ class IntercomService : Service() {
     private fun startIntercom() {
         if (running) {
             publishStatus(lastStatus)
+            return
+        }
+
+        runtimeKeepAlive = try {
+            IntercomRuntimeKeepAlive.acquire(this)
+        } catch (failure: Throwable) {
+            handleError(failure)
+            stopForegroundCompat()
+            stopSelf()
             return
         }
 
@@ -1102,7 +1115,11 @@ class IntercomService : Service() {
             },
             closeLanDiscovery = { lanToClose?.close() },
             closeWifiDirect = { onClosed ->
-                if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
+                wifiTunnelCloseOwner.closeAll(
+                    additionalResources = listOfNotNull(wifiToClose),
+                    onError = ::handleError,
+                    onComplete = onClosed
+                )
             },
             clearMediaLocator = {
                 activeMediaContext = null
@@ -1193,6 +1210,8 @@ class IntercomService : Service() {
 
     private fun stopIntercom() {
         val runtimeSessionId = activeRuntimeSessionId
+        val keepAliveToRelease = runtimeKeepAlive
+        runtimeKeepAlive = null
         if (runtimeSessionId != null) {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
@@ -1216,10 +1235,13 @@ class IntercomService : Service() {
         } catch (t: Throwable) {
             handleError(t)
         }
-        try {
-            wifiTunnel?.close()
-        } catch (t: Throwable) {
-            handleError(t)
+        val wifiToClose = wifiTunnel
+        wifiTunnel = null
+        wifiTunnelCloseOwner.closeAll(
+            additionalResources = listOfNotNull(wifiToClose),
+            onError = ::handleError
+        ) {
+            keepAliveToRelease?.close()
         }
         try {
             audioSessionController?.close()
@@ -1227,7 +1249,6 @@ class IntercomService : Service() {
             handleError(t)
         }
         intercomManager = null
-        wifiTunnel = null
         audioSessionController = null
         bluetoothReady = false
         physicalLinkReady = false
