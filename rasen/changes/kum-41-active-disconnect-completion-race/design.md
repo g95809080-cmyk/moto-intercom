@@ -17,7 +17,7 @@ state and UI remained `CONNECTED`.
   concurrent session close.
 - Preserve existing Coordinator identity validation and exact-attempt cleanup.
 - Restore `CONNECTED -> DISCOVERING -> reconnect` on two devices without full
-  runtime restart.
+  runtime restart, independent of the separate T1 asymmetric-action defect.
 
 **Non-Goals:**
 
@@ -46,7 +46,7 @@ state and UI remained `CONNECTED`.
    remain representable after closure; existing Coordinator tests prove both
    terminal events converge to one narrow cleanup and reject stale callbacks.
    Current-Head device validation proves disconnect, discovery continuity, and
-   reverse reconnect.
+   reconnect from an available selection entry without full Stop.
 
 ## Risks / Trade-offs
 
@@ -64,7 +64,7 @@ state and UI remained `CONNECTED`.
 1. Add failing completion mapping and existing disconnect lifecycle tests.
 2. Remove the Service early-return suppression and dispatch the frozen event.
 3. Run full Gradle, CI, fixed-SHA architecture review, and two-device LAN
-   disconnect/reverse reconnect.
+   disconnect/reconnect without full Stop.
 4. Merge by merge commit and retain the remote branch.
 
 Rollback is a revert of the KUM-41 merge commit. There is no protocol or data

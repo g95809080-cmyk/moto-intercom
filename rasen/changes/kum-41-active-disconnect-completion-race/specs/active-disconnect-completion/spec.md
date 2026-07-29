@@ -33,8 +33,8 @@ After local or accepted peer disconnect, the product SHALL leave the connected
 action state, retain its online runtime and discovery owners, and allow the same
 peer to be selected and connected again without a full Stop or process restart.
 
-#### Scenario: LAN disconnect and reverse reconnect
-- **WHEN** two devices connected over LAN explicitly disconnect, rediscover, and the previous responder initiates a new connection
+#### Scenario: LAN disconnect and reconnect without full Stop
+- **WHEN** two devices connected over LAN explicitly disconnect, rediscover, and either available selection entry initiates a new connection without full Stop
 - **THEN** both return to `DISCOVERING`, expose selectable Presence, establish exactly one new session, and carry bidirectional audio
 
 #### Scenario: Concurrent close callbacks

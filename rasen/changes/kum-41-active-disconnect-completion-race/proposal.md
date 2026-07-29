@@ -17,7 +17,7 @@ the terminal event that authorizes exact-attempt cleanup.
   channel identity gates.
 - Add deterministic coverage for successful and failed `DISCONNECT` completion
   after session closure, plus the existing local/remote disconnect lifecycle.
-- Verify LAN disconnect, retained discovery, reverse-direction reconnect, and
+- Verify LAN disconnect, retained discovery, reconnect without full Stop, and
   current-Head two-device behavior.
 
 ## Capabilities
