@@ -4,8 +4,10 @@ Release Candidate testing on MI 6 and Xiaomi 13 showed that an explicit active
 disconnect can leave both products stuck in the connected action state and
 unable to reconnect until the full runtime is stopped. The Service currently
 drops a completed signaling write when the peer closes the same control session
-before the completion reaches the main thread, so the Coordinator never receives
-the terminal event that authorizes exact-attempt cleanup.
+before the completion reaches the main thread. Device retest also exposed the
+mirror race: a fully decoded `DISCONNECT` is dropped when EOF marks the reader
+closed before its main-thread callback runs. In either ordering, the Coordinator
+never receives the terminal event that authorizes exact-attempt cleanup.
 
 ## What Changes
 
@@ -13,6 +15,8 @@ the terminal event that authorizes exact-attempt cleanup.
   crossing back to the main thread.
 - Dispatch that result even when the corresponding session closed or was removed
   before main-thread delivery.
+- Deliver a fully decoded, identity-checked frame while its exact session remains
+  registered, even when the reader has already observed the following EOF.
 - Keep stale/replacement protection in the existing Coordinator attempt and
   channel identity gates.
 - Add deterministic coverage for successful and failed `DISCONNECT` completion
@@ -34,7 +38,8 @@ None.
 
 ## Impact
 
-- Production: `IntercomService` signaling-send completion delivery only.
+- Production: `IntercomService` signaling completion and decoded-frame delivery
+  gates only.
 - Tests: deterministic completion mapping and KUM-35 disconnect regression
   coverage.
 - No protocol/schema, state ownership, deadline, target, discovery policy,

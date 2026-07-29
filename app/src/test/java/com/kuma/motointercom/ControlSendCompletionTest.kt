@@ -49,4 +49,33 @@ class ControlSendCompletionTest {
             )
         )
     }
+
+    @Test
+    fun decodedFrameRemainsDeliverableWhenSocketClosesBeforeMainDispatch() {
+        assertEquals(
+            true,
+            canDeliverDecodedControlEnvelope(
+                sessionCurrent = true,
+                registeredSessionMatches = true
+            )
+        )
+    }
+
+    @Test
+    fun decodedFrameIsRejectedAfterRuntimeOrRegisteredSessionChanges() {
+        assertEquals(
+            false,
+            canDeliverDecodedControlEnvelope(
+                sessionCurrent = false,
+                registeredSessionMatches = true
+            )
+        )
+        assertEquals(
+            false,
+            canDeliverDecodedControlEnvelope(
+                sessionCurrent = true,
+                registeredSessionMatches = false
+            )
+        )
+    }
 }

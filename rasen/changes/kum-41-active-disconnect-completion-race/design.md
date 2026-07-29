@@ -6,8 +6,10 @@ Service writes `DISCONNECT` on a worker and posts its result to the main thread.
 Before KUM-41, main-thread delivery first required that the original
 `SignalingSessionV2` still be mapped and open. A fast peer close, or the writer's
 own failure close, therefore caused an early return and silently discarded the
-only terminal event. The Coordinator remained in `TERMINATING` while product
-state and UI remained `CONNECTED`.
+only terminal event. On the peer, a fully decoded `DISCONNECT` could similarly
+be posted to main immediately before EOF closed the reader; the main-thread
+session-open check then discarded that already validated frame. The Coordinator
+remained in `TERMINATING` or `CONNECTED`.
 
 ## Goals / Non-Goals
 
@@ -38,11 +40,16 @@ state and UI remained `CONNECTED`.
    physical session, but it does not suppress the event. The Coordinator already
    validates runtime, attempt, channel, phase, and ownership, so adding another
    mutable Service gate would duplicate authority.
-3. **Reuse existing exact cleanup.** `ReleaseActiveSessionAndContinueDiscovery`
+3. **Preserve decoded-frame ordering.** Once framing, identity pinning, and the
+   protocol phase machine accept an inbound frame, a following EOF cannot
+   retroactively invalidate it. Main-thread delivery still requires the current
+   runtime generation and the exact registered session; replacement or removed
+   sessions remain rejected.
+4. **Reuse existing exact cleanup.** `ReleaseActiveSessionAndContinueDiscovery`
    continues to cancel attempt schedules, close exact signaling/media, release
    targeted LAN/P2P ownership, and preserve runtime discovery/audio owners. No
    adapter rebuild is added.
-4. **Test the race at both seams.** Pure mapping tests prove success and failure
+5. **Test the race at both seams.** Pure mapping tests prove success and failure
    remain representable after closure; existing Coordinator tests prove both
    terminal events converge to one narrow cleanup and reject stale callbacks.
    Current-Head device validation proves disconnect, discovery continuity, and
@@ -61,8 +68,10 @@ state and UI remained `CONNECTED`.
 
 ## Migration Plan
 
-1. Add failing completion mapping and existing disconnect lifecycle tests.
-2. Remove the Service early-return suppression and dispatch the frozen event.
+1. Add failing completion mapping, decoded-frame delivery, and existing
+   disconnect lifecycle tests.
+2. Remove the Service suppression of frozen completion and already validated
+   inbound frames while retaining current-runtime and exact-session gates.
 3. Run full Gradle, CI, fixed-SHA architecture review, and two-device LAN
    disconnect/reconnect without full Stop.
 4. Merge by merge commit and retain the remote branch.

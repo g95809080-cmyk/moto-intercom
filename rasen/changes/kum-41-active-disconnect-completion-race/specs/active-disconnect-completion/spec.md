@@ -14,6 +14,21 @@ suppress that result.
 - **WHEN** a `DISCONNECT` write fails and the writer closes the control session before main-thread delivery
 - **THEN** Service dispatches `SignalingSendFailed` for the exact runtime, attempt, channel, message type, and failure
 
+### Requirement: Decoded control frames survive following socket closure
+The Service SHALL deliver a decoded frame after framing, pinned-identity
+validation, and protocol-phase validation succeed while the same runtime
+generation and exact registered control session remain current. A following
+EOF that closes the reader before main-thread dispatch MUST NOT invalidate the
+decoded frame.
+
+#### Scenario: Peer closes immediately after sending DISCONNECT
+- **WHEN** the reader decodes and validates `DISCONNECT`, then observes EOF before the decoded frame runs on main
+- **THEN** Service dispatches `RemoteDisconnect` before processing the channel closure
+
+#### Scenario: Runtime or session was replaced
+- **WHEN** a decoded frame reaches main after its runtime generation or registered session changed
+- **THEN** Service rejects it without changing current product, attempt, media, or transport ownership
+
 ### Requirement: Coordinator remains the sole disconnect terminal authority
 Completion delivery SHALL NOT mutate product state directly. The existing
 Coordinator MUST accept only a completion matching its current immutable

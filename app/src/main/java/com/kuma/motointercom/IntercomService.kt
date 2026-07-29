@@ -654,9 +654,11 @@ class IntercomService : Service() {
         envelope: SignalingEnvelopeV2
     ) {
         if (
-            !isSessionCurrent(token) ||
-            session.isClosed ||
-            signalingSessions[session.channel.channelId] !== session
+            !canDeliverDecodedControlEnvelope(
+                sessionCurrent = isSessionCurrent(token),
+                registeredSessionMatches =
+                    signalingSessions[session.channel.channelId] === session
+            )
         ) {
             closeControlChannel(session)
             return
@@ -2155,6 +2157,11 @@ internal fun controlSendCompletionEvent(
         )
     }
 )
+
+internal fun canDeliverDecodedControlEnvelope(
+    sessionCurrent: Boolean,
+    registeredSessionMatches: Boolean
+): Boolean = sessionCurrent && registeredSessionMatches
 
 internal fun canExecuteRestartDiscoveryEffect(
     effect: SessionEffect.RestartDiscovery,

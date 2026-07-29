@@ -3,12 +3,14 @@
 - [x] 1.1 Bind KUM-41 to `main@d6bc6fdb8dc3e390f4686fe36a5fd66cc5db4ac8` and freeze the completion-race scope.
 - [x] 1.2 Add deterministic success/failure completion tests for a session that closes before main-thread delivery.
 - [x] 1.3 Retain Coordinator local-disconnect, send-failure, queued-close, stale-callback, and exact-release coverage.
+- [x] 1.4 Add deterministic coverage for decoded-frame delivery when EOF closes the reader before main dispatch.
 
 ## 2. Bounded implementation
 
 - [x] 2.1 Freeze each signaling send result into an immutable `SessionEvent` before posting to main.
 - [x] 2.2 Remove the mutable session-open early return while preserving physical close and Coordinator identity gates.
 - [x] 2.3 Confirm the change does not modify protocol, attempt/deadline/target, discovery policy, identity, database, or audio ownership.
+- [x] 2.4 Preserve current-runtime and exact-registered-session rejection while removing the reader-open prerequisite for an already validated frame.
 
 ## 3. Delivery gates
 
