@@ -19,6 +19,18 @@ peer's TargetLock and transport plan, and retain existing monotonic timing.
   original target is present
 - **THEN** a new target-locked attempt opens automatically without a user tap
 
+### Requirement: Established reader I/O loss remains transport loss
+
+An established signaling reader socket I/O failure SHALL be reported as
+transport closure rather than protocol violation.
+
+#### Scenario: Connected socket reaches EOF
+
+- **WHEN** the established control socket reaches EOF because the network is
+  removed
+- **THEN** the connected media-owner follows channel-closed recovery while
+  malformed protocol frames remain protocol violations
+
 ### Requirement: Intentional disconnect does not recover
 
 User-requested active disconnect and full stop SHALL retain their existing terminal cleanup semantics.

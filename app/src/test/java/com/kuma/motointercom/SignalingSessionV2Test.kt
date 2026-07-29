@@ -7,6 +7,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataOutputStream
+import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CompletableFuture
@@ -319,6 +320,49 @@ class SignalingSessionV2Test {
                 )
                 assertEquals(SignalingPhase.READY_TO_SEND_ANSWER, responder.phase)
                 assertTrue(failures.isEmpty())
+            } finally {
+                requester.close()
+                responder.close()
+            }
+        }
+    }
+
+    @Test
+    fun establishedReaderReportsSocketLossAsTransportFailure() {
+        socketPair().use { sockets ->
+            val attempt = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
+            val requesterFuture = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.opener,
+                    physicalRole = PhysicalSocketRole.OPENER,
+                    localDeviceId = DEVICE_A,
+                    localSessionId = SESSION_A,
+                    originatingAttempt = attempt
+                )
+            }
+            val responderFuture = CompletableFuture.supplyAsync {
+                establish(
+                    socket = sockets.acceptor,
+                    physicalRole = PhysicalSocketRole.ACCEPTOR,
+                    localDeviceId = DEVICE_B,
+                    localSessionId = SESSION_B,
+                    originatingAttempt = null,
+                    expectedRemoteTargetLock = attempt.targetLock.copy(
+                        targetDeviceId = DEVICE_A,
+                        expectedRemoteSessionId = RuntimeSessionId(SESSION_A)
+                    )
+                )
+            }
+            val requester = requesterFuture.get(2, TimeUnit.SECONDS)
+            val responder = responderFuture.get(2, TimeUnit.SECONDS)
+            val failures = java.util.concurrent.LinkedBlockingQueue<Throwable>()
+            try {
+                requester.startReader({}, failures::add)
+                responder.close()
+
+                val failure = failures.poll(2, TimeUnit.SECONDS)
+                assertTrue(failure is IOException)
+                assertFalse(failure is SignalingV2Exception)
             } finally {
                 requester.close()
                 responder.close()
