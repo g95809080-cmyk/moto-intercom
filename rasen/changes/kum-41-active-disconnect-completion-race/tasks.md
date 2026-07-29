@@ -14,7 +14,7 @@
 
 - [x] 3.1 Run targeted JVM tests and full `testDebugUnitTest`, `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest`.
 - [x] 3.2 Validate the Rasen change strictly and record exact APK hashes.
-- [ ] 3.3 Commit, push, and create one Draft PR linked to KUM-41.
+- [x] 3.3 Commit, push, and create one Draft PR linked to KUM-41.
 - [ ] 3.4 Obtain fixed Base/Head read-only architecture approval with P0=0 and P1=0.
 - [ ] 3.5 Install the exact Head APK on both devices and pass LAN disconnect→rediscovery→reverse reconnect without full Stop.
 - [ ] 3.6 Pass PR CI, merge by merge commit, pass exact-main CI, and synchronize KUM-41 evidence/state.
