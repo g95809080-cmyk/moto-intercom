@@ -1007,6 +1007,88 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun connectedOwnerSendFailureRecoversTheSameTarget() = runBlocking {
+        val recoveryId = ConnectionAttemptId(RECOVERY_ATTEMPT)
+        harness(attemptIdFactory = { recoveryId }).use { harness ->
+            val attempt = outboundAttempt()
+            harness.start(attempt)
+            val owner = requesterChannel(CHANNEL_A, attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, owner)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        attempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        500L
+                    )
+                )
+            )
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingSendFailed(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        SignalingMessageTypeV2.CANDIDATE,
+                        "network unavailable"
+                    )
+                )
+            )
+
+            val recovering = harness.orchestrator.state.value as IntercomState.Recovering
+            assertEquals(recoveryId, recovering.attempt.id)
+            assertEquals(attempt.targetLock, recovering.attempt.targetLock)
+            assertEquals(attempt.channelPlan, recovering.attempt.channelPlan)
+            assertEquals(ConnectionTrigger.RECOVERY, recovering.attempt.trigger)
+            assertEquals(
+                ConnectionAttemptTerminalOutcome.SUCCESS,
+                harness.orchestrator.terminalOutcome(attempt.id)
+            )
+            val effects = listOf(harness.nextEffect(), harness.nextEffect())
+            assertTrue(
+                effects.any {
+                    it == SessionEffect.RestartDiscovery(RUNTIME_A, recovering.attempt)
+                }
+            )
+            assertTrue(
+                effects.any {
+                    it == SessionEffect.ScheduleAttemptDeadline(recovering.attempt)
+                }
+            )
+            assertFalse(effects.any { it is SessionEffect.AbortAttemptAndResumeDiscovery })
+            assertNull(harness.orchestrator.activeControlAttempt)
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ChannelClosed(
+                        RUNTIME_A,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        "late close"
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
     fun remoteExplicitDisconnectDuringRecoveryEndsWithoutRetryOrFailureIncrement() = runBlocking {
         val recoveryIds = ArrayDeque(
             listOf(ConnectionAttemptId("30000000-0000-4000-8000-000000000021"))

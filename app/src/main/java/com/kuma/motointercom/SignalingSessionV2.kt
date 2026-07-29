@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import java.io.Closeable
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.net.Socket
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -122,8 +123,9 @@ internal class SignalingSessionV2 private constructor(
         message = message
     )
 
-    private fun Throwable.asSignalingFailure(message: String): SignalingV2Exception = when (this) {
-        is SignalingV2Exception -> this
+    private fun Throwable.asSignalingFailure(message: String): Throwable = when (this) {
+        is SignalingV2Exception,
+        is IOException -> this
         else -> SignalingV2Exception(message, this)
     }
 
