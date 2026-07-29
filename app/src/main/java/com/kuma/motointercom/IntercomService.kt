@@ -183,6 +183,9 @@ class IntercomService : Service() {
     private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
     private var wifiTunnel: WifiDirectTunnel? = null
+    private val wifiTunnelCloseOwner = PendingCloseOwner<WifiDirectTunnel> { tunnel, onComplete ->
+        tunnel.close(onComplete)
+    }
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
     private val signalingSessions = linkedMapOf<ControlChannelId, SignalingSessionV2>()
@@ -1112,7 +1115,11 @@ class IntercomService : Service() {
             },
             closeLanDiscovery = { lanToClose?.close() },
             closeWifiDirect = { onClosed ->
-                if (wifiToClose == null) onClosed() else wifiToClose.close(onClosed)
+                wifiTunnelCloseOwner.closeAll(
+                    additionalResources = listOfNotNull(wifiToClose),
+                    onError = ::handleError,
+                    onComplete = onClosed
+                )
             },
             clearMediaLocator = {
                 activeMediaContext = null
@@ -1230,15 +1237,11 @@ class IntercomService : Service() {
         }
         val wifiToClose = wifiTunnel
         wifiTunnel = null
-        try {
-            if (wifiToClose == null) {
-                keepAliveToRelease?.close()
-            } else {
-                wifiToClose.close { keepAliveToRelease?.close() }
-            }
-        } catch (t: Throwable) {
+        wifiTunnelCloseOwner.closeAll(
+            additionalResources = listOfNotNull(wifiToClose),
+            onError = ::handleError
+        ) {
             keepAliveToRelease?.close()
-            handleError(t)
         }
         try {
             audioSessionController?.close()
