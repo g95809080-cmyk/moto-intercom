@@ -56,6 +56,7 @@ class ControlSendCompletionTest {
             true,
             canDeliverDecodedControlEnvelope(
                 sessionCurrent = true,
+                sessionClosed = true,
                 registeredSessionMatches = true
             )
         )
@@ -67,6 +68,7 @@ class ControlSendCompletionTest {
             false,
             canDeliverDecodedControlEnvelope(
                 sessionCurrent = false,
+                sessionClosed = true,
                 registeredSessionMatches = true
             )
         )
@@ -74,6 +76,7 @@ class ControlSendCompletionTest {
             false,
             canDeliverDecodedControlEnvelope(
                 sessionCurrent = true,
+                sessionClosed = true,
                 registeredSessionMatches = false
             )
         )

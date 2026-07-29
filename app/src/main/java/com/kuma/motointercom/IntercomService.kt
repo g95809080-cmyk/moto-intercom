@@ -656,6 +656,7 @@ class IntercomService : Service() {
         if (
             !canDeliverDecodedControlEnvelope(
                 sessionCurrent = isSessionCurrent(token),
+                sessionClosed = session.isClosed,
                 registeredSessionMatches =
                     signalingSessions[session.channel.channelId] === session
             )
@@ -2160,8 +2161,13 @@ internal fun controlSendCompletionEvent(
 
 internal fun canDeliverDecodedControlEnvelope(
     sessionCurrent: Boolean,
+    sessionClosed: Boolean,
     registeredSessionMatches: Boolean
-): Boolean = sessionCurrent && registeredSessionMatches
+): Boolean {
+    // The frame was decoded and identity/phase checked before this main-thread seam.
+    // A following EOF may close the reader, but cannot invalidate that earlier frame.
+    return sessionCurrent && registeredSessionMatches
+}
 
 internal fun canExecuteRestartDiscoveryEffect(
     effect: SessionEffect.RestartDiscovery,

@@ -3,7 +3,7 @@
 - [x] 1.1 Bind KUM-41 to `main@d6bc6fdb8dc3e390f4686fe36a5fd66cc5db4ac8` and freeze the completion-race scope.
 - [x] 1.2 Add deterministic success/failure completion tests for a session that closes before main-thread delivery.
 - [x] 1.3 Retain Coordinator local-disconnect, send-failure, queued-close, stale-callback, and exact-release coverage.
-- [x] 1.4 Add deterministic coverage for decoded-frame delivery when EOF closes the reader before main dispatch.
+- [x] 1.4 Add deterministic Service-seam coverage for decoded frame → EOF cleanup ordering, single cleanup, and same-channel replacement rejection.
 
 ## 2. Bounded implementation
 
