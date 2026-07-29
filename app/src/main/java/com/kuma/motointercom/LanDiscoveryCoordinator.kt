@@ -281,8 +281,10 @@ internal class LanDiscoveryCoordinator(
                 try {
                     val packet = DatagramPacket(buffer, buffer.size)
                     candidate.receive(packet)
+                    expireLanBroadcastDevices()
                     handleLanBroadcast(localIp, packet)
                 } catch (_: SocketTimeoutException) {
+                    expireLanBroadcastDevices()
                 }
             }
         } catch (t: Throwable) {
@@ -321,17 +323,30 @@ internal class LanDiscoveryCoordinator(
 
     private fun handleLanBroadcast(localIp: String, packet: DatagramPacket) {
         if (!isActive()) return
-        val json = try {
+        val json = runCatching {
             JSONObject(String(packet.data, 0, packet.length, StandardCharsets.UTF_8))
-        } catch (_: Throwable) {
-            return
-        }
-        if (json.optString("type") != "MOTOCOM_HELLO" || json.optString("id") == nodeId) return
-
-        val peerIp = packet.address.hostAddress ?: json.optString("ip")
-        if (peerIp == localIp || peerIp.isBlank()) return
-
-        log("发现同一 Wi-Fi 车友：${json.optString("name")} / $peerIp")
+        }.getOrNull() ?: return
+        val device = lanBroadcastDeviceOrNull(
+            hello = LanBroadcastHello(
+                type = json.optString("type"),
+                deviceId = json.optString("id"),
+                sessionId = json.optString("sessionId"),
+                name = json.optString("name"),
+                deviceName = json.optString("deviceName"),
+                protocolVersion = json.optInt("protocolVersion", 0),
+                tcpPort = json.optInt("tcpPort", 0)
+            ),
+            sourceAddress = packet.address.hostAddress.orEmpty(),
+            localIp = localIp,
+            localDeviceId = nodeId
+        ) ?: return
+        log("发现同一 Wi-Fi 车友：${device.name} / ${device.ip}")
+        rememberLanDevice(
+            serviceName = device.discoveryEndpointId,
+            device = device,
+            expiresAtElapsedRealtimeMs =
+                monotonicClock.now().elapsedRealtimeMs + LAN_BROADCAST_RETENTION_MS
+        )
     }
 
     private fun connect(
@@ -396,12 +411,26 @@ internal class LanDiscoveryCoordinator(
         }
     }
 
-    private fun rememberLanDevice(serviceName: String, device: LanRiderDevice) {
+    private fun rememberLanDevice(
+        serviceName: String,
+        device: LanRiderDevice,
+        expiresAtElapsedRealtimeMs: Long? = null
+    ) {
         if (!isActive()) return
-        val snapshot = deviceRegistry.remember(serviceName, device)
+        val snapshot = deviceRegistry.remember(
+            serviceName,
+            device,
+            expiresAtElapsedRealtimeMs
+        )
         log("发现局域网车友：${device.name} / ${device.ip}")
         publishLanDevices(snapshot)
         connectTargetIfAvailable()
+    }
+
+    private fun expireLanBroadcastDevices() {
+        if (!isActive()) return
+        deviceRegistry.expire(monotonicClock.now().elapsedRealtimeMs)
+            ?.let(::publishLanDevices)
     }
 
     private fun removeLanDevice(serviceName: String) {
@@ -549,9 +578,56 @@ internal class LanDiscoveryCoordinator(
         private const val LAN_CONNECT_TIMEOUT_MS = 2_000
         private const val LAN_RECEIVE_TIMEOUT_MS = 1_000
         private const val LAN_BROADCAST_INTERVAL_MS = 1_000L
+        private const val LAN_BROADCAST_RETENTION_MS = LAN_BROADCAST_INTERVAL_MS * 3
         private const val NSD_SERVICE_TYPE = "_motocom._tcp."
 
     }
+}
+
+internal data class LanBroadcastHello(
+    val type: String,
+    val deviceId: String,
+    val sessionId: String,
+    val name: String,
+    val deviceName: String,
+    val protocolVersion: Int,
+    val tcpPort: Int
+)
+
+internal fun lanBroadcastDeviceOrNull(
+    hello: LanBroadcastHello,
+    sourceAddress: String,
+    localIp: String,
+    localDeviceId: String
+): LanRiderDevice? {
+    if (hello.type != "MOTOCOM_HELLO") return null
+    val deviceId = hello.deviceId.trim()
+    val sessionId = hello.sessionId.trim()
+    val peerIp = sourceAddress.trim()
+    val hasValidIdentity = runCatching {
+        DeviceId.parse(deviceId)
+        requireCanonicalUuid(sessionId, "sessionId")
+    }.isSuccess
+    if (
+        !hasValidIdentity ||
+        deviceId == localDeviceId ||
+        peerIp.isEmpty() ||
+        peerIp == localIp ||
+        hello.tcpPort !in 1..65535
+    ) {
+        return null
+    }
+    val endpointId = "udp:$deviceId:$sessionId"
+    return LanRiderDevice(
+        discoveryEndpointId = endpointId,
+        deviceId = deviceId,
+        sessionId = RuntimeSessionId(sessionId),
+        name = hello.name.ifBlank { endpointId },
+        deviceName = hello.deviceName,
+        protocolVersion = hello.protocolVersion.coerceAtLeast(0),
+        ip = peerIp,
+        port = hello.tcpPort
+    )
 }
 
 internal class LanAttemptLease(initialAttempt: ConnectionAttempt? = null) {
