@@ -180,6 +180,7 @@ class IntercomService : Service() {
     )
 
     private var listener: Listener? = null
+    private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
     private var wifiTunnel: WifiDirectTunnel? = null
     private var intercomManager: IntercomManager? = null
@@ -371,6 +372,15 @@ class IntercomService : Service() {
     private fun startIntercom() {
         if (running) {
             publishStatus(lastStatus)
+            return
+        }
+
+        runtimeKeepAlive = try {
+            IntercomRuntimeKeepAlive.acquire(this)
+        } catch (failure: Throwable) {
+            handleError(failure)
+            stopForegroundCompat()
+            stopSelf()
             return
         }
 
@@ -1193,6 +1203,8 @@ class IntercomService : Service() {
 
     private fun stopIntercom() {
         val runtimeSessionId = activeRuntimeSessionId
+        val keepAliveToRelease = runtimeKeepAlive
+        runtimeKeepAlive = null
         if (runtimeSessionId != null) {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
@@ -1216,9 +1228,16 @@ class IntercomService : Service() {
         } catch (t: Throwable) {
             handleError(t)
         }
+        val wifiToClose = wifiTunnel
+        wifiTunnel = null
         try {
-            wifiTunnel?.close()
+            if (wifiToClose == null) {
+                keepAliveToRelease?.close()
+            } else {
+                wifiToClose.close { keepAliveToRelease?.close() }
+            }
         } catch (t: Throwable) {
+            keepAliveToRelease?.close()
             handleError(t)
         }
         try {
@@ -1227,7 +1246,6 @@ class IntercomService : Service() {
             handleError(t)
         }
         intercomManager = null
-        wifiTunnel = null
         audioSessionController = null
         bluetoothReady = false
         physicalLinkReady = false
