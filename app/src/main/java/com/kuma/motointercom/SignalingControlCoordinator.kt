@@ -1629,6 +1629,21 @@ internal class SignalingControlCoordinator(
         }
         channels.remove(event.channelId)
         if (
+            current is IntercomState.Connected &&
+            context.phase == SignalingAttemptPhase.CONNECTED &&
+            context.mediaOwnerChannelId == event.channelId
+        ) {
+            rememberDisconnectedIfAccepted(context)
+            val decision = recoverConnectedAttempt(
+                current,
+                ConnectionAttemptTerminalOutcome.DISCONNECTED,
+                restartConnectedDiscovery = true
+            )
+            if (!decision.accepted) return decision
+            forgetActiveChannels(context)
+            return decision
+        }
+        if (
             context.mediaOwnerChannelId == event.channelId ||
             context.channelIds.size == 1
         ) {
