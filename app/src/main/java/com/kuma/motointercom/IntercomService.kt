@@ -1659,6 +1659,13 @@ class IntercomService : Service() {
             return
         }
         session.send(message) { result ->
+            val completionEvent = controlSendCompletionEvent(
+                runtimeSessionId,
+                attemptId,
+                channelId,
+                message.type,
+                result
+            )
             dispatchOnMain {
                 if (
                     signalingSessions[channelId] !== session ||
@@ -1666,30 +1673,11 @@ class IntercomService : Service() {
                     !session.matchesControlHandle(runtimeSessionId, attemptId, channelId)
                 ) {
                     closeControlChannel(session)
-                    return@dispatchOnMain
                 }
-                val failure = result.exceptionOrNull()
-                if (failure == null) {
-                    orchestrator.dispatch(
-                        SessionEvent.SignalingMessageSent(
-                            runtimeSessionId,
-                            attemptId,
-                            channelId,
-                            message.type
-                        )
-                    )
-                } else {
+                if (result.isFailure) {
                     closeControlChannel(session)
-                    orchestrator.dispatch(
-                        SessionEvent.SignalingSendFailed(
-                            runtimeSessionId,
-                            attemptId,
-                            channelId,
-                            message.type,
-                            failure.message.orEmpty()
-                        )
-                    )
                 }
+                orchestrator.dispatch(completionEvent)
             }
         }
     }
@@ -2141,6 +2129,32 @@ internal fun canDeliverRuntimeAudioCallback(
     activeRuntimeSessionId: RuntimeSessionId?,
     callbackRuntimeSessionId: RuntimeSessionId
 ): Boolean = running && activeRuntimeSessionId == callbackRuntimeSessionId
+
+internal fun controlSendCompletionEvent(
+    runtimeSessionId: RuntimeSessionId,
+    attemptId: ConnectionAttemptId,
+    channelId: ControlChannelId,
+    messageType: SignalingMessageTypeV2,
+    result: Result<Unit>
+): SessionEvent = result.fold(
+    onSuccess = {
+        SessionEvent.SignalingMessageSent(
+            runtimeSessionId,
+            attemptId,
+            channelId,
+            messageType
+        )
+    },
+    onFailure = { failure ->
+        SessionEvent.SignalingSendFailed(
+            runtimeSessionId,
+            attemptId,
+            channelId,
+            messageType,
+            failure.message.orEmpty()
+        )
+    }
+)
 
 internal fun canExecuteRestartDiscoveryEffect(
     effect: SessionEffect.RestartDiscovery,
