@@ -42,7 +42,19 @@ internal class PendingCloseOwner<T>(
                     next.callbacks.toList().also { next.callbacks.clear() }
                 }
             }
-            if (callbacks != null) callbacks.forEach { it() }
+            var firstFailure: Throwable? = null
+            callbacks?.forEach { callback ->
+                try {
+                    callback()
+                } catch (caught: Throwable) {
+                    if (firstFailure == null) {
+                        firstFailure = caught
+                    } else {
+                        firstFailure.addSuppressed(caught)
+                    }
+                }
+            }
+            firstFailure?.let { throw it }
         }
 
         try {

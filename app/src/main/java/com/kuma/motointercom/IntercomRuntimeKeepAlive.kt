@@ -34,14 +34,26 @@ internal class IntercomRuntimeKeepAlive private constructor(
                 .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, tag)
                 .apply { setReferenceCounted(false) }
 
-            cpuLock.acquire()
+            acquireLocks(
+                acquireCpu = cpuLock::acquire,
+                acquireWifi = wifiLock::acquire,
+                releaseCpu = cpuLock::release
+            )
+            return IntercomRuntimeKeepAlive(cpuLock, wifiLock)
+        }
+
+        internal fun acquireLocks(
+            acquireCpu: () -> Unit,
+            acquireWifi: () -> Unit,
+            releaseCpu: () -> Unit
+        ) {
+            acquireCpu()
             try {
-                wifiLock.acquire()
+                acquireWifi()
             } catch (failure: Throwable) {
-                cpuLock.release()
+                releaseCpu()
                 throw failure
             }
-            return IntercomRuntimeKeepAlive(cpuLock, wifiLock)
         }
     }
 }

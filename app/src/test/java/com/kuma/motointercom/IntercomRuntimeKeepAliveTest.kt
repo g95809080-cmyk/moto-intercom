@@ -48,4 +48,26 @@ class IntercomRuntimeKeepAliveTest {
         assertFalse(keepAlive.isHeld)
         assertEquals(1, releases)
     }
+
+    @Test
+    fun wifiAcquireFailureRollsBackCpuLock() {
+        var cpuHeld = false
+        var wifiAcquireCalls = 0
+        val failure = IllegalStateException("wifi lock unavailable")
+
+        val thrown = runCatching {
+            IntercomRuntimeKeepAlive.acquireLocks(
+                acquireCpu = { cpuHeld = true },
+                acquireWifi = {
+                    wifiAcquireCalls++
+                    throw failure
+                },
+                releaseCpu = { cpuHeld = false }
+            )
+        }.exceptionOrNull()
+
+        assertEquals(failure, thrown)
+        assertEquals(1, wifiAcquireCalls)
+        assertFalse(cpuHeld)
+    }
 }

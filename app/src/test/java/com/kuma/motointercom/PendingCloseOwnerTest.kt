@@ -104,4 +104,54 @@ class PendingCloseOwnerTest {
         assertEquals(1, released)
         assertEquals(1, errors.size)
     }
+
+    @Test
+    fun throwingRecoveryCallbackDoesNotBlockStopRelease() {
+        val callbacks = mutableListOf<() -> Unit>()
+        val owner = PendingCloseOwner<Any> { _, complete -> callbacks += complete }
+        val resource = Any()
+        var keepAliveReleased = 0
+
+        owner.close(resource) { throw IllegalStateException("recovery callback failed") }
+        owner.closeAll(emptyList()) { keepAliveReleased++ }
+
+        val thrown = runCatching { callbacks.single().invoke() }.exceptionOrNull()
+
+        assertTrue(thrown is IllegalStateException)
+        assertEquals(1, keepAliveReleased)
+        assertFalse(owner.hasPending)
+    }
+
+    @Test
+    fun recoveryStopNewRuntimeAndRepeatedStopReleaseEachRuntimeOnce() {
+        val callbacks = linkedMapOf<Any, () -> Unit>()
+        val owner = PendingCloseOwner<Any> { resource, complete -> callbacks[resource] = complete }
+        val oldResource = Any()
+        val newResource = Any()
+        var recoveryResumed = 0
+        var oldRuntimeReleased = 0
+        var newRuntimeReleased = 0
+        var repeatedStopCompleted = 0
+
+        owner.close(oldResource) { recoveryResumed++ }
+        owner.closeAll(emptyList()) { oldRuntimeReleased++ }
+        owner.close(newResource) {}
+        owner.closeAll(listOf(newResource)) { newRuntimeReleased++ }
+        owner.closeAll(emptyList()) { repeatedStopCompleted++ }
+
+        callbacks.getValue(oldResource).invoke()
+        callbacks.getValue(oldResource).invoke()
+
+        assertEquals(1, recoveryResumed)
+        assertEquals(1, oldRuntimeReleased)
+        assertEquals(0, newRuntimeReleased)
+        assertEquals(0, repeatedStopCompleted)
+
+        callbacks.getValue(newResource).invoke()
+        callbacks.getValue(newResource).invoke()
+
+        assertEquals(1, newRuntimeReleased)
+        assertEquals(1, repeatedStopCompleted)
+        assertFalse(owner.hasPending)
+    }
 }
