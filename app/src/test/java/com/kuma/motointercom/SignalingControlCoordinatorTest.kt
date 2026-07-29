@@ -670,6 +670,120 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun decodedOwnerDisconnectBeforeEofCleanupConvergesExactlyOnce() = runBlocking {
+        harness().use { harness ->
+            val attempt = outboundAttempt()
+            harness.start(attempt)
+            val owner = requesterChannel(CHANNEL_A, attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, owner)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        attempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        500L
+                    )
+                )
+            )
+
+            assertTrue(
+                canDeliverDecodedControlEnvelope(
+                    sessionCurrent = true,
+                    sessionClosed = true,
+                    registeredSessionMatches = true
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteDisconnect(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        DisconnectReason.parse("REMOTE_CANCELED")
+                    )
+                )
+            )
+            val cleanup = listOf(harness.nextEffect(), harness.nextEffect())
+            assertTrue(cleanup.any { it is SessionEffect.CloseControlChannel })
+            assertTrue(
+                cleanup.any {
+                    it == SessionEffect.ReleaseActiveSessionAndContinueDiscovery(attempt)
+                }
+            )
+            assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ChannelClosed(
+                        RUNTIME_A,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        "EOF after decoded DISCONNECT"
+                    )
+                )
+            )
+            assertFalse(harness.hasPendingEffect())
+
+            val replacement = outboundAttempt(ATTEMPT_B)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ConnectRequested(replacement)
+                )
+            )
+            val replacementOwner = requesterChannel(CHANNEL_A, replacement)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, replacementOwner)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+
+            val oldDecodedFrameDelivered = canDeliverDecodedControlEnvelope(
+                sessionCurrent = true,
+                sessionClosed = true,
+                registeredSessionMatches = false
+            )
+            assertFalse(oldDecodedFrameDelivered)
+            if (oldDecodedFrameDelivered) {
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteDisconnect(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey,
+                        DisconnectReason.parse("STALE_REMOTE_CANCELED")
+                    )
+                )
+            }
+            assertEquals(replacement, harness.orchestrator.currentAttempt)
+            assertEquals(
+                setOf(replacementOwner.channelId),
+                harness.orchestrator.activeControlAttempt?.channelIds
+            )
+            assertTrue(harness.orchestrator.state.value is IntercomState.Connecting)
+            assertFalse(harness.hasPendingEffect())
+        }
+    }
+
+    @Test
     fun protocolViolationClosesOnlyANonOwnerButEndsTheOwnerAttempt() = runBlocking {
         harness().use { harness ->
             val owner = responderChannel(CHANNEL_A)

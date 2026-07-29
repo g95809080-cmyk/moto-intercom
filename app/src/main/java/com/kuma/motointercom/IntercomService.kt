@@ -654,9 +654,12 @@ class IntercomService : Service() {
         envelope: SignalingEnvelopeV2
     ) {
         if (
-            !isSessionCurrent(token) ||
-            session.isClosed ||
-            signalingSessions[session.channel.channelId] !== session
+            !canDeliverDecodedControlEnvelope(
+                sessionCurrent = isSessionCurrent(token),
+                sessionClosed = session.isClosed,
+                registeredSessionMatches =
+                    signalingSessions[session.channel.channelId] === session
+            )
         ) {
             closeControlChannel(session)
             return
@@ -1659,6 +1662,13 @@ class IntercomService : Service() {
             return
         }
         session.send(message) { result ->
+            val completionEvent = controlSendCompletionEvent(
+                runtimeSessionId,
+                attemptId,
+                channelId,
+                message.type,
+                result
+            )
             dispatchOnMain {
                 if (
                     signalingSessions[channelId] !== session ||
@@ -1666,30 +1676,11 @@ class IntercomService : Service() {
                     !session.matchesControlHandle(runtimeSessionId, attemptId, channelId)
                 ) {
                     closeControlChannel(session)
-                    return@dispatchOnMain
                 }
-                val failure = result.exceptionOrNull()
-                if (failure == null) {
-                    orchestrator.dispatch(
-                        SessionEvent.SignalingMessageSent(
-                            runtimeSessionId,
-                            attemptId,
-                            channelId,
-                            message.type
-                        )
-                    )
-                } else {
+                if (result.isFailure) {
                     closeControlChannel(session)
-                    orchestrator.dispatch(
-                        SessionEvent.SignalingSendFailed(
-                            runtimeSessionId,
-                            attemptId,
-                            channelId,
-                            message.type,
-                            failure.message.orEmpty()
-                        )
-                    )
                 }
+                orchestrator.dispatch(completionEvent)
             }
         }
     }
@@ -2141,6 +2132,42 @@ internal fun canDeliverRuntimeAudioCallback(
     activeRuntimeSessionId: RuntimeSessionId?,
     callbackRuntimeSessionId: RuntimeSessionId
 ): Boolean = running && activeRuntimeSessionId == callbackRuntimeSessionId
+
+internal fun controlSendCompletionEvent(
+    runtimeSessionId: RuntimeSessionId,
+    attemptId: ConnectionAttemptId,
+    channelId: ControlChannelId,
+    messageType: SignalingMessageTypeV2,
+    result: Result<Unit>
+): SessionEvent = result.fold(
+    onSuccess = {
+        SessionEvent.SignalingMessageSent(
+            runtimeSessionId,
+            attemptId,
+            channelId,
+            messageType
+        )
+    },
+    onFailure = { failure ->
+        SessionEvent.SignalingSendFailed(
+            runtimeSessionId,
+            attemptId,
+            channelId,
+            messageType,
+            failure.message.orEmpty()
+        )
+    }
+)
+
+internal fun canDeliverDecodedControlEnvelope(
+    sessionCurrent: Boolean,
+    sessionClosed: Boolean,
+    registeredSessionMatches: Boolean
+): Boolean {
+    // The frame was decoded and identity/phase checked before this main-thread seam.
+    // A following EOF may close the reader, but cannot invalidate that earlier frame.
+    return sessionCurrent && registeredSessionMatches
+}
 
 internal fun canExecuteRestartDiscoveryEffect(
     effect: SessionEffect.RestartDiscovery,
