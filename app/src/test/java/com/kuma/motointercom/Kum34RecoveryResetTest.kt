@@ -41,6 +41,11 @@ class Kum34RecoveryResetTest {
             ),
             first.effects
         )
+        assertTrue(
+            shouldReuseRecoveryDiscovery(
+                first.effects.filterIsInstance<SessionEffect.RestartDiscovery>().single()
+            )
+        )
 
         val second = exhaust(coordinator, clock, recovery2)
         val recovery3 = second.state as IntercomState.Recovering
@@ -51,6 +56,11 @@ class Kum34RecoveryResetTest {
         assertEquals(recovery2.attempt.channelPlan, recovery3.attempt.channelPlan)
         assertEquals(30_500L, recovery3.attempt.deadlineElapsedRealtimeMs)
         assertEquals(recovery3.attempt, coordinator.currentAttempt)
+        assertTrue(
+            shouldReuseRecoveryDiscovery(
+                second.effects.filterIsInstance<SessionEffect.RestartDiscovery>().single()
+            )
+        )
     }
 
     @Test

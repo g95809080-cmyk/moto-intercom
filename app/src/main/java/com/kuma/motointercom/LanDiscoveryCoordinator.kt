@@ -47,7 +47,8 @@ internal class LanDiscoveryCoordinator(
     private val targetedClientSocket = AtomicReference<Socket?>()
     private val ingressAttempt = LanAttemptLease(initialTargetAttempt)
     private val targetAttempt = LanAttemptLease()
-    private val clientConnecting = AtomicBoolean(false)
+    private val clientConnectAttempt = LanAttemptLease()
+    private val retryPause = RecoveryAttemptPause()
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
 
     private var nsdManager: NsdManager? = null
@@ -81,9 +82,40 @@ internal class LanDiscoveryCoordinator(
     }
 
     fun connect(attempt: ConnectionAttempt): Boolean {
+        if (retryPause.isPrepared) {
+            if (
+                !retryPause.resumeExact(
+                    attempt,
+                    targetAttempt.current,
+                    ingressAttempt.current,
+                    monotonicClock
+                )
+            ) return false
+            connectTargetIfAvailable()
+            return true
+        }
         if (!restrictIngress(attempt)) return false
+        retryPause.clear()
         targetAttempt.bind(attempt)
         connectTargetIfAvailable()
+        return true
+    }
+
+    fun prepareRetry(attempt: ConnectionAttempt): Boolean {
+        synchronized(lifecycleLock) {
+            val previous = targetAttempt.current ?: ingressAttempt.current ?: return false
+            if (
+                !isActive() ||
+                !attempt.canReuseDiscoveryAdapterFrom(previous, Transport.LAN, monotonicClock)
+            ) {
+                return false
+            }
+            retryPause.prepare(attempt)
+            closeQuietly(targetedClientSocket.getAndSet(null))
+            clientConnectAttempt.clear()
+            ingressAttempt.bind(attempt)
+            targetAttempt.bind(attempt)
+        }
         return true
     }
 
@@ -91,15 +123,17 @@ internal class LanDiscoveryCoordinator(
         ingressAttempt.release(completedAttempt)
         if (targetAttempt.release(completedAttempt)) {
             closeQuietly(targetedClientSocket.getAndSet(null))
-            clientConnecting.set(false)
+            clientConnectAttempt.release(completedAttempt)
+            retryPause.clear()
         }
     }
 
     private fun connectTargetIfAvailable() {
+        if (retryPause.isPrepared) return
         val attempt = targetAttempt.current ?: return
         if (!isAttemptCurrent(attempt)) return
         val device = deviceRegistry.find(attempt.targetLock) ?: return
-        if (!clientConnecting.compareAndSet(false, true)) return
+        if (!clientConnectAttempt.tryBind(attempt)) return
         log("正在点名连接车友：${device.name} / ${device.ip}")
         try {
             executor.execute {
@@ -111,7 +145,7 @@ internal class LanDiscoveryCoordinator(
                 )
             }
         } catch (t: Throwable) {
-            clientConnecting.set(false)
+            clientConnectAttempt.release(attempt)
             error(t)
         }
     }
@@ -358,7 +392,7 @@ internal class LanDiscoveryCoordinator(
         var socket: Socket? = null
         try {
             if (!isAttemptCurrent(attempt)) {
-                clientConnecting.set(false)
+                clientConnectAttempt.release(attempt)
                 return
             }
             val connectTimeoutMillis = attempt.boundedTimeoutMillis(
@@ -366,14 +400,13 @@ internal class LanDiscoveryCoordinator(
                 LAN_CONNECT_TIMEOUT_MS.toLong()
             )
             if (connectTimeoutMillis <= 0L) {
-                clientConnecting.set(false)
+                clientConnectAttempt.release(attempt)
                 return
             }
             val candidate = Socket()
             socket = candidate
-            targetedClientSocket.set(candidate)
-            if (!isAttemptCurrent(attempt)) {
-                clientConnecting.set(false)
+            if (!installTargetedClientSocket(attempt, candidate)) {
+                clientConnectAttempt.release(attempt)
                 return
             }
             candidate.connect(InetSocketAddress(ip, port), connectTimeoutMillis.toInt())
@@ -391,7 +424,7 @@ internal class LanDiscoveryCoordinator(
                 monotonicClock = monotonicClock
             )
             if (!isAttemptCurrent(attempt)) {
-                clientConnecting.set(false)
+                clientConnectAttempt.release(attempt)
                 session.close()
                 return
             }
@@ -399,16 +432,25 @@ internal class LanDiscoveryCoordinator(
                 targetedClientSocket.compareAndSet(candidate, null)
                 socket = null
             } else {
-                clientConnecting.set(false)
+                clientConnectAttempt.release(attempt)
             }
         } catch (t: Throwable) {
-            clientConnecting.set(false)
+            clientConnectAttempt.release(attempt)
             if (reportFailure && isAttemptCurrent(attempt)) error(t)
             else log("局域网连接失败：${t.message}")
         } finally {
             socket?.let { targetedClientSocket.compareAndSet(it, null) }
             closeQuietly(socket)
         }
+    }
+
+    private fun installTargetedClientSocket(
+        attempt: ConnectionAttempt,
+        candidate: Socket
+    ): Boolean = synchronized(lifecycleLock) {
+        if (!isAttemptCurrent(attempt)) return@synchronized false
+        targetedClientSocket.set(candidate)
+        true
     }
 
     private fun rememberLanDevice(
@@ -494,8 +536,11 @@ internal class LanDiscoveryCoordinator(
 
     private fun isAttemptCurrent(attempt: ConnectionAttempt): Boolean =
         isActive() &&
-            attempt.remainingMillis(monotonicClock) > 0L &&
-            targetAttempt.current?.hasSameImmutableIdentity(attempt) == true
+            attempt.canRunTargetedWork(
+                targetAttempt.current,
+                retryPause,
+                monotonicClock
+            )
 
     private fun isAttemptCurrentOrPassive(attempt: ConnectionAttempt?): Boolean =
         if (attempt == null) isActive() && targetAttempt.current == null
@@ -512,6 +557,8 @@ internal class LanDiscoveryCoordinator(
         executor.shutdownNow()
         ingressAttempt.clear()
         targetAttempt.clear()
+        clientConnectAttempt.clear()
+        retryPause.clear()
         deviceRegistry.clear()
         onDevicesChanged(emptyList())
     }
@@ -639,6 +686,9 @@ internal class LanAttemptLease(initialAttempt: ConnectionAttempt? = null) {
     fun bind(value: ConnectionAttempt) {
         attempt.set(value)
     }
+
+    fun tryBind(value: ConnectionAttempt): Boolean =
+        attempt.compareAndSet(null, value)
 
     fun release(expected: ConnectionAttempt): Boolean {
         while (true) {
