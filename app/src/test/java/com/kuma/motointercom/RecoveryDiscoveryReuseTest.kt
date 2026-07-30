@@ -70,14 +70,17 @@ class RecoveryDiscoveryReuseTest {
     fun preparedAdapterCannotResumeForAnOldOrDifferentAttempt() {
         val pause = RecoveryAttemptPause()
         val retry = attempt("retry", Transport.WIFI_DIRECT)
+        val other = attempt("other", Transport.WIFI_DIRECT)
 
         pause.prepare(retry)
 
         assertTrue(pause.isPrepared)
         assertFalse(retry.canRunTargetedWork(retry, pause, clock))
-        assertFalse(pause.resume(attempt("other", Transport.WIFI_DIRECT)))
+        assertFalse(pause.resumeExact(other, retry, retry, clock))
         assertTrue(pause.isPrepared)
-        assertTrue(pause.resume(retry))
+        assertFalse(pause.resumeExact(retry, other, retry, clock))
+        assertTrue(pause.isPrepared)
+        assertTrue(pause.resumeExact(retry, retry, retry, clock))
         assertFalse(pause.isPrepared)
         assertTrue(retry.canRunTargetedWork(retry, pause, clock))
     }

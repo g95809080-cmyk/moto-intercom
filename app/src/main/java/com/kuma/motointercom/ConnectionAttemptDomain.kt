@@ -70,6 +70,17 @@ internal class RecoveryAttemptPause {
     }
 }
 
+internal fun RecoveryAttemptPause.resumeExact(
+    expected: ConnectionAttempt,
+    currentTarget: ConnectionAttempt?,
+    currentIngress: ConnectionAttempt?,
+    clock: MonotonicClock
+): Boolean =
+    expected.remainingMillis(clock) > 0L &&
+        expected.hasSameImmutableIdentity(currentTarget) &&
+        expected.hasSameImmutableIdentity(currentIngress) &&
+        resume(expected)
+
 internal fun ConnectionAttempt.canRunTargetedWork(
     current: ConnectionAttempt?,
     pause: RecoveryAttemptPause,

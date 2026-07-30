@@ -27,7 +27,12 @@
   - [x] Add a shared prepared-attempt pause, attempt-owned LAN connect lease,
     synchronized targeted Socket installation, fresh-ID admission, partial
     preparation fallback coverage, and reuse-to-third-reset coverage.
-  - [ ] Complete fixed-SHA re-review after remediation.
+  - [x] Validate the second review findings: Wi-Fi Direct setup callbacks did
+    not honor the pause and a mismatched adapter `connect()` could clear it.
+  - [x] Invalidate in-flight setup work at preparation, gate targeted/setup
+    callbacks during the pause, restart incomplete setup after exact resume,
+    and reject every non-exact prepared-attempt resume without fallback.
+  - [ ] Complete fixed-SHA re-review after second remediation.
 - [ ] 3.4 Push the exact Head, pass CI, and repeat the physical Wi-Fi Direct
   fault-recovery scenario without peer clicks.
 - [ ] 3.5 Synchronize PR and Linear evidence, merge with a merge commit, verify

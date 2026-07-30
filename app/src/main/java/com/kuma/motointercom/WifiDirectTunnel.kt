@@ -239,12 +239,15 @@ internal class WifiDirectTunnel(
     }
 
     fun connect(attempt: ConnectionAttempt): Boolean {
-        if (
-            targetAttempt == attempt &&
-            ingressAttempt == attempt &&
-            attempt.remainingMillis(monotonicClock) > 0L &&
-            retryPause.resume(attempt)
-        ) {
+        if (retryPause.isPrepared) {
+            if (
+                !retryPause.resumeExact(
+                    attempt,
+                    targetAttempt,
+                    ingressAttempt,
+                    monotonicClock
+                )
+            ) return false
             resumePreparedRetry()
             return true
         }
@@ -285,6 +288,7 @@ internal class WifiDirectTunnel(
         targetAttempt = attempt
         targetAddress = preservedAddress
         groupValidationGate.cancel()
+        setupRecoveryGate.cancel()
         validatingGroup = false
         cancelPendingRetry()
         cancelConnectWatchdog()
@@ -317,8 +321,12 @@ internal class WifiDirectTunnel(
                 }
             }
             State.DISCOVERING -> {
-                connectTargetIfAvailable()
-                discoverPeers()
+                if (serviceDiscoveryReady) {
+                    connectTargetIfAvailable()
+                    discoverPeers()
+                } else {
+                    setupServiceDiscovery()
+                }
             }
             State.SIGNALING_READY,
             State.CLOSED -> Unit
@@ -471,7 +479,11 @@ internal class WifiDirectTunnel(
 
     private fun isTargetedContextCurrent(context: TargetedTaskContext): Boolean =
         isTargetedContextIdentityCurrent(context) &&
-            context.attempt.remainingMillis(monotonicClock) > 0L
+            context.attempt.canRunTargetedWork(
+                targetAttempt,
+                retryPause,
+                monotonicClock
+            )
 
     override fun close() = close {}
 
@@ -1678,7 +1690,9 @@ internal class WifiDirectTunnel(
     )
 
     private fun isSetupCurrent(setup: WifiDirectSetupRecoveryGate.Session): Boolean =
-        running && setupRecoveryGate.isCurrent(setup)
+        running &&
+            !retryPause.isPrepared &&
+            setupRecoveryGate.isCurrent(setup)
 
     private fun discoverAction(
         message: String,

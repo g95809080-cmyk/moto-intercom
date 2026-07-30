@@ -82,11 +82,15 @@ internal class LanDiscoveryCoordinator(
     }
 
     fun connect(attempt: ConnectionAttempt): Boolean {
-        if (
-            targetAttempt.current == attempt &&
-            ingressAttempt.current == attempt &&
-            retryPause.resume(attempt)
-        ) {
+        if (retryPause.isPrepared) {
+            if (
+                !retryPause.resumeExact(
+                    attempt,
+                    targetAttempt.current,
+                    ingressAttempt.current,
+                    monotonicClock
+                )
+            ) return false
             connectTargetIfAvailable()
             return true
         }
