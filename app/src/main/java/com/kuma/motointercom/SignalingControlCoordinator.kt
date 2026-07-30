@@ -1072,6 +1072,7 @@ internal class SignalingControlCoordinator(
             }
         }
         ownedAttempt = attempt
+        targetedTransportRace = null
         val effects = losingChannelIds.map {
             SessionEffect.CloseControlChannel(
                 runtimeSessionId = currentAttempt.runtimeSessionId,

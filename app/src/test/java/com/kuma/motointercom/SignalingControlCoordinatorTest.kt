@@ -604,7 +604,42 @@ class SignalingControlCoordinatorTest {
                     )
                 )
             )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RecoveryTransportReady(
+                        localRecovery.attempt,
+                        Transport.LAN
+                    )
+                )
+            )
             assertEquals(converged.attempt, harness.orchestrator.currentAttempt)
+
+            val select = effects.filterIsInstance<SessionEffect.SelectMediaChannel>().single()
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.MediaChannelSelected(
+                        RUNTIME_A,
+                        converged.attempt.id,
+                        select.cohort.wireRequestKey,
+                        remoteWinner.channelId
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectAccept)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingMessageSent(
+                        RUNTIME_A,
+                        converged.attempt.id,
+                        remoteWinner.channelId,
+                        SignalingMessageTypeV2.CONNECT_ACCEPT
+                    )
+                )
+            )
+            val start = harness.nextEffect() as SessionEffect.StartWebRtc
+            assertEquals(remoteWinner.channelId, start.channelId)
+            assertEquals(WebRtcRole.ANSWERER, start.role)
+            assertFalse(harness.hasPendingEffect())
         }
     }
 
@@ -650,6 +685,82 @@ class SignalingControlCoordinatorTest {
             val reject = harness.nextEffect() as SessionEffect.SendConnectReject
             assertEquals(RejectReason.GLARE_LOST, reject.reason)
             assertEquals(remoteLoser.channelId, reject.channelId)
+            assertEquals(localRecovery, harness.orchestrator.state.value)
+            assertEquals(localRecovery.attempt, harness.orchestrator.currentAttempt)
+            assertEquals(SignalingAttemptPhase.WAITING_REMOTE_DECISION, activePhase(harness))
+            assertFalse(harness.hasPendingEffect())
+        }
+    }
+
+    @Test
+    fun recoveryGlareGateKeepsUserAndThirdPartyRequestsBusy() = runBlocking {
+        val recoveryIds = ArrayDeque(listOf(ConnectionAttemptId(ATTEMPT_A)))
+        harness(attemptIdFactory = recoveryIds::removeFirst).use { harness ->
+            val localRecovery = enterRecovery(harness)
+            val localChannel = requesterChannel(CHANNEL_A, localRecovery.attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, localChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+
+            val sameTargetUser = responderChannel(
+                channelId = CHANNEL_B,
+                requesterDeviceId = DEVICE_B,
+                requesterRuntime = RUNTIME_B,
+                responderDeviceId = DEVICE_A,
+                attemptId = ATTEMPT_B,
+                originatingAttempt = localRecovery.attempt
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, sameTargetUser)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_A,
+                        sameTargetUser.channelId,
+                        sameTargetUser.wireRequestKey,
+                        RequestTrigger.USER,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+            assertEquals(sameTargetUser.channelId, (harness.nextEffect() as SessionEffect.SendBusy).channelId)
+
+            val thirdPartyRecovery = responderChannel(
+                channelId = CHANNEL_C,
+                requesterDeviceId = DEVICE_C,
+                requesterRuntime = RUNTIME_C,
+                responderDeviceId = DEVICE_A,
+                attemptId = ATTEMPT_C,
+                originatingAttempt = localRecovery.attempt
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, thirdPartyRecovery)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_A,
+                        thirdPartyRecovery.channelId,
+                        thirdPartyRecovery.wireRequestKey,
+                        RequestTrigger.RECOVERY,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+            assertEquals(
+                thirdPartyRecovery.channelId,
+                (harness.nextEffect() as SessionEffect.SendBusy).channelId
+            )
             assertEquals(localRecovery, harness.orchestrator.state.value)
             assertEquals(localRecovery.attempt, harness.orchestrator.currentAttempt)
             assertEquals(SignalingAttemptPhase.WAITING_REMOTE_DECISION, activePhase(harness))
