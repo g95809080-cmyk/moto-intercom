@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
 
 @JvmInline
@@ -44,11 +45,39 @@ internal fun ConnectionAttempt.canReuseDiscoveryAdapterFrom(
     clock: MonotonicClock
 ): Boolean =
     previous != null &&
+        id != previous.id &&
         trigger == ConnectionTrigger.RECOVERY &&
         transport in channelPlan &&
         runtimeSessionId == previous.runtimeSessionId &&
         targetLock == previous.targetLock &&
         remainingMillis(clock) > 0L
+
+internal class RecoveryAttemptPause {
+    private val attempt = AtomicReference<ConnectionAttempt?>()
+
+    val isPrepared: Boolean
+        get() = attempt.get() != null
+
+    fun prepare(value: ConnectionAttempt) {
+        attempt.set(value)
+    }
+
+    fun resume(expected: ConnectionAttempt): Boolean =
+        attempt.compareAndSet(expected, null)
+
+    fun clear() {
+        attempt.set(null)
+    }
+}
+
+internal fun ConnectionAttempt.canRunTargetedWork(
+    current: ConnectionAttempt?,
+    pause: RecoveryAttemptPause,
+    clock: MonotonicClock
+): Boolean =
+    !pause.isPrepared &&
+        remainingMillis(clock) > 0L &&
+        hasSameImmutableIdentity(current)
 
 internal data class AttemptTaskContext(
     val attempt: ConnectionAttempt,

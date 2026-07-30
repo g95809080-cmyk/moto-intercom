@@ -35,6 +35,16 @@ internal fun shouldReuseRecoveryDiscovery(effect: SessionEffect.RestartDiscovery
     effect.attempt.trigger == ConnectionTrigger.RECOVERY &&
         effect.restartDelayMillis > 0L
 
+internal fun prepareRecoveryDiscoveryAdapters(
+    planned: Set<Transport>,
+    prepare: (Transport) -> Boolean
+): Boolean {
+    for (transport in listOf(Transport.WIFI_DIRECT, Transport.LAN)) {
+        if (transport in planned && !prepare(transport)) return false
+    }
+    return true
+}
+
 internal class RecoveryTransportStartup(
     private val expectedAttempt: ConnectionAttempt?,
     private val dispatch: (SessionEvent.RecoveryTransportReady) -> Unit
@@ -1765,11 +1775,14 @@ class IntercomService : Service() {
             return false
         }
 
-        val wifiPrepared = Transport.WIFI_DIRECT !in planned ||
-            wifiTunnel?.prepareRetry(effect.attempt) == true
-        val lanPrepared = Transport.LAN !in planned ||
-            lanDiscovery?.prepareRetry(effect.attempt) == true
-        if (!wifiPrepared || !lanPrepared) return false
+        if (
+            !prepareRecoveryDiscoveryAdapters(planned) { transport ->
+                when (transport) {
+                    Transport.WIFI_DIRECT -> wifiTunnel?.prepareRetry(effect.attempt) == true
+                    Transport.LAN -> lanDiscovery?.prepareRetry(effect.attempt) == true
+                }
+            }
+        ) return false
 
         attemptMilestoneScheduler.cancelRuntime(effect.runtimeSessionId)
         controlChannelCloseDeadlineScheduler.cancelRuntime(effect.runtimeSessionId)

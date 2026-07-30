@@ -20,6 +20,14 @@
 - [x] 3.2 Run full JVM, lint, debug APK, and AndroidTest APK gates.
 - [ ] 3.3 Complete fixed Base/Head read-only architecture review with P0=0 and
   P1=0.
+  - [x] Validate the first adapter-reuse review findings: discovery could
+    bypass the retry delay, an old LAN worker could clear the fresh lease,
+    reuse did not require a fresh ID, and production seam coverage was
+    incomplete.
+  - [x] Add a shared prepared-attempt pause, attempt-owned LAN connect lease,
+    synchronized targeted Socket installation, fresh-ID admission, partial
+    preparation fallback coverage, and reuse-to-third-reset coverage.
+  - [ ] Complete fixed-SHA re-review after remediation.
 - [ ] 3.4 Push the exact Head, pass CI, and repeat the physical Wi-Fi Direct
   fault-recovery scenario without peer clicks.
 - [ ] 3.5 Synchronize PR and Linear evidence, merge with a merge commit, verify

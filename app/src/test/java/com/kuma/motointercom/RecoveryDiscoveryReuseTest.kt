@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,11 +56,43 @@ class RecoveryDiscoveryReuseTest {
             retry.copy(trigger = ConnectionTrigger.USER)
                 .canReuseDiscoveryAdapterFrom(previous, Transport.WIFI_DIRECT, clock)
         )
+        assertFalse(
+            previous.canReuseDiscoveryAdapterFrom(previous, Transport.WIFI_DIRECT, clock)
+        )
 
         clock.advanceBy(10_000L)
         assertFalse(
             retry.canReuseDiscoveryAdapterFrom(previous, Transport.WIFI_DIRECT, clock)
         )
+    }
+
+    @Test
+    fun preparedAdapterCannotResumeForAnOldOrDifferentAttempt() {
+        val pause = RecoveryAttemptPause()
+        val retry = attempt("retry", Transport.WIFI_DIRECT)
+
+        pause.prepare(retry)
+
+        assertTrue(pause.isPrepared)
+        assertFalse(retry.canRunTargetedWork(retry, pause, clock))
+        assertFalse(pause.resume(attempt("other", Transport.WIFI_DIRECT)))
+        assertTrue(pause.isPrepared)
+        assertTrue(pause.resume(retry))
+        assertFalse(pause.isPrepared)
+        assertTrue(retry.canRunTargetedWork(retry, pause, clock))
+    }
+
+    @Test
+    fun partialAdapterPreparationFailsClosed() {
+        val calls = mutableListOf<Transport>()
+
+        val prepared = prepareRecoveryDiscoveryAdapters(Transport.entries.toSet()) {
+            calls += it
+            it == Transport.WIFI_DIRECT
+        }
+
+        assertFalse(prepared)
+        assertEquals(listOf(Transport.WIFI_DIRECT, Transport.LAN), calls)
     }
 
     private fun attempt(id: String, transport: Transport) = ConnectionAttempt(

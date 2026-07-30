@@ -40,6 +40,21 @@ class LanAttemptLeaseTest {
         assertEquals(current, lease.current)
     }
 
+    @Test
+    fun staleConnectWorkerCannotReleaseTheFreshAttemptLease() {
+        val lease = LanAttemptLease()
+        val old = attempt("10000000-0000-4000-8000-000000000001")
+        val current = attempt("10000000-0000-4000-8000-000000000002")
+
+        assertTrue(lease.tryBind(old))
+        lease.clear()
+        assertTrue(lease.tryBind(current))
+
+        assertFalse(lease.release(old))
+        assertFalse(lease.tryBind(attempt("10000000-0000-4000-8000-000000000003")))
+        assertEquals(current, lease.current)
+    }
+
     private fun attempt(id: String) = ConnectionAttempt(
         id = ConnectionAttemptId(id),
         runtimeSessionId = RuntimeSessionId("20000000-0000-4000-8000-000000000001"),
