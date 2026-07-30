@@ -15,7 +15,7 @@
 
 - [x] 3.1 Run targeted tests and full `testDebugUnitTest`, `lintDebug`, `assembleDebug`, and `assembleDebugAndroidTest`.
 - [x] 3.2 Validate Rasen strictly and record exact APK hashes.
-- [ ] 3.3 Commit, push, and create one Draft PR linked to KUM-42.
-- [ ] 3.4 Obtain fixed Base/Head architecture approval with P0=0 and P1=0.
-- [ ] 3.5 Pass exact-Head A→B and B→A LAN selection/connection without full Stop.
-- [ ] 3.6 Pass PR CI, merge by merge commit, pass exact-main CI, and synchronize KUM-42 evidence/state.
+- [x] 3.3 Commit, push, and create one Draft PR linked to KUM-42.
+- [x] 3.4 Obtain fixed Base/Head architecture approval with P0=0 and P1=0.
+- [x] 3.5 Pass exact-Head A→B and B→A LAN selection/connection without full Stop.
+- [x] 3.6 Pass PR CI, merge by merge commit, pass exact-main CI, and synchronize KUM-42 evidence/state.

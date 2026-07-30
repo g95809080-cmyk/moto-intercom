@@ -17,6 +17,6 @@
 
 - [x] 3.1 Run targeted and full Gradle gates plus strict Rasen validation.
 - [x] 3.2 Commit, push, create one Draft PR, and pass CI.
-- [ ] 3.3 Obtain fixed Base/Head architecture approval with P0=0 and P1=0.
-- [ ] 3.4 Pass exact-Head Wi-Fi disable/enable automatic recovery on both devices.
-- [ ] 3.5 Merge by merge commit, pass exact-main CI, and synchronize Linear.
+- [x] 3.3 Obtain fixed Base/Head architecture approval with P0=0 and P1=0.
+- [x] 3.4 Pass exact-Head Wi-Fi disable/enable automatic recovery on both devices.
+- [x] 3.5 Merge by merge commit, pass exact-main CI, and synchronize Linear.

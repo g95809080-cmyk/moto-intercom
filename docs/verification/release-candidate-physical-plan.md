@@ -1,9 +1,15 @@
 # MotoIntercom Release Candidate Physical Acceptance Plan
 
-Status: **READY FOR RELEASE**; physical execution `DEFERRED_TO_RELEASE_CANDIDATE`
+Status: **GITHUB PERSONAL-USE RELEASE AUTHORIZED**
 
-This document is the required physical evidence queue. No row below is claimed
-as passed by JVM, fake, emulator, or CI evidence.
+Release boundary updated: 2026-07-30
+
+The user accepted the current feature set and the explicitly listed remaining
+hardware risks for a GitHub-hosted APK. This is not an app-store production
+release.
+
+This document records the final automated, two-device, and accepted-residual
+evidence for the GitHub personal-use release.
 
 ## Entry gate
 
@@ -15,43 +21,41 @@ as passed by JVM, fake, emulator, or CI evidence.
 
 Entry gate result: PASS.
 
-- Application source anchor: `c86c710d75708e1748cf29780c4cf590d58c657f`
-- App tree: `8bffc1cee233332c61dc19a757e5da585fba9ca7` (unchanged by the
-  KUM-39 evidence-only delivery)
-- Exact-main CI: `29717734064` - success
-- CI artifact: `android-verification-91` (artifact ID `8451237435`)
+- Application source anchor: `8d164a458316afab672e70ec7c179838d0923b5a`
+- Exact-main CI: `30509400377` - success
 - Debug APK SHA-256:
-  `A253F80775F250F9A34F96106F23614E32D6709BC748C09FC4F8EC357BF41A9C`
-- AndroidTest APK SHA-256:
-  `07F3EE89ECB9306FA9BFC4538FDA03ACC447F8913AD7249D22BB9478E77E2326`
-- Automated result: 294/294 JVM tests; 45 suites; 0 failures/errors/skipped;
-  Lint 0 errors/36 warnings; focused/full emulator matrices PASS; architecture
-  review APPROVED with P0=0/P1=0
+  `D26BFFEE8157F719B3028E6B71E4F593F8B0037D0177A7CA7341061FB6B84639`
+- Debug certificate SHA-256:
+  `7F20F38DC1D7372CDE34CAC6E0E17D80EC995AC298C298FD0D24605E1A8070F3`
+- Automated result: 323/323 JVM tests; 49 suites; 0 failures/errors/skipped;
+  Lint 0 fatal/0 errors/29 warnings; `assembleDebug` and
+  `assembleDebugAndroidTest` PASS; architecture reviews APPROVED with
+  P0=0/P1=0.
 
-The fixed debug APK is the physical-acceptance candidate, not a signed
-production release. Production signing and publication remain separately
-forbidden until this plan passes and the user explicitly authorizes release.
+The GitHub APK intentionally keeps the Android debug signing identity used by
+the two physically accepted installations. This preserves in-place update
+compatibility. It is not an app-store production-signing identity.
 
 ## Physical matrix
 
 | Area | Required physical procedure | Development status |
 | --- | --- | --- |
-| T0/T+5 transport race | With weak/unavailable LAN and healthy Wi-Fi Direct, prove LAN starts at T0, fallback starts no earlier than T+5, only one winner reaches media, and the loser is released | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Sequential fallback without stable overlap | On at least two OEM/Android families, reproduce unavailable or unreliable LAN/P2P overlap; prove the same attempt and target retire LAN before retrying P2P, preserve the immutable T+10 deadline, and create only one media owner | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| OEM Wi-Fi Direct | Two phones per supported OEM family; discover, form group, connect, disconnect, and repeat after radio toggle | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| RF/range/interference | Validate near, normal riding distance, weak signal, and controlled interference without deadline extension | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| OEM background limits | Lock screen, background, screen-off, process pressure, and notification action on Xiaomi and another OEM | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Hot audio recovery lifecycle | Establish audio on two phones, interrupt only the active media/transport path, verify the same SCO/communication route and capture/VOX platform remain active without remote send or local loopback, reconnect with exactly one media stream, then verify full Stop releases the route and microphone | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Recovery target lock | Establish A-B, make B unavailable while C advertises/responds first over LAN and Wi-Fi Direct, and prove A names and retries only B while every C Socket/group/HELLO is rejected and cleaned | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Three-second recovery fallback | Establish A-B over each transport, interrupt B under controlled RF/OEM conditions, prove the last successful transport owns the first 3 seconds, then prove the alternate starts without target/deadline replacement and exactly one media stream wins | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Three-failure wireless reset | Force three complete same-target recovery failures on at least two OEM/Android families; prove visible `RESETTING`, ordered cancel/removeGroup/clear requests/clear services/channel close, LAN/NSD/UDP/Socket retirement, no stale callback takeover, fresh discovery rebuild, and no audio-owner duplication | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Active disconnect stays online | Establish LAN and Wi-Fi Direct sessions in both directions, disconnect locally and from the peer, and prove signaling/WebRTC/current transport close while Service, discovery, foreground notification, presence, and the hot audio platform remain online with no remote media; then issue full Stop and prove complete teardown | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Sprint 4 composite acceptance | With A paired to B and C present, execute target-locked recovery, preferred T+3 fallback, immutable T+10, three final failures and wireless reset, stale callback rejection, intentional active disconnect, full Stop, and audio recovery; prove one B media owner throughout | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Bluetooth SCO | Connect/disconnect headset before and during a session; verify route recovery and one media stream | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Microphone/speaker | Bidirectional spoken phrases, mute/cancel/disconnect, and no audio after stop | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Hardware AEC | Speaker-mode speech with echo observation on both endpoints | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Human listening | Bidirectional intelligibility, clipping, silence, and recovery confirmation | `DEFERRED_TO_RELEASE_CANDIDATE` |
-| Power/thermal/background survival | Long-running session with battery, thermal, process, and reconnect evidence | `DEFERRED_TO_RELEASE_CANDIDATE` |
+| T0/T+5 transport race | With weak/unavailable LAN and healthy Wi-Fi Direct, prove LAN starts at T0, fallback starts no earlier than T+5, only one winner reaches media, and the loser is released | `AUTOMATED_PASS / PHYSICAL_TIMING_ACCEPTED_RESIDUAL` |
+| Sequential fallback without stable overlap | On at least two OEM/Android families, reproduce unavailable or unreliable LAN/P2P overlap; prove the same attempt and target retire LAN before retrying P2P, preserve the immutable T+10 deadline, and create only one media owner | `AUTOMATED_PASS / PHYSICAL_OVERLAP_ACCEPTED_RESIDUAL` |
+| OEM Wi-Fi Direct | Two phones per supported OEM family; discover, form group, connect, disconnect, and repeat after radio toggle | `PASS` |
+| RF/range/interference | Validate near, normal riding distance, weak signal, and controlled interference without deadline extension | `ACCEPTED_RESIDUAL_RISK` |
+| OEM background limits | Lock screen, background, screen-off, process pressure, and notification action on Xiaomi and another OEM | `PASS_LOCK_BACKGROUND / PROCESS_PRESSURE_ACCEPTED_RESIDUAL` |
+| Hot audio recovery lifecycle | Establish audio on two phones, interrupt only the active media/transport path, verify the same SCO/communication route and capture/VOX platform remain active without remote send or local loopback, reconnect with exactly one media stream, then verify full Stop releases the route and microphone | `PASS` |
+| Recovery target lock | Establish A-B, make B unavailable while C advertises/responds first over LAN and Wi-Fi Direct, and prove A names and retries only B while every C Socket/group/HELLO is rejected and cleaned | `AUTOMATED_PASS / THIRD_PHONE_ACCEPTED_RESIDUAL` |
+| Three-second recovery fallback | Establish A-B over each transport, interrupt B under controlled RF/OEM conditions, prove the last successful transport owns the first 3 seconds, then prove the alternate starts without target/deadline replacement and exactly one media stream wins | `AUTOMATED_PASS / PHYSICAL_TIMING_ACCEPTED_RESIDUAL` |
+| Three-failure wireless reset | Force three complete same-target recovery failures on at least two OEM/Android families; prove visible `RESETTING`, ordered cancel/removeGroup/clear requests/clear services/channel close, LAN/NSD/UDP/Socket retirement, no stale callback takeover, fresh discovery rebuild, and no audio-owner duplication | `AUTOMATED_PASS / PHYSICAL_SEQUENCE_ACCEPTED_RESIDUAL` |
+| Active disconnect stays online | Establish LAN and Wi-Fi Direct sessions in both directions, disconnect locally and from the peer, and prove signaling/WebRTC/current transport close while Service, discovery, foreground notification, presence, and the hot audio platform remain online with no remote media; then issue full Stop and prove complete teardown | `PASS` |
+| Sprint 4 composite acceptance | With A paired to B and C present, execute target-locked recovery, preferred T+3 fallback, immutable T+10, three final failures and wireless reset, stale callback rejection, intentional active disconnect, full Stop, and audio recovery; prove one B media owner throughout | `AUTOMATED_PASS / THIRD_PHONE_ACCEPTED_RESIDUAL` |
+| Bluetooth SCO | Connect/disconnect headset before and during a session; verify route recovery and one media stream | `PASS` |
+| Microphone/speaker | Bidirectional spoken phrases, mute/cancel/disconnect, and no audio after stop | `PASS` |
+| Hardware AEC | Speaker-mode speech with echo observation on both endpoints | `BASIC_SPEAKER_PASS / FORMAL_AEC_ACCEPTED_RESIDUAL` |
+| Human listening | Bidirectional intelligibility, clipping, silence, and recovery confirmation | `PASS` |
+| Power/thermal/background survival | Long-running session with battery, thermal, process, and reconnect evidence | `30_MINUTE_PASS / FORMAL_METRICS_ACCEPTED_RESIDUAL` |
 
 ## Core scenario sequence
 
@@ -69,12 +73,12 @@ forbidden until this plan passes and the user explicitly authorizes release.
 
 ## Release decision
 
-KUM-36 automated evidence and exact-main CI bind the development matrix to
-`c86c710`. This Ready for Release decision does not convert any physical row to
-PASS. Emulator Wi-Fi Direct/RF/OEM gaps, ATD black framebuffers, real audio
-hardware, and long-duration behavior remain explicit Release Candidate work.
+The final two-device sessions covered LAN and Wi-Fi Direct in both requester
+directions, active disconnect and rediscovery, lock-screen/background audio,
+Bluetooth headset connect/disconnect/reconnect without duplicate playout,
+process restart, full Stop without residual audio, a 30-minute session, and
+automatic same-target Wi-Fi Direct outage recovery.
 
-Any failed mandatory row blocks production release. At Release Candidate
-execution, unavailable hardware remains `NOT_RUN`, not accepted or passed,
-until the user explicitly approves a revised Release Gate. Production release
-always requires a separate explicit user authorization.
+The user explicitly accepted the remaining physical-only risks above for this
+GitHub personal-use APK. App-store publication and a production signing key
+remain out of scope.

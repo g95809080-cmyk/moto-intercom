@@ -1,6 +1,12 @@
 # Sprint 4 Final Verification
 
-Status: **READY FOR RELEASE - PHYSICAL ACCEPTANCE PENDING**
+Status: **COMPLETED**
+
+The later GitHub personal-use release decision, two-device evidence, and
+accepted residual risks are recorded in
+`docs/verification/release-candidate-physical-plan.md` and
+`docs/releases/v1.0.0.md`. The historical checkpoint details below remain
+unchanged.
 
 Evidence state: 2026-07-20
 
