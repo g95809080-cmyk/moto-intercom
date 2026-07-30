@@ -535,6 +535,129 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun sameTargetRecoveryGlareConvergesWithoutBusy() = runBlocking {
+        val recoveryIds = ArrayDeque(listOf(ConnectionAttemptId(ATTEMPT_B)))
+        harness(attemptIdFactory = recoveryIds::removeFirst).use { harness ->
+            val localRecovery = enterRecovery(harness)
+            val localChannel = requesterChannel(CHANNEL_B, localRecovery.attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, localChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+
+            val remoteWinner = responderChannel(
+                channelId = CHANNEL_A,
+                requesterDeviceId = DEVICE_B,
+                requesterRuntime = RUNTIME_B,
+                responderDeviceId = DEVICE_A,
+                attemptId = ATTEMPT_A,
+                originatingAttempt = localRecovery.attempt
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, remoteWinner)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_A,
+                        remoteWinner.channelId,
+                        remoteWinner.wireRequestKey,
+                        RequestTrigger.RECOVERY,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+
+            val effects = listOf(
+                harness.nextEffect(),
+                harness.nextEffect(),
+                harness.nextEffect()
+            )
+            val converged = harness.orchestrator.state.value as IntercomState.Recovering
+            assertFalse(effects.any { it is SessionEffect.SendBusy })
+            assertTrue(effects.any { it is SessionEffect.CloseControlChannel })
+            assertTrue(effects.any { it is SessionEffect.ScheduleAttemptDeadline })
+            assertTrue(effects.any { it is SessionEffect.SelectMediaChannel })
+            assertEquals(ConnectionAttemptId(ATTEMPT_A), converged.attempt.id)
+            assertEquals(ConnectionTrigger.RECOVERY, converged.attempt.trigger)
+            assertEquals(localRecovery.attempt.targetLock, converged.attempt.targetLock)
+            assertEquals(
+                localRecovery.attempt.deadlineElapsedRealtimeMs,
+                converged.attempt.deadlineElapsedRealtimeMs
+            )
+            assertEquals(localRecovery.consecutiveFinalFailures, converged.consecutiveFinalFailures)
+            assertEquals(
+                ConnectionAttemptTerminalOutcome.GLARE_LOST,
+                harness.orchestrator.terminalOutcome(localRecovery.attempt.id)
+            )
+            assertFalse(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AttemptTimedOut(
+                        RUNTIME_A,
+                        localRecovery.attempt.id,
+                        localRecovery.attempt.deadlineElapsedRealtimeMs
+                    )
+                )
+            )
+            assertEquals(converged.attempt, harness.orchestrator.currentAttempt)
+        }
+    }
+
+    @Test
+    fun localRecoveryGlareWinnerRejectsRemoteAttemptWithoutLeavingRecovery() = runBlocking {
+        val recoveryIds = ArrayDeque(listOf(ConnectionAttemptId(ATTEMPT_A)))
+        harness(attemptIdFactory = recoveryIds::removeFirst).use { harness ->
+            val localRecovery = enterRecovery(harness)
+            val localChannel = requesterChannel(CHANNEL_A, localRecovery.attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, localChannel)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+
+            val remoteLoser = responderChannel(
+                channelId = CHANNEL_B,
+                requesterDeviceId = DEVICE_B,
+                requesterRuntime = RUNTIME_B,
+                responderDeviceId = DEVICE_A,
+                attemptId = ATTEMPT_B,
+                originatingAttempt = localRecovery.attempt
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, remoteLoser)
+                )
+            )
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.IncomingConnectRequest(
+                        RUNTIME_A,
+                        remoteLoser.channelId,
+                        remoteLoser.wireRequestKey,
+                        RequestTrigger.RECOVERY,
+                        Transport.LAN,
+                        100L
+                    )
+                )
+            )
+
+            val reject = harness.nextEffect() as SessionEffect.SendConnectReject
+            assertEquals(RejectReason.GLARE_LOST, reject.reason)
+            assertEquals(remoteLoser.channelId, reject.channelId)
+            assertEquals(localRecovery, harness.orchestrator.state.value)
+            assertEquals(localRecovery.attempt, harness.orchestrator.currentAttempt)
+            assertEquals(SignalingAttemptPhase.WAITING_REMOTE_DECISION, activePhase(harness))
+            assertFalse(harness.hasPendingEffect())
+        }
+    }
+
+    @Test
     fun activeRecoverySignalingDisconnectClearsContextAndRearmsSchedules() = runBlocking {
         val recoveryIds = ArrayDeque(
             listOf(ConnectionAttemptId("30000000-0000-4000-8000-000000000011"))
@@ -3231,6 +3354,47 @@ class SignalingControlCoordinatorTest {
         runtimeSessionId = runtimeSessionId,
         isDeviceIdVerified = true
     )
+
+    private suspend fun enterRecovery(harness: Harness): IntercomState.Recovering {
+        val connectedAttempt = outboundAttempt(ATTEMPT_C)
+        harness.start(connectedAttempt)
+        val connectedChannel = requesterChannel(CHANNEL_C, connectedAttempt)
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.ControlChannelVerified(RUNTIME_A, connectedChannel)
+            )
+        )
+        assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.RemoteConnectAccepted(
+                    RUNTIME_A,
+                    connectedAttempt.id,
+                    connectedChannel.channelId,
+                    connectedChannel.wireRequestKey
+                )
+            )
+        )
+        assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    RUNTIME_A,
+                    connectedAttempt.id,
+                    WebRtcConnectionState.CONNECTED,
+                    500L
+                )
+            )
+        )
+        assertTrue(
+            harness.orchestrator.dispatchAndAwait(
+                SessionEvent.SignalingDisconnected(RUNTIME_A, connectedAttempt.id)
+            )
+        )
+        assertTrue(harness.nextEffect() is SessionEffect.RestartDiscovery)
+        assertTrue(harness.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+        return harness.orchestrator.state.value as IntercomState.Recovering
+    }
 
     private fun harness(
         pairedDeviceIds: Set<String> = emptySet(),

@@ -818,7 +818,11 @@ internal class SignalingControlCoordinator(
 
         val currentAttempt = current.connectionAttemptOrNull()
         if (
-            current is IntercomState.Connecting &&
+            (
+                current is IntercomState.Connecting ||
+                    current is IntercomState.Recovering &&
+                    event.trigger == RequestTrigger.RECOVERY
+                ) &&
             currentAttempt != null &&
             currentAttempt.targetLock == channel.targetLock
         ) {
@@ -996,12 +1000,13 @@ internal class SignalingControlCoordinator(
     }
 
     private fun acceptGlareWinner(
-        current: IntercomState.Connecting,
+        current: IntercomState,
         channel: VerifiedControlChannel,
         preferredTransportHint: Transport?,
         occurredAtElapsedMs: Long
     ): SignalingControlDecision {
-        if (current.attempt.isExpiredAt(clock.now())) return rejected()
+        val currentAttempt = current.connectionAttemptOrNull() ?: return rejected()
+        if (currentAttempt.isExpiredAt(clock.now())) return rejected()
         val losingContext = active
         if (
             losingContext != null &&
@@ -1017,7 +1022,7 @@ internal class SignalingControlCoordinator(
                     .filter { it.wireRequestKey == channel.wireRequestKey }
                     .map {
                         rejectEffect(
-                            current.runtimeSessionId,
+                            currentAttempt.runtimeSessionId,
                             it.wireRequestKey.attemptId,
                             it.channelId,
                             RejectReason.GLARE_LOST,
@@ -1029,44 +1034,50 @@ internal class SignalingControlCoordinator(
 
         val losingChannelIds = losingContext?.channelIds.orEmpty() + channels.values
             .filter {
-                it.originatingAttempt == current.attempt &&
+                it.originatingAttempt == currentAttempt &&
                     it.wireRequestKey != channel.wireRequestKey
             }
             .map { it.channelId }
         losingContext?.let {
             remember(it.wireRequestKey, AttemptOutcome.GLARE_LOST, null)
         }
-        recordTerminal(current.attempt, ConnectionAttemptTerminalOutcome.GLARE_LOST)
+        recordTerminal(currentAttempt, ConnectionAttemptTerminalOutcome.GLARE_LOST)
         losingChannelIds.forEach(channels::remove)
 
         val plan = inboundChannelPlan(channel.transport, preferredTransportHint)
         val eligible = eligibleChannels(channel.wireRequestKey, plan)
         if (eligible.isEmpty()) {
             active = null
-            clearOwnedAttempt(current.attempt)
+            clearOwnedAttempt(currentAttempt)
             return accepted(
-                state = IntercomState.Discovering(current.runtimeSessionId),
+                state = IntercomState.Discovering(currentAttempt.runtimeSessionId),
                 effects = listOf(
                     SessionEffect.AbortAttemptAndResumeDiscovery(
-                        current.runtimeSessionId,
-                        current.attempt.id
+                        currentAttempt.runtimeSessionId,
+                        currentAttempt.id
                     )
                 )
             )
         }
         val attempt = inboundAttempt(
-            runtimeSessionId = current.runtimeSessionId,
+            runtimeSessionId = currentAttempt.runtimeSessionId,
             channel = channel,
             channelPlan = plan,
-            deadlineAt = current.attempt.deadlineAt
-        )
+            deadlineAt = currentAttempt.deadlineAt
+        ).let { attempt ->
+            if (current is IntercomState.Recovering) {
+                attempt.copy(trigger = ConnectionTrigger.RECOVERY)
+            } else {
+                attempt
+            }
+        }
         ownedAttempt = attempt
         val effects = losingChannelIds.map {
             SessionEffect.CloseControlChannel(
-                runtimeSessionId = current.runtimeSessionId,
-                attemptId = current.attempt.id,
+                runtimeSessionId = currentAttempt.runtimeSessionId,
+                attemptId = currentAttempt.id,
                 channelId = it,
-                targetLock = current.attempt.targetLock
+                targetLock = currentAttempt.targetLock
             )
         } + SessionEffect.ScheduleAttemptDeadline(attempt)
         return beginMediaSelection(
@@ -2274,7 +2285,7 @@ internal class SignalingControlCoordinator(
                 optimizationMilestone = milestone
             )
             return accepted(
-                state = IntercomState.Optimizing(attempt, peer),
+                state = selectionState(current, attempt, peer, optimizing = true),
                 effects = prefixEffects + SessionEffect.ScheduleAttemptMilestone(milestone)
             )
         }
@@ -2287,9 +2298,27 @@ internal class SignalingControlCoordinator(
             selectionCohort = cohort
         )
         return accepted(
-            state = IntercomState.Connecting(attempt, peer),
+            state = selectionState(current, attempt, peer, optimizing = false),
             effects = prefixEffects + selectEffect(attempt, cohort)
         )
+    }
+
+    private fun selectionState(
+        current: IntercomState,
+        attempt: ConnectionAttempt,
+        peer: PeerIdentity,
+        optimizing: Boolean
+    ): IntercomState = when (current) {
+        is IntercomState.Recovering -> IntercomState.Recovering(
+            attempt,
+            peer,
+            current.consecutiveFinalFailures
+        )
+        else -> if (optimizing) {
+            IntercomState.Optimizing(attempt, peer)
+        } else {
+            IntercomState.Connecting(attempt, peer)
+        }
     }
 
     private fun inboundAttempt(
