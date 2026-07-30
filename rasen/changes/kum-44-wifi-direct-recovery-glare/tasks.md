@@ -41,5 +41,5 @@
     interruption recovered the same Wi-Fi Direct target without peer,
     disconnect, or Stop clicks; both WebRTC peers returned to `CONNECTED` and
     human bidirectional listening passed.
-- [ ] 3.5 Synchronize PR and Linear evidence, merge with a merge commit, verify
+- [x] 3.5 Synchronize PR and Linear evidence, merge with a merge commit, verify
   main CI, and mark KUM-44 Done.
