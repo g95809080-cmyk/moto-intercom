@@ -38,6 +38,18 @@ internal fun ConnectionAttempt.hasSameImmutableIdentity(other: ConnectionAttempt
         channelPlan == other.channelPlan &&
         deadlineAt == other.deadlineAt
 
+internal fun ConnectionAttempt.canReuseDiscoveryAdapterFrom(
+    previous: ConnectionAttempt?,
+    transport: Transport,
+    clock: MonotonicClock
+): Boolean =
+    previous != null &&
+        trigger == ConnectionTrigger.RECOVERY &&
+        transport in channelPlan &&
+        runtimeSessionId == previous.runtimeSessionId &&
+        targetLock == previous.targetLock &&
+        remainingMillis(clock) > 0L
+
 internal data class AttemptTaskContext(
     val attempt: ConnectionAttempt,
     val generation: Int

@@ -87,6 +87,21 @@ internal class LanDiscoveryCoordinator(
         return true
     }
 
+    fun prepareRetry(attempt: ConnectionAttempt): Boolean {
+        val previous = targetAttempt.current ?: ingressAttempt.current ?: return false
+        if (
+            !isActive() ||
+            !attempt.canReuseDiscoveryAdapterFrom(previous, Transport.LAN, monotonicClock)
+        ) {
+            return false
+        }
+        closeQuietly(targetedClientSocket.getAndSet(null))
+        clientConnecting.set(false)
+        ingressAttempt.bind(attempt)
+        targetAttempt.bind(attempt)
+        return true
+    }
+
     fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
         ingressAttempt.release(completedAttempt)
         if (targetAttempt.release(completedAttempt)) {

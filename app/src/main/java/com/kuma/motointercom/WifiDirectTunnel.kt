@@ -107,6 +107,7 @@ internal class WifiDirectTunnel(
     @Volatile private var tunnelStarted = false
     @Volatile private var removingGroup = false
     @Volatile private var validatingGroup = false
+    @Volatile private var retryPrepared = false
     @Volatile private var state = State.DISCOVERING
 
     @Volatile private var socketTransport: WifiDirectSignalingSocket? = null
@@ -157,6 +158,7 @@ internal class WifiDirectTunnel(
                 WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> requestPeers()
 
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
+                    if (retryPrepared) return
                     @Suppress("DEPRECATION")
                     val networkInfo = intent.parcelableCompat<NetworkInfo>(
                         WifiP2pManager.EXTRA_NETWORK_INFO
@@ -237,7 +239,17 @@ internal class WifiDirectTunnel(
     }
 
     fun connect(attempt: ConnectionAttempt): Boolean {
+        if (
+            targetAttempt == attempt &&
+            ingressAttempt == attempt &&
+            attempt.remainingMillis(monotonicClock) > 0L
+        ) {
+            retryPrepared = false
+            resumePreparedRetry()
+            return true
+        }
         if (!restrictIngress(attempt)) return false
+        retryPrepared = false
         groupValidationGate.cancel()
         validatingGroup = false
         cancelConnectWatchdog()
@@ -246,6 +258,68 @@ internal class WifiDirectTunnel(
         targetAddress = null
         connectTargetIfAvailable()
         return true
+    }
+
+    fun prepareRetry(attempt: ConnectionAttempt): Boolean {
+        val previous = targetAttempt ?: ingressAttempt ?: return false
+        if (
+            !running ||
+            state == State.CLOSED ||
+            !attempt.canReuseDiscoveryAdapterFrom(
+                previous,
+                Transport.WIFI_DIRECT,
+                monotonicClock
+            )
+        ) {
+            return false
+        }
+        val preservedAddress = targetAddress
+            ?: connectingAddress
+            ?: peerRegistry.findAcceptedAddress(peerClaims, attempt.targetLock)
+        if (!restrictIngress(attempt)) return false
+        targetAttemptGeneration++
+        targetAttempt = attempt
+        targetAddress = preservedAddress
+        groupValidationGate.cancel()
+        validatingGroup = false
+        retryPrepared = true
+        cancelPendingRetry()
+        cancelConnectWatchdog()
+        when (state) {
+            State.SIGNALING_READY,
+            State.GROUP_READY -> {
+                resetTunnelOnly()
+                targetAddress = preservedAddress
+                state = State.GROUP_READY
+            }
+            State.P2P_CONNECTING -> connectingAddress = preservedAddress
+            State.DISCOVERING -> connectingAddress = null
+            State.CLOSED -> error("closed state passed retry admission")
+        }
+        return true
+    }
+
+    private fun resumePreparedRetry() {
+        when (state) {
+            State.GROUP_READY -> requestConnectionInfo()
+            State.P2P_CONNECTING -> {
+                val address = connectingAddress ?: targetAddress
+                val device = address?.let(peerDevices::get)
+                if (device?.status == WifiP2pDevice.AVAILABLE) {
+                    connectingAddress = null
+                    state = State.DISCOVERING
+                    targetAttempt?.let { connectTarget(device, it) }
+                } else {
+                    currentTargetContext(address)?.let(::startConnectWatchdog)
+                }
+            }
+            State.DISCOVERING -> {
+                connectTargetIfAvailable()
+                discoverPeers()
+            }
+            State.SIGNALING_READY,
+            State.CLOSED -> Unit
+        }
     }
 
     fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
@@ -421,6 +495,7 @@ internal class WifiDirectTunnel(
         val cleanupGeneration = ++lifecycleGeneration
         Log.d(TAG, "close cleanup start generation=$cleanupGeneration")
         running = false
+        retryPrepared = false
         groupRemovalGeneration++
         targetAttemptGeneration++
         targetAttempt = null
@@ -948,7 +1023,7 @@ internal class WifiDirectTunnel(
             (taskContext == null && targetAttempt != null) ||
             (taskContext != null && !isTargetedContextCurrent(taskContext))
         ) {
-            if (taskContext != null) {
+            if (taskContext != null && !isSupersededByCurrentRecovery(taskContext)) {
                 removeGroupAndRediscover(
                     "stale P2P connection-info callback",
                     taskContext = taskContext
@@ -974,6 +1049,13 @@ internal class WifiDirectTunnel(
         scheduleGroupValidationDeadline(validation, taskContext)
         requestValidatedGroup(info, attempt = 0, validation, taskContext)
     }
+
+    private fun isSupersededByCurrentRecovery(context: TargetedTaskContext): Boolean =
+        targetAttempt?.canReuseDiscoveryAdapterFrom(
+            context.attempt,
+            Transport.WIFI_DIRECT,
+            monotonicClock
+        ) == true
 
     @SuppressLint("MissingPermission")
     private fun requestValidatedGroup(

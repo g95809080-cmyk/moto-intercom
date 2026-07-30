@@ -31,6 +31,10 @@ private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
 internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
     if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
 
+internal fun shouldReuseRecoveryDiscovery(effect: SessionEffect.RestartDiscovery): Boolean =
+    effect.attempt.trigger == ConnectionTrigger.RECOVERY &&
+        effect.restartDelayMillis > 0L
+
 internal class RecoveryTransportStartup(
     private val expectedAttempt: ConnectionAttempt?,
     private val dispatch: (SessionEvent.RecoveryTransportReady) -> Unit
@@ -1363,11 +1367,16 @@ class IntercomService : Service() {
                         orchestrator.currentAttempt
                     )
                 ) {
-                    abortResourcesAndResumeDiscovery(
-                        runtimeSessionId = effect.runtimeSessionId,
-                        nextAttempt = effect.attempt,
-                        restartDelayMillis = effect.restartDelayMillis
-                    )
+                    if (
+                        !shouldReuseRecoveryDiscovery(effect) ||
+                        !retryRecoveryWithExistingDiscovery(effect)
+                    ) {
+                        abortResourcesAndResumeDiscovery(
+                            runtimeSessionId = effect.runtimeSessionId,
+                            nextAttempt = effect.attempt,
+                            restartDelayMillis = effect.restartDelayMillis
+                        )
+                    }
                 }
             }
             is SessionEffect.ResetWirelessEnvironment -> {
@@ -1728,6 +1737,72 @@ class IntercomService : Service() {
                 reason = reason
             )
         )
+    }
+
+    private fun retryRecoveryWithExistingDiscovery(
+        effect: SessionEffect.RestartDiscovery
+    ): Boolean {
+        val request = RecoveryCleanupRequest(
+            runtimeSessionId = effect.runtimeSessionId,
+            nextAttempt = effect.attempt,
+            restartDelayMillis = effect.restartDelayMillis
+        )
+        if (recoveryCleanupCoordinator.updateIfActive(request)) return true
+        if (
+            !running ||
+            activeRuntimeSessionId != effect.runtimeSessionId ||
+            orchestrator.currentAttempt != effect.attempt ||
+            effect.attempt.isExpiredAt(MonotonicTimestamp(SystemClock.elapsedRealtime()))
+        ) {
+            return true
+        }
+        val token = activeSession ?: return false
+        val planned = plannedDiscoveryTransports(effect.attempt)
+        if (
+            (Transport.WIFI_DIRECT in planned && wifiTunnel == null) ||
+            (Transport.LAN in planned && lanDiscovery == null)
+        ) {
+            return false
+        }
+
+        val wifiPrepared = Transport.WIFI_DIRECT !in planned ||
+            wifiTunnel?.prepareRetry(effect.attempt) == true
+        val lanPrepared = Transport.LAN !in planned ||
+            lanDiscovery?.prepareRetry(effect.attempt) == true
+        if (!wifiPrepared || !lanPrepared) return false
+
+        attemptMilestoneScheduler.cancelRuntime(effect.runtimeSessionId)
+        controlChannelCloseDeadlineScheduler.cancelRuntime(effect.runtimeSessionId)
+        drainSignalingSessions().forEach(SignalingSessionV2::close)
+        runCatching { intercomManager?.close() }.onFailure(::handleError)
+        intercomManager = null
+        physicalLinkReady = false
+        mediaConnected = false
+        publishStatus(SIGNAL_LOST_STATUS)
+
+        val delayMillis = effect.attempt.boundedTimeoutMillis(
+            MonotonicClock { MonotonicTimestamp(SystemClock.elapsedRealtime()) },
+            effect.restartDelayMillis
+        )
+        if (delayMillis <= 0L) return true
+        mainHandler.postDelayed({
+            if (
+                !isSessionCurrent(token) ||
+                !canRestartRecoveryAttempt(
+                    expectedAttempt = effect.attempt,
+                    currentAttempt = orchestrator.currentAttempt,
+                    now = MonotonicTimestamp(SystemClock.elapsedRealtime())
+                )
+            ) {
+                return@postDelayed
+            }
+            planned.forEach { transport ->
+                orchestrator.dispatch(
+                    SessionEvent.RecoveryTransportReady(effect.attempt, transport)
+                )
+            }
+        }, delayMillis)
+        return true
     }
 
     private fun PeerConnection.PeerConnectionState.toProductState(): WebRtcConnectionState =
