@@ -18,7 +18,7 @@
 
 - [x] 3.1 Run targeted recovery, cleanup, signaling, and reuse JVM tests.
 - [x] 3.2 Run full JVM, lint, debug APK, and AndroidTest APK gates.
-- [ ] 3.3 Complete fixed Base/Head read-only architecture review with P0=0 and
+- [x] 3.3 Complete fixed Base/Head read-only architecture review with P0=0 and
   P1=0.
   - [x] Validate the first adapter-reuse review findings: discovery could
     bypass the retry delay, an old LAN worker could clear the fresh lease,
@@ -32,8 +32,14 @@
   - [x] Invalidate in-flight setup work at preparation, gate targeted/setup
     callbacks during the pause, restart incomplete setup after exact resume,
     and reject every non-exact prepared-attempt resume without fallback.
-  - [ ] Complete fixed-SHA re-review after second remediation.
-- [ ] 3.4 Push the exact Head, pass CI, and repeat the physical Wi-Fi Direct
+  - [x] Complete fixed-SHA re-review after second remediation: `fe0ef43`,
+    APPROVED, P0=0, P1=0.
+- [x] 3.4 Push the exact Head, pass CI, and repeat the physical Wi-Fi Direct
   fault-recovery scenario without peer clicks.
+  - [x] Exact-Head CI `30508869545` succeeded.
+  - [x] On MI 6 and Xiaomi 13, an ADB-controlled eight-second Xiaomi 13 Wi-Fi
+    interruption recovered the same Wi-Fi Direct target without peer,
+    disconnect, or Stop clicks; both WebRTC peers returned to `CONNECTED` and
+    human bidirectional listening passed.
 - [ ] 3.5 Synchronize PR and Linear evidence, merge with a merge commit, verify
   main CI, and mark KUM-44 Done.
