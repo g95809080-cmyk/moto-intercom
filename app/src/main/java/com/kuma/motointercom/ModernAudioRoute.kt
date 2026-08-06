@@ -69,6 +69,9 @@ internal class ModernAudioRoute(
         return audioManager.setCommunicationDevice(speaker)
     }
 
+    fun isSpeakerActive(): Boolean =
+        !closed.get() && audioManager.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+
     fun stateSummary(): String =
         "communicationDevice=${summary(audioManager.communicationDevice)}, " +
             "available=${audioManager.availableCommunicationDevices.joinToString(prefix = "[", postfix = "]", transform = ::summary)}"

@@ -42,6 +42,8 @@ class AudioRouteController(
     @Volatile private var bluetoothReported = false
     @Volatile private var modernFallbackActive = false
     private var modernRoute: ModernAudioRoute? = null
+    private val speakerFallbackRecovery = AudioSpeakerFallbackRecovery()
+    private var speakerFallbackRunnable: Runnable? = null
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -112,6 +114,7 @@ class AudioRouteController(
     fun reset() {
         if (!closed.compareAndSet(false, true)) return
         wantBluetoothSco = false
+        cancelSpeakerFallbackRetry()
         ROUTE_EXECUTOR.execute {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -155,6 +158,7 @@ class AudioRouteController(
 
     private fun routeModernBluetooth(reason: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || closed.get() || !wantBluetoothSco) return
+        cancelSpeakerFallbackRetry()
         modernFallbackActive = false
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         val route = modernRoute()
@@ -224,28 +228,80 @@ class AudioRouteController(
     private fun fallbackToPhone(noBluetooth: Boolean, reason: String) {
         if (closed.get()) return
         Log.i(TAG, "fallback to phone: reason=$reason, noBluetooth=$noBluetooth")
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             modernFallbackActive = true
             val route = modernRoute()
-            val speakerRouted = try {
-                route.routeToSpeaker()
-            } catch (t: Throwable) {
-                reportError(t)
-                false
-            }
-            if (!speakerRouted) route.clear()
+            cancelSpeakerFallbackRetry()
+            trySpeakerFallback(route, noBluetooth, reason)
         } else {
             wantBluetoothSco = false
             stopLegacySco()
             @Suppress("DEPRECATION")
             audioManager.isSpeakerphoneOn = true
+            if (audioManager.isSpeakerphoneOn) {
+                completeSpeakerFallback(noBluetooth)
+            } else {
+                reportError(IllegalStateException("phone speaker route was not accepted"))
+            }
         }
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+    }
+
+    private fun trySpeakerFallback(
+        route: ModernAudioRoute,
+        noBluetooth: Boolean,
+        reason: String
+    ) {
+        if (closed.get()) return
+        val attempt = speakerFallbackRecovery.next()
+        if (attempt == null) {
+            route.clear()
+            reportError(IllegalStateException("phone speaker route verification failed: ${route.stateSummary()}"))
+            return
+        }
+
+        val speakerRouted = try {
+            route.routeToSpeaker()
+        } catch (t: Throwable) {
+            reportError(t)
+            false
+        }
+        if (speakerRouted && route.isSpeakerActive()) {
+            Log.i(TAG, "phone speaker route verified attempt=${attempt.number} reason=$reason")
+            completeSpeakerFallback(noBluetooth)
+            return
+        }
+
+        Log.w(
+            TAG,
+            "phone speaker route pending attempt=${attempt.number} reason=$reason ${route.stateSummary()}"
+        )
+        val retryRunnable = Runnable {
+            speakerFallbackRunnable = null
+            if (closed.get() || !speakerFallbackRecovery.isCurrent(attempt)) return@Runnable
+            ROUTE_EXECUTOR.execute {
+                if (closed.get() || !speakerFallbackRecovery.isCurrent(attempt)) return@execute
+                trySpeakerFallback(route, noBluetooth, reason)
+            }
+        }
+        speakerFallbackRunnable = retryRunnable
+        mainHandler.postDelayed(retryRunnable, SPEAKER_FALLBACK_RETRY_DELAY_MS)
+    }
+
+    private fun completeSpeakerFallback(noBluetooth: Boolean) {
+        if (closed.get()) return
+        cancelSpeakerFallbackRetry()
         if (bluetoothReported) {
             bluetoothReported = false
             postMain(onScoDisconnected)
         }
         postMain { onSpeakerFallback(noBluetooth) }
+    }
+
+    private fun cancelSpeakerFallbackRetry() {
+        speakerFallbackRecovery.reset()
+        speakerFallbackRunnable?.let(mainHandler::removeCallbacks)
+        speakerFallbackRunnable = null
     }
 
     @SuppressLint("MissingPermission")
@@ -381,6 +437,7 @@ class AudioRouteController(
     companion object {
         private const val TAG = "AudioRouteController"
         private const val MODERN_ROUTE_VERIFY_DELAY_MS = 1_500L
+        private const val SPEAKER_FALLBACK_RETRY_DELAY_MS = 250L
         private val ROUTE_EXECUTOR = Executors.newSingleThreadExecutor()
 
         fun requiredPermissions(): Array<String> =
