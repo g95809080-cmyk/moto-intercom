@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -23,7 +24,10 @@ class SharedNetworkNsdTest {
     @Test
     fun exchange() {
         val role = InstrumentationRegistry.getArguments().getString("role")
-            ?: error("Missing role")
+            ?: run {
+                assumeTrue("requires -e role=server|client for two-device execution", false)
+                return
+            }
         when (role) {
             "server" -> runServer()
             "client" -> runClient()

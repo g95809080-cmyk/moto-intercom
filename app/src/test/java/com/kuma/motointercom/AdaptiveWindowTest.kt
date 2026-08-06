@@ -31,4 +31,10 @@ class AdaptiveWindowTest {
         assertEquals(MainWindowWidthClass.Expanded, mainWindowWidthClass(1200, 840))
         assertEquals(MainWindowWidthClass.Expanded, mainWindowWidthClass(1200, 2400))
     }
+
+    @Test
+    fun mediumToExpandedBoundaryIsAt840Dp() {
+        assertEquals(MainWindowWidthClass.Medium, mainWindowWidthClass(839, 900))
+        assertEquals(MainWindowWidthClass.Expanded, mainWindowWidthClass(840, 900))
+    }
 }

@@ -82,7 +82,15 @@ internal class MainScreen(
     private var restoreSettingsAudio = false
     private var logBottomFollowPending = false
     private var userScrollView: ScrollView? = null
-    private var expandedSelectedPresence: PendingPresenceSelection? = null
+    private var expandedSelectedPresence: PendingPresenceSelection? = savedState?.let { state ->
+        val deviceId = state.getString(KEY_EXPANDED_SELECTED_DEVICE_ID)
+        val sessionId = state.getString(KEY_EXPANDED_SELECTED_SESSION_ID)
+        if (deviceId != null && sessionId != null) {
+            PendingPresenceSelection(deviceId, RuntimeSessionId(sessionId))
+        } else {
+            null
+        }
+    }
 
     init {
         root = inflater.inflate(R.layout.activity_main, FrameLayout(activity), false)
@@ -105,6 +113,10 @@ internal class MainScreen(
         saveCurrentPageScrollAndDraft()
         outState.putString(KEY_ROUTE, currentRoute.name)
         outState.putString(KEY_NICKNAME_DRAFT, settingsNicknameDraft)
+        expandedSelectedPresence?.let { selected ->
+            outState.putString(KEY_EXPANDED_SELECTED_DEVICE_ID, selected.deviceId)
+            outState.putString(KEY_EXPANDED_SELECTED_SESSION_ID, selected.sessionId.value)
+        }
         MainRoute.entries.forEach { route ->
             outState.putInt(scrollKey(route), scrollPositions[route] ?: 0)
         }
@@ -1333,6 +1345,8 @@ internal class MainScreen(
     private companion object {
         const val KEY_ROUTE = "main_route"
         const val KEY_NICKNAME_DRAFT = "nickname_draft"
+        const val KEY_EXPANDED_SELECTED_DEVICE_ID = "expanded_selected_device_id"
+        const val KEY_EXPANDED_SELECTED_SESSION_ID = "expanded_selected_session_id"
         const val KEY_SCROLL_PREFIX = "scroll_"
     }
 }

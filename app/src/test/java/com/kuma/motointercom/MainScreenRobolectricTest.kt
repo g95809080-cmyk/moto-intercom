@@ -448,6 +448,45 @@ class MainScreenRobolectricTest {
     }
 
     @Test
+    fun adaptiveStateRestoresSelectedPresenceAcrossWindowClassChange() {
+        val first = fixture()
+        val presence = selectablePresence()
+        openRoute(first, MainRoute.DISCOVER)
+        first.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-adaptive-restore")),
+            canStart = true
+        )
+        first.screen.setPresences(listOf(presence))
+        measureAtWidth(first, widthDp = 840, heightDp = 1200)
+        first.screen.onWindowSizeChanged(widthDp = 840, heightDp = 1200)
+
+        val card = first.screen.root
+            .findViewById<ViewGroup>(R.id.discover_nearby_container)
+            .getChildAt(0)
+        card.performClick()
+        assertEquals(
+            "Road Captain",
+            first.screen.root.findViewById<TextView>(R.id.expanded_detail_title).text.toString()
+        )
+
+        val savedState = Bundle()
+        first.screen.saveState(savedState)
+
+        val recreated = fixture(savedState = savedState)
+        recreated.screen.setPresences(listOf(presence))
+        measureAtWidth(recreated, widthDp = 360, heightDp = 640)
+        recreated.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
+        assertNotNull(recreated.screen.root.findViewById<View>(R.id.discover_scroll))
+        assertEquals(View.VISIBLE, recreated.screen.root.findViewById<View>(R.id.bottom_navigation).visibility)
+
+        recreated.screen.onWindowSizeChanged(widthDp = 840, heightDp = 1200)
+        assertEquals(
+            "Road Captain",
+            recreated.screen.root.findViewById<TextView>(R.id.expanded_detail_title).text.toString()
+        )
+    }
+
+    @Test
     fun resumeScrollRestoreWinsOverFocusedNicknameChildState() {
         val first = fixture(initialRiderName = "Persisted Rider")
         openRoute(first, MainRoute.SETTINGS)

@@ -9,6 +9,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -17,7 +18,10 @@ class SyntheticAudioNetworkTest {
     @Test
     fun exchange() {
         val arguments = InstrumentationRegistry.getArguments()
-        val role = arguments.getString("role") ?: error("Missing role")
+        val role = arguments.getString("role") ?: run {
+            assumeTrue("requires -e role=server|client for two-device execution", false)
+            return
+        }
         val port = arguments.getString("port")?.toIntOrNull() ?: DEFAULT_PORT
         when (role) {
             "server" -> runServer(port)
