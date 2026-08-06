@@ -3,18 +3,21 @@ package com.kuma.motointercom
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.util.AttributeSet
 import android.view.View
 import android.view.animation.LinearInterpolator
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.sin
 
-internal class VisualizerView(context: Context) : View(context) {
+internal class VisualizerView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : View(context, attrs) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(126, 219, 34)
+        color = context.getColor(R.color.motocom_accent_green_alt)
         strokeWidth = 3f
         style = Paint.Style.STROKE
     }

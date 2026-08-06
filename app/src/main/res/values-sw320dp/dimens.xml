@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="motocom_page_horizontal_padding">16dp</dimen>
+    <dimen name="motocom_card_padding">8dp</dimen>
+    <dimen name="motocom_home_card_padding">10dp</dimen>
+    <dimen name="motocom_home_audio_padding">8dp</dimen>
+    <dimen name="motocom_home_fact_padding">5dp</dimen>
+    <dimen name="motocom_home_compact_gap">4dp</dimen>
+    <dimen name="motocom_main_control_gap">0dp</dimen>
+    <dimen name="motocom_logs_viewport_height">200dp</dimen>
+</resources>

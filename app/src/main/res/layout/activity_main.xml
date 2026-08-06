@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToPadding="false">
+
+    <LinearLayout
+        android:id="@+id/main_content_column"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/main_content_row"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/navigation_rail"
+                android:layout_width="@dimen/motocom_navigation_rail_width"
+                android:layout_height="match_parent"
+                android:background="@color/motocom_surface"
+                android:orientation="vertical"
+                android:paddingLeft="8dp"
+                android:paddingTop="16dp"
+                android:paddingRight="8dp"
+                android:paddingBottom="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="@string/brand_name"
+                    android:textColor="@color/motocom_text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/adaptive_nav_home_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:background="@drawable/motocom_secondary_button"
+                    android:minHeight="64dp"
+                    android:text="@string/nav_home"
+                    android:textAllCaps="false"
+                    android:textColor="@color/motocom_text_primary" />
+
+                <Button
+                    android:id="@+id/adaptive_nav_discover_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/motocom_secondary_button"
+                    android:minHeight="64dp"
+                    android:text="@string/nav_discover"
+                    android:textAllCaps="false"
+                    android:textColor="@color/motocom_text_primary" />
+
+                <Button
+                    android:id="@+id/adaptive_nav_settings_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/motocom_secondary_button"
+                    android:minHeight="64dp"
+                    android:text="@string/nav_settings"
+                    android:textAllCaps="false"
+                    android:textColor="@color/motocom_text_primary" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/page_container"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:clipToPadding="false" />
+
+            <LinearLayout
+                android:id="@+id/expanded_detail_container"
+                android:layout_width="@dimen/motocom_expanded_detail_width"
+                android:layout_height="match_parent"
+                android:background="@color/motocom_surface_soft"
+                android:orientation="vertical"
+                android:padding="@dimen/motocom_card_padding"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/expanded_detail_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/motocom_text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/expanded_detail_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/motocom_gap"
+                    android:textColor="@color/motocom_text_secondary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/expanded_detail_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/motocom_gap"
+                    android:textColor="@color/motocom_text_muted_accessible"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/bottom_navigation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/motocom_surface"
+            android:orientation="horizontal"
+            android:paddingLeft="8dp"
+            android:paddingTop="4dp"
+            android:paddingRight="8dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/bottom_nav_home_button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/motocom_secondary_button"
+                android:minHeight="64dp"
+                android:text="@string/nav_home"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary" />
+
+            <Button
+                android:id="@+id/bottom_nav_discover_button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/motocom_secondary_button"
+                android:minHeight="64dp"
+                android:text="@string/nav_discover"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary" />
+
+            <Button
+                android:id="@+id/bottom_nav_settings_button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/motocom_secondary_button"
+                android:minHeight="64dp"
+                android:text="@string/nav_settings"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:id="@+id/navigation_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/motocom_scrim"
+        android:clickable="true"
+        android:contentDescription="@string/close_navigation_description"
+        android:focusable="true"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/navigation_panel"
+        android:layout_width="@dimen/motocom_panel_width"
+        android:layout_height="match_parent"
+        android:background="@color/motocom_surface"
+        android:elevation="12dp"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="@dimen/motocom_page_horizontal_padding">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/brand_name"
+                android:textColor="@color/motocom_text_primary"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/brand_tagline"
+                android:textColor="@color/motocom_text_secondary"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/nav_home_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:background="@drawable/motocom_secondary_button"
+                android:minHeight="@dimen/motocom_control_min_height"
+                android:text="@string/nav_home"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary" />
+
+            <Button
+                android:id="@+id/nav_discover_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/motocom_gap"
+                android:background="@drawable/motocom_secondary_button"
+                android:minHeight="@dimen/motocom_control_min_height"
+                android:text="@string/nav_discover"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary" />
+
+            <Button
+                android:id="@+id/nav_settings_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/motocom_gap"
+                android:background="@drawable/motocom_secondary_button"
+                android:minHeight="@dimen/motocom_control_min_height"
+                android:text="@string/nav_settings"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary" />
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

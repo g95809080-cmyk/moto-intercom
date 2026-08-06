@@ -302,6 +302,19 @@ class IntercomService : Service() {
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
+        listener?.let(::replayActiveIncomingConfirmation)
+    }
+
+    private fun replayActiveIncomingConfirmation(target: Listener) {
+        val prompt = activeIncomingPrompt
+            ?.takeIf { it.surface == ConfirmationSurface.IN_APP }
+            ?.takeIf { it.decisionDeadlineElapsedMs > SystemClock.elapsedRealtime() }
+            ?: return
+        try {
+            target.onIncomingConfirmation(prompt)
+        } catch (t: Throwable) {
+            handleError(t)
+        }
     }
 
     internal fun setAppForeground(foreground: Boolean) {
@@ -1978,7 +1991,7 @@ class IntercomService : Service() {
             .setContentText("请在 15 秒内接受或拒绝")
             .setStyle(
                 Notification.BigTextStyle().bigText(
-                    "${prompt.peer.deviceName.ifBlank { "MotoCom" }} · 当前 Socket 身份已验证"
+                    incomingConfirmationNotificationMessage(prompt.peer.deviceName)
                 )
             )
             .setCategory(Notification.CATEGORY_CALL)

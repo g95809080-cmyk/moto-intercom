@@ -3,16 +3,19 @@ package com.kuma.motointercom
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
+import android.util.AttributeSet
 import android.view.View
 import android.view.animation.LinearInterpolator
 
-internal class RippleView(context: Context) : View(context) {
+internal class RippleView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : View(context, attrs) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 5f
-        color = Color.rgb(126, 219, 34)
+        color = context.getColor(R.color.motocom_accent_green_alt)
     }
     private var progress = 0f
     private var animator: ValueAnimator? = null

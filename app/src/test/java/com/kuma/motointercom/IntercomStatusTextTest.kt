@@ -20,10 +20,16 @@ class IntercomStatusTextTest {
     }
 
     @Test
-    fun recoveringTextUsesDeviceNameThenExplicitOriginalRiderFallback() {
+    fun recoveringTextDoesNotPromoteDeviceNameToRiderIdentity() {
+        val unnamedPeerState = recoveringState("", "B Phone")
+
         assertEquals(
-            "正在恢复与 B Phone 的连接",
-            recoveryStatusText(recoveringState("", "B Phone").peer)
+            "正在恢复与 原车友 的连接",
+            recoveryStatusText(unnamedPeerState.peer)
+        )
+        assertEquals(
+            "正在恢复与 原车友 的连接",
+            foregroundNotificationText(unnamedPeerState, "generic")
         )
         assertEquals(
             "正在恢复与 原车友 的连接",

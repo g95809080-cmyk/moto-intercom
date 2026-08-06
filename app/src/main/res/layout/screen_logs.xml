@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/logs_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToPadding="false"
+    android:fillViewport="false">
+
+    <LinearLayout
+        android:id="@+id/logs_content"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingLeft="@dimen/motocom_page_horizontal_padding"
+        android:paddingTop="@dimen/motocom_page_vertical_padding"
+        android:paddingRight="@dimen/motocom_page_horizontal_padding"
+        android:paddingBottom="32dp">
+
+        <Button
+            android:id="@+id/logs_back_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/motocom_secondary_button"
+            android:text="@string/logs_back_settings"
+            android:textAllCaps="false"
+            android:textColor="@color/motocom_text_primary"
+            android:minHeight="@dimen/motocom_control_min_height" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/motocom_gap"
+            android:background="@drawable/motocom_card"
+            android:orientation="vertical"
+            android:padding="@dimen/motocom_card_padding">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/logs_title"
+                android:textColor="@color/motocom_text_primary"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/logs_scope_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textColor="@color/motocom_text_secondary"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/logs_text"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/motocom_logs_viewport_height"
+                android:layout_marginTop="@dimen/motocom_gap"
+                android:background="@drawable/motocom_card_soft"
+                android:contentDescription="@string/logs_content_description"
+                android:fontFamily="monospace"
+                android:gravity="top|start"
+                android:focusable="true"
+                android:padding="12dp"
+                android:scrollbars="vertical"
+                android:textColor="@color/motocom_text_primary"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/logs_copy_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/motocom_gap"
+                android:background="@drawable/motocom_primary_button"
+                android:text="@string/logs_copy_all"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary"
+                android:textStyle="bold"
+                android:minHeight="@dimen/motocom_control_min_height" />
+
+            <Button
+                android:id="@+id/logs_close_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/motocom_gap"
+                android:background="@drawable/motocom_secondary_button"
+                android:text="@string/logs_close"
+                android:textAllCaps="false"
+                android:textColor="@color/motocom_text_primary"
+                android:minHeight="@dimen/motocom_control_min_height" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

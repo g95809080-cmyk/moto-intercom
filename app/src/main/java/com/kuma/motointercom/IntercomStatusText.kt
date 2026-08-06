@@ -1,7 +1,7 @@
 package com.kuma.motointercom
 
 internal fun recoveryStatusText(peer: PeerIdentity): String {
-    val rider = peer.nickname.ifBlank { peer.deviceName }.ifBlank { "原车友" }
+    val rider = peer.nickname.ifBlank { "原车友" }
     return "正在恢复与 $rider 的连接"
 }
 
