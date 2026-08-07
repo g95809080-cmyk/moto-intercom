@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import android.app.Notification
 import android.os.SystemClock
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,6 +14,35 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class IntercomServiceRobolectricTest {
+    @Test
+    fun startupFailureIsReportedBeforeRuntimeIsStopped() {
+        val events = mutableListOf<String>()
+        val failure = IllegalStateException("startup failed")
+
+        val started = runSafelyOrStop(
+            action = { throw failure },
+            onFailure = { error -> events += "failure:${error.message}" },
+            onStop = { events += "stop" }
+        )
+
+        assertFalse(started)
+        assertEquals(listOf("failure:startup failed", "stop"), events)
+    }
+
+    @Test
+    fun cleanupFailureDoesNotEscapeTheStartupBoundary() {
+        val events = mutableListOf<String>()
+
+        val started = runSafelyOrStop(
+            action = { throw IllegalStateException("startup failed") },
+            onFailure = { events += "failure" },
+            onStop = { throw IllegalStateException("cleanup failed") }
+        )
+
+        assertFalse(started)
+        assertEquals(listOf("failure"), events)
+    }
+
     @Test
     fun listenerReplaysOnlyTheCurrentInAppConfirmationAfterActivityRebind() {
         val controller = Robolectric.buildService(IntercomService::class.java).create()

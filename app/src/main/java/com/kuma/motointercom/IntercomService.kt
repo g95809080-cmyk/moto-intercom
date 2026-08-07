@@ -45,6 +45,19 @@ internal fun prepareRecoveryDiscoveryAdapters(
     return true
 }
 
+internal fun runSafelyOrStop(
+    action: () -> Unit,
+    onFailure: (Throwable) -> Unit,
+    onStop: () -> Unit
+): Boolean = try {
+    action()
+    true
+} catch (t: Throwable) {
+    runCatching { onFailure(t) }
+    runCatching { onStop() }
+    false
+}
+
 internal class RecoveryTransportStartup(
     private val expectedAttempt: ConnectionAttempt?,
     private val dispatch: (SessionEvent.RecoveryTransportReady) -> Unit
@@ -267,8 +280,21 @@ class IntercomService : Service() {
                     stopSelf(startId)
                     return START_NOT_STICKY
                 }
-                startForeground(NOTIFICATION_ID, buildNotification())
-                startIntercom()
+                if (
+                    !runSafelyOrStop(
+                        action = {
+                            startForeground(NOTIFICATION_ID, buildNotification())
+                            startIntercom()
+                        },
+                        onFailure = ::handleError,
+                        onStop = {
+                            stopIntercom()
+                            stopSelf(startId)
+                        }
+                    )
+                ) {
+                    return START_NOT_STICKY
+                }
                 return START_NOT_STICKY
             }
             ACTION_STOP_INTERCOM -> {
@@ -436,10 +462,16 @@ class IntercomService : Service() {
                 if (requestedRiderName.isNotBlank()) identityStore.updateNickname(requestedRiderName)
                 postForSession(token) {
                     if (activeRuntimeSessionId != runtimeSessionId) return@postForSession
-                    localDeviceId = deviceId
-                    requestedRiderName = nickname
-                    startAudioSession(runtimeSessionId)
-                    startDiscoveryTransports(token, deviceId, runtimeSessionId)
+                    runSafelyOrStop(
+                        action = {
+                            localDeviceId = deviceId
+                            requestedRiderName = nickname
+                            startAudioSession(runtimeSessionId)
+                            startDiscoveryTransports(token, deviceId, runtimeSessionId)
+                        },
+                        onFailure = ::handleError,
+                        onStop = ::stopIntercom
+                    )
                 }
             } catch (t: Throwable) {
                 postForSession(token) {
