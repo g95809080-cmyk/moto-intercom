@@ -44,6 +44,42 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
+    fun staleConfirmationCancellationCannotClearTheCurrentPrompt() {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val current = incomingPrompt(
+            nonce = "current-confirmation",
+            surface = ConfirmationSurface.IN_APP,
+            deadline = SystemClock.elapsedRealtime() + 60_000L
+        )
+        val stale = incomingPrompt(
+            nonce = "stale-confirmation",
+            surface = ConfirmationSurface.IN_APP,
+            deadline = SystemClock.elapsedRealtime() + 60_000L
+        )
+        val canceled = mutableListOf<String>()
+        setActiveIncomingPrompt(service, current)
+        service.setListener(recordingListener(mutableListOf(), canceled))
+
+        val method = IntercomService::class.java.getDeclaredMethod(
+            "cancelIncomingConfirmation",
+            SessionEffect.CancelIncomingConfirmation::class.java
+        ).apply { isAccessible = true }
+        method.invoke(
+            service,
+            SessionEffect.CancelIncomingConfirmation(
+                stale.runtimeSessionId,
+                stale.attemptId,
+                stale.actionNonce
+            )
+        )
+
+        assertEquals(current, activeIncomingPrompt(service))
+        assertTrue(canceled.isEmpty())
+        controller.destroy()
+    }
+
+    @Test
     fun listenerReplaysOnlyTheCurrentInAppConfirmationAfterActivityRebind() {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
         val service = controller.get()
@@ -121,13 +157,17 @@ class IntercomServiceRobolectricTest {
     }
 
     private fun recordingListener(
-        replayed: MutableList<IncomingConfirmationPrompt>
+        replayed: MutableList<IncomingConfirmationPrompt>,
+        canceled: MutableList<String> = mutableListOf()
     ): IntercomService.Listener = object : IntercomService.Listener {
         override fun onStatusChanged(status: String, running: Boolean) = Unit
         override fun onLog(message: String) = Unit
         override fun onError(message: String) = Unit
         override fun onIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
             replayed += prompt
+        }
+        override fun onIncomingConfirmationCanceled(actionNonce: String) {
+            canceled += actionNonce
         }
     }
 
@@ -140,6 +180,11 @@ class IntercomServiceRobolectricTest {
             set(service, prompt)
         }
     }
+
+    private fun activeIncomingPrompt(service: IntercomService): IncomingConfirmationPrompt? =
+        IntercomService::class.java.getDeclaredField("activeIncomingPrompt").apply {
+            isAccessible = true
+        }.get(service) as IncomingConfirmationPrompt?
 
     private fun incomingPrompt(
         nonce: String,

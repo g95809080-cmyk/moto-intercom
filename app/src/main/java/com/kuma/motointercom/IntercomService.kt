@@ -1613,10 +1613,13 @@ class IntercomService : Service() {
             effect.attemptId,
             effect.actionNonce
         )
+        activeIncomingPrompt
+            ?.takeIf { it.runtimeSessionId == effect.runtimeSessionId }
+            ?.takeIf { it.attemptId == effect.attemptId }
+            ?.takeIf { it.actionNonce == effect.actionNonce }
+            ?: return
         getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
-        if (activeIncomingPrompt?.actionNonce == effect.actionNonce) {
-            activeIncomingPrompt = null
-        }
+        activeIncomingPrompt = null
         listener?.onIncomingConfirmationCanceled(effect.actionNonce)
     }
 
