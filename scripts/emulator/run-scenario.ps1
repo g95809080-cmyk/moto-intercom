@@ -65,7 +65,7 @@ function Stop-PairedServer {
     }
 }
 
-function Get-SharedAddress {
+function Get-SharedNetworkInfo {
     param(
         [string]$Serial,
         [string]$Interface = ""
@@ -88,7 +88,7 @@ function Get-SharedAddress {
         ) {
             continue
         }
-        $interfaceName = $match.Groups["interface"].Value
+        $interfaceName = $match.Groups["interface"].Value.Split("@")[0]
         [pscustomobject]@{
             interface = $interfaceName
             address = $address
@@ -100,26 +100,39 @@ function Get-SharedAddress {
         $scope = if ([string]::IsNullOrWhiteSpace($Interface)) { "any interface" } else { $Interface }
         throw "Shared network IPv4 address missing: $Serial interface=$scope"
     }
-    return $selected.address
+    return $selected
+}
+
+function Get-SharedNetworkMap {
+    $networks = @{}
+    foreach ($serial in $Serials) {
+        $networks[$serial] = Get-SharedNetworkInfo $serial $SharedInterface
+    }
+    Assert-UniqueSharedAddresses $networks
+    return $networks
 }
 
 function Get-SharedAddressMap {
+    $networks = Get-SharedNetworkMap
     $addresses = @{}
-    foreach ($serial in $Serials) {
-        $addresses[$serial] = Get-SharedAddress $serial $SharedInterface
+    foreach ($entry in $networks.GetEnumerator()) {
+        $addresses[$entry.Key] = $entry.Value.address
     }
-    Assert-UniqueSharedAddresses $addresses
     return $addresses
 }
 
 function Assert-UniqueSharedAddresses {
     param([hashtable]$Addresses)
     $duplicates = $Addresses.GetEnumerator() |
-        Group-Object -Property Value |
+        ForEach-Object {
+            $address = if ($_.Value -is [string]) { $_.Value } else { $_.Value.address }
+            [pscustomobject]@{ serial = $_.Key; address = $address }
+        } |
+        Group-Object -Property address |
         Where-Object Count -gt 1
     if ($duplicates) {
         $summary = $duplicates |
-            ForEach-Object { "$($_.Name)=($($_.Group.Name -join ', '))" }
+            ForEach-Object { "$($_.Name)=($($_.Group.serial -join ', '))" }
         throw "Shared network addresses are not unique: $($summary -join '; ')"
     }
 }
@@ -325,13 +338,23 @@ function Run-NetworkFault {
     if ($Serials.Count -lt 2) { throw "Network fault recovery requires two emulators" }
     $source = $Serials[0]
     $target = $Serials[1]
-    $addresses = Get-SharedAddressMap
-    $targetIp = $addresses[$target]
+    $networks = Get-SharedNetworkMap
+    $targetIp = $networks[$target].address
+    $targetInterface = $networks[$target].interface
     $faultScript = Join-Path $scriptRoot "inject-network-fault.ps1"
 
-    & $faultScript -Serial $target -Mode offline -Adb $Adb |
-        Set-Content -LiteralPath (Join-Path $resultDir "$target-fault-offline.json") -Encoding UTF8
+    $baselineOutput = & $Adb -s $source shell ping -c 1 -W 2 $targetIp 2>&1
+    $baselineExitCode = $LASTEXITCODE
+    @($baselineOutput) | Set-Content -LiteralPath (
+        Join-Path $resultDir "$source-baseline-ping-$target.txt"
+    ) -Encoding UTF8
+    if ($baselineExitCode -ne 0) {
+        throw "Shared network was not reachable before fault injection: $source -> $targetIp"
+    }
+
     try {
+        & $faultScript -Serial $target -Mode offline -Interface $targetInterface -Adb $Adb |
+            Set-Content -LiteralPath (Join-Path $resultDir "$target-fault-offline.json") -Encoding UTF8
         Start-Sleep -Seconds 2
         $offlineOutput = & $Adb -s $source shell ping -c 1 -W 2 $targetIp 2>&1
         @($offlineOutput) | Set-Content -LiteralPath (
@@ -339,7 +362,7 @@ function Run-NetworkFault {
         ) -Encoding UTF8
         if ($LASTEXITCODE -eq 0) { throw "Shared network stayed reachable after offline fault" }
     } finally {
-        & $faultScript -Serial $target -Mode online -Adb $Adb |
+        & $faultScript -Serial $target -Mode online -Interface $targetInterface -Adb $Adb |
             Set-Content -LiteralPath (Join-Path $resultDir "$target-fault-online.json") -Encoding UTF8
     }
 

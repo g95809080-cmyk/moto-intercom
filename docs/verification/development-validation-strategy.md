@@ -33,8 +33,11 @@ gates pass.
 Android Emulator 36.5+ shared networking is used for LAN reachability,
 instrumentation, process lifecycle, deterministic network delay/offline
 recovery, and synthetic PCM transfer. Emulator instances use explicit ADB
-ports and `-shared-net-id`; scripts resolve each node's actual shared `wlan0`
-address and never mix in a physical ADB serial implicitly.
+ports and `-shared-net-id`; scripts resolve each node's actual shared network
+interface/address (typically `wlan0` or `eth0`) and never mix in a physical
+ADB serial implicitly. Network-fault injection toggles that selected
+interface and performs a baseline reachability check before declaring the
+fault scenario valid.
 
 Wi-Fi Direct group formation and OEM-specific behavior may be unavailable or
 non-deterministic in the emulator. The project validates their state, deadline,
