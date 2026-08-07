@@ -496,7 +496,8 @@ internal class LanDiscoveryCoordinator(
 
     @Suppress("DEPRECATION")
     private fun localWifiIp(): String? {
-        val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val wifiManager = context.applicationContext
+            .getSystemService(Context.WIFI_SERVICE) as WifiManager
         val ip = wifiManager.connectionInfo?.ipAddress ?: return null
         if (ip == 0) return null
         return "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"

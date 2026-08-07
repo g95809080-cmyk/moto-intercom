@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.RequiresApi
 import java.io.Closeable
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -156,8 +157,9 @@ class AudioRouteController(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     private fun routeModernBluetooth(reason: String) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || closed.get() || !wantBluetoothSco) return
+        if (closed.get() || !wantBluetoothSco) return
         cancelSpeakerFallbackRetry()
         modernFallbackActive = false
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -180,8 +182,8 @@ class AudioRouteController(
         scheduleModernRouteVerification(reason)
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     private fun modernRoute(): ModernAudioRoute {
-        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
         return modernRoute ?: ModernAudioRoute(
             audioManager = audioManager,
             callbackExecutor = ROUTE_EXECUTOR,
@@ -209,14 +211,18 @@ class AudioRouteController(
     }
 
     private fun rerouteAfterDeviceChange(reason: String) {
-        if (closed.get()) return
+        if (closed.get() || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         ROUTE_EXECUTOR.execute {
             rerouteModernOnExecutor(reason)
         }
     }
 
     private fun rerouteModernOnExecutor(reason: String) {
-        if (closed.get() || !wantBluetoothSco) return
+        if (
+            closed.get() ||
+                !wantBluetoothSco ||
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+        ) return
         try {
             routeModernBluetooth(reason)
         } catch (t: Throwable) {
@@ -247,6 +253,7 @@ class AudioRouteController(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     private fun trySpeakerFallback(
         route: ModernAudioRoute,
         noBluetooth: Boolean,
@@ -449,8 +456,7 @@ class AudioRouteController(
 
         fun hasRequiredPermissions(context: Context): Boolean =
             requiredPermissions().all {
-                Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
-                    context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+                context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
             }
     }
 }

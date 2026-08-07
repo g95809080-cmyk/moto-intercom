@@ -1,15 +1,15 @@
 package com.kuma.motointercom
 
-import android.annotation.TargetApi
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.util.Log
+import androidx.annotation.RequiresApi
 import java.io.Closeable
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
-@TargetApi(Build.VERSION_CODES.S)
+@RequiresApi(Build.VERSION_CODES.S)
 internal class ModernAudioRoute(
     private val audioManager: AudioManager,
     private val callbackExecutor: Executor,
