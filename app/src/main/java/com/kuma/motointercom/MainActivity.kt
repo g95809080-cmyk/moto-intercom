@@ -19,8 +19,6 @@ import android.content.res.Configuration
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
-import android.window.OnBackInvokedCallback
-import android.window.OnBackInvokedDispatcher
 import java.util.UUID
 
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
@@ -34,7 +32,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     private var replayingServiceSnapshot = false
     private var incomingConfirmationDialog: AlertDialog? = null
     private var incomingConfirmationNonce: String? = null
-    private var platformBackCallback: OnBackInvokedCallback? = null
+    private var platformBackCallback: Any? = null
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 
     private val serviceConnection = object : ServiceConnection {
@@ -452,19 +450,14 @@ internal class MainActivity : Activity(), IntercomService.Listener {
 
     private fun registerPlatformBackCallback() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val callback = OnBackInvokedCallback {
+        platformBackCallback = Api33BackDispatcher.register(this) {
             if (!screen.handleBack()) moveTaskToBack(false)
         }
-        onBackInvokedDispatcher.registerOnBackInvokedCallback(
-            OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-            callback
-        )
-        platformBackCallback = callback
     }
 
     private fun unregisterPlatformBackCallback() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        platformBackCallback?.let(onBackInvokedDispatcher::unregisterOnBackInvokedCallback)
+        platformBackCallback?.let { Api33BackDispatcher.unregister(this, it) }
         platformBackCallback = null
     }
 
