@@ -112,12 +112,14 @@ internal class WifiDirectTunnel(
     @Volatile private var socketTransport: WifiDirectSignalingSocket? = null
     @Volatile private var socketTransportGeneration = 0
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
+    private var localServiceInfo: WifiP2pDnsSdServiceInfo? = null
     private val peerRegistry = WifiDirectPeerRegistry()
     private val peerSessionTracker = DiscoverySessionTracker()
     private val groupValidationGate = WifiDirectGroupValidationGate {
         monotonicClock.now().elapsedRealtimeMs
     }
     private val setupRecoveryGate = WifiDirectSetupRecoveryGate()
+    private val pendingDiscoveryRecovery = WifiDirectPendingDiscoveryRecovery()
     private val retryPause = RecoveryAttemptPause()
     private val peerDevices = linkedMapOf<String, WifiP2pDevice>()
     private val peerClaims = linkedMapOf<String, DiscoveryIdentityClaim>()
@@ -126,8 +128,8 @@ internal class WifiDirectTunnel(
     @Volatile private var targetAddress: String? = null
     private var targetAttemptGeneration = 0
     private var pendingRetryAttempt = 0
-    private var pendingRetryGeneration = 0
     private var pendingRetryScheduled = false
+    private var pendingRetryInFlight = false
     private var connectWatchdogGeneration = 0
     private var groupRemovalGeneration = 0
     private var lifecycleGeneration = 0
@@ -164,6 +166,7 @@ internal class WifiDirectTunnel(
                         WifiP2pManager.EXTRA_NETWORK_INFO
                     )
                     if (networkInfo?.isConnected == true) {
+                        cancelPendingRetry()
                         requestConnectionInfo()
                     } else if (state == State.P2P_CONNECTING) {
                         Log.d(TAG, "ignore disconnected broadcast while connecting: $connectingAddress")
@@ -173,6 +176,7 @@ internal class WifiDirectTunnel(
                             taskContext != null &&
                             !isTargetedContextIdentityCurrent(taskContext)
                         ) return
+                        cancelPendingRetry()
                         resetTunnelOnly(taskContext)
                         state = State.DISCOVERING
                         if (isCapturedTaskCurrent(taskContext)) {
@@ -641,6 +645,7 @@ internal class WifiDirectTunnel(
     private fun finishCloseCleanup(generation: Int, c: WifiP2pManager.Channel?) {
         if (generation != lifecycleGeneration) return
         serviceRequest = null
+        localServiceInfo = null
         serviceDiscoveryReady = false
         peerRegistry.reset()
         peerDevices.clear()
@@ -783,6 +788,7 @@ internal class WifiDirectTunnel(
             SERVICE_TYPE,
             record
         )
+        localServiceInfo = serviceInfo
         val request = WifiP2pDnsSdServiceRequest.newInstance(SERVICE_TYPE)
         serviceRequest = request
 
@@ -922,6 +928,7 @@ internal class WifiDirectTunnel(
         if (wasPending) {
             Log.d(TAG, "pending -> accepted: ${peerSummary(device)} pending=${snapshot.pending.size}")
         }
+        cancelPendingRetry()
         logPeer(device, accepted = true, reason = reason)
         publishPeers(snapshot)
         connectTargetIfAvailable()
@@ -1046,6 +1053,7 @@ internal class WifiDirectTunnel(
             }
             return
         }
+        cancelPendingRetry()
         if (!info.groupFormed) {
             resetTunnelOnly(taskContext)
             state = State.DISCOVERING
@@ -1578,16 +1586,22 @@ internal class WifiDirectTunnel(
     }
 
     private fun cancelPendingRetry() {
-        pendingRetryGeneration++
+        pendingDiscoveryRecovery.invalidate()
         pendingRetryAttempt = 0
         pendingRetryScheduled = false
+        pendingRetryInFlight = false
     }
 
     private fun schedulePendingRetryIfNeeded() {
         var peers = peerRegistry.snapshot()
         if (!running || peers.pending.isEmpty() || peers.accepted.isNotEmpty()) return
-        if (connectingAddress != null || state == State.SIGNALING_READY || pendingRetryScheduled) return
+        if (
+            pendingDiscoveryRetryBlocked() ||
+            pendingRetryScheduled ||
+            pendingRetryInFlight
+        ) return
 
+        val generation = pendingDiscoveryRecovery.currentGeneration
         if (pendingRetryAttempt >= PENDING_DISCOVERY_RETRY_COUNT) {
             Log.w(
                 TAG,
@@ -1597,26 +1611,208 @@ internal class WifiDirectTunnel(
             return
         }
 
-        val generation = pendingRetryGeneration
-        val attempt = pendingRetryAttempt + 1
         pendingRetryScheduled = true
         mainHandler.postDelayed({
+            if (!running || generation != pendingDiscoveryRecovery.currentGeneration) return@postDelayed
             pendingRetryScheduled = false
-            if (!running || generation != pendingRetryGeneration) return@postDelayed
             peers = peerRegistry.snapshot()
             if (peers.pending.isEmpty() || peers.accepted.isNotEmpty()) return@postDelayed
-            if (connectingAddress != null || state == State.SIGNALING_READY) return@postDelayed
+            if (pendingDiscoveryRetryBlocked()) return@postDelayed
 
-            pendingRetryAttempt = attempt
+            val retry = pendingDiscoveryRecovery.next(
+                hasPendingPeers = peers.pending.isNotEmpty(),
+                hasAcceptedPeers = peers.accepted.isNotEmpty(),
+                blocked = pendingDiscoveryRetryBlocked()
+            ) ?: return@postDelayed
+            pendingRetryAttempt = retry.attempt
             Log.d(
                 TAG,
-                "retry discoverServices attempt=$attempt/$PENDING_DISCOVERY_RETRY_COUNT " +
-                    "pending=${peers.pending.size}"
+                "retry pending discovery attempt=${retry.attempt}/$PENDING_DISCOVERY_RETRY_COUNT " +
+                    "action=${retry.action} pending=${peers.pending.size}"
             )
-            discoverPeers()
-            schedulePendingRetryIfNeeded()
+            if (retry.action == WifiDirectPendingDiscoveryRecovery.Action.DISCOVER) {
+                discoverPeers()
+                schedulePendingRetryIfNeeded()
+            } else {
+                pendingRetryInFlight = true
+                rePrimePendingServiceDiscovery(retry)
+            }
         }, PENDING_DISCOVERY_RETRY_DELAY_MS)
     }
+
+    @SuppressLint("MissingPermission")
+    private fun rePrimePendingServiceDiscovery(
+        retry: WifiDirectPendingDiscoveryRecovery.Retry
+    ) {
+        if (!isPendingDiscoveryRetryCurrent(retry)) {
+            pendingRetryInFlight = false
+            return
+        }
+        serviceDiscoveryReady = false
+        val m = manager
+        val c = channel
+        val request = WifiP2pDnsSdServiceRequest.newInstance(SERVICE_TYPE)
+        if (m == null || c == null) {
+            finishPendingDiscoveryRetry(retry, success = false, reason = "P2P channel unavailable")
+            return
+        }
+
+        val rePrimeRequest: () -> Unit = rePrimeRequest@{
+            if (!isPendingDiscoveryRetryCurrent(retry)) return@rePrimeRequest
+            try {
+                m.clearServiceRequests(
+                    c,
+                    pendingDiscoveryAction(retry, "clear pending service requests", onSuccess = {
+                        try {
+                            m.addServiceRequest(
+                                c,
+                                request,
+                                pendingDiscoveryAction(
+                                    retry,
+                                    "add pending service request",
+                                    onSuccess = {
+                                        serviceRequest = request
+                                        serviceDiscoveryReady = true
+                                        finishPendingDiscoveryRetry(retry, success = true)
+                                    },
+                                    onFailure = { reason ->
+                                        finishPendingDiscoveryRetry(
+                                            retry,
+                                            success = false,
+                                            reason = "add service request failed: ${reasonText(reason)}"
+                                        )
+                                    }
+                                )
+                            )
+                        } catch (t: Throwable) {
+                            finishPendingDiscoveryRetry(
+                                retry,
+                                success = false,
+                                reason = "add service request threw: ${t.message}"
+                            )
+                        }
+                    }, onFailure = { reason ->
+                        finishPendingDiscoveryRetry(
+                            retry,
+                            success = false,
+                            reason = "clear service requests failed: ${reasonText(reason)}"
+                        )
+                    })
+                )
+            } catch (t: Throwable) {
+                finishPendingDiscoveryRetry(
+                    retry,
+                    success = false,
+                    reason = "clear service requests threw: ${t.message}"
+                )
+            }
+        }
+
+        if (retry.action == WifiDirectPendingDiscoveryRecovery.Action.REREGISTER_LOCAL_SERVICE) {
+            val info = localServiceInfo
+            if (info == null) {
+                rePrimeRequest()
+                return
+            }
+            try {
+                m.clearLocalServices(
+                    c,
+                    pendingDiscoveryAction(retry, "clear local MotoCom service", onSuccess = {
+                        try {
+                            m.addLocalService(
+                                c,
+                                info,
+                                pendingDiscoveryAction(
+                                    retry,
+                                    "re-register local MotoCom service",
+                                    onSuccess = rePrimeRequest,
+                                    onFailure = { reason ->
+                                        finishPendingDiscoveryRetry(
+                                            retry,
+                                            success = false,
+                                            reason = "add local service failed: ${reasonText(reason)}"
+                                        )
+                                    }
+                                )
+                            )
+                        } catch (t: Throwable) {
+                            finishPendingDiscoveryRetry(
+                                retry,
+                                success = false,
+                                reason = "add local service threw: ${t.message}"
+                            )
+                        }
+                    }, onFailure = { reason ->
+                        finishPendingDiscoveryRetry(
+                            retry,
+                            success = false,
+                            reason = "clear local service failed: ${reasonText(reason)}"
+                        )
+                    })
+                )
+            } catch (t: Throwable) {
+                finishPendingDiscoveryRetry(
+                    retry,
+                    success = false,
+                    reason = "clear local service threw: ${t.message}"
+                )
+            }
+        } else {
+            rePrimeRequest()
+        }
+    }
+
+    private fun pendingDiscoveryAction(
+        retry: WifiDirectPendingDiscoveryRecovery.Retry,
+        label: String,
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) = object : WifiP2pManager.ActionListener {
+        override fun onSuccess() {
+            if (isPendingDiscoveryRetryCurrent(retry)) onSuccess()
+        }
+
+        override fun onFailure(reason: Int) {
+            if (!isPendingDiscoveryRetryCurrent(retry)) return
+            Log.w(TAG, "$label failed: ${reasonText(reason)}")
+            onFailure(reason)
+        }
+    }
+
+    private fun finishPendingDiscoveryRetry(
+        retry: WifiDirectPendingDiscoveryRecovery.Retry,
+        success: Boolean,
+        reason: String? = null
+    ) {
+        if (!isPendingDiscoveryRetryCurrent(retry)) return
+        pendingRetryInFlight = false
+        if (success) {
+            Log.d(TAG, "pending discovery service request re-prime complete")
+            discoverPeers()
+        } else {
+            Log.w(TAG, "pending discovery recovery failed: ${reason ?: "unknown"}")
+        }
+        schedulePendingRetryIfNeeded()
+    }
+
+    private fun isPendingDiscoveryRetryCurrent(
+        retry: WifiDirectPendingDiscoveryRecovery.Retry
+    ): Boolean {
+        val peers = peerRegistry.snapshot()
+        return running &&
+            retry.generation == pendingDiscoveryRecovery.currentGeneration &&
+            peers.pending.isNotEmpty() &&
+            peers.accepted.isEmpty() &&
+            !pendingDiscoveryRetryBlocked()
+    }
+
+    private fun pendingDiscoveryRetryBlocked(): Boolean =
+        connectingAddress != null ||
+            state != State.DISCOVERING ||
+            validatingGroup ||
+            tunnelStarted ||
+            removingGroup ||
+            retryPause.isPrepared
 
     private fun startConnectWatchdog(taskContext: TargetedTaskContext) {
         val generation = ++connectWatchdogGeneration
