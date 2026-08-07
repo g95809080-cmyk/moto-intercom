@@ -29,6 +29,7 @@ ksp {
 dependencies {
     implementation("androidx.window:window:1.4.0")
     implementation("androidx.window:window-core:1.4.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-core:2.8.3")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.room:room-ktx:2.7.2")
     implementation("androidx.room:room-runtime:2.7.2")
