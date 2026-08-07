@@ -4,12 +4,13 @@ param(
     [string]$Scenario = "all",
     [string[]]$Serials = @(),
     [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
+    [string]$TestPackage = "com.kuma.motointercom.instrumentation",
     [string]$ResultsRoot = "build\emulator-results"
 )
 
 $ErrorActionPreference = "Stop"
 $targetPackage = "com.kuma.motointercom"
-$runner = "$targetPackage.test/androidx.test.runner.AndroidJUnitRunner"
+$runner = "$TestPackage/androidx.test.runner.AndroidJUnitRunner"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 if ($Serials.Count -eq 0) {
