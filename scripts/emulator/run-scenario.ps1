@@ -5,6 +5,7 @@ param(
     [string[]]$Serials = @(),
     [string]$Adb = $(Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"),
     [string]$TestPackage = "com.kuma.motointercom.instrumentation",
+    [string]$SharedInterface = "",
     [string]$ResultsRoot = "build\emulator-results"
 )
 
@@ -65,13 +66,62 @@ function Stop-PairedServer {
 }
 
 function Get-SharedAddress {
-    param([string]$Serial)
-    $output = Invoke-AdbText $Serial "shared-ip" @(
-        "shell", "ip", "-o", "-4", "addr", "show", "wlan0"
+    param(
+        [string]$Serial,
+        [string]$Interface = ""
     )
-    $match = [regex]::Match($output, "inet\s+(?<address>\d+\.\d+\.\d+\.\d+)/")
-    if (-not $match.Success) { throw "Shared network address missing: $Serial" }
-    return $match.Groups["address"].Value
+    $arguments = @("shell", "ip", "-o", "-4", "addr", "show")
+    if (-not [string]::IsNullOrWhiteSpace($Interface)) {
+        $arguments += $Interface
+    }
+    $output = Invoke-AdbText $Serial "shared-ip" $arguments
+    $matches = [regex]::Matches(
+        $output,
+        "(?m)^\d+:\s+(?<interface>\S+)\s+inet\s+(?<address>\d{1,3}(?:\.\d{1,3}){3})/"
+    )
+    $candidates = foreach ($match in $matches) {
+        $address = $match.Groups["address"].Value
+        if (
+            $address -eq "0.0.0.0" -or
+                $address.StartsWith("127.") -or
+                $address.StartsWith("169.254.")
+        ) {
+            continue
+        }
+        $interfaceName = $match.Groups["interface"].Value
+        [pscustomobject]@{
+            interface = $interfaceName
+            address = $address
+            priority = if ($interfaceName -eq "wlan0") { 0 } elseif ($interfaceName -eq "eth0") { 1 } else { 2 }
+        }
+    }
+    $selected = $candidates | Sort-Object priority, interface | Select-Object -First 1
+    if ($null -eq $selected) {
+        $scope = if ([string]::IsNullOrWhiteSpace($Interface)) { "any interface" } else { $Interface }
+        throw "Shared network IPv4 address missing: $Serial interface=$scope"
+    }
+    return $selected.address
+}
+
+function Get-SharedAddressMap {
+    $addresses = @{}
+    foreach ($serial in $Serials) {
+        $addresses[$serial] = Get-SharedAddress $serial $SharedInterface
+    }
+    Assert-UniqueSharedAddresses $addresses
+    return $addresses
+}
+
+function Assert-UniqueSharedAddresses {
+    param([hashtable]$Addresses)
+    $duplicates = $Addresses.GetEnumerator() |
+        Group-Object -Property Value |
+        Where-Object Count -gt 1
+    if ($duplicates) {
+        $summary = $duplicates |
+            ForEach-Object { "$($_.Name)=($($_.Group.Name -join ', '))" }
+        throw "Shared network addresses are not unique: $($summary -join '; ')"
+    }
 }
 
 function Get-UiDump {
@@ -102,8 +152,7 @@ function Run-Smoke {
         Get-UiDump $serial
     }
 
-    $addresses = @{}
-    foreach ($serial in $Serials) { $addresses[$serial] = Get-SharedAddress $serial }
+    $addresses = Get-SharedAddressMap
     foreach ($source in $Serials) {
         foreach ($target in $Serials) {
             if ($source -eq $target) { continue }
@@ -125,7 +174,8 @@ function Run-SyntheticAudio {
     if ($Serials.Count -lt 2) { throw "Synthetic network audio requires two emulators" }
     $server = $Serials[0]
     $client = $Serials[1]
-    $serverIp = Get-SharedAddress $server
+    $addresses = Get-SharedAddressMap
+    $serverIp = $addresses[$server]
     $port = 39027
     $serverOut = Join-Path $resultDir "$server-synthetic-server.txt"
     $serverErr = Join-Path $resultDir "$server-synthetic-server.err.txt"
@@ -275,7 +325,8 @@ function Run-NetworkFault {
     if ($Serials.Count -lt 2) { throw "Network fault recovery requires two emulators" }
     $source = $Serials[0]
     $target = $Serials[1]
-    $targetIp = Get-SharedAddress $target
+    $addresses = Get-SharedAddressMap
+    $targetIp = $addresses[$target]
     $faultScript = Join-Path $scriptRoot "inject-network-fault.ps1"
 
     & $faultScript -Serial $target -Mode offline -Adb $Adb |
