@@ -418,7 +418,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
 
         val riderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty()
-        val intent = IntercomService.startIntent(this, riderName)
+        val intent = IntercomService.startIntent(this, riderName, preferredAudioControls)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)

@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class IntercomServiceRobolectricTest {
     @Test
-    fun listenerReplaysPersistedVoxSettingsWithoutPersistingMute() {
+    fun serviceDoesNotReadActivityOwnedVoxPreferences() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         AudioControlPreferences(context).saveVoxSettings(
             AudioControlSettings(muted = true, voxEnabled = false, voxSensitivity = 73)
@@ -30,8 +30,8 @@ class IntercomServiceRobolectricTest {
 
         assertEquals(
             AudioControlSnapshot(
-                AudioControlSettings(muted = false, voxEnabled = false, voxSensitivity = 73),
-                VoxRuntimeState.DISABLED
+                AudioControlSettings(),
+                VoxRuntimeState.IDLE
             ),
             snapshots.last()
         )
@@ -39,7 +39,31 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
-    fun staleEngineControlSnapshotCannotOverwriteCurrentVoxState() {
+    fun startIntentCarriesActivityOwnedVoxSettingsWithoutSessionMute() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val intent = IntercomService.startIntent(
+            context,
+            riderName = "Road Captain",
+            audioControls = AudioControlSettings(
+                muted = true,
+                voxEnabled = false,
+                voxSensitivity = 73
+            )
+        )
+
+        assertEquals("Road Captain", intent.getStringExtra(IntercomService.EXTRA_RIDER_NAME))
+        assertFalse(
+            intent.getBooleanExtra("com.kuma.motointercom.extra.VOX_ENABLED", true)
+        )
+        assertEquals(
+            73,
+            intent.getIntExtra("com.kuma.motointercom.extra.VOX_SENSITIVITY", -1)
+        )
+        assertFalse(intent.hasExtra("com.kuma.motointercom.extra.MUTED"))
+    }
+
+    @Test
+    fun staleEngineControlRevisionCannotWinAfterSettingsReturnToTheSameValue() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         AudioControlPreferences(context).saveVoxSettings(AudioControlSettings())
         val controller = Robolectric.buildService(IntercomService::class.java).create()
@@ -50,20 +74,28 @@ class IntercomServiceRobolectricTest {
         setPrivate(service, "activeRuntimeSessionId", runtime.value)
         service.setListener(audioControlListener(snapshots))
         service.setVoxSettings(voxEnabled = true, voxSensitivity = 80)
+        service.setVoxSettings(voxEnabled = true, voxSensitivity = 50)
+        val currentRevision = audioControlRevision(service)
 
         invokeVoxState(
             service,
             runtime,
-            AudioControlSettings(voxEnabled = true, voxSensitivity = 50),
+            VersionedAudioControls(
+                revision = 0,
+                settings = AudioControlSettings(voxEnabled = true, voxSensitivity = 50)
+            ),
             VoxRuntimeState.OPEN
         )
-        assertEquals(80, snapshots.last().controls.voxSensitivity)
-        assertEquals(VoxRuntimeState.LISTENING, snapshots.last().voxState)
+        assertEquals(50, snapshots.last().controls.voxSensitivity)
+        assertEquals(VoxRuntimeState.IDLE, snapshots.last().voxState)
 
         invokeVoxState(
             service,
             runtime,
-            AudioControlSettings(voxEnabled = true, voxSensitivity = 80),
+            VersionedAudioControls(
+                revision = currentRevision,
+                settings = AudioControlSettings(voxEnabled = true, voxSensitivity = 50)
+            ),
             VoxRuntimeState.OPEN
         )
         assertEquals(VoxRuntimeState.OPEN, snapshots.last().voxState)
@@ -275,7 +307,7 @@ class IntercomServiceRobolectricTest {
     private fun invokeVoxState(
         service: IntercomService,
         runtimeSessionId: RuntimeSessionId,
-        controls: AudioControlSettings,
+        controls: VersionedAudioControls,
         state: VoxRuntimeState
     ) {
         IntercomService::class.java.declaredMethods.single {
@@ -284,6 +316,11 @@ class IntercomServiceRobolectricTest {
                 !java.lang.reflect.Modifier.isStatic(it.modifiers)
         }.apply { isAccessible = true }.invoke(service, runtimeSessionId.value, controls, state)
     }
+
+    private fun audioControlRevision(service: IntercomService): Long =
+        IntercomService::class.java.getDeclaredField("audioControlRevision").apply {
+            isAccessible = true
+        }.getLong(service)
 
     private fun setActiveIncomingPrompt(
         service: IntercomService,

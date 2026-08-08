@@ -52,7 +52,7 @@ internal interface RiderMediaSession : Closeable {
 }
 
 internal interface RiderMediaEngine : Closeable {
-    fun updateAudioControls(controls: AudioControlSettings)
+    fun updateAudioControls(controls: VersionedAudioControls)
     fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
 }
 
@@ -77,8 +77,11 @@ internal class RiderAudioEngine(
     context: Context,
     private val onEngineError: (Throwable) -> Unit = {},
     private val isRuntimeCurrent: () -> Boolean = { true },
-    initialAudioControls: AudioControlSettings = AudioControlSettings(),
-    private val onVoxStateChanged: (AudioControlSettings, VoxRuntimeState) -> Unit = { _, _ -> }
+    initialAudioControls: VersionedAudioControls = VersionedAudioControls(
+        revision = 0,
+        settings = AudioControlSettings()
+    ),
+    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
@@ -95,13 +98,14 @@ internal class RiderAudioEngine(
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
     private val audioControlLock = Any()
-    private var audioControls = initialAudioControls.normalized()
+    private var versionedAudioControls = initialAudioControls.normalized()
+    private var audioControls = versionedAudioControls.settings
     private var voxGate = VoxGate(
         enabled = audioControls.voxEnabled,
         sensitivity = audioControls.voxSensitivity
     )
     private var gateState = voxGate.currentState()
-    private var lastPublishedVoxSnapshot: Pair<AudioControlSettings, VoxRuntimeState>? = null
+    private var lastPublishedVoxSnapshot: Pair<VersionedAudioControls, VoxRuntimeState>? = null
     private var engineState = EngineState.INITIALIZING
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
@@ -112,29 +116,30 @@ internal class RiderAudioEngine(
         runRtc { initializeRtc() }
     }
 
-    override fun updateAudioControls(controls: AudioControlSettings) {
+    override fun updateAudioControls(controls: VersionedAudioControls) {
         if (closed.get()) return
         val normalized = controls.normalized()
-        val application = synchronized(audioControlLock) {
+        val accepted = synchronized(audioControlLock) {
+            if (normalized.revision <= versionedAudioControls.revision) {
+                return@synchronized false
+            }
             if (
-                audioControls.voxEnabled != normalized.voxEnabled ||
-                audioControls.voxSensitivity != normalized.voxSensitivity
+                audioControls.voxEnabled != normalized.settings.voxEnabled ||
+                audioControls.voxSensitivity != normalized.settings.voxSensitivity
             ) {
                 voxGate = VoxGate(
-                    enabled = normalized.voxEnabled,
-                    sensitivity = normalized.voxSensitivity
+                    enabled = normalized.settings.voxEnabled,
+                    sensitivity = normalized.settings.voxSensitivity
                 )
                 gateState = voxGate.currentState()
             }
-            audioControls = normalized
-            currentAudioControlApplicationLocked()
+            versionedAudioControls = normalized
+            audioControls = normalized.settings
+            true
         }
-        runRtc {
-            if (engineState == EngineState.READY) {
-                localAudioTrack?.setVolume(application.trackVolume)
-            }
-        }
-        publishVoxState(application.controls, application.state)
+        if (!accepted) return
+        applyCurrentTrackVolume()
+        publishCurrentVoxState()
     }
 
     private fun initializeRtc() {
@@ -382,7 +387,7 @@ internal class RiderAudioEngine(
             setEnabled(true)
             setVolume(initialApplication.trackVolume)
         }
-        publishVoxState(initialApplication.controls, initialApplication.state)
+        publishCurrentVoxState()
         Log.i(
             TAG,
             "VOX 初始化 enabled=${audioControls.voxEnabled} " +
@@ -408,18 +413,14 @@ internal class RiderAudioEngine(
             gateState = decision.state
             VoxSampleResult(
                 decision = decision,
-                controls = audioControls,
+                controls = versionedAudioControls,
                 state = effectiveVoxRuntimeState(audioControls, decision.state),
                 trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
             )
         }
         val decision = result.decision
         if (decision.stateChanged) {
-            runRtc {
-                if (engineState == EngineState.READY) {
-                    localAudioTrack?.setVolume(result.trackVolume)
-                }
-            }
+            applyCurrentTrackVolume()
             Log.i(
                 TAG,
                 String.format(
@@ -434,7 +435,7 @@ internal class RiderAudioEngine(
                 )
             )
         }
-        publishVoxState(result.controls, result.state)
+        publishCurrentVoxState()
         postAudioLevel(energy)
         logVoxSnapshot(now, energy, result)
     }
@@ -448,7 +449,7 @@ internal class RiderAudioEngine(
             String.format(
                 Locale.US,
                 "VOX enabled=%s state=%s energy=%.1f noise=%.1f open=%.1f close=%.1f volume=%.1f",
-                result.controls.voxEnabled,
+                result.controls.settings.voxEnabled,
                 result.state,
                 energy,
                 decision.noiseFloor,
@@ -461,25 +462,35 @@ internal class RiderAudioEngine(
 
     private fun currentAudioControlApplicationLocked(): AudioControlApplication =
         AudioControlApplication(
-            controls = audioControls,
+            controls = versionedAudioControls,
             state = effectiveVoxRuntimeState(audioControls, gateState),
-            trackVolume = effectiveTrackVolume(
-                audioControls,
-                if (gateState == VoxGate.State.LISTENING) 0.0 else 1.0
-            )
+            trackVolume = trackVolumeForCurrentState(audioControls, gateState)
         )
 
-    private fun publishVoxState(controls: AudioControlSettings, state: VoxRuntimeState) {
-        val snapshot = controls to state
-        val changed = synchronized(audioControlLock) {
-            if (lastPublishedVoxSnapshot == snapshot) {
-                false
-            } else {
-                lastPublishedVoxSnapshot = snapshot
-                true
+    private fun applyCurrentTrackVolume() {
+        runRtc {
+            val volume = synchronized(audioControlLock) {
+                currentAudioControlApplicationLocked().trackVolume
+            }
+            if (engineState == EngineState.READY) {
+                localAudioTrack?.setVolume(volume)
             }
         }
-        if (changed) postRuntimeMain { onVoxStateChanged(controls, state) }
+    }
+
+    private fun publishCurrentVoxState() {
+        synchronized(audioControlLock) {
+            val application = currentAudioControlApplicationLocked()
+            val snapshot = application.controls to application.state
+            if (lastPublishedVoxSnapshot == snapshot) {
+                return
+            }
+            lastPublishedVoxSnapshot = snapshot
+            // Enqueue while holding the state lock so callbacks preserve state-transition order.
+            postRuntimeMain {
+                onVoxStateChanged(application.controls, application.state)
+            }
+        }
     }
 
     private fun postAudioLevel(db: Double) {
@@ -908,14 +919,14 @@ internal class RiderAudioEngine(
     }
 
     private data class AudioControlApplication(
-        val controls: AudioControlSettings,
+        val controls: VersionedAudioControls,
         val state: VoxRuntimeState,
         val trackVolume: Double
     )
 
     private data class VoxSampleResult(
         val decision: VoxGate.Decision,
-        val controls: AudioControlSettings,
+        val controls: VersionedAudioControls,
         val state: VoxRuntimeState,
         val trackVolume: Double
     )

@@ -14,6 +14,13 @@ internal data class AudioControlSettings(
     )
 }
 
+internal data class VersionedAudioControls(
+    val revision: Long,
+    val settings: AudioControlSettings
+) {
+    fun normalized(): VersionedAudioControls = copy(settings = settings.normalized())
+}
+
 internal enum class VoxRuntimeState {
     IDLE,
     DISABLED,
@@ -51,3 +58,11 @@ internal fun effectiveTrackVolume(
     controls: AudioControlSettings,
     gateVolume: Double
 ): Double = if (controls.muted) 0.0 else gateVolume
+
+internal fun trackVolumeForCurrentState(
+    controls: AudioControlSettings,
+    gateState: VoxGate.State
+): Double = effectiveTrackVolume(
+    controls,
+    if (gateState == VoxGate.State.LISTENING) 0.0 else 1.0
+)

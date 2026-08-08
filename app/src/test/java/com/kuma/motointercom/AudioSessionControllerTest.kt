@@ -101,14 +101,19 @@ class AudioSessionControllerTest {
     fun audioControlsAreAppliedToTheOwnedEngineAndRejectedAfterClose() {
         val engine = FakeEngine()
         val controller = AudioSessionController(engine, RecordingCloseable("route"))
-        val controls = AudioControlSettings(muted = true, voxSensitivity = 75)
+        val controls = VersionedAudioControls(
+            revision = 1,
+            settings = AudioControlSettings(muted = true, voxSensitivity = 75)
+        )
 
         controller.updateAudioControls(controls)
 
         assertEquals(listOf(controls), engine.controlUpdates)
         controller.close()
         assertThrows(IllegalStateException::class.java) {
-            controller.updateAudioControls(AudioControlSettings())
+            controller.updateAudioControls(
+                VersionedAudioControls(2, AudioControlSettings())
+            )
         }
     }
 
@@ -128,9 +133,9 @@ class AudioSessionControllerTest {
     ) : RiderMediaEngine {
         var openCount = 0
         var closeCount = 0
-        val controlUpdates = mutableListOf<AudioControlSettings>()
+        val controlUpdates = mutableListOf<VersionedAudioControls>()
 
-        override fun updateAudioControls(controls: AudioControlSettings) {
+        override fun updateAudioControls(controls: VersionedAudioControls) {
             controlUpdates += controls
         }
 

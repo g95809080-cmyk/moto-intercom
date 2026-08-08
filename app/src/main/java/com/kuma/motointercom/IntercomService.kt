@@ -226,6 +226,7 @@ class IntercomService : Service() {
     private var physicalLinkReady = false
     private var mediaConnected = false
     private var audioControls = AudioControlSettings()
+    private var audioControlRevision = 0L
     private var voxRuntimeState = VoxRuntimeState.IDLE
     private var running = false
     private var lastStatus = READY_STATUS
@@ -242,10 +243,6 @@ class IntercomService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        idleAudioControlSnapshot(AudioControlPreferences(this).load()).let { snapshot ->
-            audioControls = snapshot.controls
-            voxRuntimeState = snapshot.voxState
-        }
         identityStore = DataStoreLocalIdentityStore(this)
         pairingRepository = RoomPairingRepository(PairingDatabase.getInstance(this).pairingDao())
         orchestrator = SessionOrchestrator(
@@ -282,6 +279,16 @@ class IntercomService : Service() {
         when (intent?.action) {
             ACTION_START_INTERCOM -> {
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()
+                setVoxSettings(
+                    voxEnabled = intent.getBooleanExtra(
+                        EXTRA_VOX_ENABLED,
+                        audioControls.voxEnabled
+                    ),
+                    voxSensitivity = intent.getIntExtra(
+                        EXTRA_VOX_SENSITIVITY,
+                        audioControls.voxSensitivity
+                    )
+                )
                 if (!hasRequiredRuntimePermissions()) {
                     publishStatus("缺少必要权限，无法启动摩声")
                     stopSelf(startId)
@@ -381,13 +388,18 @@ class IntercomService : Service() {
         }
         if (next == audioControls) return
         val previous = audioControls
+        val nextVersioned = VersionedAudioControls(
+            revision = audioControlRevision + 1,
+            settings = next
+        )
         try {
-            audioSessionController?.updateAudioControls(next)
+            audioSessionController?.updateAudioControls(nextVersioned)
         } catch (error: RuntimeException) {
             handleError(error)
             return
         }
         audioControls = next
+        audioControlRevision = nextVersioned.revision
         when {
             !running -> {
                 voxRuntimeState = if (next.voxEnabled) {
@@ -405,9 +417,13 @@ class IntercomService : Service() {
                 voxRuntimeState = VoxRuntimeState.DISABLED
                 publishAudioControls()
             }
+            audioSessionController == null -> {
+                voxRuntimeState = VoxRuntimeState.IDLE
+                publishAudioControls()
+            }
             previous.voxEnabled != next.voxEnabled ||
                 previous.voxSensitivity != next.voxSensitivity -> {
-                // RiderAudioEngine synchronously replaces its gate with LISTENING before returning.
+                // With an engine, the gate is synchronously replaced before this returns.
                 voxRuntimeState = VoxRuntimeState.LISTENING
                 publishAudioControls()
             }
@@ -418,11 +434,16 @@ class IntercomService : Service() {
 
     private fun onVoxStateChanged(
         runtimeSessionId: RuntimeSessionId,
-        callbackControls: AudioControlSettings,
+        callbackControls: VersionedAudioControls,
         state: VoxRuntimeState
     ) {
         postForRuntime(runtimeSessionId) {
-            if (callbackControls != audioControls) return@postForRuntime
+            if (
+                callbackControls.revision != audioControlRevision ||
+                callbackControls.settings != audioControls
+            ) {
+                return@postForRuntime
+            }
             voxRuntimeState = state
             publishAudioControls()
         }
@@ -433,6 +454,13 @@ class IntercomService : Service() {
 
     private fun publishAudioControls() {
         listener?.onAudioControlsChanged(currentAudioControlSnapshot())
+    }
+
+    private fun resetSessionAudioControls() {
+        val snapshot = idleAudioControlSnapshot(audioControls)
+        if (snapshot.controls != audioControls) audioControlRevision++
+        audioControls = snapshot.controls
+        voxRuntimeState = snapshot.voxState
     }
 
     internal fun refreshConfirmationAvailability() {
@@ -530,10 +558,7 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
-        idleAudioControlSnapshot(audioControls).let { snapshot ->
-            audioControls = snapshot.controls
-            voxRuntimeState = snapshot.voxState
-        }
+        resetSessionAudioControls()
         publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
@@ -604,7 +629,10 @@ class IntercomService : Service() {
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
             },
-            initialAudioControls = audioControls,
+            initialAudioControls = VersionedAudioControls(
+                revision = audioControlRevision,
+                settings = audioControls
+            ),
             onVoxStateChanged = { callbackControls, state ->
                 onVoxStateChanged(runtimeSessionId, callbackControls, state)
             }
@@ -1406,10 +1434,7 @@ class IntercomService : Service() {
         }
         intercomManager = null
         audioSessionController = null
-        idleAudioControlSnapshot(audioControls).let { snapshot ->
-            audioControls = snapshot.controls
-            voxRuntimeState = snapshot.voxState
-        }
+        resetSessionAudioControls()
         publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
@@ -2198,6 +2223,8 @@ class IntercomService : Service() {
         const val ACTION_ACCEPT_INCOMING = "com.kuma.motointercom.action.ACCEPT_INCOMING"
         const val ACTION_REJECT_INCOMING = "com.kuma.motointercom.action.REJECT_INCOMING"
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
+        private const val EXTRA_VOX_ENABLED = "com.kuma.motointercom.extra.VOX_ENABLED"
+        private const val EXTRA_VOX_SENSITIVITY = "com.kuma.motointercom.extra.VOX_SENSITIVITY"
         private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
         private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
         private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
@@ -2222,10 +2249,16 @@ class IntercomService : Service() {
         private const val ENDED_STATUS = "对讲已结束"
         private const val BLUETOOTH_RETRY_STATUS = "头盔蓝牙已断开，正在尝试重连..."
 
-        fun startIntent(context: Context, riderName: String = ""): Intent =
+        internal fun startIntent(
+            context: Context,
+            riderName: String = "",
+            audioControls: AudioControlSettings = AudioControlSettings()
+        ): Intent =
             Intent(context, IntercomService::class.java)
                 .setAction(ACTION_START_INTERCOM)
                 .putExtra(EXTRA_RIDER_NAME, riderName)
+                .putExtra(EXTRA_VOX_ENABLED, audioControls.voxEnabled)
+                .putExtra(EXTRA_VOX_SENSITIVITY, audioControls.normalized().voxSensitivity)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)

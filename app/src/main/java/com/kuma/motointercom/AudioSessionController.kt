@@ -14,7 +14,7 @@ internal class AudioSessionController(
     private var activeLease: Any? = null
     private var activeSession: RiderMediaSession? = null
 
-    fun updateAudioControls(controls: AudioControlSettings) {
+    fun updateAudioControls(controls: VersionedAudioControls) {
         synchronized(lock) {
             check(!closed) { "audio session controller is closed" }
             engine.updateAudioControls(controls.normalized())
@@ -104,8 +104,11 @@ internal class AudioSessionController(
             onSpeakerFallback: (Boolean) -> Unit,
             onError: (Throwable) -> Unit,
             isRuntimeCurrent: () -> Boolean,
-            initialAudioControls: AudioControlSettings = AudioControlSettings(),
-            onVoxStateChanged: (AudioControlSettings, VoxRuntimeState) -> Unit = { _, _ -> }
+            initialAudioControls: VersionedAudioControls = VersionedAudioControls(
+                revision = 0,
+                settings = AudioControlSettings()
+            ),
+            onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,

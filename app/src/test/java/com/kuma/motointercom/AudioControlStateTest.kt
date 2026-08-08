@@ -14,6 +14,13 @@ class AudioControlStateTest {
             AudioControlSettings(voxSensitivity = 0),
             AudioControlSettings(voxSensitivity = -1).normalized()
         )
+        assertEquals(
+            VersionedAudioControls(7, AudioControlSettings(voxSensitivity = 100)),
+            VersionedAudioControls(
+                7,
+                AudioControlSettings(voxSensitivity = 900)
+            ).normalized()
+        )
     }
 
     @Test
@@ -67,5 +74,17 @@ class AudioControlStateTest {
             effectiveVoxRuntimeState(disabled, VoxGate.State.BYPASS)
         )
         assertEquals(1.0, effectiveTrackVolume(disabled, gateVolume = 1.0), 0.0)
+    }
+
+    @Test
+    fun queuedVolumeResolutionReadsTheLatestMuteAtExecutionTime() {
+        var currentControls = AudioControlSettings(muted = false, voxEnabled = true)
+        val queuedOpenApplication = {
+            trackVolumeForCurrentState(currentControls, VoxGate.State.OPEN)
+        }
+
+        currentControls = currentControls.copy(muted = true)
+
+        assertEquals(0.0, queuedOpenApplication(), 0.0)
     }
 }
