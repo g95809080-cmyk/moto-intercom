@@ -3,10 +3,14 @@ package com.kuma.motointercom
 import android.content.Context
 import java.io.Closeable
 
+internal interface RiderAudioRoute : Closeable {
+    fun select(selection: AudioRouteSelection)
+}
+
 /** Owns audio platform resources for one online runtime. */
 internal class AudioSessionController(
     private val engine: RiderMediaEngine,
-    private val route: Closeable
+    private val route: RiderAudioRoute
 ) : Closeable {
 
     private val lock = Any()
@@ -18,6 +22,13 @@ internal class AudioSessionController(
         synchronized(lock) {
             check(!closed) { "audio session controller is closed" }
             engine.updateAudioControls(controls.normalized())
+        }
+    }
+
+    fun updateAudioRoute(selection: AudioRouteSelection) {
+        synchronized(lock) {
+            check(!closed) { "audio session controller is closed" }
+            route.select(selection)
         }
     }
 
@@ -108,7 +119,9 @@ internal class AudioSessionController(
                 revision = 0,
                 settings = AudioControlSettings()
             ),
-            onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
+            onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
+            initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+            onEarpieceActive: () -> Unit = {}
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,
@@ -123,9 +136,10 @@ internal class AudioSessionController(
                     onScoConnected = onScoConnected,
                     onScoDisconnected = onScoDisconnected,
                     onSpeakerFallback = onSpeakerFallback,
+                    onEarpieceActive = onEarpieceActive,
                     onError = onError
                 )
-                route.switchToBluetoothSco()
+                route.select(initialAudioRoute)
                 AudioSessionController(engine, route)
             } catch (t: Throwable) {
                 engine.close()

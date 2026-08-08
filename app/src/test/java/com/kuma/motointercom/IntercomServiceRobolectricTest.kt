@@ -48,7 +48,8 @@ class IntercomServiceRobolectricTest {
                 muted = true,
                 voxEnabled = false,
                 voxSensitivity = 73
-            )
+            ),
+            preferredAudioRoute = AudioRouteSelection.EARPIECE
         )
 
         assertEquals("Road Captain", intent.getStringExtra(IntercomService.EXTRA_RIDER_NAME))
@@ -60,6 +61,28 @@ class IntercomServiceRobolectricTest {
             intent.getIntExtra("com.kuma.motointercom.extra.VOX_SENSITIVITY", -1)
         )
         assertFalse(intent.hasExtra("com.kuma.motointercom.extra.MUTED"))
+        assertEquals(
+            AudioRouteSelection.EARPIECE.name,
+            intent.getStringExtra("com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE")
+        )
+    }
+
+    @Test
+    fun serviceReplaysAndUpdatesRuntimeAudioRouteWithoutReadingPreferences() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        AudioRoutePreferences(context).save(AudioRouteSelection.SPEAKER)
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val selections = mutableListOf<AudioRouteSelection>()
+
+        service.setListener(audioRouteListener(selections))
+        service.setPreferredAudioRoute(AudioRouteSelection.EARPIECE)
+
+        assertEquals(
+            listOf(AudioRouteSelection.BLUETOOTH, AudioRouteSelection.EARPIECE),
+            selections
+        )
+        controller.destroy()
     }
 
     @Test
@@ -292,6 +315,17 @@ class IntercomServiceRobolectricTest {
         override fun onStatusChanged(status: String, running: Boolean) = Unit
         override fun onAudioControlsChanged(snapshot: AudioControlSnapshot) {
             snapshots += snapshot
+        }
+        override fun onLog(message: String) = Unit
+        override fun onError(message: String) = Unit
+    }
+
+    private fun audioRouteListener(
+        selections: MutableList<AudioRouteSelection>
+    ): IntercomService.Listener = object : IntercomService.Listener {
+        override fun onStatusChanged(status: String, running: Boolean) = Unit
+        override fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) {
+            selections += selection
         }
         override fun onLog(message: String) = Unit
         override fun onError(message: String) = Unit

@@ -38,9 +38,11 @@ internal class MainScreen(
     private val onOpenWifiSettings: () -> Unit,
     private val onOpenPermissionSettings: () -> Unit,
     initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
+    initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
     private val onSetMuted: (Boolean) -> Unit = {},
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
-    private val onSetVoxSensitivity: (Int) -> Unit = {}
+    private val onSetVoxSensitivity: (Int) -> Unit = {},
+    private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {}
 ) {
     val root: View
 
@@ -104,6 +106,7 @@ internal class MainScreen(
     private var discoverCtaNeedsReselect = false
     private var audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
     private var bluetoothActive = false
+    private var preferredAudioRoute = initialPreferredAudioRoute
     private var wifiUnavailable = false
     private var bluetoothPermissionMissing = false
     private var notificationPermissionMissing = false
@@ -294,6 +297,11 @@ internal class MainScreen(
 
     fun setAudioControls(snapshot: AudioControlSnapshot) {
         audioControlSnapshot = snapshot
+        renderCurrentPage()
+    }
+
+    fun setPreferredAudioRoute(selection: AudioRouteSelection) {
+        preferredAudioRoute = selection
         renderCurrentPage()
     }
 
@@ -892,7 +900,8 @@ internal class MainScreen(
                         onAbout = ::showAboutDialog,
                         onPlaceholder = { showPlaceholderDialog() },
                         onVoxEnabledChanged = onSetVoxEnabled,
-                        onVoxSensitivityChanged = onSetVoxSensitivity
+                        onVoxSensitivityChanged = onSetVoxSensitivity,
+                        onAudioRouteSelected = onSelectAudioRoute
                     )
                 }
             }
@@ -955,7 +964,8 @@ internal class MainScreen(
             version = activity.getString(R.string.settings_version_summary, currentVersionName()),
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
-            voxState = audioControlSnapshot.voxState
+            voxState = audioControlSnapshot.voxState,
+            preferredAudioRoute = preferredAudioRoute
         )
     }
 

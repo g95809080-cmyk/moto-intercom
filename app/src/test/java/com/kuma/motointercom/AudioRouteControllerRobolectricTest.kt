@@ -78,6 +78,85 @@ class AudioRouteControllerRobolectricTest {
         assertEquals(emptyList<String>(), connected)
     }
 
+    @Test
+    fun modernRouteSelectsEachRequestedCommunicationDeviceWithoutInference() {
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val earpiece = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+        val bluetooth = audioDevice(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(speaker, earpiece, bluetooth))
+        val route = ModernAudioRoute(
+            audioManager = audioManager,
+            callbackExecutor = { command -> command.run() },
+            onBluetoothConnected = {},
+            onDeviceLost = {}
+        )
+
+        assertEquals(
+            ModernAudioRoute.RouteResult.ROUTED,
+            route.routeTo(AudioRouteSelection.EARPIECE)
+        )
+        assertEquals(earpiece, audioManager.communicationDevice)
+        assertEquals(
+            ModernAudioRoute.RouteResult.ROUTED,
+            route.routeTo(AudioRouteSelection.SPEAKER)
+        )
+        assertEquals(speaker, audioManager.communicationDevice)
+        assertEquals(
+            ModernAudioRoute.RouteResult.ROUTED,
+            route.routeTo(AudioRouteSelection.BLUETOOTH)
+        )
+        assertEquals(bluetooth, audioManager.communicationDevice)
+
+        route.close()
+    }
+
+    @Test
+    fun staleRouteGenerationCannotPublishAfterANewerSelection() {
+        val controller = AudioRouteController(context = context)
+        val stale = VersionedAudioRouteSelection(1, AudioRouteSelection.EARPIECE)
+        val current = VersionedAudioRouteSelection(2, AudioRouteSelection.SPEAKER)
+        setField(controller, "routeRequest", current)
+        val callbacks = mutableListOf<String>()
+
+        invokePostMainForRoute(controller, stale) { callbacks += "stale" }
+        invokePostMainForRoute(controller, current) { callbacks += "current" }
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(listOf("current"), callbacks)
+        controller.close()
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun legacyPhoneRoutesSwitchBetweenEarpieceAndSpeaker() {
+        val active = mutableListOf<AudioRouteSelection>()
+        val controller = AudioRouteController(
+            context = context,
+            onEarpieceActive = { active += AudioRouteSelection.EARPIECE },
+            onSpeakerFallback = { active += AudioRouteSelection.SPEAKER }
+        )
+        val earpiece = VersionedAudioRouteSelection(1, AudioRouteSelection.EARPIECE)
+        setField(controller, "routeRequest", earpiece)
+
+        invokeSelectPhoneRoute(controller, earpiece)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        @Suppress("DEPRECATION")
+        assertFalse(audioManager.isSpeakerphoneOn)
+        val speaker = VersionedAudioRouteSelection(2, AudioRouteSelection.SPEAKER)
+        setField(controller, "routeRequest", speaker)
+        invokeSelectPhoneRoute(controller, speaker)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        @Suppress("DEPRECATION")
+        assertEquals(true, audioManager.isSpeakerphoneOn)
+        assertEquals(
+            listOf(AudioRouteSelection.EARPIECE, AudioRouteSelection.SPEAKER),
+            active
+        )
+        controller.close()
+    }
+
     private fun invokeFallbackToPhone(controller: AudioRouteController) {
         AudioRouteController::class.java.getDeclaredMethod(
             "fallbackToPhone",
@@ -85,6 +164,25 @@ class AudioRouteControllerRobolectricTest {
             String::class.java
         ).apply { isAccessible = true }
             .invoke(controller, true, "test fallback")
+    }
+
+    private fun invokePostMainForRoute(
+        controller: AudioRouteController,
+        request: VersionedAudioRouteSelection,
+        callback: () -> Unit
+    ) {
+        AudioRouteController::class.java.declaredMethods.single {
+            it.name.startsWith("postMainForRoute") && it.parameterCount == 2
+        }.apply { isAccessible = true }.invoke(controller, request, callback)
+    }
+
+    private fun invokeSelectPhoneRoute(
+        controller: AudioRouteController,
+        request: VersionedAudioRouteSelection
+    ) {
+        AudioRouteController::class.java.declaredMethods.single {
+            it.name.startsWith("selectPhoneRoute") && it.parameterCount == 1
+        }.apply { isAccessible = true }.invoke(controller, request)
     }
 
     private fun audioDevice(type: Int): AudioDeviceInfo =

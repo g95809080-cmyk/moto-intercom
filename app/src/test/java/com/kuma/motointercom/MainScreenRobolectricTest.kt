@@ -37,6 +37,7 @@ import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -1063,9 +1064,6 @@ class MainScreenRobolectricTest {
 
         openRoute(fixture, MainRoute.SETTINGS)
         val settingsPlaceholderIds = listOf(
-            R.id.settings_audio_route_button,
-            R.id.settings_audio_earpiece_button,
-            R.id.settings_audio_speaker_button,
             R.id.settings_reconnect_button,
             R.id.settings_help_button
         )
@@ -1090,6 +1088,31 @@ class MainScreenRobolectricTest {
         clickDiscover("discover_back_button")
         assertFalse(homeContentDescription("home_vox_pill").contains("开发中"))
         assertTrue(homeContentDescription("home_vox_card").contains("VOX 当前状态"))
+    }
+
+    @Test
+    fun manualAudioRouteRowsExposeSelectionAndUseRealCallback() {
+        var selected: AudioRouteSelection? = null
+        val fixture = fixture(
+            initialPreferredAudioRoute = AudioRouteSelection.EARPIECE,
+            onSelectAudioRoute = { selected = it }
+        )
+        openRoute(fixture, MainRoute.SETTINGS)
+
+        assertEquals(
+            true,
+            settingsNode("settings_audio_earpiece_button")
+                .fetchSemanticsNode().config[SemanticsProperties.Selected]
+        )
+        val speakerDescription = settingsNode("settings_audio_speaker_button")
+            .fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
+            .joinToString()
+        assertFalse(speakerDescription.contains("开发中"))
+
+        clickSettings("settings_audio_speaker_button")
+
+        assertEquals(AudioRouteSelection.SPEAKER, selected)
+        assertNull(ShadowAlertDialog.getLatestAlertDialog())
     }
 
     @Test
@@ -1192,9 +1215,6 @@ class MainScreenRobolectricTest {
         val cases = listOf(
             MainRoute.DISCOVER to listOf(R.id.discover_help_button, R.id.discover_rescan_button),
             MainRoute.SETTINGS to listOf(
-                R.id.settings_audio_route_button,
-                R.id.settings_audio_earpiece_button,
-                R.id.settings_audio_speaker_button,
                 R.id.settings_reconnect_button,
                 R.id.settings_help_button
             )
@@ -1234,9 +1254,6 @@ class MainScreenRobolectricTest {
         val cases = listOf(
             MainRoute.DISCOVER to listOf(R.id.discover_help_button, R.id.discover_rescan_button),
             MainRoute.SETTINGS to listOf(
-                R.id.settings_audio_route_button,
-                R.id.settings_audio_earpiece_button,
-                R.id.settings_audio_speaker_button,
                 R.id.settings_reconnect_button,
                 R.id.settings_help_button
             )
@@ -1671,9 +1688,6 @@ class MainScreenRobolectricTest {
         } else if (route == MainRoute.SETTINGS) {
             clickSettings(
                 when (id) {
-                    R.id.settings_audio_route_button -> "settings_audio_route_button"
-                    R.id.settings_audio_earpiece_button -> "settings_audio_earpiece_button"
-                    R.id.settings_audio_speaker_button -> "settings_audio_speaker_button"
                     R.id.settings_vox_button -> "settings_vox_button"
                     R.id.settings_vox_sensitivity_button -> "settings_vox_sensitivity_button"
                     R.id.settings_vox_state_button -> "settings_vox_state_button"
@@ -1695,9 +1709,6 @@ class MainScreenRobolectricTest {
     }
 
     private fun settingsTagForPlaceholderId(id: Int): String = when (id) {
-        R.id.settings_audio_route_button -> "settings_audio_route_button"
-        R.id.settings_audio_earpiece_button -> "settings_audio_earpiece_button"
-        R.id.settings_audio_speaker_button -> "settings_audio_speaker_button"
         R.id.settings_vox_button -> "settings_vox_button"
         R.id.settings_vox_sensitivity_button -> "settings_vox_sensitivity_button"
         R.id.settings_vox_state_button -> "settings_vox_state_button"
@@ -1886,9 +1897,11 @@ class MainScreenRobolectricTest {
         onSaveRiderName: (String) -> Boolean = { true },
         onConnectPresence: (RiderPresence) -> Boolean = { false },
         initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
+        initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
         onSetMuted: (Boolean) -> Unit = {},
         onSetVoxEnabled: (Boolean) -> Unit = {},
-        onSetVoxSensitivity: (Int) -> Unit = {}
+        onSetVoxSensitivity: (Int) -> Unit = {},
+        onSelectAudioRoute: (AudioRouteSelection) -> Unit = {}
     ): Fixture {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val activity = controller.get()
@@ -1909,9 +1922,11 @@ class MainScreenRobolectricTest {
             onOpenWifiSettings = {},
             onOpenPermissionSettings = {},
             initialAudioControls = initialAudioControls,
+            initialPreferredAudioRoute = initialPreferredAudioRoute,
             onSetMuted = onSetMuted,
             onSetVoxEnabled = onSetVoxEnabled,
-            onSetVoxSensitivity = onSetVoxSensitivity
+            onSetVoxSensitivity = onSetVoxSensitivity,
+            onSelectAudioRoute = onSelectAudioRoute
         )
         activity.setContentView(screen.root)
         return Fixture(activity, screen)

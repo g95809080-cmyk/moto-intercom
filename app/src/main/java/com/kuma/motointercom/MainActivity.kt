@@ -36,6 +36,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
     private val audioControlPreferences by lazy { AudioControlPreferences(this) }
     private var preferredAudioControls = AudioControlSettings()
+    private val audioRoutePreferences by lazy { AudioRoutePreferences(this) }
+    private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -47,6 +49,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             val local = service as IntercomService.LocalBinder
             intercomService = local.service()
             serviceConnected = true
+            intercomService?.setPreferredAudioRoute(preferredAudioRoute)
             intercomService?.setVoxSettings(
                 preferredAudioControls.voxEnabled,
                 preferredAudioControls.voxSensitivity
@@ -78,6 +81,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         preferredAudioControls = audioControlPreferences.load()
+        preferredAudioRoute = audioRoutePreferences.load()
         screen = MainScreen(
             activity = this,
             initialRiderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty(),
@@ -135,6 +139,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 openAppPermissionSettings()
             },
             initialAudioControls = idleAudioControlSnapshot(preferredAudioControls),
+            initialPreferredAudioRoute = preferredAudioRoute,
             onSetMuted = { muted ->
                 val service = intercomService
                 if (service == null) {
@@ -150,7 +155,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 savePreferredVoxSettings(
                     preferredAudioControls.copy(voxSensitivity = sensitivity)
                 )
-            }
+            },
+            onSelectAudioRoute = ::savePreferredAudioRoute
         )
         setContentView(screen.root)
         registerPlatformBackCallback()
@@ -272,6 +278,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            preferredAudioRoute = selection
+            screen.setPreferredAudioRoute(selection)
+        }
+    }
+
     override fun onPresencesChanged(presences: List<RiderPresence>) {
         runOnUiThread {
             if (serviceConnected) screen.setPresences(presences)
@@ -365,6 +379,16 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    private fun savePreferredAudioRoute(selection: AudioRouteSelection) {
+        if (!audioRoutePreferences.save(selection)) {
+            Toast.makeText(this, R.string.audio_route_save_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        preferredAudioRoute = selection
+        screen.setPreferredAudioRoute(selection)
+        intercomService?.setPreferredAudioRoute(selection)
+    }
+
     private fun requestCorePermissions() {
         val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
         if (missing.isEmpty()) {
@@ -418,7 +442,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
 
         val riderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty()
-        val intent = IntercomService.startIntent(this, riderName, preferredAudioControls)
+        val intent = IntercomService.startIntent(
+            context = this,
+            riderName = riderName,
+            audioControls = preferredAudioControls,
+            preferredAudioRoute = preferredAudioRoute
+        )
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)

@@ -1,9 +1,13 @@
 package com.kuma.motointercom
 
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
@@ -102,6 +106,50 @@ class SettingsScreenComposeTest {
         composeRule.runOnIdle {
             assertEquals(false, enabled)
             assertEquals(80, sensitivity)
+        }
+    }
+
+    @Test
+    fun audioRouteRowsExposePersistedSelectionAndRealCallbacks() {
+        var selected: AudioRouteSelection? = null
+        var placeholderCount = 0
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "Rider",
+                        nicknameFeedback = "",
+                        audioSource = "当前音频源：手机听筒",
+                        productState = "Offline",
+                        attemptFacts = "No attempt",
+                        discoveryCandidates = "No candidates",
+                        deviceStatus = "Ready",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0",
+                        preferredAudioRoute = AudioRouteSelection.EARPIECE
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onPlaceholder = { placeholderCount++ },
+                    onAudioRouteSelected = { selected = it }
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithTag("settings_audio_route_button").onLast().assertIsNotSelected()
+        composeRule.onAllNodesWithTag("settings_audio_earpiece_button").onLast().assertIsSelected()
+        composeRule.onAllNodesWithTag("settings_audio_speaker_button").onLast()
+            .assertIsNotSelected()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+
+        composeRule.runOnIdle {
+            assertEquals(AudioRouteSelection.SPEAKER, selected)
+            assertEquals(0, placeholderCount)
         }
     }
 }

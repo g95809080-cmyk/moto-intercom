@@ -117,6 +117,39 @@ class MainActivityRobolectricTest {
     }
 
     @Test
+    fun activityOwnsAndPersistsPreferredAudioRouteBeforeServiceReplay() {
+        val application = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val preferences = AudioRoutePreferences(application)
+        preferences.save(AudioRouteSelection.EARPIECE)
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+
+        assertEquals(
+            AudioRouteSelection.EARPIECE,
+            MainScreen::class.java.getDeclaredField("preferredAudioRoute").apply {
+                isAccessible = true
+            }.get(screen(activity))
+        )
+
+        MainActivity::class.java.getDeclaredMethod(
+            "savePreferredAudioRoute",
+            AudioRouteSelection::class.java
+        ).apply { isAccessible = true }.invoke(activity, AudioRouteSelection.SPEAKER)
+
+        assertEquals(AudioRouteSelection.SPEAKER, AudioRoutePreferences(application).load())
+        assertEquals(
+            AudioRouteSelection.SPEAKER,
+            MainScreen::class.java.getDeclaredField("preferredAudioRoute").apply {
+                isAccessible = true
+            }.get(screen(activity))
+        )
+
+        controller.destroy()
+        preferences.save(AudioRouteSelection.BLUETOOTH)
+    }
+
+    @Test
     fun processRestartDoesNotRestoreSavedRouteFromAnotherProcess() {
         val savedState = Bundle().apply {
             putString("main_route", MainRoute.SETTINGS.name)

@@ -40,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
@@ -65,7 +66,8 @@ internal data class SettingsScreenUiState(
     val version: String,
     val voxEnabled: Boolean = true,
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
-    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE
+    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
+    val preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH
 )
 
 @Composable
@@ -80,7 +82,8 @@ internal fun MotoComSettingsScreen(
     onPlaceholder: (String) -> Unit,
     modifier: Modifier = Modifier,
     onVoxEnabledChanged: (Boolean) -> Unit = {},
-    onVoxSensitivityChanged: (Int) -> Unit = {}
+    onVoxSensitivityChanged: (Int) -> Unit = {},
+    onAudioRouteSelected: (AudioRouteSelection) -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -171,32 +174,30 @@ internal fun MotoComSettingsScreen(
         SettingsSectionLabel(stringResource(R.string.section_audio_output))
         SettingsPanel {
             SettingsFact(state.audioSource, "settings_audio_source", hidden = true)
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_audio_bluetooth_developing),
+            SettingsAudioRouteRow(
+                text = stringResource(R.string.settings_audio_bluetooth),
                 tag = "settings_audio_route_button",
-                description = stringResource(R.string.audio_route_developing_description),
-                onClick = onPlaceholder,
+                description = stringResource(R.string.audio_route_description),
+                selected = state.preferredAudioRoute == AudioRouteSelection.BLUETOOTH,
+                onClick = { onAudioRouteSelected(AudioRouteSelection.BLUETOOTH) },
                 icon = R.drawable.ic_headset_24
-            ) {
-                RadioMark(
-                    selected = state.audioSource.contains("蓝牙耳机") &&
-                        !state.audioSource.contains("未连接")
-                )
-            }
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_audio_earpiece_developing),
+            )
+            SettingsAudioRouteRow(
+                text = stringResource(R.string.settings_audio_earpiece),
                 tag = "settings_audio_earpiece_button",
-                description = stringResource(R.string.audio_earpiece_developing_description),
-                onClick = onPlaceholder,
+                description = stringResource(R.string.audio_earpiece_description),
+                selected = state.preferredAudioRoute == AudioRouteSelection.EARPIECE,
+                onClick = { onAudioRouteSelected(AudioRouteSelection.EARPIECE) },
                 icon = R.drawable.ic_audio_24
-            ) { RadioMark(selected = false) }
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_audio_speaker_developing),
+            )
+            SettingsAudioRouteRow(
+                text = stringResource(R.string.settings_audio_speaker),
                 tag = "settings_audio_speaker_button",
-                description = stringResource(R.string.audio_speaker_developing_description),
-                onClick = onPlaceholder,
+                description = stringResource(R.string.audio_speaker_description),
+                selected = state.preferredAudioRoute == AudioRouteSelection.SPEAKER,
+                onClick = { onAudioRouteSelected(AudioRouteSelection.SPEAKER) },
                 icon = R.drawable.ic_audio_24
-            ) { RadioMark(selected = false) }
+            )
         }
 
         SettingsSectionLabel(stringResource(R.string.settings_connection_device))
@@ -417,6 +418,44 @@ private fun SettingsPlaceholderRow(
             fontSize = 14.sp
         )
         trailing()
+    }
+}
+
+@Composable
+private fun SettingsAudioRouteRow(
+    text: String,
+    tag: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: Int
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 44.dp)
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics {
+                contentDescription = description
+                this.selected = selected
+            }
+            .testTag(tag),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painterResource(icon),
+            null,
+            Modifier.size(21.dp),
+            tint = colorResource(R.color.motocom_text_muted_accessible)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text,
+            Modifier.weight(1f),
+            color = colorResource(R.color.motocom_text_primary),
+            fontSize = 14.sp
+        )
+        RadioMark(selected)
     }
 }
 

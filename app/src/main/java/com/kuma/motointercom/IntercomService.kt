@@ -111,6 +111,7 @@ class IntercomService : Service() {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
+        fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) = Unit
         fun onPresencesChanged(presences: List<RiderPresence>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
         fun onAudioControlsChanged(snapshot: AudioControlSnapshot) = Unit
@@ -232,6 +233,7 @@ class IntercomService : Service() {
     private var lastStatus = READY_STATUS
     private var audioSourceStatus = AUDIO_STANDBY_STATUS
     private var audioSourceBluetooth = false
+    private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
     private var appInForeground = false
@@ -279,6 +281,11 @@ class IntercomService : Service() {
         when (intent?.action) {
             ACTION_START_INTERCOM -> {
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()
+                setPreferredAudioRoute(
+                    audioRouteSelectionFromPersisted(
+                        intent.getStringExtra(EXTRA_PREFERRED_AUDIO_ROUTE)
+                    )
+                )
                 setVoxSettings(
                     voxEnabled = intent.getBooleanExtra(
                         EXTRA_VOX_ENABLED,
@@ -340,6 +347,7 @@ class IntercomService : Service() {
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
+        listener?.onAudioRouteSelectionChanged(preferredAudioRoute)
         listener?.onAudioControlsChanged(currentAudioControlSnapshot())
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
@@ -379,6 +387,19 @@ class IntercomService : Service() {
                     voxSensitivity = voxSensitivity
                 )
             )
+        }
+    }
+
+    internal fun setPreferredAudioRoute(selection: AudioRouteSelection) {
+        dispatchOnMain {
+            val changed = selection != preferredAudioRoute
+            preferredAudioRoute = selection
+            if (changed) listener?.onAudioRouteSelectionChanged(selection)
+            try {
+                audioSessionController?.updateAudioRoute(selection)
+            } catch (error: RuntimeException) {
+                handleError(error)
+            }
         }
     }
 
@@ -625,6 +646,13 @@ class IntercomService : Service() {
                     updateStageStatus()
                 }
             },
+            onEarpieceActive = {
+                postForRuntime(runtimeSessionId) {
+                    bluetoothReady = false
+                    publishAudioSource(AUDIO_EARPIECE_STATUS, bluetooth = false)
+                    updateStageStatus()
+                }
+            },
             onError = { error -> postForRuntime(runtimeSessionId) { handleError(error) } },
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
@@ -635,7 +663,8 @@ class IntercomService : Service() {
             ),
             onVoxStateChanged = { callbackControls, state ->
                 onVoxStateChanged(runtimeSessionId, callbackControls, state)
-            }
+            },
+            initialAudioRoute = preferredAudioRoute
         )
     }
 
@@ -2225,6 +2254,8 @@ class IntercomService : Service() {
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
         private const val EXTRA_VOX_ENABLED = "com.kuma.motointercom.extra.VOX_ENABLED"
         private const val EXTRA_VOX_SENSITIVITY = "com.kuma.motointercom.extra.VOX_SENSITIVITY"
+        private const val EXTRA_PREFERRED_AUDIO_ROUTE =
+            "com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE"
         private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
         private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
         private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
@@ -2238,7 +2269,8 @@ class IntercomService : Service() {
         private const val NOTIFICATION_ID = 2601
         private const val INCOMING_NOTIFICATION_ID = 2602
         private const val AUDIO_STANDBY_STATUS = "当前音频源：待机"
-        private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放（无蓝牙）"
+        private const val AUDIO_EARPIECE_STATUS = "当前音频源：手机听筒"
+        private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放"
         private const val READY_STATUS = "请点击下方启动对讲"
         private const val SEARCHING_STATUS = "无线配对中，请把两台手机靠近.."
         private const val PEER_FOUND_STATUS = "已发现车友"
@@ -2252,13 +2284,15 @@ class IntercomService : Service() {
         internal fun startIntent(
             context: Context,
             riderName: String = "",
-            audioControls: AudioControlSettings = AudioControlSettings()
+            audioControls: AudioControlSettings = AudioControlSettings(),
+            preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH
         ): Intent =
             Intent(context, IntercomService::class.java)
                 .setAction(ACTION_START_INTERCOM)
                 .putExtra(EXTRA_RIDER_NAME, riderName)
                 .putExtra(EXTRA_VOX_ENABLED, audioControls.voxEnabled)
                 .putExtra(EXTRA_VOX_SENSITIVITY, audioControls.normalized().voxSensitivity)
+                .putExtra(EXTRA_PREFERRED_AUDIO_ROUTE, preferredAudioRoute.name)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)
