@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class IntercomServiceRobolectricTest {
     @Test
-    fun manualDiscoveryRefreshDispatchesThroughTheOrchestrator() = runBlocking {
+    fun manualDiscoveryRefreshWithoutReadyResourcesIsCoalescedWithCurrentStartup() = runBlocking {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
         val service = controller.get()
         val runtime = RuntimeSessionId("runtime-manual-refresh")
@@ -43,7 +43,9 @@ class IntercomServiceRobolectricTest {
             override fun onStatusChanged(status: String, running: Boolean) = Unit
             override fun onLog(message: String) {
                 logs += message
-                if (message == "手动重新扫描附近车友") refreshLogged.countDown()
+                if (message == "重新扫描请求未启动新的发现轮次") {
+                    refreshLogged.countDown()
+                }
             }
             override fun onError(message: String) = Unit
         })
@@ -51,7 +53,7 @@ class IntercomServiceRobolectricTest {
         service.requestDiscoveryRefresh()
         awaitMainCallback(refreshLogged)
 
-        assertTrue(logs.contains("手动重新扫描附近车友"))
+        assertTrue(logs.contains("重新扫描请求未启动新的发现轮次"))
         assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
         controller.destroy()
         Unit

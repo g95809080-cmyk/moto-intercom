@@ -4,7 +4,8 @@ internal data class RecoveryCleanupRequest(
     val runtimeSessionId: RuntimeSessionId,
     val nextAttempt: ConnectionAttempt?,
     val restartDelayMillis: Long,
-    val resetEffect: SessionEffect.ResetWirelessEnvironment? = null
+    val resetEffect: SessionEffect.ResetWirelessEnvironment? = null,
+    val discoveryRefreshGeneration: Long? = null
 ) {
     init {
         require(restartDelayMillis >= 0L) { "Restart delay must not be negative" }
@@ -16,6 +17,12 @@ internal data class RecoveryCleanupRequest(
                 (nextAttempt == null && resetEffect.runtimeSessionId == runtimeSessionId)
         ) {
             "Reset cleanup must belong to the cleanup runtime and have no next attempt"
+        }
+        require(
+            discoveryRefreshGeneration == null ||
+                (discoveryRefreshGeneration > 0L && nextAttempt == null && resetEffect == null)
+        ) {
+            "Manual refresh cleanup must have a positive generation and no recovery work"
         }
     }
 }

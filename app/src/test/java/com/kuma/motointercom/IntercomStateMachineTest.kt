@@ -47,12 +47,12 @@ class IntercomStateMachineTest {
 
     @Test
     fun manualDiscoveryRefreshRequiresTheCurrentDiscoveringRuntime() {
-        val event = SessionEvent.DiscoveryRefreshRequested(runtime)
+        val event = SessionEvent.DiscoveryRefreshRequested(runtime, generation = 1L)
 
         assertEquals(
             SessionTransition(
                 state = IntercomState.Discovering(runtime),
-                effects = listOf(SessionEffect.RefreshDiscovery(runtime))
+                effects = listOf(SessionEffect.RefreshDiscovery(runtime, generation = 1L))
             ),
             reduceIntercomState(IntercomState.Discovering(runtime), event)
         )

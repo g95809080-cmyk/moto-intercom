@@ -32,6 +32,28 @@ import java.util.concurrent.CancellationException
 
 private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
 
+internal class DiscoveryRefreshGate {
+    private var nextGeneration = 0L
+    private var activeGeneration: Long? = null
+
+    fun begin(): Long? {
+        if (activeGeneration != null) return null
+        val generation = ++nextGeneration
+        activeGeneration = generation
+        return generation
+    }
+
+    fun accepts(generation: Long): Boolean = activeGeneration == generation
+
+    fun complete(generation: Long) {
+        if (activeGeneration == generation) activeGeneration = null
+    }
+
+    fun cancel() {
+        activeGeneration = null
+    }
+}
+
 internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
     if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
 
@@ -139,6 +161,7 @@ class IntercomService : Service() {
         removeCallbacks = mainHandler::removeCallbacks,
         restart = ::restartAfterRecoveryCleanup
     )
+    private val discoveryRefreshGate = DiscoveryRefreshGate()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val presenceAggregator = PresenceAggregator(SystemClock::elapsedRealtime)
 
@@ -674,7 +697,15 @@ class IntercomService : Service() {
         mainHandler.post {
             if (!running) return@post
             val runtimeSessionId = activeRuntimeSessionId ?: return@post
-            orchestrator.dispatch(SessionEvent.DiscoveryRefreshRequested(runtimeSessionId))
+            val generation = discoveryRefreshGate.begin() ?: return@post
+            val queued = orchestrator.dispatch(
+                SessionEvent.DiscoveryRefreshRequested(runtimeSessionId, generation)
+            ) { accepted ->
+                if (!accepted) {
+                    dispatchOnMain { discoveryRefreshGate.complete(generation) }
+                }
+            }
+            if (!queued) discoveryRefreshGate.complete(generation)
         }
     }
 
@@ -1406,9 +1437,10 @@ class IntercomService : Service() {
         nextAttempt: ConnectionAttempt?,
         restartDelayMillis: Long = restartDiscoveryDelayMillis(nextAttempt),
         resetEffect: SessionEffect.ResetWirelessEnvironment? = null,
-        cleanupStatus: String = SIGNAL_LOST_STATUS
-    ) {
-        if (!running || activeRuntimeSessionId != runtimeSessionId) return
+        cleanupStatus: String = SIGNAL_LOST_STATUS,
+        discoveryRefreshGeneration: Long? = null
+    ): Boolean {
+        if (!running || activeRuntimeSessionId != runtimeSessionId) return false
         if (
             resetEffect != null &&
             !canExecuteResetWirelessEnvironmentEffect(
@@ -1419,18 +1451,19 @@ class IntercomService : Service() {
                 orchestrator.pendingInboundRequest
             )
         ) {
-            return
+            return false
         }
         val request = RecoveryCleanupRequest(
             runtimeSessionId = runtimeSessionId,
             nextAttempt = nextAttempt,
             restartDelayMillis = restartDelayMillis,
-            resetEffect = resetEffect
+            resetEffect = resetEffect,
+            discoveryRefreshGeneration = discoveryRefreshGeneration
         )
-        if (recoveryCleanupCoordinator.updateIfActive(request)) return
-        val token = activeSession ?: return
-        if (!isSessionCurrent(token)) return
-        if (localDeviceId.isBlank()) return
+        if (recoveryCleanupCoordinator.updateIfActive(request)) return true
+        val token = activeSession ?: return false
+        if (!isSessionCurrent(token)) return false
+        if (localDeviceId.isBlank()) return false
         val cleanupToken = recoveryCleanupCoordinator.start(request)
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
@@ -1478,14 +1511,19 @@ class IntercomService : Service() {
             },
             onError = ::handleError
         ).abortAndResumeDiscovery()
+        return true
     }
 
     private fun restartAfterRecoveryCleanup(request: RecoveryCleanupRequest): Boolean {
+        fun completeManualRefresh() {
+            request.discoveryRefreshGeneration?.let(discoveryRefreshGate::complete)
+        }
         if (
             !running ||
             activeSession != null ||
             activeRuntimeSessionId != request.runtimeSessionId
         ) {
+            completeManualRefresh()
             return true
         }
         val resetEffect = request.resetEffect
@@ -1499,19 +1537,21 @@ class IntercomService : Service() {
                 orchestrator.pendingInboundRequest
             )
         ) {
+            completeManualRefresh()
             return false
         }
         if (
             resetEffect == null &&
             request.nextAttempt == null &&
-            !canExecuteRefreshDiscoveryEffect(
-                SessionEffect.RefreshDiscovery(request.runtimeSessionId),
+            !canResumePassiveDiscovery(
+                request.runtimeSessionId,
                 orchestrator.state.value,
                 orchestrator.currentAttempt,
                 orchestrator.activeControlAttempt,
                 orchestrator.pendingInboundRequest
             )
         ) {
+            completeManualRefresh()
             return false
         }
         if (
@@ -1522,9 +1562,13 @@ class IntercomService : Service() {
             )
         ) {
             publishLog("忽略已过期或已替换的恢复尝试")
+            completeManualRefresh()
             return false
         }
-        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return false
+        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: run {
+            completeManualRefresh()
+            return false
+        }
         val recoveryToken = sessions.start()
         activeSession = recoveryToken
         publishLog("重新启动车友发现")
@@ -1537,6 +1581,7 @@ class IntercomService : Service() {
         ) {
             activeSession = null
             sessions.invalidate()
+            completeManualRefresh()
             return false
         }
         startDiscoveryTransports(
@@ -1550,6 +1595,7 @@ class IntercomService : Service() {
                 SessionEvent.ResetCompleted(it.runtimeSessionId, it.failedAttemptId)
             )
         }
+        completeManualRefresh()
         return true
     }
 
@@ -1569,6 +1615,7 @@ class IntercomService : Service() {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
         recoveryCleanupCoordinator.cancel()
+        discoveryRefreshGate.cancel()
         attemptDeadlineScheduler.cancel()
         attemptMilestoneScheduler.cancel()
         controlChannelCloseDeadlineScheduler.cancel()
@@ -1673,6 +1720,7 @@ class IntercomService : Service() {
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
             is SessionEffect.RefreshDiscovery -> {
+                if (!discoveryRefreshGate.accepts(effect.generation)) return
                 if (
                     canExecuteRefreshDiscoveryEffect(
                         effect,
@@ -1682,13 +1730,21 @@ class IntercomService : Service() {
                         orchestrator.pendingInboundRequest
                     )
                 ) {
-                    publishLog("手动重新扫描附近车友")
-                    abortResourcesAndResumeDiscovery(
+                    val started = abortResourcesAndResumeDiscovery(
                         runtimeSessionId = effect.runtimeSessionId,
                         nextAttempt = null,
                         restartDelayMillis = 0L,
-                        cleanupStatus = RESCANNING_STATUS
+                        cleanupStatus = RESCANNING_STATUS,
+                        discoveryRefreshGeneration = effect.generation
                     )
+                    if (started) {
+                        publishLog("手动重新扫描附近车友")
+                    } else {
+                        discoveryRefreshGate.complete(effect.generation)
+                        publishLog("重新扫描请求未启动新的发现轮次")
+                    }
+                } else {
+                    discoveryRefreshGate.complete(effect.generation)
                 }
             }
             is SessionEffect.RetireTargetedTransport -> {
@@ -2584,7 +2640,21 @@ internal fun canExecuteRefreshDiscoveryEffect(
     currentAttempt: ConnectionAttempt?,
     activeAttempt: AttemptChannelSet?,
     pendingInbound: PendingInboundRequest?
-): Boolean = currentState == IntercomState.Discovering(effect.runtimeSessionId) &&
+): Boolean = canResumePassiveDiscovery(
+    effect.runtimeSessionId,
+    currentState,
+    currentAttempt,
+    activeAttempt,
+    pendingInbound
+)
+
+internal fun canResumePassiveDiscovery(
+    runtimeSessionId: RuntimeSessionId,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = currentState == IntercomState.Discovering(runtimeSessionId) &&
     currentAttempt == null &&
     activeAttempt == null &&
     pendingInbound == null

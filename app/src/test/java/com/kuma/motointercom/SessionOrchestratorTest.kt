@@ -19,14 +19,22 @@ class SessionOrchestratorTest {
         try {
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
             assertTrue(
-                orchestrator.dispatchAndAwait(SessionEvent.DiscoveryRefreshRequested(runtime))
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.DiscoveryRefreshRequested(runtime, generation = 1L)
+                )
             )
-            assertEquals(SessionEffect.RefreshDiscovery(runtime), orchestrator.effects.first())
+            assertEquals(
+                SessionEffect.RefreshDiscovery(runtime, generation = 1L),
+                orchestrator.effects.first()
+            )
             assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
 
             assertFalse(
                 orchestrator.dispatchAndAwait(
-                    SessionEvent.DiscoveryRefreshRequested(RuntimeSessionId("runtime-stale"))
+                    SessionEvent.DiscoveryRefreshRequested(
+                        RuntimeSessionId("runtime-stale"),
+                        generation = 2L
+                    )
                 )
             )
         } finally {
@@ -36,7 +44,7 @@ class SessionOrchestratorTest {
 
     @Test
     fun manualDiscoveryRefreshEffectRequiresIdleDiscoveryForTheExactRuntime() {
-        val effect = SessionEffect.RefreshDiscovery(runtime)
+        val effect = SessionEffect.RefreshDiscovery(runtime, generation = 1L)
         val activeAttempt = attempt("attempt-active", "peer-a", Transport.LAN)
 
         assertTrue(
