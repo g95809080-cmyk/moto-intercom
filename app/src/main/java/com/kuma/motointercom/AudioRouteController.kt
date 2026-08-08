@@ -338,7 +338,10 @@ class AudioRouteController(
     }
 
     private fun publishBluetoothConnected(name: String) {
-        if (closed.get() || bluetoothReported) return
+        if (closed.get()) return
+        cancelSpeakerFallbackRetry()
+        modernFallbackActive = false
+        if (bluetoothReported) return
         bluetoothReported = true
         postMain { onScoConnected(name.ifBlank { "头盔蓝牙" }) }
     }
