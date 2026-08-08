@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -11,6 +12,61 @@ import org.junit.Test
 
 class SessionOrchestratorTest {
     private val runtime = RuntimeSessionId("runtime-current")
+
+    @Test
+    fun manualDiscoveryRefreshEmitsOneExactEffectAndRejectsStaleRuntime() = runBlocking {
+        val orchestrator = orchestrator()
+        try {
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
+            assertTrue(
+                orchestrator.dispatchAndAwait(SessionEvent.DiscoveryRefreshRequested(runtime))
+            )
+            assertEquals(SessionEffect.RefreshDiscovery(runtime), orchestrator.effects.first())
+            assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
+
+            assertFalse(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.DiscoveryRefreshRequested(RuntimeSessionId("runtime-stale"))
+                )
+            )
+        } finally {
+            orchestrator.close()
+        }
+    }
+
+    @Test
+    fun manualDiscoveryRefreshEffectRequiresIdleDiscoveryForTheExactRuntime() {
+        val effect = SessionEffect.RefreshDiscovery(runtime)
+        val activeAttempt = attempt("attempt-active", "peer-a", Transport.LAN)
+
+        assertTrue(
+            canExecuteRefreshDiscoveryEffect(
+                effect,
+                IntercomState.Discovering(runtime),
+                currentAttempt = null,
+                activeAttempt = null,
+                pendingInbound = null
+            )
+        )
+        assertFalse(
+            canExecuteRefreshDiscoveryEffect(
+                effect,
+                IntercomState.Discovering(RuntimeSessionId("runtime-stale")),
+                currentAttempt = null,
+                activeAttempt = null,
+                pendingInbound = null
+            )
+        )
+        assertFalse(
+            canExecuteRefreshDiscoveryEffect(
+                effect,
+                IntercomState.Connecting(activeAttempt),
+                currentAttempt = activeAttempt,
+                activeAttempt = null,
+                pendingInbound = null
+            )
+        )
+    }
 
     @Test
     fun connectedThenImmediateDisconnectCannotRemainStaleConnected() = runBlocking {

@@ -7,6 +7,34 @@ import org.junit.Test
 
 class RecoveryCleanupCoordinatorTest {
     @Test
+    fun repeatedPassiveDiscoveryRefreshUsesOneCleanupAndOneRestart() {
+        val tasks = TaskQueue()
+        val restarted = mutableListOf<RecoveryCleanupRequest>()
+        val coordinator = RecoveryCleanupCoordinator(
+            postDelayed = tasks::post,
+            removeCallbacks = tasks::remove,
+            restart = {
+                restarted += it
+                true
+            }
+        )
+        val refresh = RecoveryCleanupRequest(
+            runtimeSessionId = RuntimeSessionId("runtime-current"),
+            nextAttempt = null,
+            restartDelayMillis = 0L
+        )
+
+        val token = coordinator.start(refresh)
+        assertTrue(coordinator.updateIfActive(refresh))
+        assertTrue(coordinator.updateIfActive(refresh))
+        coordinator.complete(token)
+
+        tasks.runNext()
+        assertEquals(listOf(refresh), restarted)
+        assertFalse(tasks.hasTasks())
+    }
+
+    @Test
     fun completedCleanupReschedulesForTheLatestRequest() {
         val tasks = TaskQueue()
         val restarted = mutableListOf<RecoveryCleanupRequest>()

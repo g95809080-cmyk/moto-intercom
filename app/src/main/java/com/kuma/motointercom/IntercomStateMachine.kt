@@ -11,6 +11,10 @@ enum class WebRtcConnectionState {
 internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
+    data class DiscoveryRefreshRequested(
+        val runtimeSessionId: RuntimeSessionId
+    ) : SessionEvent
+
     data class IncomingAccepted(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -217,6 +221,10 @@ internal sealed interface SessionEvent {
 }
 
 internal sealed interface SessionEffect {
+    data class RefreshDiscovery(
+        val runtimeSessionId: RuntimeSessionId
+    ) : SessionEffect
+
     data class OpenTargetedTransport(
         val attempt: ConnectionAttempt,
         val transport: Transport = attempt.preferredTransport
@@ -356,6 +364,12 @@ internal fun reduceIntercomState(
     is SessionEvent.RuntimeStarted ->
         transition(IntercomState.Discovering(event.runtimeSessionId))
             .takeIf { current == IntercomState.Offline }
+
+    is SessionEvent.DiscoveryRefreshRequested ->
+        transition(
+            current,
+            effects = listOf(SessionEffect.RefreshDiscovery(event.runtimeSessionId))
+        ).takeIf { current == IntercomState.Discovering(event.runtimeSessionId) }
 
     is SessionEvent.ConnectRequested ->
         transition(IntercomState.Connecting(event.attempt))

@@ -96,6 +96,32 @@ class MainActivityRobolectricTest {
         assertTrue(recreated.findViewById<View>(R.id.home_scroll) == null)
     }
 
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun manualDiscoveryRefreshWithoutABoundServiceReportsUnavailable() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val mainScreen = screen(activity)
+        mainScreen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-unbound-refresh")),
+            canStart = true
+        )
+        invokeShowPage(mainScreen, MainRoute.DISCOVER)
+        val refresh = MainScreen::class.java
+            .getDeclaredField("onRequestDiscoveryRefresh")
+            .apply { isAccessible = true }
+            .get(mainScreen) as () -> Unit
+
+        refresh()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(
+            SERVICE_UNAVAILABLE_STATUS,
+            (stateValue(mainScreen, "discoverUiState") as DiscoverScreenUiState).supplementalText
+        )
+        controller.destroy()
+    }
+
     @Test
     fun activityLoadsPersistedVoxSettingsBeforeAnyServiceReplay() {
         val application = androidx.test.core.app.ApplicationProvider

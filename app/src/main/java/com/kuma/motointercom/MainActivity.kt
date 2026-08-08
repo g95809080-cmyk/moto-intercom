@@ -123,6 +123,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     }
                 }
             },
+            onRequestDiscoveryRefresh = {
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                } else {
+                    service.requestDiscoveryRefresh()
+                }
+            },
             onSaveRiderName = { name ->
                 prefs.edit().putString(KEY_RIDER_NAME, name).commit()
             },

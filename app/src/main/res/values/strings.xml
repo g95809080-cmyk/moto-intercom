@@ -24,7 +24,6 @@
     <string name="incoming_confirmation_message">%1$s 发来当前连接请求。是否接受本次对讲？</string>
     <string name="incoming_confirmation_reject">拒绝本次</string>
     <string name="incoming_confirmation_accept">接受</string>
-    <string name="discover_rescan">重新扫描 · 开发中</string>
     <string name="discover_rescan_label">重新扫描</string>
     <string name="discover_start">启动摩声</string>
     <string name="discover_connect">连接</string>
@@ -76,7 +75,8 @@
     <string name="unmute_description">取消麦克风静音</string>
     <string name="mute_unavailable_description">静音麦克风，启动对讲后可用</string>
     <string name="help_developing_description">帮助与反馈，功能开发中</string>
-    <string name="rescan_developing_description">重新扫描，功能开发中</string>
+    <string name="rescan_description">重新扫描附近车友</string>
+    <string name="rescan_unavailable_description">重新扫描，当前状态不可用</string>
     <string name="audio_route_description">选择蓝牙耳机作为首选音频输出</string>
     <string name="audio_earpiece_description">选择手机听筒作为首选音频输出</string>
     <string name="audio_speaker_description">选择手机外放作为首选音频输出</string>

@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -30,6 +31,70 @@ class DiscoverScreenComposeTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
 
         assertEquals("等待上线", context.getString(R.string.discover_status_pending))
+    }
+
+    @Test
+    fun rescanIsEnabledOnlyForActiveDiscoveryAndRoutesTheRealAction() {
+        var rescans = 0
+        val state = DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "Choose a rider",
+            supplementalText = null,
+            emptyText = "No riders",
+            radarRunning = true,
+            rescanEnabled = true
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    state = state,
+                    onBack = {},
+                    onHelp = {},
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = { rescans++ },
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("discover_rescan_button")
+            .assertIsEnabled()
+            .performClick()
+        assertEquals(1, rescans)
+    }
+
+    @Test
+    fun rescanIsDisabledOutsideActiveDiscovery() {
+        val state = DiscoverScreenUiState(
+            presentation = DiscoverPresentation(true, false, null, emptyList(), emptyList()),
+            stateText = "Start discovery",
+            supplementalText = null,
+            emptyText = "No riders",
+            radarRunning = false,
+            rescanEnabled = false
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    state = state,
+                    onBack = {},
+                    onHelp = {},
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = {},
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("discover_rescan_button").assertIsNotEnabled()
     }
 
     @Test

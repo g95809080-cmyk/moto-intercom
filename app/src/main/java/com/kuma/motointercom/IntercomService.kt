@@ -670,6 +670,14 @@ class IntercomService : Service() {
         }
     }
 
+    internal fun requestDiscoveryRefresh() {
+        mainHandler.post {
+            if (!running) return@post
+            val runtimeSessionId = activeRuntimeSessionId ?: return@post
+            orchestrator.dispatch(SessionEvent.DiscoveryRefreshRequested(runtimeSessionId))
+        }
+    }
+
     private fun startIntercom() {
         if (running) {
             publishStatus(lastStatus)
@@ -1397,7 +1405,8 @@ class IntercomService : Service() {
         runtimeSessionId: RuntimeSessionId,
         nextAttempt: ConnectionAttempt?,
         restartDelayMillis: Long = restartDiscoveryDelayMillis(nextAttempt),
-        resetEffect: SessionEffect.ResetWirelessEnvironment? = null
+        resetEffect: SessionEffect.ResetWirelessEnvironment? = null,
+        cleanupStatus: String = SIGNAL_LOST_STATUS
     ) {
         if (!running || activeRuntimeSessionId != runtimeSessionId) return
         if (
@@ -1460,7 +1469,7 @@ class IntercomService : Service() {
                 physicalLinkReady = false
                 mediaConnected = false
                 remoteRiderName = null
-                publishStatus(SIGNAL_LOST_STATUS)
+                publishStatus(cleanupStatus)
             },
             resumeDiscovery = { resumedRuntimeSessionId ->
                 if (resumedRuntimeSessionId == runtimeSessionId) {
@@ -1484,6 +1493,19 @@ class IntercomService : Service() {
             resetEffect != null &&
             !canExecuteResetWirelessEnvironmentEffect(
                 resetEffect,
+                orchestrator.state.value,
+                orchestrator.currentAttempt,
+                orchestrator.activeControlAttempt,
+                orchestrator.pendingInboundRequest
+            )
+        ) {
+            return false
+        }
+        if (
+            resetEffect == null &&
+            request.nextAttempt == null &&
+            !canExecuteRefreshDiscoveryEffect(
+                SessionEffect.RefreshDiscovery(request.runtimeSessionId),
                 orchestrator.state.value,
                 orchestrator.currentAttempt,
                 orchestrator.activeControlAttempt,
@@ -1650,6 +1672,25 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.RefreshDiscovery -> {
+                if (
+                    canExecuteRefreshDiscoveryEffect(
+                        effect,
+                        orchestrator.state.value,
+                        orchestrator.currentAttempt,
+                        orchestrator.activeControlAttempt,
+                        orchestrator.pendingInboundRequest
+                    )
+                ) {
+                    publishLog("手动重新扫描附近车友")
+                    abortResourcesAndResumeDiscovery(
+                        runtimeSessionId = effect.runtimeSessionId,
+                        nextAttempt = null,
+                        restartDelayMillis = 0L,
+                        cleanupStatus = RESCANNING_STATUS
+                    )
+                }
+            }
             is SessionEffect.RetireTargetedTransport -> {
                 if (orchestrator.currentAttempt == effect.attempt) {
                     retireTargetedTransport(effect.attempt, effect.transport)
@@ -2396,6 +2437,7 @@ class IntercomService : Service() {
         private const val MEDIA_INITIALIZING_STATUS = "媒体初始化中"
         private const val VOICE_CONNECTED_STATUS = "语音通道已连接"
         private const val SIGNAL_LOST_STATUS = "队友信号丢失，等待重新连接..."
+        private const val RESCANNING_STATUS = "正在重新扫描附近车友..."
         private const val ENDED_STATUS = "对讲已结束"
         private const val BLUETOOTH_RETRY_STATUS = "头盔蓝牙已断开，正在尝试重连..."
 
@@ -2535,6 +2577,17 @@ internal fun canExecuteAbortAttemptEffect(
     activeAttempt == null &&
     pendingInbound == null &&
     terminalOutcome != null
+
+internal fun canExecuteRefreshDiscoveryEffect(
+    effect: SessionEffect.RefreshDiscovery,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = currentState == IntercomState.Discovering(effect.runtimeSessionId) &&
+    currentAttempt == null &&
+    activeAttempt == null &&
+    pendingInbound == null
 
 internal fun canFinalizeActiveSessionReleaseEffect(
     effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery,

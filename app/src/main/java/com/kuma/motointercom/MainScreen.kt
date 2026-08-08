@@ -43,6 +43,7 @@ internal class MainScreen(
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
     private val onSetVoxSensitivity: (Int) -> Unit = {},
     private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+    private val onRequestDiscoveryRefresh: () -> Unit = {},
     private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
     private val onForgetPairing: (String) -> Boolean = { false }
 ) {
@@ -90,7 +91,8 @@ internal class MainScreen(
             stateText = "",
             supplementalText = null,
             emptyText = "",
-            radarRunning = false
+            radarRunning = false,
+            rescanEnabled = false
         )
     )
     private val settingsUiState = mutableStateOf(
@@ -812,7 +814,10 @@ internal class MainScreen(
                 presentation.offlineStartVisible ||
                 presentation.readOnlyReason != null
             ) stateText else activity.getString(R.string.discover_empty_no_presence),
-            radarRunning = animationsEnabled() && productState is IntercomState.Discovering
+            radarRunning = animationsEnabled() && productState is IntercomState.Discovering,
+            rescanEnabled = productState is IntercomState.Discovering &&
+                !wifiUnavailable &&
+                !discoverConnectAwaitingState
         )
     }
 
@@ -838,7 +843,7 @@ internal class MainScreen(
                             onHelp = ::showPlaceholderDialog,
                             onStart = onToggleIntercom,
                             onWifiSettings = onOpenWifiSettings,
-                            onRescan = ::showPlaceholderDialog,
+                            onRescan = onRequestDiscoveryRefresh,
                             onSelectPresence = { presence ->
                                 val deviceId = presence.deviceId
                                 val sessionId = presence.sessionId

@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -25,6 +26,37 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class IntercomServiceRobolectricTest {
+    @Test
+    fun manualDiscoveryRefreshDispatchesThroughTheOrchestrator() = runBlocking {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val runtime = RuntimeSessionId("runtime-manual-refresh")
+        val orchestrator = IntercomService::class.java.getDeclaredField("orchestrator").apply {
+            isAccessible = true
+        }.get(service) as SessionOrchestrator
+        val refreshLogged = CountDownLatch(1)
+        val logs = mutableListOf<String>()
+        setPrivate(service, "running", true)
+        setPrivate(service, "activeRuntimeSessionId", runtime.value)
+        assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
+        service.setListener(object : IntercomService.Listener {
+            override fun onStatusChanged(status: String, running: Boolean) = Unit
+            override fun onLog(message: String) {
+                logs += message
+                if (message == "手动重新扫描附近车友") refreshLogged.countDown()
+            }
+            override fun onError(message: String) = Unit
+        })
+
+        service.requestDiscoveryRefresh()
+        awaitMainCallback(refreshLogged)
+
+        assertTrue(logs.contains("手动重新扫描附近车友"))
+        assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
+        controller.destroy()
+        Unit
+    }
+
     @Test
     fun serviceDoesNotReadActivityOwnedVoxPreferences() {
         val context = ApplicationProvider.getApplicationContext<Context>()

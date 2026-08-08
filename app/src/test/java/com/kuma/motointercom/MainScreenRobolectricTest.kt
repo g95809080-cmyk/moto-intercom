@@ -1269,12 +1269,48 @@ class MainScreenRobolectricTest {
         val discoverHelp = discoverNode("discover_help_button")
         assertTrue("Discover help placeholder should exist", discoverExists("discover_help_button"))
         assertTrue(discoverHelp.fetchSemanticsNode().config.contains(SemanticsProperties.ContentDescription))
-        val rescan = discoverNode("discover_rescan_button")
         assertTrue(discoverExists("discover_rescan_button"))
+        assertFalse(
+            discoverNode("discover_rescan_button")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.ContentDescription]
+                .joinToString(separator = "")
+                .contains("开发中")
+        )
 
         clickDiscover("discover_back_button")
         assertFalse(homeContentDescription("home_vox_pill").contains("开发中"))
         assertTrue(homeContentDescription("home_vox_card").contains("VOX 当前状态"))
+    }
+
+    @Test
+    fun manualRescanIsDisabledOfflineAndRoutesOnlyDuringDiscovery() {
+        var rescans = 0
+        val fixture = fixture(onRequestDiscoveryRefresh = { rescans++ })
+        openRoute(fixture, MainRoute.DISCOVER)
+
+        discoverNode("discover_rescan_button").assertIsNotEnabled()
+
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-manual-rescan")),
+            canStart = true
+        )
+        discoverNode("discover_rescan_button").assertIsEnabled()
+        clickDiscover("discover_rescan_button")
+
+        assertEquals(1, rescans)
+        assertNull(ShadowAlertDialog.getLatestAlertDialog())
+
+        fixture.screen.setIntercomState(
+            IntercomState.Connecting(
+                ConnectionAttemptFixture.create(
+                    FakeMonotonicClock(MonotonicTimestamp(1L)),
+                    runtimeSessionId = RuntimeSessionId("runtime-manual-rescan")
+                )
+            ),
+            canStart = true
+        )
+        discoverNode("discover_rescan_button").assertIsNotEnabled()
     }
 
     @Test
@@ -1400,7 +1436,7 @@ class MainScreenRobolectricTest {
     @Test
     fun allPlaceholderControlsShareOneDialogWithoutChangingRoute() {
         val cases = listOf(
-            MainRoute.DISCOVER to listOf(R.id.discover_help_button, R.id.discover_rescan_button),
+            MainRoute.DISCOVER to listOf(R.id.discover_help_button),
             MainRoute.SETTINGS to listOf(
                 R.id.settings_reconnect_button,
                 R.id.settings_help_button
@@ -1439,7 +1475,7 @@ class MainScreenRobolectricTest {
     @Test
     fun everyPlaceholderControlCanOpenTheSharedDialogOnItsOwn() {
         val cases = listOf(
-            MainRoute.DISCOVER to listOf(R.id.discover_help_button, R.id.discover_rescan_button),
+            MainRoute.DISCOVER to listOf(R.id.discover_help_button),
             MainRoute.SETTINGS to listOf(
                 R.id.settings_reconnect_button,
                 R.id.settings_help_button
@@ -2089,6 +2125,7 @@ class MainScreenRobolectricTest {
         onSetVoxEnabled: (Boolean) -> Unit = {},
         onSetVoxSensitivity: (Int) -> Unit = {},
         onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+        onRequestDiscoveryRefresh: () -> Unit = {},
         onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
         onForgetPairing: (String) -> Boolean = { false }
     ): Fixture {
@@ -2116,6 +2153,7 @@ class MainScreenRobolectricTest {
             onSetVoxEnabled = onSetVoxEnabled,
             onSetVoxSensitivity = onSetVoxSensitivity,
             onSelectAudioRoute = onSelectAudioRoute,
+            onRequestDiscoveryRefresh = onRequestDiscoveryRefresh,
             onSetPairingPreferred = onSetPairingPreferred,
             onForgetPairing = onForgetPairing
         )

@@ -58,7 +58,8 @@ internal data class DiscoverScreenUiState(
     val stateText: String,
     val supplementalText: String?,
     val emptyText: String,
-    val radarRunning: Boolean
+    val radarRunning: Boolean,
+    val rescanEnabled: Boolean = false
 )
 
 @Composable
@@ -75,6 +76,13 @@ internal fun MotoComDiscoverScreen(
     modifier: Modifier = Modifier
 ) {
     val presentation = state.presentation
+    val rescanDescription = stringResource(
+        if (state.rescanEnabled) {
+            R.string.rescan_description
+        } else {
+            R.string.rescan_unavailable_description
+        }
+    )
     Column(
         modifier = modifier
             .widthIn(max = dimensionResource(R.dimen.motocom_content_max_width))
@@ -136,11 +144,13 @@ internal fun MotoComDiscoverScreen(
 
         Button(
             onClick = onRescan,
+            enabled = state.rescanEnabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 14.dp)
                 .height(56.dp)
-                .testTag("discover_rescan_button"),
+                .testTag("discover_rescan_button")
+                .semantics { contentDescription = rescanDescription },
             colors = ButtonDefaults.buttonColors(
                 containerColor = colorResource(R.color.motocom_surface),
                 contentColor = colorResource(R.color.motocom_text_primary)
@@ -620,7 +630,8 @@ private fun DiscoverScreenPreview() {
                 stateText = "正在搜索附近 MotoCom 车友",
                 supplementalText = null,
                 emptyText = "暂无附近车友",
-                radarRunning = true
+                radarRunning = true,
+                rescanEnabled = true
             ),
             onBack = {},
             onHelp = {},
