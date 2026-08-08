@@ -38,11 +38,11 @@
     <string name="discover_fact_separator"> · </string>
     <string name="discover_status_recommended">推荐连接</string>
     <string name="discover_status_paired">已配对</string>
-    <string name="discover_status_pending">等待校验</string>
+    <string name="discover_status_pending">等待上线</string>
     <string name="discover_status_unavailable">不可用</string>
-    <string name="discover_status_online">已通过身份校验</string>
-    <string name="discover_identity_short">仅连接已完成 MotoCom 身份校验的设备</string>
-    <string name="discover_connected_fact">已通过身份校验</string>
+    <string name="discover_status_online">发现信息可用</string>
+    <string name="discover_identity_short">具备稳定 MotoCom 发现信息</string>
+    <string name="discover_connected_fact">当前通道身份已核对</string>
     <string name="discover_no_available_transport">暂无可用通道</string>
     <string name="logs_copy_all">复制全部</string>
     <string name="logs_empty">本次界面会话还没有日志</string>
@@ -83,6 +83,7 @@
     <string name="settings_vox_sensitivity_developing">灵敏度</string>
     <string name="settings_vox_pending_developing">精确状态</string>
     <string name="settings_connection_device">连接方式</string>
+    <string name="settings_transport_policy">自动选择 LAN / Wi-Fi Direct</string>
     <string name="settings_device_status">设备状态</string>
     <string name="settings_device_status_summary">音频：%1$s\n蓝牙：%2$s\n产品状态：%3$s\n当前通道：%4$s</string>
     <string name="settings_optional_permission_grant">授予可选权限</string>

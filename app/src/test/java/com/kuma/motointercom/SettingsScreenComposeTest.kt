@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
@@ -53,5 +54,6 @@ class SettingsScreenComposeTest {
         assertEquals("Road Captain", nickname)
         assertEquals(true, saved)
         composeRule.onNodeWithTag("settings_product_state").assertTextContains("Offline")
+        composeRule.onNodeWithText("自动选择 LAN / Wi-Fi Direct").fetchSemanticsNode()
     }
 }

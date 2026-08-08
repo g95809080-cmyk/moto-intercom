@@ -214,7 +214,7 @@ internal fun MotoComSettingsScreen(
         SettingsPanel {
             val reconnectDescription = stringResource(R.string.reconnect_developing_description)
             SettingsNavigationRow(
-                title = "优先使用 Wi-Fi Direct（P2P）",
+                title = stringResource(R.string.settings_transport_policy),
                 subtitle = state.attemptFacts,
                 tag = "settings_reconnect_button",
                 description = reconnectDescription,

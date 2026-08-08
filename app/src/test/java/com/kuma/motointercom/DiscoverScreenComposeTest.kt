@@ -1,11 +1,16 @@
 package com.kuma.motointercom
 
+import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -18,6 +23,13 @@ import org.robolectric.annotation.Config
 class DiscoverScreenComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun offlinePairingCopyWaitsForAvailabilityRatherThanClaimingIdentityVerification() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        assertEquals("等待上线", context.getString(R.string.discover_status_pending))
+    }
 
     @Test
     fun offlineStateRoutesStartAction() {
@@ -101,6 +113,11 @@ class DiscoverScreenComposeTest {
         composeRule.onNodeWithTag("discover_card_device-a").assertIsDisplayed()
         composeRule.onNodeWithTag("discover_select_device-a").performClick()
         composeRule.onNodeWithTag("discover_connect_device-a").assertIsEnabled().assertHasClickAction()
+        composeRule.onNodeWithText("发现信息可用").assertIsDisplayed()
+        assertTrue(
+            composeRule.onAllNodesWithText("具备稳定 MotoCom 发现信息")
+                .fetchSemanticsNodes().isNotEmpty()
+        )
         assertTrue(selected)
     }
 }
