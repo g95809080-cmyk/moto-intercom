@@ -629,6 +629,39 @@ class MainScreenRobolectricTest {
     }
 
     @Test
+    @Config(qualifiers = "w360dp-h640dp-420dpi")
+    fun homeCoreControlFitsTheStandardCompactViewport() {
+        val fixture = fixture()
+        fixture.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
+        measureAtWidth(fixture, widthDp = 360, heightDp = 640)
+
+        val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
+        val row = fixture.screen.root.findViewById<View>(R.id.home_main_control_row)
+        val scrollLocation = IntArray(2)
+        val rowLocation = IntArray(2)
+        scroll.getLocationOnScreen(scrollLocation)
+        row.getLocationOnScreen(rowLocation)
+        val scrollRect = android.graphics.Rect(
+            scrollLocation[0],
+            scrollLocation[1],
+            scrollLocation[0] + scroll.width,
+            scrollLocation[1] + scroll.height
+        )
+        val rowRect = android.graphics.Rect(
+            rowLocation[0],
+            rowLocation[1],
+            rowLocation[0] + row.width,
+            rowLocation[1] + row.height
+        )
+        val bottomClearance = (48 * scroll.resources.displayMetrics.density).toInt()
+        assertTrue(
+            "Home core control should keep a 48dp bottom clearance in the standard viewport " +
+                "(row=$rowRect, scroll=$scrollRect)",
+            rowRect.bottom + bottomClearance <= scrollRect.bottom
+        )
+    }
+
+    @Test
     fun discoverAndSettingsHeadersKeepTitlesCentered() {
         val fixture = fixture()
         val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
