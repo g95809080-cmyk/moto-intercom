@@ -630,34 +630,48 @@ class MainScreenRobolectricTest {
 
     @Test
     @Config(qualifiers = "w360dp-h640dp-420dpi")
-    fun homeCoreControlFitsTheStandardCompactViewport() {
+    fun compactHomeCoreControlAndPermissionActionsRemainReachable() {
         val fixture = fixture()
+        fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
+        fixture.screen.setPermissionStatus("缺少必要权限，请先授权")
         fixture.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
         measureAtWidth(fixture, widthDp = 360, heightDp = 640)
 
         val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
         val row = fixture.screen.root.findViewById<View>(R.id.home_main_control_row)
-        val scrollLocation = IntArray(2)
-        val rowLocation = IntArray(2)
-        scroll.getLocationOnScreen(scrollLocation)
-        row.getLocationOnScreen(rowLocation)
-        val scrollRect = android.graphics.Rect(
-            scrollLocation[0],
-            scrollLocation[1],
-            scrollLocation[0] + scroll.width,
-            scrollLocation[1] + scroll.height
-        )
-        val rowRect = android.graphics.Rect(
-            rowLocation[0],
-            rowLocation[1],
-            rowLocation[0] + row.width,
-            rowLocation[1] + row.height
-        )
-        val bottomClearance = (48 * scroll.resources.displayMetrics.density).toInt()
+        val permissionGrant = fixture.screen.root.findViewById<View>(R.id.home_permission_grant_cta)
+        val globalRect: (View) -> android.graphics.Rect = { view ->
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            android.graphics.Rect(
+                location[0],
+                location[1],
+                location[0] + view.width,
+                location[1] + view.height
+            )
+        }
+        val scrollRect = globalRect(scroll)
+        val rowRect = globalRect(row)
+
         assertTrue(
-            "Home core control should keep a 48dp bottom clearance in the standard viewport " +
-                "(row=$rowRect, scroll=$scrollRect)",
-            rowRect.bottom + bottomClearance <= scrollRect.bottom
+            "Home core control should start within the compact first viewport",
+            rowRect.top < scrollRect.bottom
+        )
+        assertEquals(View.VISIBLE, permissionGrant.visibility)
+
+        val maxScrollY = (scroll.getChildAt(0).height - scroll.height).coerceAtLeast(0)
+        scroll.scrollTo(0, maxScrollY)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val scrolledRowRect = globalRect(row)
+        val scrolledGrantRect = globalRect(permissionGrant)
+        assertTrue(
+            "Home core control should be fully reachable after compact scrolling",
+            scrolledRowRect.top >= scrollRect.top && scrolledRowRect.bottom <= scrollRect.bottom
+        )
+        assertTrue(
+            "Permission grant action should be fully reachable after compact scrolling",
+            scrolledGrantRect.top >= scrollRect.top && scrolledGrantRect.bottom <= scrollRect.bottom
         )
     }
 
