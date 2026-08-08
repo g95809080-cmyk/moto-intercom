@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -52,7 +53,8 @@ class DiscoverScreenComposeTest {
                     onWifiSettings = {},
                     onRescan = {},
                     onSelectPresence = {},
-                    onConnect = {}
+                    onConnect = {},
+                    onManagePairing = {}
                 )
             }
         }
@@ -105,7 +107,8 @@ class DiscoverScreenComposeTest {
                     onWifiSettings = {},
                     onRescan = {},
                     onSelectPresence = { selected = it.deviceId == "device-a" },
-                    onConnect = {}
+                    onConnect = {},
+                    onManagePairing = {}
                 )
             }
         }
@@ -120,4 +123,81 @@ class DiscoverScreenComposeTest {
         )
         assertTrue(selected)
     }
+
+    @Test
+    fun pairingManagementIsExposedOnlyForPairedRidersAndRoutesTheExactPresence() {
+        val paired = selectablePresence("paired-device").copy(
+            pairing = PairingRecord(
+                remoteDeviceId = "paired-device",
+                remoteNickname = "Paired Rider",
+                deviceName = "Paired Phone",
+                localAlias = "Paired Rider",
+                shortCode = "1234",
+                pairedAt = 1L,
+                lastConnectedAt = 2L,
+                isPreferred = false,
+                lastTransport = "LAN",
+                failureCount = 0
+            )
+        )
+        val nearby = selectablePresence("nearby-device")
+        var managedDeviceId: String? = null
+        val state = DiscoverScreenUiState(
+            presentation = discoverPresentation(
+                state = IntercomState.Discovering(RuntimeSessionId("runtime-pairing-management")),
+                presences = listOf(paired, nearby)
+            ),
+            stateText = "Choose a rider",
+            supplementalText = null,
+            emptyText = "No riders",
+            radarRunning = false
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    state = state,
+                    onBack = {},
+                    onHelp = {},
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = {},
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = { managedDeviceId = it.deviceId }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("discover_manage_paired-device")
+            .assertIsDisplayed()
+            .assertHasClickAction()
+            .performClick()
+        assertTrue(
+            composeRule.onAllNodesWithTag("discover_manage_nearby-device")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .isEmpty()
+        )
+        assertEquals("paired-device", managedDeviceId)
+    }
+
+    private fun selectablePresence(deviceId: String): RiderPresence = RiderPresence(
+        deviceId = deviceId,
+        sessionId = RuntimeSessionId("session-$deviceId"),
+        nickname = "Rider $deviceId",
+        deviceName = "Phone $deviceId",
+        protocolVersion = 2,
+        lastSeenElapsedRealtimeMs = 1L,
+        candidates = listOf(
+            PresenceTransportCandidate(
+                transport = Transport.LAN,
+                endpointId = "endpoint-$deviceId",
+                address = "127.0.0.1",
+                port = 1234,
+                lastSeenElapsedRealtimeMs = 1L,
+                isAvailable = true
+            )
+        ),
+        pairing = null
+    )
 }

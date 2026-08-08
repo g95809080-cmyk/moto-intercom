@@ -42,7 +42,9 @@ internal class MainScreen(
     private val onSetMuted: (Boolean) -> Unit = {},
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
     private val onSetVoxSensitivity: (Int) -> Unit = {},
-    private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {}
+    private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+    private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
+    private val onForgetPairing: (String) -> Boolean = { false }
 ) {
     val root: View
 
@@ -120,6 +122,9 @@ internal class MainScreen(
         initialRiderName
     )
     private var placeholderDialog: AlertDialog? = null
+    private var pairingManagementDialog: AlertDialog? = null
+    private var forgetPairingDialog: AlertDialog? = null
+    private var activePairingDeviceId: String? = null
     private var navigationFocusReturn: View? = null
     private var incomingConfirmationVisible = false
     private var restoreSettingsAudio = false
@@ -188,7 +193,7 @@ internal class MainScreen(
                 true
             }
             BackNavigation.DismissPlaceholder -> {
-                dismissPlaceholderDialog()
+                dismissTransientDialogs()
                 true
             }
             BackNavigation.IgnoreIncomingConfirmation -> true
@@ -207,6 +212,11 @@ internal class MainScreen(
     fun dismissPlaceholderDialog() {
         placeholderDialog?.dismiss()
         placeholderDialog = null
+    }
+
+    fun dismissTransientDialogs() {
+        dismissPlaceholderDialog()
+        dismissPairingDialogs()
     }
 
     fun setIncomingConfirmationVisible(visible: Boolean) {
@@ -365,6 +375,9 @@ internal class MainScreen(
 
     fun setPresences(value: List<RiderPresence>) {
         presences = value.toList()
+        activePairingDeviceId?.let { deviceId ->
+            if (currentPairedPresence(deviceId) == null) dismissPairingDialogs()
+        }
         val pending = pendingPresenceSelection
         if (
             discoverConnectAwaitingState &&
@@ -834,7 +847,8 @@ internal class MainScreen(
                                     updateExpandedDetailPane()
                                 }
                             },
-                            onConnect = ::connectFromDiscover
+                            onConnect = ::connectFromDiscover,
+                            onManagePairing = ::showPairingManagement
                         )
                     }
                 }
@@ -875,6 +889,106 @@ internal class MainScreen(
             pendingPresenceSelection = null
             feedbackAfterDiscoverConnect(false)?.let(::setStatus)
         }
+    }
+
+    private fun showPairingManagement(presence: RiderPresence) {
+        if (incomingConfirmationVisible || currentRoute != MainRoute.DISCOVER) return
+        val deviceId = presence.deviceId ?: return
+        val currentPresence = currentPairedPresence(deviceId) ?: return
+        val pairing = requireNotNull(currentPresence.pairing)
+        val riderName = currentPresence.displayName.ifBlank {
+            activity.getString(R.string.pairing_rider_fallback)
+        }
+        val deviceName = currentPresence.deviceName.ifBlank {
+            activity.getString(R.string.version_unavailable)
+        }
+        val requestedPreferred = !pairing.isPreferred
+
+        dismissTransientDialogs()
+        activePairingDeviceId = deviceId
+        pairingManagementDialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.pairing_manage_title)
+            .setMessage(
+                activity.getString(
+                    R.string.pairing_manage_message,
+                    riderName,
+                    deviceName
+                )
+            )
+            .setPositiveButton(
+                if (requestedPreferred) {
+                    R.string.pairing_set_preferred
+                } else {
+                    R.string.pairing_clear_preferred
+                }
+            ) { _, _ ->
+                val current = currentPairedPresence(deviceId) ?: return@setPositiveButton
+                if (current.pairing?.isPreferred == requestedPreferred) return@setPositiveButton
+                if (!onSetPairingPreferred(deviceId, requestedPreferred)) {
+                    setStatus(SERVICE_UNAVAILABLE_STATUS)
+                }
+            }
+            .setNeutralButton(R.string.pairing_forget) { _, _ ->
+                currentPairedPresence(deviceId)?.let(::showForgetPairingConfirmation)
+            }
+            .setNegativeButton(R.string.pairing_cancel, null)
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener {
+                    if (pairingManagementDialog === dialog) {
+                        pairingManagementDialog = null
+                        if (forgetPairingDialog == null) activePairingDeviceId = null
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun showForgetPairingConfirmation(presence: RiderPresence) {
+        val deviceId = presence.deviceId ?: return
+        val currentPresence = currentPairedPresence(deviceId) ?: return
+        val riderName = currentPresence.displayName.ifBlank {
+            activity.getString(R.string.pairing_rider_fallback)
+        }
+
+        dismissPairingDialogs()
+        activePairingDeviceId = deviceId
+        forgetPairingDialog = AlertDialog.Builder(activity)
+            .setTitle(activity.getString(R.string.pairing_forget_title, riderName))
+            .setMessage(
+                activity.getString(
+                    R.string.pairing_forget_message,
+                    activity.getString(R.string.pairing_forget_connection_note)
+                )
+            )
+            .setPositiveButton(R.string.pairing_forget) { _, _ ->
+                if (currentPairedPresence(deviceId) == null) return@setPositiveButton
+                if (!onForgetPairing(deviceId)) setStatus(SERVICE_UNAVAILABLE_STATUS)
+            }
+            .setNegativeButton(R.string.pairing_cancel, null)
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener {
+                    if (forgetPairingDialog === dialog) {
+                        forgetPairingDialog = null
+                        if (pairingManagementDialog == null) activePairingDeviceId = null
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun currentPairedPresence(deviceId: String): RiderPresence? =
+        presences.firstOrNull {
+            it.deviceId == deviceId && it.pairing?.remoteDeviceId == deviceId
+        }
+
+    private fun dismissPairingDialogs() {
+        pairingManagementDialog?.dismiss()
+        pairingManagementDialog = null
+        forgetPairingDialog?.dismiss()
+        forgetPairingDialog = null
+        activePairingDeviceId = null
     }
 
     private fun createSettingsPage(): ScrollView = ScrollView(activity).apply {
@@ -1045,7 +1159,9 @@ internal class MainScreen(
     private fun currentChrome(): RouteChrome = RouteChrome(
         route = currentRoute,
         navigationOpen = navigationPanel.visibility == View.VISIBLE,
-        placeholderVisible = placeholderDialog?.isShowing == true,
+        placeholderVisible = placeholderDialog?.isShowing == true ||
+            pairingManagementDialog?.isShowing == true ||
+            forgetPairingDialog?.isShowing == true,
         incomingConfirmationVisible = incomingConfirmationVisible
     )
 

@@ -36,6 +36,12 @@ internal abstract class PairingDao {
     protected abstract suspend fun markPreferredInternal(deviceId: String): Int
 
     @Query(
+        "UPDATE paired_peers SET isPreferred = 0 " +
+            "WHERE remoteDeviceId = :deviceId AND isPreferred = 1"
+    )
+    abstract suspend fun clearPreferred(deviceId: String): Int
+
+    @Query(
         "UPDATE paired_peers SET lastConnectedAt = :connectedAt, lastTransport = :transport " +
             "WHERE remoteDeviceId = :deviceId"
     )
@@ -77,8 +83,4 @@ internal abstract class PairingDao {
         return markPreferredInternal(deviceId) == 1
     }
 
-    @Transaction
-    open suspend fun clearPreferred() {
-        clearPreferredInternal()
-    }
 }

@@ -73,6 +73,18 @@ class PairingRepositoryTest {
     }
 
     @Test
+    fun clearingPreferenceIsScopedToTheExpectedPeer() = runBlocking {
+        repository.saveConnectedPeer(record("peer-a"))
+        repository.saveConnectedPeer(record("peer-b"))
+        assertTrue(repository.setPreferred("peer-a"))
+
+        assertFalse(repository.clearPreferred("peer-b"))
+        assertTrue(repository.getByDeviceId("peer-a")?.isPreferred == true)
+        assertTrue(repository.clearPreferred("peer-a"))
+        assertFalse(repository.getByDeviceId("peer-a")?.isPreferred == true)
+    }
+
+    @Test
     fun forgettingPreferredPeerClearsItsPreferenceWithTheRecord() = runBlocking {
         repository.saveConnectedPeer(record("peer-a"))
         repository.saveConnectedPeer(record("peer-b"))

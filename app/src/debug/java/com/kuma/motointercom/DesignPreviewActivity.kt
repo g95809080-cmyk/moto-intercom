@@ -175,7 +175,8 @@ private fun ConnectedDiscoverPreview() {
         onWifiSettings = {},
         onRescan = {},
         onSelectPresence = {},
-        onConnect = {}
+        onConnect = {},
+        onManagePairing = {}
     )
 }
 

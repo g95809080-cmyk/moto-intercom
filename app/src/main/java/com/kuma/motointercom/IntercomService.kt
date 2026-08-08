@@ -17,14 +17,18 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
+import java.util.concurrent.CancellationException
 
 private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
 
@@ -140,6 +144,7 @@ class IntercomService : Service() {
 
     private lateinit var identityStore: LocalIdentityStore
     private lateinit var pairingRepository: PairingRepository
+    private val pairingMutationMutex = Mutex()
     private lateinit var orchestrator: SessionOrchestrator
     private val attemptDeadlineScheduler = AttemptDeadlineScheduler(
         elapsedRealtime = SystemClock::elapsedRealtime,
@@ -402,6 +407,112 @@ class IntercomService : Service() {
             }
         }
     }
+
+    internal fun setPairingPreferred(deviceId: String, preferred: Boolean) {
+        val normalizedDeviceId = deviceId.trim()
+        if (normalizedDeviceId.isBlank()) {
+            publishToast(
+                getString(
+                    R.string.pairing_record_missing,
+                    getString(R.string.pairing_rider_fallback)
+                )
+            )
+            return
+        }
+        serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairingMutationMutex.withLock {
+                try {
+                    val record = pairingRepository.getByDeviceId(normalizedDeviceId)
+                    if (record == null) {
+                        publishMissingPairing()
+                        return@withLock
+                    }
+                    val riderName = pairingRiderName(record)
+                    if (record.isPreferred == preferred) {
+                        publishPairingPreferenceFeedback(riderName, preferred)
+                        return@withLock
+                    }
+                    val changed = if (preferred) {
+                        pairingRepository.setPreferred(normalizedDeviceId)
+                    } else {
+                        pairingRepository.clearPreferred(normalizedDeviceId)
+                    }
+                    if (changed) {
+                        publishPairingPreferenceFeedback(riderName, preferred)
+                    } else {
+                        val current = pairingRepository.getByDeviceId(normalizedDeviceId)
+                        when {
+                            current == null -> publishMissingPairing(riderName)
+                            current.isPreferred == preferred ->
+                                publishPairingPreferenceFeedback(pairingRiderName(current), preferred)
+                            else -> publishToast(getString(R.string.pairing_update_failed))
+                        }
+                    }
+                } catch (canceled: CancellationException) {
+                    throw canceled
+                } catch (error: Exception) {
+                    publishLog("Pairing preference update failed: ${error.message ?: error.javaClass.simpleName}")
+                    publishToast(getString(R.string.pairing_update_failed))
+                }
+            }
+        }
+    }
+
+    internal fun forgetPairing(deviceId: String) {
+        val normalizedDeviceId = deviceId.trim()
+        if (normalizedDeviceId.isBlank()) {
+            publishMissingPairing()
+            return
+        }
+        serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairingMutationMutex.withLock {
+                try {
+                    val record = pairingRepository.getByDeviceId(normalizedDeviceId)
+                    if (record == null) {
+                        publishMissingPairing()
+                        return@withLock
+                    }
+                    val riderName = pairingRiderName(record)
+                    val forgotten = pairingRepository.forget(normalizedDeviceId)
+                    if (forgotten) {
+                        publishToast(getString(R.string.pairing_forgotten, riderName))
+                    } else {
+                        publishMissingPairing(riderName)
+                    }
+                } catch (canceled: CancellationException) {
+                    throw canceled
+                } catch (error: Exception) {
+                    publishLog("Forget pairing failed: ${error.message ?: error.javaClass.simpleName}")
+                    publishToast(getString(R.string.pairing_update_failed))
+                }
+            }
+        }
+    }
+
+    private fun publishPairingPreferenceFeedback(riderName: String, preferred: Boolean) {
+        publishToast(
+            getString(
+                if (preferred) {
+                    R.string.pairing_preferred_saved
+                } else {
+                    R.string.pairing_preferred_cleared
+                },
+                riderName
+            )
+        )
+    }
+
+    private fun publishMissingPairing(
+        riderName: String = getString(R.string.pairing_rider_fallback)
+    ) {
+        publishToast(getString(R.string.pairing_record_missing, riderName))
+    }
+
+    private fun pairingRiderName(record: PairingRecord): String =
+        record.localAlias.trim()
+            .ifBlank { record.remoteNickname.trim() }
+            .ifBlank { record.deviceName.trim() }
+            .ifBlank { getString(R.string.pairing_rider_fallback) }
 
     private fun applyAudioControls(requested: AudioControlSettings) {
         val next = requested.normalized().let {

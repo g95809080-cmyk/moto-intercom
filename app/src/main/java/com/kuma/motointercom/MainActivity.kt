@@ -156,7 +156,27 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     preferredAudioControls.copy(voxSensitivity = sensitivity)
                 )
             },
-            onSelectAudioRoute = ::savePreferredAudioRoute
+            onSelectAudioRoute = ::savePreferredAudioRoute,
+            onSetPairingPreferred = { deviceId, preferred ->
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                    false
+                } else {
+                    service.setPairingPreferred(deviceId, preferred)
+                    true
+                }
+            },
+            onForgetPairing = { deviceId ->
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                    false
+                } else {
+                    service.forgetPairing(deviceId)
+                    true
+                }
+            }
         )
         setContentView(screen.root)
         registerPlatformBackCallback()
@@ -538,7 +558,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     private fun showIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
-        screen.dismissPlaceholderDialog()
+        screen.dismissTransientDialogs()
         dismissIncomingConfirmation()
         screen.setIncomingConfirmationVisible(true)
         incomingConfirmationNonce = prompt.actionNonce

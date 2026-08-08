@@ -29,6 +29,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -70,6 +71,7 @@ internal fun MotoComDiscoverScreen(
     onRescan: () -> Unit,
     onSelectPresence: (RiderPresence) -> Unit,
     onConnect: (RiderPresence) -> Unit,
+    onManagePairing: (RiderPresence) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val presentation = state.presentation
@@ -94,7 +96,8 @@ internal fun MotoComDiscoverScreen(
             cards = presentation.cards.withIndex().filter { !it.value.offlinePaired && (it.value.paired || it.value.preferred) },
             orderedPresences = presentation.orderedPresences,
             onSelectPresence = onSelectPresence,
-            onConnect = onConnect
+            onConnect = onConnect,
+            onManagePairing = onManagePairing
         )
         DiscoverGroup(
             tag = "discover_nearby_container",
@@ -103,7 +106,8 @@ internal fun MotoComDiscoverScreen(
             }.sortedBy { if (it.value.offlinePaired) 0 else 1 },
             orderedPresences = presentation.orderedPresences,
             onSelectPresence = onSelectPresence,
-            onConnect = onConnect
+            onConnect = onConnect,
+            onManagePairing = onManagePairing
         )
         DiscoverGroup(
             tag = "discover_offline_paired_container",
@@ -111,6 +115,7 @@ internal fun MotoComDiscoverScreen(
             orderedPresences = presentation.orderedPresences,
             onSelectPresence = onSelectPresence,
             onConnect = onConnect,
+            onManagePairing = onManagePairing,
             renderCards = false
         )
 
@@ -350,6 +355,7 @@ private fun DiscoverGroup(
     orderedPresences: List<RiderPresence>,
     onSelectPresence: (RiderPresence) -> Unit,
     onConnect: (RiderPresence) -> Unit,
+    onManagePairing: (RiderPresence) -> Unit,
     renderCards: Boolean = true
 ) {
     if (cards.isEmpty()) return
@@ -366,7 +372,8 @@ private fun DiscoverGroup(
                     indexed.value,
                     orderedPresences[indexed.index],
                     onSelectPresence,
-                    onConnect
+                    onConnect,
+                    onManagePairing
                 )
             }
         }
@@ -380,7 +387,8 @@ private fun DiscoverPresenceCard(
     card: DiscoverCardPresentation,
     presence: RiderPresence,
     onSelectPresence: (RiderPresence) -> Unit,
-    onConnect: (RiderPresence) -> Unit
+    onConnect: (RiderPresence) -> Unit,
+    onManagePairing: (RiderPresence) -> Unit
 ) {
     val cardId = presence.deviceId ?: card.title
     val shape = RoundedCornerShape(16.dp)
@@ -482,46 +490,70 @@ private fun DiscoverPresenceCard(
                 }
             }
         }
-        if (card.connectVisible) {
-            Button(
-                onClick = { onConnect(presence) },
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .width(76.dp)
-                    .height(48.dp)
-                    .testTag("discover_connect_$cardId"),
-                enabled = card.connectEnabled,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colorResource(R.color.motocom_accent_green),
-                    contentColor = colorResource(R.color.motocom_text_primary),
-                    disabledContainerColor = colorResource(R.color.motocom_surface_soft),
-                    disabledContentColor = colorResource(R.color.motocom_text_muted_accessible)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
-            ) {
-                Text(
-                    stringResource(if (card.connectEnabled) R.string.discover_connect else R.string.discover_connect_pending),
-                    modifier = Modifier.testTag("discover_connect_${cardId}_text"),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (card.connectVisible) {
+                Button(
+                    onClick = { onConnect(presence) },
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .width(76.dp)
+                        .height(48.dp)
+                        .testTag("discover_connect_$cardId"),
+                    enabled = card.connectEnabled,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorResource(R.color.motocom_accent_green),
+                        contentColor = colorResource(R.color.motocom_text_primary),
+                        disabledContainerColor = colorResource(R.color.motocom_surface_soft),
+                        disabledContentColor = colorResource(R.color.motocom_text_muted_accessible)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text(
+                        stringResource(if (card.connectEnabled) R.string.discover_connect else R.string.discover_connect_pending),
+                        modifier = Modifier.testTag("discover_connect_${cardId}_text"),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                Icon(
+                    painter = painterResource(
+                        when {
+                            card.offlinePaired -> R.drawable.ic_hourglass_24
+                            presence.isSelectableForUi() -> R.drawable.ic_chevron_right_24
+                            else -> R.drawable.ic_block_24
+                        }
+                    ),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(24.dp),
+                    tint = colorResource(R.color.motocom_text_muted_accessible)
                 )
             }
-        } else {
-            Icon(
-                painter = painterResource(
-                    when {
-                        card.offlinePaired -> R.drawable.ic_hourglass_24
-                        presence.isSelectableForUi() -> R.drawable.ic_chevron_right_24
-                        else -> R.drawable.ic_block_24
-                    }
-                ),
-                contentDescription = null,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .size(24.dp),
-                tint = colorResource(R.color.motocom_text_muted_accessible)
-            )
+            if (card.paired) {
+                val manageDescription = stringResource(
+                    R.string.discover_manage_pairing_description,
+                    card.title
+                )
+                TextButton(
+                    onClick = { onManagePairing(presence) },
+                    modifier = Modifier
+                        .padding(start = 8.dp, top = 2.dp)
+                        .width(76.dp)
+                        .defaultMinSize(minHeight = 48.dp)
+                        .semantics { contentDescription = manageDescription }
+                        .testTag("discover_manage_$cardId"),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.discover_manage_pairing),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
@@ -596,7 +628,8 @@ private fun DiscoverScreenPreview() {
             onWifiSettings = {},
             onRescan = {},
             onSelectPresence = {},
-            onConnect = {}
+            onConnect = {},
+            onManagePairing = {}
         )
     }
 }

@@ -400,6 +400,151 @@ class MainScreenRobolectricTest {
     }
 
     @Test
+    fun pairedRiderManagementUsesNamedActionsAndRequiresForgetConfirmation() {
+        val preferenceRequests = mutableListOf<Pair<String, Boolean>>()
+        val forgetRequests = mutableListOf<String>()
+        val fixture = fixture(
+            onSetPairingPreferred = { deviceId, preferred ->
+                preferenceRequests += deviceId to preferred
+                true
+            },
+            onForgetPairing = { deviceId ->
+                forgetRequests += deviceId
+                true
+            }
+        )
+        openRoute(fixture, MainRoute.DISCOVER)
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-pairing-management")),
+            canStart = true
+        )
+        fixture.screen.setPresences(
+            listOf(
+                pairedPresence(),
+                selectablePresence().copy(
+                    deviceId = "device-nearby",
+                    sessionId = RuntimeSessionId("session-nearby")
+                )
+            )
+        )
+
+        assertTrue(discoverExists("discover_manage_device-a"))
+        assertFalse(discoverExists("discover_manage_device-nearby"))
+        clickDiscover("discover_manage_device-a")
+
+        val management = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("pairing management dialog was not shown")
+        assertEquals(
+            fixture.activity.getString(R.string.pairing_manage_title),
+            shadowOf(management).title
+        )
+        val managementMessage = management.findViewById<TextView>(android.R.id.message).text.toString()
+        assertTrue(managementMessage.contains("Road Captain"))
+        assertTrue(managementMessage.contains("Pixel"))
+        assertFalse(managementMessage.contains("device-a"))
+        assertEquals(
+            fixture.activity.getString(R.string.pairing_set_preferred),
+            management.getButton(AlertDialog.BUTTON_POSITIVE).text
+        )
+
+        management.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(listOf("device-a" to true), preferenceRequests)
+
+        clickDiscover("discover_manage_device-a")
+        val reopened = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("pairing management dialog was not reopened")
+        reopened.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val confirmation = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("forget confirmation dialog was not shown")
+        assertEquals(
+            fixture.activity.getString(R.string.pairing_forget_title, "Road Captain"),
+            shadowOf(confirmation).title
+        )
+        val confirmationMessage = confirmation.findViewById<TextView>(android.R.id.message).text.toString()
+        assertFalse(confirmationMessage.contains("device-a"))
+        assertTrue(confirmationMessage.contains(fixture.activity.getString(R.string.pairing_forget_connection_note)))
+        assertTrue(forgetRequests.isEmpty())
+
+        confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(listOf("device-a"), forgetRequests)
+    }
+
+    @Test
+    fun preferredRiderManagementRoutesOnlyTheCancelPreferenceAction() {
+        val requests = mutableListOf<Pair<String, Boolean>>()
+        val fixture = fixture(
+            onSetPairingPreferred = { deviceId, preferred ->
+                requests += deviceId to preferred
+                true
+            }
+        )
+        openRoute(fixture, MainRoute.DISCOVER)
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-clear-preference")),
+            canStart = true
+        )
+        fixture.screen.setPresences(listOf(pairedPresence(preferred = true)))
+
+        clickDiscover("discover_manage_device-a")
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("preferred pairing management dialog was not shown")
+        assertEquals(
+            fixture.activity.getString(R.string.pairing_clear_preferred),
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).text
+        )
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(listOf("device-a" to false), requests)
+    }
+
+    @Test
+    fun expiredPairingDialogCannotDispatchAndServiceFailureStaysOnDiscover() {
+        var preferenceDispatches = 0
+        val stale = fixture(
+            onSetPairingPreferred = { _, _ ->
+                preferenceDispatches += 1
+                true
+            }
+        )
+        openRoute(stale, MainRoute.DISCOVER)
+        stale.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-stale-pairing")),
+            canStart = true
+        )
+        stale.screen.setPresences(listOf(pairedPresence()))
+        clickDiscover("discover_manage_device-a")
+        val staleDialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("stale pairing dialog was not shown")
+
+        stale.screen.setPresences(emptyList())
+
+        assertFalse(staleDialog.isShowing)
+        staleDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        assertEquals(0, preferenceDispatches)
+
+        val unavailable = fixture(onSetPairingPreferred = { _, _ -> false })
+        openRoute(unavailable, MainRoute.DISCOVER)
+        unavailable.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-pairing-service-unavailable")),
+            canStart = true
+        )
+        unavailable.screen.setPresences(listOf(pairedPresence()))
+        clickDiscover("discover_manage_device-a")
+        ShadowAlertDialog.getLatestAlertDialog()
+            ?.getButton(AlertDialog.BUTTON_POSITIVE)
+            ?.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertNotNull(unavailable.screen.root.findViewById<View>(R.id.discover_scroll))
+        assertEquals(SERVICE_UNAVAILABLE_STATUS, discoverText("discover_status_supplemental"))
+    }
+
+    @Test
     fun activityRecreationRestoresRouteScrollAndNicknameDraftButNotProductState() {
         val first = fixture(initialRiderName = "Persisted Rider")
         first.screen.setIntercomState(
@@ -1901,7 +2046,9 @@ class MainScreenRobolectricTest {
         onSetMuted: (Boolean) -> Unit = {},
         onSetVoxEnabled: (Boolean) -> Unit = {},
         onSetVoxSensitivity: (Int) -> Unit = {},
-        onSelectAudioRoute: (AudioRouteSelection) -> Unit = {}
+        onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+        onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
+        onForgetPairing: (String) -> Boolean = { false }
     ): Fixture {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val activity = controller.get()
@@ -1926,7 +2073,9 @@ class MainScreenRobolectricTest {
             onSetMuted = onSetMuted,
             onSetVoxEnabled = onSetVoxEnabled,
             onSetVoxSensitivity = onSetVoxSensitivity,
-            onSelectAudioRoute = onSelectAudioRoute
+            onSelectAudioRoute = onSelectAudioRoute,
+            onSetPairingPreferred = onSetPairingPreferred,
+            onForgetPairing = onForgetPairing
         )
         activity.setContentView(screen.root)
         return Fixture(activity, screen)
@@ -2018,6 +2167,22 @@ class MainScreenRobolectricTest {
         ),
         pairing = null
     )
+
+    private fun pairedPresence(preferred: Boolean = false): RiderPresence =
+        selectablePresence().copy(
+            pairing = PairingRecord(
+                remoteDeviceId = "device-a",
+                remoteNickname = "Road Captain",
+                deviceName = "Pixel",
+                localAlias = "Road Captain",
+                shortCode = "123456",
+                pairedAt = 1L,
+                lastConnectedAt = 2L,
+                isPreferred = preferred,
+                lastTransport = "LAN",
+                failureCount = 0
+            )
+        )
 
     private fun uiAttempt(runtime: RuntimeSessionId): ConnectionAttempt = ConnectionAttempt(
         id = ConnectionAttemptId("attempt-ui"),

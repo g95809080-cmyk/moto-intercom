@@ -524,7 +524,7 @@ class Kum34RecoveryResetTest {
         override suspend fun getByDeviceId(deviceId: String): PairingRecord? = null
         override suspend fun saveConnectedPeer(record: PairingRecord) = Unit
         override suspend fun setPreferred(deviceId: String): Boolean = false
-        override suspend fun clearPreferred() = Unit
+        override suspend fun clearPreferred(deviceId: String): Boolean = false
         override suspend fun updateLastConnectedAt(
             deviceId: String,
             connectedAt: Long,

@@ -4,13 +4,22 @@ import android.app.Notification
 import android.content.Context
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -294,6 +303,108 @@ class IntercomServiceRobolectricTest {
         controller.destroy()
     }
 
+    @Test
+    fun pairingManagementMutatesOnlyTheRequestedLocalRecordAndKeepsProductStateOffline() {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val repository = RecordingPairingRepository(
+            pairingRecord("peer-a"),
+            pairingRecord("peer-b")
+        )
+        setPrivate(service, "pairingRepository", repository)
+        val states = mutableListOf<IntercomState>()
+        val toasts = mutableListOf<String>()
+
+        var callback = CountDownLatch(1)
+        service.setListener(pairingListener(states, toasts, callback))
+        service.setPairingPreferred("peer-a", preferred = true)
+        assertEquals("set:peer-a", repository.awaitOperation())
+        awaitMainCallback(callback)
+        assertTrue(repository.record("peer-a")?.isPreferred == true)
+        assertFalse(repository.record("peer-b")?.isPreferred == true)
+        assertEquals(
+            service.getString(R.string.pairing_preferred_saved, "Rider peer-a"),
+            toasts.last()
+        )
+
+        callback = CountDownLatch(1)
+        service.setListener(pairingListener(states, toasts, callback))
+        service.setPairingPreferred("peer-a", preferred = false)
+        assertEquals("clear:peer-a", repository.awaitOperation())
+        awaitMainCallback(callback)
+        assertFalse(repository.record("peer-a")?.isPreferred == true)
+        assertFalse(repository.record("peer-b")?.isPreferred == true)
+        assertEquals(
+            service.getString(R.string.pairing_preferred_cleared, "Rider peer-a"),
+            toasts.last()
+        )
+
+        callback = CountDownLatch(1)
+        service.setListener(pairingListener(states, toasts, callback))
+        service.forgetPairing("peer-a")
+        assertEquals("forget:peer-a", repository.awaitOperation())
+        awaitMainCallback(callback)
+        assertNull(repository.record("peer-a"))
+        assertEquals(
+            service.getString(R.string.pairing_forgotten, "Rider peer-a"),
+            toasts.last()
+        )
+        assertTrue(states.isNotEmpty())
+        assertTrue(states.all { it == IntercomState.Offline })
+        controller.destroy()
+    }
+
+    @Test
+    fun pairingManagementReportsMissingRecordsWithoutCreatingOne() {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val repository = RecordingPairingRepository()
+        setPrivate(service, "pairingRepository", repository)
+        val toasts = mutableListOf<String>()
+        val callback = CountDownLatch(1)
+        service.setListener(pairingListener(mutableListOf(), toasts, callback))
+
+        service.setPairingPreferred("missing-peer", preferred = true)
+
+        assertEquals("get:missing-peer", repository.awaitOperation())
+        awaitMainCallback(callback)
+        assertNull(repository.record("missing-peer"))
+        assertEquals(
+            service.getString(
+                R.string.pairing_record_missing,
+                service.getString(R.string.pairing_rider_fallback)
+            ),
+            toasts.last()
+        )
+        controller.destroy()
+    }
+
+    @Test
+    fun pairingPreferenceRequestsStayInInvocationOrderWhenTheFirstDatabaseCallSuspends() {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val repository = RecordingPairingRepository(
+            pairingRecord("peer-a"),
+            pairingRecord("peer-b"),
+            blockFirstPreference = true
+        )
+        setPrivate(service, "pairingRepository", repository)
+        val callback = CountDownLatch(2)
+        service.setListener(pairingListener(mutableListOf(), mutableListOf(), callback))
+
+        service.setPairingPreferred("peer-a", preferred = true)
+        assertEquals("set-enter:peer-a", repository.awaitOperation())
+        service.setPairingPreferred("peer-b", preferred = true)
+        repository.releaseFirstPreference()
+
+        assertEquals("set:peer-a", repository.awaitOperation())
+        assertEquals("set:peer-b", repository.awaitOperation())
+        awaitMainCallback(callback)
+        assertFalse(repository.record("peer-a")?.isPreferred == true)
+        assertTrue(repository.record("peer-b")?.isPreferred == true)
+        controller.destroy()
+    }
+
     private fun recordingListener(
         replayed: MutableList<IncomingConfirmationPrompt>,
         canceled: MutableList<String> = mutableListOf()
@@ -329,6 +440,31 @@ class IntercomServiceRobolectricTest {
         }
         override fun onLog(message: String) = Unit
         override fun onError(message: String) = Unit
+    }
+
+    private fun pairingListener(
+        states: MutableList<IntercomState>,
+        toasts: MutableList<String>,
+        callback: CountDownLatch
+    ): IntercomService.Listener = object : IntercomService.Listener {
+        override fun onStatusChanged(status: String, running: Boolean) = Unit
+        override fun onIntercomStateChanged(state: IntercomState) {
+            states += state
+        }
+        override fun onLog(message: String) = Unit
+        override fun onToast(message: String) {
+            toasts += message
+            callback.countDown()
+        }
+        override fun onError(message: String) = Unit
+    }
+
+    private fun awaitMainCallback(callback: CountDownLatch) {
+        repeat(100) {
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            if (callback.await(10L, TimeUnit.MILLISECONDS)) return
+        }
+        error("timed out waiting for Service callback")
     }
 
     private fun setPrivate(service: IntercomService, fieldName: String, value: Any) {
@@ -391,4 +527,102 @@ class IntercomServiceRobolectricTest {
         decisionDeadlineElapsedMs = deadline,
         surface = surface
     )
+
+    private fun pairingRecord(deviceId: String): PairingRecord = PairingRecord(
+        remoteDeviceId = deviceId,
+        remoteNickname = "Rider $deviceId",
+        deviceName = "Phone $deviceId",
+        localAlias = "",
+        shortCode = "1234",
+        pairedAt = 1L,
+        lastConnectedAt = 2L,
+        isPreferred = false,
+        lastTransport = "LAN",
+        failureCount = 0
+    )
+
+    private class RecordingPairingRepository(
+        vararg initialRecords: PairingRecord,
+        blockFirstPreference: Boolean = false
+    ) : PairingRepository {
+        private val records = initialRecords.associateByTo(linkedMapOf(), PairingRecord::remoteDeviceId)
+        private val observed = MutableStateFlow(records.values.toList())
+        private val operations = LinkedBlockingQueue<String>()
+        private val blockPreference = AtomicBoolean(blockFirstPreference)
+        private val firstPreferenceRelease = CompletableDeferred<Unit>()
+
+        override fun observeAll(): Flow<List<PairingRecord>> = observed
+
+        override suspend fun getAll(): List<PairingRecord> = synchronized(this) {
+            records.values.toList()
+        }
+
+        override suspend fun getByDeviceId(deviceId: String): PairingRecord? = synchronized(this) {
+            records[deviceId].also { record ->
+                if (record == null) operations.offer("get:$deviceId")
+            }
+        }
+
+        override suspend fun saveConnectedPeer(record: PairingRecord) {
+            synchronized(this) {
+                records[record.remoteDeviceId] = record
+                publish()
+            }
+        }
+
+        override suspend fun setPreferred(deviceId: String): Boolean {
+            if (blockPreference.compareAndSet(true, false)) {
+                operations.offer("set-enter:$deviceId")
+                firstPreferenceRelease.await()
+            }
+            return synchronized(this) {
+                val target = records[deviceId] ?: return@synchronized false
+                records.replaceAll { _, record -> record.copy(isPreferred = false) }
+                records[deviceId] = target.copy(isPreferred = true)
+                operations.offer("set:$deviceId")
+                publish()
+                true
+            }
+        }
+
+        override suspend fun clearPreferred(deviceId: String): Boolean = synchronized(this) {
+            val target = records[deviceId]
+            val changed = target?.isPreferred == true
+            if (changed) {
+                records[deviceId] = requireNotNull(target).copy(isPreferred = false)
+                publish()
+            }
+            operations.offer("clear:$deviceId")
+            changed
+        }
+
+        override suspend fun updateLastConnectedAt(
+            deviceId: String,
+            connectedAt: Long,
+            transport: String?
+        ): Boolean = false
+
+        override suspend fun incrementFailureCount(deviceId: String): Boolean = false
+
+        override suspend fun clearFailureCount(deviceId: String): Boolean = false
+
+        override suspend fun forget(deviceId: String): Boolean = synchronized(this) {
+            val removed = records.remove(deviceId) != null
+            operations.offer("forget:$deviceId")
+            if (removed) publish()
+            removed
+        }
+
+        fun record(deviceId: String): PairingRecord? = synchronized(this) { records[deviceId] }
+
+        fun awaitOperation(): String? = operations.poll(5L, TimeUnit.SECONDS)
+
+        fun releaseFirstPreference() {
+            firstPreferenceRelease.complete(Unit)
+        }
+
+        private fun publish() {
+            observed.value = records.values.toList()
+        }
+    }
 }

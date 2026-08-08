@@ -191,6 +191,40 @@ class MainActivityRobolectricTest {
     }
 
     @Test
+    fun incomingConfirmationDismissesPairingManagementBeforeTakingPriority() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val mainScreen = screen(activity)
+        val presence = pairedPresence()
+        invokeShowPage(mainScreen, MainRoute.DISCOVER)
+        mainScreen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-pairing-priority")),
+            canStart = true
+        )
+        mainScreen.setPresences(listOf(presence))
+        MainScreen::class.java.getDeclaredMethod(
+            "showPairingManagement",
+            RiderPresence::class.java
+        ).apply { isAccessible = true }.invoke(mainScreen, presence)
+        val pairingDialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("pairing management dialog was not shown")
+        assertTrue(pairingDialog.isShowing)
+
+        showIncomingConfirmation(activity, incomingPrompt("pairing-priority", "Incoming Rider"))
+        val incomingDialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("incoming confirmation dialog was not shown")
+
+        assertFalse(pairingDialog.isShowing)
+        assertTrue(incomingDialog.isShowing)
+        assertEquals(
+            activity.getString(R.string.incoming_confirmation_title, "Incoming Rider"),
+            shadowOf(incomingDialog).title
+        )
+        incomingDialog.dismiss()
+        controller.destroy()
+    }
+
+    @Test
     fun replacedIncomingDialogCannotActOnTheCurrentRequest() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
@@ -446,6 +480,37 @@ class MainActivityRobolectricTest {
                 )
             ),
             pairing = null
+        )
+    )
+
+    private fun pairedPresence(): RiderPresence = RiderPresence(
+        deviceId = "paired-device",
+        sessionId = RuntimeSessionId("paired-session"),
+        nickname = "Paired Rider",
+        deviceName = "Paired Phone",
+        protocolVersion = 2,
+        lastSeenElapsedRealtimeMs = 1L,
+        candidates = listOf(
+            PresenceTransportCandidate(
+                transport = Transport.LAN,
+                endpointId = "paired-endpoint",
+                address = "127.0.0.1",
+                port = 1234,
+                lastSeenElapsedRealtimeMs = 1L,
+                isAvailable = true
+            )
+        ),
+        pairing = PairingRecord(
+            remoteDeviceId = "paired-device",
+            remoteNickname = "Paired Rider",
+            deviceName = "Paired Phone",
+            localAlias = "Paired Rider",
+            shortCode = "1234",
+            pairedAt = 1L,
+            lastConnectedAt = 2L,
+            isPreferred = false,
+            lastTransport = "LAN",
+            failureCount = 0
         )
     )
 }

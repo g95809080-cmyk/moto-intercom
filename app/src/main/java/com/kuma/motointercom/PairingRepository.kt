@@ -10,7 +10,7 @@ interface PairingRepository {
     suspend fun getByDeviceId(deviceId: String): PairingRecord?
     suspend fun saveConnectedPeer(record: PairingRecord)
     suspend fun setPreferred(deviceId: String): Boolean
-    suspend fun clearPreferred()
+    suspend fun clearPreferred(deviceId: String): Boolean
     suspend fun updateLastConnectedAt(deviceId: String, connectedAt: Long, transport: String?): Boolean
     suspend fun incrementFailureCount(deviceId: String): Boolean
     suspend fun clearFailureCount(deviceId: String): Boolean
@@ -46,7 +46,8 @@ internal class RoomPairingRepository(
     override suspend fun setPreferred(deviceId: String): Boolean =
         dao.setPreferred(deviceId.trim())
 
-    override suspend fun clearPreferred() = dao.clearPreferred()
+    override suspend fun clearPreferred(deviceId: String): Boolean =
+        dao.clearPreferred(deviceId.trim()) == 1
 
     override suspend fun updateLastConnectedAt(
         deviceId: String,

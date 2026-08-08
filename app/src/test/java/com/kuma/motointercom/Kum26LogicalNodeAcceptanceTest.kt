@@ -935,7 +935,7 @@ class Kum26LogicalNodeAcceptanceTest {
         }
 
         override suspend fun setPreferred(deviceId: String): Boolean = false
-        override suspend fun clearPreferred() = Unit
+        override suspend fun clearPreferred(deviceId: String): Boolean = false
         override suspend fun updateLastConnectedAt(
             deviceId: String,
             connectedAt: Long,
