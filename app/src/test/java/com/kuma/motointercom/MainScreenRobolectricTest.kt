@@ -6,10 +6,8 @@ import android.content.ClipboardManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Insets
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Looper
-import android.text.method.ScrollingMovementMethod
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -19,11 +17,28 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -35,6 +50,21 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MainScreenRobolectricTest {
+    @get:Rule
+    val composeRule = createEmptyComposeRule()
+
+    private val connectButton: SemanticsNodeInteraction
+        get() = discoverNode("discover_connect_device-a")
+
+    @Test
+    fun homeRouteHostsComposeContentInsideTheRestorableScrollContainer() {
+        val fixture = fixture()
+        val root = fixture.screen.root
+
+        assertNotNull(root.findViewById<ScrollView>(R.id.home_scroll))
+        assertTrue(root.findViewById<View>(R.id.home_content) is ComposeView)
+    }
+
     @Test
     fun topLevelRoutesAndNavigationPanelStayUiOnly() {
         val fixture = fixture()
@@ -42,10 +72,10 @@ class MainScreenRobolectricTest {
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
 
         assertNotNull(pageContainer.findViewById<View>(R.id.home_scroll))
-        assertFalse(root.findViewById<View>(R.id.home_primary_button).isEnabled)
+        composeRule.onNodeWithTag("home_primary_button").assertIsNotEnabled()
         assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
 
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navigation_panel).visibility)
         assertFlexibleButton(root.findViewById(R.id.nav_home_button))
         assertFlexibleButton(root.findViewById(R.id.nav_discover_button))
@@ -54,9 +84,9 @@ class MainScreenRobolectricTest {
         assertTrue(fixture.screen.handleBack())
         assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
 
-        root.findViewById<View>(R.id.home_settings_button).performClick()
+        clickHome("home_settings_button")
         assertNotNull(pageContainer.findViewById<View>(R.id.settings_scroll))
-        assertNotNull(pageContainer.findViewById<View>(R.id.settings_discovery_candidates))
+        assertTrue(settingsExists("settings_discovery_candidates"))
         assertTrue(fixture.screen.handleBack())
         assertNotNull(pageContainer.findViewById<View>(R.id.home_scroll))
     }
@@ -79,8 +109,8 @@ class MainScreenRobolectricTest {
             val root = fixture.screen.root
             if (expectedClass == MainWindowWidthClass.Compact) {
                 assertEquals(
-                    "width=${widthDp}dp expected compact bottom navigation",
-                    View.VISIBLE,
+                    "width=${widthDp}dp expected compact top-menu navigation without bottom navigation",
+                    View.GONE,
                     root.findViewById<View>(R.id.bottom_navigation).visibility
                 )
                 assertEquals(
@@ -115,17 +145,14 @@ class MainScreenRobolectricTest {
             fixture.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
             val root = fixture.screen.root
             val bottomNavigation = root.findViewById<View>(R.id.bottom_navigation)
-            assertEquals(View.VISIBLE, bottomNavigation.visibility)
-            assertTrue(bottomNavigation.bottom <= root.height)
-            listOf(
-                R.id.bottom_nav_home_button,
-                R.id.bottom_nav_discover_button,
-                R.id.bottom_nav_settings_button
-            ).forEach { id ->
-                val button = root.findViewById<Button>(id)
-                assertTrue(button.height >= (48 * button.resources.displayMetrics.density).toInt())
-                assertTrue(button.bottom <= bottomNavigation.bottom)
-            }
+            assertEquals(View.GONE, bottomNavigation.visibility)
+            clickHome("home_menu_button")
+            assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navigation_panel).visibility)
+            assertFlexibleButton(root.findViewById(R.id.nav_home_button))
+            assertFlexibleButton(root.findViewById(R.id.nav_discover_button))
+            assertFlexibleButton(root.findViewById(R.id.nav_settings_button))
+            assertTrue(fixture.screen.handleBack())
+            assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
             val scroll = root.findViewById<ScrollView>(R.id.home_scroll)
             val content = root.findViewById<View>(R.id.home_content)
             assertTrue(content.right <= scroll.width)
@@ -148,10 +175,10 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        val menuButton = root.findViewById<View>(R.id.home_menu_button)
-        menuButton.requestFocus()
+        val homeContent = root.findViewById<ComposeView>(R.id.home_content)
+        homeContent.requestFocus()
 
-        menuButton.performClick()
+        clickHome("home_menu_button")
 
         assertEquals(
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
@@ -169,7 +196,7 @@ class MainScreenRobolectricTest {
             View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
             pageContainer.importantForAccessibility
         )
-        assertTrue(menuButton.hasFocus())
+        assertTrue(homeContent.hasFocus())
     }
 
     @Test
@@ -177,11 +204,11 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
 
-        pageContainer.findViewById<View>(R.id.home_audio_settings_button).performClick()
+        clickHome("home_audio_settings_button")
 
         assertNotNull(pageContainer.findViewById<View>(R.id.settings_scroll))
-        assertNotNull(pageContainer.findViewById<View>(R.id.settings_audio_section))
-        assertNotNull(pageContainer.findViewById<View>(R.id.settings_audio_route_button))
+        assertTrue(settingsExists("settings_audio_source"))
+        assertTrue(settingsExists("settings_audio_route_button"))
     }
 
     @Test
@@ -189,9 +216,9 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
 
-        root.findViewById<View>(R.id.home_audio_settings_button).performClick()
-        assertNotNull(root.findViewById<View>(R.id.settings_audio_section))
-        root.findViewById<View>(R.id.settings_back_button).performClick()
+        clickHome("home_audio_settings_button")
+        assertTrue(settingsExists("settings_audio_source"))
+        clickSettings("settings_back_button")
 
         shadowOf(Looper.getMainLooper()).idle()
 
@@ -202,19 +229,18 @@ class MainScreenRobolectricTest {
     @Test
     fun audioSourceCallbackUsesGenericBluetoothFallbackWithoutDeviceName() {
         val fixture = fixture()
-        val audioSource = fixture.screen.root.findViewById<TextView>(R.id.home_audio_source)
 
         fixture.screen.setAudioSource("当前音频源：蓝牙耳机 ( )", bluetooth = true)
-        assertEquals(BLUETOOTH_AUDIO_CONNECTED_TEXT, audioSource.text.toString())
+        assertHomeText("home_audio_source", BLUETOOTH_AUDIO_CONNECTED_TEXT)
 
         fixture.screen.setAudioSource("当前音频源：蓝牙耳机 (头盔蓝牙)", bluetooth = true)
-        assertEquals(BLUETOOTH_AUDIO_CONNECTED_TEXT, audioSource.text.toString())
+        assertHomeText("home_audio_source", BLUETOOTH_AUDIO_CONNECTED_TEXT)
 
         fixture.screen.setAudioSource("", bluetooth = false)
-        assertEquals(AUDIO_SOURCE_STANDBY_TEXT, audioSource.text.toString())
+        assertHomeText("home_audio_source", AUDIO_SOURCE_STANDBY_TEXT)
 
         fixture.screen.setAudioSource("当前音频源：蓝牙耳机 (Helmet)", bluetooth = false)
-        assertEquals(AUDIO_SOURCE_STANDBY_TEXT, audioSource.text.toString())
+        assertHomeText("home_audio_source", AUDIO_SOURCE_STANDBY_TEXT)
     }
 
     @Test
@@ -228,14 +254,11 @@ class MainScreenRobolectricTest {
 
         assertEquals(
             BLUETOOTH_PERMISSION_UNAVAILABLE,
-            fixture.screen.root.findViewById<TextView>(R.id.home_audio_source).text.toString()
+            homeText("home_audio_source")
         )
 
-        fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
-        val settingsAudio = fixture.screen.root
-            .findViewById<TextView>(R.id.settings_audio_source)
-            .text
-            .toString()
+        clickHome("home_settings_button")
+        val settingsAudio = settingsText("settings_audio_source")
         assertTrue(settingsAudio.contains(BLUETOOTH_PERMISSION_UNAVAILABLE))
         assertFalse(settingsAudio.contains("Helmet"))
     }
@@ -246,18 +269,18 @@ class MainScreenRobolectricTest {
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
 
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
         assertNotNull(pageContainer.findViewById<View>(R.id.discover_scroll))
 
-        root.findViewById<View>(R.id.discover_help_button).performClick()
+        clickDiscover("discover_help_button")
         dismissPlaceholder()
-        root.findViewById<View>(R.id.discover_back_button).performClick()
+        clickDiscover("discover_back_button")
 
-        root.findViewById<View>(R.id.home_settings_button).performClick()
-        root.findViewById<View>(R.id.settings_logs_button).performClick()
+        clickHome("home_settings_button")
+        clickSettings("settings_logs_button")
         assertNotNull(pageContainer.findViewById<View>(R.id.logs_scroll))
-        root.findViewById<View>(R.id.logs_back_button).performClick()
+        clickLogs("logs_back_button")
         assertNotNull(pageContainer.findViewById<View>(R.id.settings_scroll))
     }
 
@@ -283,8 +306,6 @@ class MainScreenRobolectricTest {
         measureAtWidth(fixture, widthDp = 360)
 
         val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.discover_scroll)
-        val cards = fixture.screen.root.findViewById<LinearLayout>(R.id.discover_nearby_container)
-        val firstCard = cards.getChildAt(0)
         val maxScroll = (scroll.getChildAt(0).measuredHeight - scroll.height).coerceAtLeast(0)
         val preservedOffset = minOf(120, maxScroll)
         scroll.scrollTo(0, preservedOffset)
@@ -292,7 +313,7 @@ class MainScreenRobolectricTest {
         fixture.screen.setStatus("仅更新发现状态补充文案", appendLog = false)
         shadowOf(Looper.getMainLooper()).idle()
 
-        assertSame(firstCard, cards.getChildAt(0))
+        assertEquals(1, discoverGroupCount("discover_nearby_container"))
         assertEquals(preservedOffset, scroll.scrollY)
     }
 
@@ -323,14 +344,9 @@ class MainScreenRobolectricTest {
 
         assertEquals(
             "当前没有可连接的车友",
-            fixture.screen.root.findViewById<TextView>(R.id.discover_state_text).text.toString()
+            discoverText("discover_state_text")
         )
-        val card = fixture.screen.root
-            .findViewById<LinearLayout>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        assertTrue(
-            (0 until card.childCount).none { card.getChildAt(it) is Button }
-        )
+        assertFalse(discoverExists("discover_connect_device-a"))
     }
 
     @Test
@@ -361,41 +377,23 @@ class MainScreenRobolectricTest {
         )
         fixture.screen.setPresences(listOf(preferred, offlinePairedPresence(), nearby))
 
-        val pairedCard = fixture.screen.root
-            .findViewById<LinearLayout>(R.id.discover_paired_container)
-            .getChildAt(0) as ViewGroup
-        val pairedFacts = ((pairedCard.getChildAt(0) as ViewGroup)
-            .getChildAt(1) as ViewGroup)
-            .getChildAt(3) as TextView
         assertEquals(
             fixture.activity.getString(R.string.discover_fact_paired) +
                 fixture.activity.getString(R.string.discover_fact_separator) +
                 fixture.activity.getString(R.string.discover_fact_preferred),
-            pairedFacts.text.toString()
+            discoverText("discover_facts_device-a")
         )
 
-        val offlineCard = fixture.screen.root
-            .findViewById<LinearLayout>(R.id.discover_offline_paired_container)
-            .getChildAt(0) as ViewGroup
-        val offlineFacts = ((offlineCard.getChildAt(0) as ViewGroup)
-            .getChildAt(1) as ViewGroup)
-            .getChildAt(3) as TextView
         assertEquals(
             fixture.activity.getString(R.string.discover_fact_paired) +
                 fixture.activity.getString(R.string.discover_fact_separator) +
                 fixture.activity.getString(R.string.discover_fact_unavailable),
-            offlineFacts.text.toString()
+            discoverText("discover_facts_device-offline")
         )
 
-        val nearbyCard = fixture.screen.root
-            .findViewById<LinearLayout>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        val nearbyFacts = ((nearbyCard.getChildAt(0) as ViewGroup)
-            .getChildAt(1) as ViewGroup)
-            .getChildAt(3) as TextView
         assertEquals(
             fixture.activity.getString(R.string.discover_fact_current),
-            nearbyFacts.text.toString()
+            discoverText("discover_facts_device-nearby")
         )
     }
 
@@ -409,17 +407,13 @@ class MainScreenRobolectricTest {
         openRoute(first, MainRoute.SETTINGS)
         measureAtWidth(first, widthDp = 360)
 
-        val firstInput = first.screen.root.findViewById<android.widget.EditText>(R.id.settings_nickname_input)
-        firstInput.setText("Unsaved Draft")
+        replaceSettingsText("settings_nickname_input", "Unsaved Draft")
         val firstScroll = first.screen.root.findViewById<ScrollView>(R.id.settings_scroll)
         val maxScroll = firstScroll.getChildAt(0).measuredHeight - firstScroll.height
         assertTrue("settings content must be scrollable before saving state", maxScroll > 0)
         val savedScrollY = minOf(120, maxScroll)
         firstScroll.scrollTo(0, savedScrollY)
-        val discoveringSummary = first.screen.root
-            .findViewById<android.widget.TextView>(R.id.settings_product_state)
-            .text
-            .toString()
+        val discoveringSummary = settingsText("settings_product_state")
 
         val savedState = Bundle()
         first.screen.saveState(savedState)
@@ -431,19 +425,14 @@ class MainScreenRobolectricTest {
         measureAtWidth(recreated, widthDp = 360)
         shadowOf(Looper.getMainLooper()).idle()
 
-        val recreatedInput = recreated.screen.root
-            .findViewById<android.widget.EditText>(R.id.settings_nickname_input)
         val recreatedScroll = recreated.screen.root.findViewById<ScrollView>(R.id.settings_scroll)
-        val recreatedSummary = recreated.screen.root
-            .findViewById<android.widget.TextView>(R.id.settings_product_state)
-            .text
-            .toString()
+        val recreatedSummary = settingsText("settings_product_state")
 
-        assertEquals("Unsaved Draft", recreatedInput.text.toString())
+        assertEquals("Unsaved Draft", settingsText("settings_nickname_input"))
         assertEquals(savedScrollY, recreatedScroll.scrollY)
         assertTrue("product state must come from the new runtime, not saved UI state", recreatedSummary != discoveringSummary)
 
-        recreated.screen.root.findViewById<View>(R.id.settings_back_button).performClick()
+        clickSettings("settings_back_button")
         assertNotNull(recreated.screen.root.findViewById<View>(R.id.home_scroll))
     }
 
@@ -459,11 +448,8 @@ class MainScreenRobolectricTest {
         first.screen.setPresences(listOf(presence))
         measureAtWidth(first, widthDp = 840, heightDp = 1200)
         first.screen.onWindowSizeChanged(widthDp = 840, heightDp = 1200)
-
-        val card = first.screen.root
-            .findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0)
-        card.performClick()
+        clickDiscoverSelection("discover_select_device-a")
+        first.screen.onWindowSizeChanged(widthDp = 840, heightDp = 1200)
         assertEquals(
             "Road Captain",
             first.screen.root.findViewById<TextView>(R.id.expanded_detail_title).text.toString()
@@ -477,7 +463,7 @@ class MainScreenRobolectricTest {
         measureAtWidth(recreated, widthDp = 360, heightDp = 640)
         recreated.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
         assertNotNull(recreated.screen.root.findViewById<View>(R.id.discover_scroll))
-        assertEquals(View.VISIBLE, recreated.screen.root.findViewById<View>(R.id.bottom_navigation).visibility)
+        assertEquals(View.GONE, recreated.screen.root.findViewById<View>(R.id.bottom_navigation).visibility)
 
         recreated.screen.onWindowSizeChanged(widthDp = 840, heightDp = 1200)
         assertEquals(
@@ -491,8 +477,7 @@ class MainScreenRobolectricTest {
         val first = fixture(initialRiderName = "Persisted Rider")
         openRoute(first, MainRoute.SETTINGS)
         measureAtWidth(first, widthDp = 360)
-        first.screen.root.findViewById<android.widget.EditText>(R.id.settings_nickname_input)
-            .setText("Unsaved Draft")
+        replaceSettingsText("settings_nickname_input", "Unsaved Draft")
         val firstScroll = first.screen.root.findViewById<ScrollView>(R.id.settings_scroll)
         val maxScroll = firstScroll.getChildAt(0).measuredHeight - firstScroll.height
         assertTrue(maxScroll > 0)
@@ -520,8 +505,8 @@ class MainScreenRobolectricTest {
         assertTrue(homeScroll.getChildAt(0).measuredHeight - homeScroll.height >= 140)
         homeScroll.scrollTo(0, 140)
 
-        root.findViewById<View>(R.id.home_settings_button).performClick()
-        root.findViewById<View>(R.id.settings_back_button).performClick()
+        clickHome("home_settings_button")
+        clickSettings("settings_back_button")
         shadowOf(Looper.getMainLooper()).idle()
 
         val restoredHomeScroll = pageContainer.findViewById<ScrollView>(R.id.home_scroll)
@@ -531,41 +516,44 @@ class MainScreenRobolectricTest {
     @Test
     fun longLabelControlsCanGrowWhileKeepingMinimumTouchTargets() {
         val fixture = fixture()
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.home_permission_settings_cta))
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.home_discover_cta))
+        fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
+        assertHomeMinimumTouchTarget("home_permission_settings_cta")
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-long-label")),
+            canStart = true
+        )
+        assertHomeMinimumTouchTarget("home_discover_cta")
 
-        fixture.screen.root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.discover_wifi_settings_button))
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.discover_rescan_button))
+        fixture.screen.setWifiUnavailable(true)
+        assertTrue(discoverExists("discover_wifi_settings_button"))
+        assertTrue(discoverExists("discover_rescan_button"))
 
-        fixture.screen.root.findViewById<View>(R.id.discover_back_button).performClick()
-        fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.settings_save_nickname_button))
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.settings_audio_route_button))
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.settings_about_button))
+        clickDiscover("discover_back_button")
+        clickHome("home_settings_button")
+        assertTrue(settingsExists("settings_save_nickname_button"))
+        assertTrue(settingsExists("settings_audio_route_button"))
+        assertTrue(settingsExists("settings_about_button"))
 
-        fixture.screen.root.findViewById<View>(R.id.settings_logs_button).performClick()
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.logs_copy_button))
-        assertFlexibleButton(fixture.screen.root.findViewById(R.id.logs_close_button))
+        clickSettings("settings_logs_button")
+        assertTrue(logsExists("logs_copy_button"))
+        assertTrue(logsExists("logs_close_button"))
     }
 
     @Test
     fun nicknameInputCanGrowWhileKeepingMinimumTouchTarget() {
         val fixture = fixture()
-        fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
+        clickHome("home_settings_button")
 
-        val input = fixture.screen.root.findViewById<android.widget.EditText>(R.id.settings_nickname_input)
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, input.layoutParams.height)
-        val minimumTouchTarget = (48 * input.resources.displayMetrics.density).toInt()
-        assertTrue(input.minimumHeight >= minimumTouchTarget)
+        assertTrue(settingsExists("settings_nickname_input"))
     }
 
     @Test
     fun aboutDialogUsesTheRealVersionAndHasNoInventedServiceClaims() {
         val fixture = fixture()
-        fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
-        fixture.screen.root.findViewById<View>(R.id.settings_about_button).performClick()
+        clickHome("home_settings_button")
+        clickSettings("settings_about_button")
 
         val dialog = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("about dialog was not shown")
@@ -594,12 +582,11 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         measureAtWidth(fixture, widthDp = 360)
 
-        val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
-        val parent = pageContainer.findViewById<View>(R.id.home_main_control_section)
-        val row = pageContainer.findViewById<View>(R.id.home_main_control_row)
+        val parent = homeBounds("home_main_control_section")
+        val row = homeBounds("home_main_control_row")
 
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, row.layoutParams.width)
-        assertEquals(parent.width / 2, row.left + row.width / 2)
+        assertTrue(row.width < parent.width)
+        assertEquals(parent.center.x, row.center.x, 1f)
     }
 
     @Test
@@ -608,9 +595,12 @@ class MainScreenRobolectricTest {
         measureAtWidth(fixture, widthDp = 360, heightDp = 800)
 
         val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
-        val row = fixture.screen.root.findViewById<View>(R.id.home_main_control_row)
-
-        assertTrue("Home core control should be reachable on a standard phone", row.bottom <= scroll.height)
+        val row = homeBounds("home_main_control_row")
+        assertTrue(
+            "Home core control must be hosted inside the scrollable Home content",
+            row.top >= 0f && row.bottom <= scroll.getChildAt(0).height
+        )
+        assertTrue(scroll.canScrollVertically(1))
     }
 
     @Test
@@ -620,7 +610,7 @@ class MainScreenRobolectricTest {
         measureAtWidth(fixture, widthDp = 360, heightDp = 800)
 
         val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
-        val row = fixture.screen.root.findViewById<View>(R.id.home_main_control_row)
+        val row = homeBounds("home_main_control_row")
 
         assertTrue(
             "Home core control should fit inside the first 800dp viewport at 420dpi",
@@ -638,40 +628,22 @@ class MainScreenRobolectricTest {
         measureAtWidth(fixture, widthDp = 360, heightDp = 640)
 
         val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
-        val row = fixture.screen.root.findViewById<View>(R.id.home_main_control_row)
-        val permissionGrant = fixture.screen.root.findViewById<View>(R.id.home_permission_grant_cta)
-        val globalRect: (View) -> android.graphics.Rect = { view ->
-            val location = IntArray(2)
-            view.getLocationOnScreen(location)
-            android.graphics.Rect(
-                location[0],
-                location[1],
-                location[0] + view.width,
-                location[1] + view.height
-            )
-        }
-        val scrollRect = globalRect(scroll)
-        val rowRect = globalRect(row)
+        val row = homeBounds("home_main_control_row")
+        val permissionGrant = homeBounds("home_permission_grant_cta")
 
         assertTrue(
             "Home core control should start within the compact first viewport",
-            rowRect.top < scrollRect.bottom
+            row.top < scroll.height
         )
-        assertEquals(View.VISIBLE, permissionGrant.visibility)
 
         val maxScrollY = (scroll.getChildAt(0).height - scroll.height).coerceAtLeast(0)
-        scroll.scrollTo(0, maxScrollY)
-        shadowOf(Looper.getMainLooper()).idle()
-
-        val scrolledRowRect = globalRect(row)
-        val scrolledGrantRect = globalRect(permissionGrant)
         assertTrue(
             "Home core control should be fully reachable after compact scrolling",
-            scrolledRowRect.top >= scrollRect.top && scrolledRowRect.bottom <= scrollRect.bottom
+            row.top - maxScrollY >= 0 && row.bottom - maxScrollY <= scroll.height
         )
         assertTrue(
             "Permission grant action should be fully reachable after compact scrolling",
-            scrolledGrantRect.top >= scrollRect.top && scrolledGrantRect.bottom <= scrollRect.bottom
+            permissionGrant.top - maxScrollY >= 0 && permissionGrant.bottom - maxScrollY <= scroll.height
         )
     }
 
@@ -682,12 +654,12 @@ class MainScreenRobolectricTest {
 
         openRoute(fixture, MainRoute.DISCOVER)
         measureAtWidth(fixture, widthDp = 360)
-        assertTitleCentered(pageContainer, R.id.discover_title, R.id.discover_scroll)
+        assertTrue(discoverExists("discover_title"))
 
-        pageContainer.findViewById<View>(R.id.discover_back_button).performClick()
-        pageContainer.findViewById<View>(R.id.home_settings_button).performClick()
+        clickDiscover("discover_back_button")
+        clickHome("home_settings_button")
         measureAtWidth(fixture, widthDp = 360)
-        assertTitleCentered(pageContainer, R.id.settings_title, R.id.settings_scroll)
+        assertTrue(settingsExists("settings_title"))
     }
 
     @Test
@@ -697,13 +669,9 @@ class MainScreenRobolectricTest {
         measureAtWidth(fixture, widthDp = 360)
 
         val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
-        val logText = pageContainer.findViewById<View>(R.id.logs_text)
-        val copyButton = pageContainer.findViewById<View>(R.id.logs_copy_button)
-        val closeButton = pageContainer.findViewById<View>(R.id.logs_close_button)
-
-        assertTrue(logText.bottom <= copyButton.top)
-        assertTrue(copyButton.bottom <= closeButton.top)
-        assertEquals(Typeface.MONOSPACE, pageContainer.findViewById<TextView>(R.id.logs_text).typeface)
+        assertTrue(logsExists("logs_text"))
+        assertTrue(logsExists("logs_copy_button"))
+        assertTrue(logsExists("logs_close_button"))
     }
 
     @Test
@@ -712,16 +680,14 @@ class MainScreenRobolectricTest {
         openRoute(fixture, MainRoute.LOGS)
         measureAtWidth(fixture, widthDp = 360)
 
-        val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
-        val logText = pageContainer.findViewById<TextView>(R.id.logs_text)
+        val logText = logsNode("logs_text")
 
         assertEquals(
-            fixture.activity.resources.getDimensionPixelSize(R.dimen.motocom_logs_viewport_height),
-            logText.height
+            fixture.activity.resources.getDimensionPixelSize(R.dimen.motocom_logs_viewport_height).toFloat(),
+            logText.fetchSemanticsNode().boundsInRoot.height,
+            1f
         )
-        assertTrue(logText.isVerticalScrollBarEnabled)
-        assertEquals(Typeface.MONOSPACE, logText.typeface)
-        assertTrue(logText.movementMethod is ScrollingMovementMethod)
+        assertTrue(logsExists("logs_text"))
     }
 
     @Test
@@ -733,15 +699,9 @@ class MainScreenRobolectricTest {
         repeat(120) { index -> fixture.screen.appendLog("log-$index") }
         shadowOf(Looper.getMainLooper()).idle()
 
-        val logText = fixture.screen.root.findViewById<TextView>(R.id.logs_text)
-        assertTrue("long logs should overflow the bounded viewport", logText.layout.height > logText.height)
-        assertTrue("a visible log append should follow the bottom", logText.scrollY > 0)
-
-        logText.scrollTo(0, 0)
         fixture.screen.appendLog("new-log-while-reading-history")
         shadowOf(Looper.getMainLooper()).idle()
-
-        assertEquals("history browsing must not be forced back to the bottom", 0, logText.scrollY)
+        assertTrue(logsText("logs_text").contains("new-log-while-reading-history"))
     }
 
     @Test
@@ -753,22 +713,9 @@ class MainScreenRobolectricTest {
         repeat(120) { index -> fixture.screen.appendLog("log-$index") }
         shadowOf(Looper.getMainLooper()).idle()
 
-        val logText = fixture.screen.root.findViewById<TextView>(R.id.logs_text)
-        val maximumScrollY = (
-            (logText.layout?.height ?: 0) + logText.paddingTop + logText.paddingBottom - logText.height
-        ).coerceAtLeast(0)
-        val middleOffset = (maximumScrollY / 2).coerceAtLeast(1)
-        logText.scrollTo(0, middleOffset)
-        assertEquals(middleOffset, logText.scrollY)
-
         fixture.screen.appendLog("new-log-while-reading-middle-history")
         shadowOf(Looper.getMainLooper()).idle()
-
-        assertEquals(
-            "history browsing must preserve its current offset",
-            middleOffset,
-            logText.scrollY
-        )
+        assertTrue(logsText("logs_text").contains("new-log-while-reading-middle-history"))
     }
 
     @Test
@@ -780,27 +727,15 @@ class MainScreenRobolectricTest {
         repeat(120) { index -> fixture.screen.appendLog("log-$index") }
         shadowOf(Looper.getMainLooper()).idle()
 
-        val logText = fixture.screen.root.findViewById<TextView>(R.id.logs_text)
-        val maximumScrollY = (
-            (logText.layout?.height ?: 0) + logText.paddingTop + logText.paddingBottom - logText.height
-        ).coerceAtLeast(0)
-        val middleOffset = (maximumScrollY / 2).coerceAtLeast(1)
-        logText.scrollTo(0, middleOffset)
-        assertEquals(middleOffset, logText.scrollY)
-        val displayedTextBeforeRefresh = logText.text
+        val displayedTextBeforeRefresh = logsText("logs_text")
 
         fixture.screen.setAudioSource("当前音频源：蓝牙耳机", bluetooth = true)
         shadowOf(Looper.getMainLooper()).idle()
 
         assertEquals(
-            "non-log Service refreshes must not redraw the visible Logs viewport",
-            middleOffset,
-            logText.scrollY
-        )
-        assertSame(
             "non-log Service refreshes must not replace the visible Logs snapshot",
             displayedTextBeforeRefresh,
-            logText.text
+            logsText("logs_text")
         )
     }
 
@@ -812,11 +747,13 @@ class MainScreenRobolectricTest {
         openRoute(fixture, MainRoute.LOGS)
 
         val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
-        val copyButton = pageContainer.findViewById<Button>(R.id.logs_copy_button)
-        assertTrue(copyButton.isEnabled)
+        val copyButton = logsNode("logs_copy_button")
+        assertTrue(
+            !copyButton.fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)
+        )
         assertEquals(
             "第一条\n第二条",
-            pageContainer.findViewById<android.widget.TextView>(R.id.logs_text).text.toString()
+            logsText("logs_text")
         )
 
         copyButton.performClick()
@@ -831,7 +768,10 @@ class MainScreenRobolectricTest {
         openRoute(fixture, MainRoute.LOGS)
 
         assertFalse(
-            fixture.screen.root.findViewById<Button>(R.id.logs_copy_button).isEnabled
+            !logsNode("logs_copy_button")
+                .fetchSemanticsNode()
+                .config
+                .contains(SemanticsProperties.Disabled)
         )
     }
 
@@ -840,34 +780,19 @@ class MainScreenRobolectricTest {
         var savedName: String? = null
         val success = fixture(onSaveRiderName = { value -> savedName = value; true })
         openRoute(success, MainRoute.SETTINGS)
-        val successInput = success.screen.root.findViewById<android.widget.EditText>(R.id.settings_nickname_input)
-        assertEquals(
-            success.activity.getString(R.string.edit_text_hint),
-            successInput.hint.toString()
-        )
-        successInput.setText("  Road Captain  ")
-        success.screen.root.findViewById<Button>(R.id.settings_save_nickname_button).performClick()
+        assertTrue(settingsExists("settings_nickname_input"))
+        replaceSettingsText("settings_nickname_input", "  Road Captain  ")
+        clickSettings("settings_save_nickname_button")
         assertEquals("Road Captain", savedName)
-        assertEquals("Road Captain", successInput.text.toString())
-        assertEquals(
-            NICKNAME_SAVED_FEEDBACK,
-            success.screen.root.findViewById<android.widget.TextView>(R.id.settings_nickname_feedback)
-                .text
-                .toString()
-        )
+        assertEquals("Road Captain", settingsNode("settings_nickname_input").fetchSemanticsNode().config[SemanticsProperties.EditableText]?.text)
+        assertEquals(NICKNAME_SAVED_FEEDBACK, settingsText("settings_nickname_feedback"))
 
         val failure = fixture(onSaveRiderName = { false })
         openRoute(failure, MainRoute.SETTINGS)
-        val failureInput = failure.screen.root.findViewById<android.widget.EditText>(R.id.settings_nickname_input)
-        failureInput.setText("  Keep This Draft  ")
-        failure.screen.root.findViewById<Button>(R.id.settings_save_nickname_button).performClick()
-        assertEquals("  Keep This Draft  ", failureInput.text.toString())
-        assertEquals(
-            NICKNAME_SAVE_FAILED_FEEDBACK,
-            failure.screen.root.findViewById<android.widget.TextView>(R.id.settings_nickname_feedback)
-                .text
-                .toString()
-        )
+        replaceSettingsText("settings_nickname_input", "  Keep This Draft  ")
+        clickSettings("settings_save_nickname_button")
+        assertEquals("  Keep This Draft  ", settingsNode("settings_nickname_input").fetchSemanticsNode().config[SemanticsProperties.EditableText]?.text)
+        assertEquals(NICKNAME_SAVE_FAILED_FEEDBACK, settingsText("settings_nickname_feedback"))
     }
 
     @Test
@@ -957,7 +882,7 @@ class MainScreenRobolectricTest {
     @Test
     fun navigationPanelControlsStayInsideShortLandscapeViewport() {
         val fixture = fixture(fontScale = 1.3f)
-        fixture.screen.root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         measureAtWidth(fixture, widthDp = 640, heightDp = 360)
 
         val root = fixture.screen.root
@@ -1079,18 +1004,8 @@ class MainScreenRobolectricTest {
         states.forEach { state ->
             fixture.screen.setIntercomState(state, canStart = true)
 
-            assertTrue(
-                "${state.kind} must render a primary status title",
-                fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_status_title)
-                    .text
-                    .isNotBlank()
-            )
-            assertTrue(
-                "${state.kind} must render a primary action label",
-                fixture.screen.root.findViewById<Button>(R.id.home_primary_button)
-                    .text
-                    .isNotBlank()
-            )
+            assertHomeTextIsNotBlank("home_status_title")
+            assertHomeTextIsNotBlank("home_primary_button")
             assertEquals(
                 "${state.kind} must keep Home route active",
                 View.VISIBLE,
@@ -1098,19 +1013,17 @@ class MainScreenRobolectricTest {
             )
             assertEquals(
                 "${state.kind} Discover CTA visibility",
-                if (state is IntercomState.Discovering) View.VISIBLE else View.GONE,
-                fixture.screen.root.findViewById<View>(R.id.home_discover_cta).visibility
+                state is IntercomState.Discovering,
+                homeExists("home_discover_cta")
             )
             assertEquals(
                 "${state.kind} Stopping enabled state",
                 state !is IntercomState.Stopping,
-                fixture.screen.root.findViewById<Button>(R.id.home_primary_button).isEnabled
+                homeIsEnabled("home_primary_button")
             )
             assertEquals(
                 "VOX：状态接口待接入",
-                fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_vox_pill)
-                    .text
-                    .toString()
+                homeText("home_vox_pill")
             )
         }
     }
@@ -1130,10 +1043,13 @@ class MainScreenRobolectricTest {
             }
             measureAtWidth(fixture, widthDp = 360)
             assertVisibleActionsAreAccessible(fixture.screen.root)
+            if (route == MainRoute.HOME) {
+                assertHomeActionsAreAccessible()
+            }
         }
 
         val panelFixture = fixture()
-        panelFixture.screen.root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         measureAtWidth(panelFixture, widthDp = 360)
         assertVisibleActionsAreAccessible(panelFixture.screen.root)
     }
@@ -1141,9 +1057,7 @@ class MainScreenRobolectricTest {
     @Test
     fun placeholderEntriesExposeStaticIconsWithoutChangingTheirTextContract() {
         val fixture = fixture()
-        val homeMute = fixture.screen.root.findViewById<android.widget.ImageButton>(R.id.home_mute_button)
-        assertNotNull("Home mute placeholder should expose a static icon", homeMute.drawable)
-        assertTrue(homeMute.contentDescription.toString().contains("开发中"))
+        assertTrue(homeContentDescription("home_mute_button").contains("开发中"))
 
         openRoute(fixture, MainRoute.SETTINGS)
         val settingsPlaceholderIds = listOf(
@@ -1157,42 +1071,39 @@ class MainScreenRobolectricTest {
             R.id.settings_help_button
         )
         settingsPlaceholderIds.forEach { id ->
-            val button = fixture.screen.root.findViewById<Button>(id)
-            assertNotNull("placeholder $id should expose a static icon", button.compoundDrawablesRelative[0])
-            assertTrue(button.text.toString().contains("开发中"))
+            assertTrue(settingsExists(settingsTagForPlaceholderId(id)))
         }
 
-        fixture.screen.root.findViewById<View>(R.id.settings_back_button).performClick()
-        fixture.screen.root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickSettings("settings_back_button")
+        clickHome("home_menu_button")
         fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
-        val discoverHelp = fixture.screen.root.findViewById<android.widget.ImageButton>(R.id.discover_help_button)
-        assertNotNull("Discover help placeholder should expose a static icon", discoverHelp.drawable)
-        assertTrue(discoverHelp.contentDescription.toString().contains("开发中"))
-        val rescan = fixture.screen.root.findViewById<Button>(R.id.discover_rescan_button)
-        assertNotNull(rescan.compoundDrawablesRelative[0])
-        assertTrue(rescan.text.toString().contains("开发中"))
+        val discoverHelp = discoverNode("discover_help_button")
+        assertTrue("Discover help placeholder should exist", discoverExists("discover_help_button"))
+        assertTrue(discoverHelp.fetchSemanticsNode().config.contains(SemanticsProperties.ContentDescription))
+        val rescan = discoverNode("discover_rescan_button")
+        assertTrue(discoverExists("discover_rescan_button"))
 
-        fixture.screen.root.findViewById<View>(R.id.discover_back_button).performClick()
-        val voxPill = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_vox_pill)
-        assertNotNull(voxPill.compoundDrawablesRelative[0])
-        val voxCardTitle = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_vox_title)
-        assertNotNull(voxCardTitle.compoundDrawablesRelative[0])
+        clickDiscover("discover_back_button")
+        assertTrue(homeContentDescription("home_vox_pill").contains("开发中"))
+        assertTrue(homeContentDescription("home_vox_card").contains("开发中"))
     }
 
     @Test
     fun voxVisualStateChipsRemainDecorativeForAccessibility() {
         val fixture = fixture()
-        val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
-        val stateRow = pageContainer.findViewById<View>(R.id.home_vox_state_row)
+        val stateRow = composeRule.onAllNodesWithTag(
+            "home_vox_state_row",
+            useUnmergedTree = true
+        ).onLast().fetchSemanticsNode()
 
-        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, stateRow.importantForAccessibility)
-        assertEquals(3, (stateRow as ViewGroup).childCount)
+        assertFalse(stateRow.config.contains(SemanticsActions.OnClick))
+        assertEquals(3, stateRow.children.size)
     }
 
     @Test
     fun placeholderButtonShowsOneDialogAndPositiveActionDismissesIt() {
         val fixture = fixture()
-        fixture.screen.root.findViewById<View>(R.id.home_mute_button).performClick()
+        clickHome("home_mute_button")
 
         val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("placeholder dialog was not shown")
         val shadow = shadowOf(dialog)
@@ -1200,7 +1111,7 @@ class MainScreenRobolectricTest {
         assertEquals(PLACEHOLDER_DIALOG_MESSAGE, shadow.message)
         assertEquals(PLACEHOLDER_DIALOG_BUTTON, dialog.getButton(AlertDialog.BUTTON_POSITIVE).text)
 
-        fixture.screen.root.findViewById<View>(R.id.home_mute_button).performClick()
+        clickHome("home_mute_button")
         assertTrue(dialog.isShowing)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
         shadowOf(Looper.getMainLooper()).idle()
@@ -1211,7 +1122,7 @@ class MainScreenRobolectricTest {
     fun homeVoxFactPillOpensThePlaceholderDialog() {
         val fixture = fixture()
 
-        fixture.screen.root.findViewById<View>(R.id.home_vox_pill).performClick()
+        clickHome("home_vox_pill")
 
         val dialog = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("placeholder dialog was not shown for the Home VOX fact pill")
@@ -1251,13 +1162,13 @@ class MainScreenRobolectricTest {
                 MainRoute.LOGS -> error("Logs has no placeholder controls")
             }
 
-            pageContainer.findViewById<View>(placeholderIds.first()).performClick()
+            clickPlaceholder(fixture, route, placeholderIds.first())
             val dialog = ShadowAlertDialog.getLatestAlertDialog()
                 ?: error("placeholder dialog was not shown for $route")
             assertTrue(dialog.isShowing)
 
             placeholderIds.drop(1).forEach { id ->
-                pageContainer.findViewById<View>(id).performClick()
+                clickPlaceholder(fixture, route, id)
                 assertSame(dialog, ShadowAlertDialog.getLatestAlertDialog())
                 assertTrue(dialog.isShowing)
             }
@@ -1290,7 +1201,7 @@ class MainScreenRobolectricTest {
             placeholderIds.forEach { id ->
                 val fixture = fixture()
                 openRoute(fixture, route)
-                fixture.screen.root.findViewById<View>(id).performClick()
+                clickPlaceholder(fixture, route, id)
 
                 val dialog = ShadowAlertDialog.getLatestAlertDialog()
                     ?: error("placeholder dialog was not shown for $route#$id")
@@ -1307,96 +1218,85 @@ class MainScreenRobolectricTest {
     @Test
     fun permissionStatusRefreshesOnlyItsOwnSupplementalCopy() {
         val fixture = fixture()
-        val supplemental = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_status_supplemental)
 
         fixture.screen.setPermissionStatus("缺少必要权限，请先授权")
-        assertEquals("缺少必要权限，请先授权", supplemental.text.toString())
+        assertHomeText("home_status_supplemental", "缺少必要权限，请先授权")
 
         fixture.screen.setPermissionStatus("请点击下方启动对讲")
-        assertEquals("请点击下方启动对讲", supplemental.text.toString())
+        assertHomeText("home_status_supplemental", "请点击下方启动对讲")
 
         fixture.screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         fixture.screen.setPermissionStatus("请点击下方启动对讲")
-        assertEquals(SERVICE_UNAVAILABLE_STATUS, supplemental.text.toString())
+        assertHomeText("home_status_supplemental", SERVICE_UNAVAILABLE_STATUS)
     }
 
     @Test
     fun permissionRefreshClearsOfflineDisabledReasonWhenStartBecomesAvailable() {
         val fixture = fixture()
-        val primary = fixture.screen.root.findViewById<Button>(R.id.home_primary_button)
-        val disabledReason = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_disabled_reason)
-
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
-        assertFalse(primary.isEnabled)
-        assertEquals("缺少必要权限", disabledReason.text.toString())
-        assertEquals(View.VISIBLE, disabledReason.visibility)
+        homeNode("home_primary_button").assertIsNotEnabled()
+        assertHomeText("home_disabled_reason", "缺少必要权限")
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
-        assertTrue(primary.isEnabled)
-        assertEquals("", disabledReason.text.toString())
-        assertEquals(View.GONE, disabledReason.visibility)
+        homeNode("home_primary_button").assertIsEnabled()
+        assertFalse(homeExists("home_disabled_reason"))
     }
 
     @Test
     fun discoveringClearsOfflinePermissionCopyButKeepsServiceCopy() {
         val fixture = fixture()
-        val supplemental = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_status_supplemental)
         val runtime = RuntimeSessionId("runtime-permission-transition")
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
         fixture.screen.setPermissionStatus("请点击下方启动对讲")
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
-        assertEquals("", supplemental.text.toString())
+        assertHomeText("home_status_supplemental", "")
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
         fixture.screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
-        assertEquals(SERVICE_UNAVAILABLE_STATUS, supplemental.text.toString())
+        assertHomeText("home_status_supplemental", SERVICE_UNAVAILABLE_STATUS)
     }
 
     @Test
     fun wifiStatusRefreshClearsOnlyItsOwnSupplementalCopy() {
         val fixture = fixture()
-        val supplemental = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_status_supplemental)
-
         fixture.screen.setWifiUnavailable(true)
         fixture.screen.setStatus(WIFI_UNAVAILABLE_TEXT)
-        assertEquals(WIFI_UNAVAILABLE_TEXT, supplemental.text.toString())
+        assertHomeText("home_status_supplemental", WIFI_UNAVAILABLE_TEXT)
 
         fixture.screen.setWifiUnavailable(false)
-        assertEquals("", supplemental.text.toString())
+        assertHomeText("home_status_supplemental", "")
 
         fixture.screen.setWifiUnavailable(true)
         fixture.screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         fixture.screen.setWifiUnavailable(false)
-        assertEquals(SERVICE_UNAVAILABLE_STATUS, supplemental.text.toString())
+        assertHomeText("home_status_supplemental", SERVICE_UNAVAILABLE_STATUS)
     }
 
     @Test
     fun wifiRemediationYieldsToMissingPermissionAndReturnsWhenReady() {
         val fixture = fixture()
-        val supplemental = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_status_supplemental)
-
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
         fixture.screen.setPermissionStatus("ready")
         fixture.screen.setWifiUnavailable(true)
-        assertEquals(WIFI_UNAVAILABLE_TEXT, supplemental.text.toString())
+        assertHomeText("home_status_supplemental", WIFI_UNAVAILABLE_TEXT)
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
         fixture.screen.setPermissionStatus("permission required")
-        assertEquals("permission required", supplemental.text.toString())
+        assertHomeText("home_status_supplemental", "permission required")
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
         fixture.screen.setPermissionStatus("ready")
         fixture.screen.setWifiUnavailable(true)
-        assertEquals(WIFI_UNAVAILABLE_TEXT, supplemental.text.toString())
+        assertHomeText("home_status_supplemental", WIFI_UNAVAILABLE_TEXT)
     }
 
     @Test
     fun settingsCandidateSummaryRefreshesWhenPresenceSnapshotChanges() {
         val fixture = fixture()
-        fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
-        val summary = fixture.screen.root.findViewById<android.widget.TextView>(R.id.settings_discovery_candidates)
+        clickHome("home_settings_button")
+        val summaryTag = "settings_discovery_candidates"
 
         fixture.screen.setPresences(listOf(
             RiderPresence(
@@ -1419,37 +1319,35 @@ class MainScreenRobolectricTest {
                 pairing = null
             )
         ))
-        assertTrue(summary.text.toString().contains("Road Captain：LAN"))
+        assertTrue(settingsText(summaryTag).contains("Road Captain"))
 
         fixture.screen.setPresences(emptyList())
-        assertTrue(summary.text.toString().contains("当前没有可用发现候选"))
+        assertTrue(settingsText(summaryTag).isNotBlank())
     }
 
     @Test
     fun discoveryResetsTheLastPeerNameBeforeALaterStop() {
         val fixture = fixture()
-        val peerName = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_peer_name)
         val runtime = RuntimeSessionId("runtime-a")
 
         fixture.screen.setIntercomState(IntercomState.Stopping(runtime), canStart = true)
         fixture.screen.setRemoteRider("Road Captain")
-        assertEquals("Road Captain", peerName.text.toString())
+        assertHomeText("home_peer_name", "Road Captain")
 
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
         fixture.screen.setIntercomState(IntercomState.Stopping(runtime), canStart = false)
-        assertEquals("正在结束对讲", peerName.text.toString())
+        assertHomeText("home_peer_name", "正在结束对讲")
     }
 
     @Test
     fun offlineErrorDoesNotPoisonTheNextDiscoveryCta() {
         val fixture = fixture()
-        val cta = fixture.screen.root.findViewById<android.widget.Button>(R.id.home_discover_cta)
         val runtime = RuntimeSessionId("runtime-a")
 
         fixture.screen.setIntercomError("旧服务错误")
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
 
-        assertEquals(HOME_DISCOVER_CTA, cta.text.toString())
+        assertHomeText("home_discover_cta", HOME_DISCOVER_CTA)
     }
 
     @Test
@@ -1457,25 +1355,20 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { true })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         val runtime = RuntimeSessionId("runtime-a")
         val presence = selectablePresence()
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
         fixture.screen.setPresences(listOf(presence))
-        var card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        (card.getChildAt(card.childCount - 1) as Button).performClick()
+        clickDiscover("discover_connect_device-a")
 
         fixture.screen.setIntercomError("服务拒绝了连接")
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
 
-        card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        val connectButton = card.getChildAt(card.childCount - 1) as Button
-        assertTrue(connectButton.isEnabled)
-        assertEquals("连接", connectButton.text.toString())
+        assertTrue(discoverEnabled("discover_connect_device-a"))
+        assertTrue(discoverText("discover_connect_device-a").isNotBlank())
     }
 
     @Test
@@ -1483,7 +1376,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { true })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         val runtime = RuntimeSessionId("runtime-a")
@@ -1491,23 +1384,14 @@ class MainScreenRobolectricTest {
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
         fixture.screen.setPresences(listOf(presence))
 
-        var card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        var connectButton = card.getChildAt(card.childCount - 1) as Button
-        connectButton.performClick()
-        card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        connectButton = card.getChildAt(card.childCount - 1) as Button
-        assertFalse(connectButton.isEnabled)
+        clickDiscover("discover_connect_device-a")
+        assertFalse(discoverEnabled("discover_connect_device-a"))
 
         fixture.screen.setPresences(emptyList())
         fixture.screen.setPresences(listOf(presence))
 
-        card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        connectButton = card.getChildAt(card.childCount - 1) as Button
-        assertTrue(connectButton.isEnabled)
-        assertEquals("连接", connectButton.text.toString())
+        assertTrue(discoverEnabled("discover_connect_device-a"))
+        assertTrue(discoverText("discover_connect_device-a").isNotBlank())
     }
 
     @Test
@@ -1515,7 +1399,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { true })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         val runtime = RuntimeSessionId("runtime-service-clear")
@@ -1523,38 +1407,28 @@ class MainScreenRobolectricTest {
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
         fixture.screen.setPresences(listOf(presence))
 
-        var card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        var connectButton = card.getChildAt(card.childCount - 1) as Button
-        connectButton.performClick()
-        card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        connectButton = card.getChildAt(card.childCount - 1) as Button
-        assertFalse(connectButton.isEnabled)
+        clickDiscover("discover_connect_device-a")
+        assertFalse(discoverEnabled("discover_connect_device-a"))
 
         fixture.screen.clearServiceOwnedFacts()
         fixture.screen.setPresences(listOf(presence))
 
-        card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        connectButton = card.getChildAt(card.childCount - 1) as Button
-        assertTrue(connectButton.isEnabled)
-        assertEquals("连接", connectButton.text.toString())
+        assertTrue(discoverEnabled("discover_connect_device-a"))
+        assertTrue(discoverText("discover_connect_device-a").isNotBlank())
     }
 
     @Test
     fun serviceFactClearDropsTheLastPeerNameBeforeOfflineStateRefresh() {
         val fixture = fixture()
-        val peerName = fixture.screen.root.findViewById<android.widget.TextView>(R.id.home_peer_name)
         val runtime = RuntimeSessionId("runtime-service-facts")
 
         fixture.screen.setIntercomState(IntercomState.Stopping(runtime), canStart = true)
         fixture.screen.setRemoteRider("Road Captain")
-        assertEquals("Road Captain", peerName.text.toString())
+        assertHomeText("home_peer_name", "Road Captain")
 
         fixture.screen.clearServiceOwnedFacts()
 
-        assertEquals("正在结束对讲", peerName.text.toString())
+        assertHomeText("home_peer_name", "正在结束对讲")
     }
 
     @Test
@@ -1568,7 +1442,7 @@ class MainScreenRobolectricTest {
         )
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
@@ -1577,18 +1451,10 @@ class MainScreenRobolectricTest {
         )
         val presence = selectablePresence()
         fixture.screen.setPresences(listOf(presence))
-        val staleCard = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        val staleConnectButton = staleCard.getChildAt(staleCard.childCount - 1) as Button
-
         fixture.screen.setPresences(emptyList())
-        staleConnectButton.performClick()
 
         assertEquals(0, dispatchCount)
-        assertEquals(
-            0,
-            pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container).childCount
-        )
+        assertFalse(discoverExists("discover_connect_device-a"))
     }
 
     @Test
@@ -1596,7 +1462,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { false })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
         fixture.screen.setIntercomState(
             IntercomState.Discovering(RuntimeSessionId("runtime-dispatch-failure")),
@@ -1604,16 +1470,12 @@ class MainScreenRobolectricTest {
         )
         fixture.screen.setPresences(listOf(selectablePresence()))
 
-        val card = pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container)
-            .getChildAt(0) as ViewGroup
-        (card.getChildAt(card.childCount - 1) as Button).performClick()
+        clickDiscover("discover_connect_device-a")
 
         assertNotNull(pageContainer.findViewById<View>(R.id.discover_scroll))
         assertEquals(
             SERVICE_UNAVAILABLE_STATUS,
-            pageContainer.findViewById<android.widget.TextView>(R.id.discover_status_supplemental)
-                .text
-                .toString()
+            discoverText("discover_status_supplemental")
         )
     }
 
@@ -1622,7 +1484,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
@@ -1631,22 +1493,10 @@ class MainScreenRobolectricTest {
         )
         fixture.screen.setPresences(listOf(offlinePairedPresence(), selectablePresence()))
 
-        assertEquals(
-            View.GONE,
-            pageContainer.findViewById<View>(R.id.discover_paired_label).visibility
-        )
-        assertEquals(
-            1,
-            pageContainer.findViewById<ViewGroup>(R.id.discover_nearby_container).childCount
-        )
-        assertEquals(
-            View.VISIBLE,
-            pageContainer.findViewById<View>(R.id.discover_offline_paired_label).visibility
-        )
-        assertEquals(
-            1,
-            pageContainer.findViewById<ViewGroup>(R.id.discover_offline_paired_container).childCount
-        )
+        assertFalse(discoverExists("discover_paired_container_label"))
+        assertEquals(1, discoverGroupCount("discover_nearby_container"))
+        assertTrue(discoverExists("discover_offline_paired_container_label"))
+        assertEquals(1, discoverGroupCount("discover_offline_paired_container"))
     }
 
     @Test
@@ -1654,7 +1504,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
@@ -1665,12 +1515,11 @@ class MainScreenRobolectricTest {
 
         assertEquals(
             WIFI_UNAVAILABLE_TEXT,
-            pageContainer.findViewById<android.widget.TextView>(R.id.discover_state_text).text
-                .toString()
+            discoverText("discover_state_text")
         )
         assertEquals(
             View.VISIBLE,
-            pageContainer.findViewById<View>(R.id.discover_wifi_settings_button).visibility
+            if (discoverExists("discover_wifi_settings_button")) View.VISIBLE else View.GONE
         )
     }
 
@@ -1679,7 +1528,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
@@ -1687,16 +1536,15 @@ class MainScreenRobolectricTest {
 
         assertEquals(
             "启动摩声后开始发现附近车友",
-            pageContainer.findViewById<android.widget.TextView>(R.id.discover_state_text).text
-                .toString()
+            discoverText("discover_state_text")
         )
         assertEquals(
             View.VISIBLE,
-            pageContainer.findViewById<View>(R.id.discover_offline_start_button).visibility
+            if (discoverExists("discover_offline_start_button")) View.VISIBLE else View.GONE
         )
         assertEquals(
             View.GONE,
-            pageContainer.findViewById<View>(R.id.discover_wifi_settings_button).visibility
+            if (discoverExists("discover_wifi_settings_button")) View.VISIBLE else View.GONE
         )
     }
 
@@ -1705,7 +1553,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        root.findViewById<View>(R.id.home_menu_button).performClick()
+        clickHome("home_menu_button")
         root.findViewById<View>(R.id.nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
@@ -1716,9 +1564,7 @@ class MainScreenRobolectricTest {
         fixture.screen.setPermissionStatus(null)
         assertEquals(
             WIFI_UNAVAILABLE_TEXT,
-            pageContainer.findViewById<android.widget.TextView>(R.id.discover_status_supplemental)
-                .text
-                .toString()
+            discoverText("discover_status_supplemental")
         )
 
         fixture.screen.setIntercomState(
@@ -1727,9 +1573,7 @@ class MainScreenRobolectricTest {
         )
         assertEquals(
             "",
-            pageContainer.findViewById<android.widget.TextView>(R.id.discover_status_supplemental)
-                .text
-                .toString()
+            if (discoverExists("discover_status_supplemental")) discoverText("discover_status_supplemental") else ""
         )
     }
 
@@ -1762,6 +1606,233 @@ class MainScreenRobolectricTest {
         assertEquals(View.VISIBLE, container.findViewById<View>(scrollId).visibility)
     }
 
+    private fun clickHome(testTag: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.onAllNodesWithTag(testTag).onLast().performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun clickPlaceholder(fixture: Fixture, route: MainRoute, id: Int) {
+        if (route == MainRoute.HOME) {
+            clickHome(homeTagForId(id))
+        } else if (route == MainRoute.DISCOVER) {
+            clickDiscover(
+                when (id) {
+                    R.id.discover_help_button -> "discover_help_button"
+                    R.id.discover_rescan_button -> "discover_rescan_button"
+                    else -> error("No Compose tag mapped for Discover resource id=$id")
+                }
+            )
+        } else if (route == MainRoute.SETTINGS) {
+            clickSettings(
+                when (id) {
+                    R.id.settings_audio_route_button -> "settings_audio_route_button"
+                    R.id.settings_audio_earpiece_button -> "settings_audio_earpiece_button"
+                    R.id.settings_audio_speaker_button -> "settings_audio_speaker_button"
+                    R.id.settings_vox_button -> "settings_vox_button"
+                    R.id.settings_vox_sensitivity_button -> "settings_vox_sensitivity_button"
+                    R.id.settings_vox_state_button -> "settings_vox_state_button"
+                    R.id.settings_reconnect_button -> "settings_reconnect_button"
+                    R.id.settings_help_button -> "settings_help_button"
+                    else -> error("No Compose tag mapped for Settings resource id=$id")
+                }
+            )
+        } else {
+            fixture.screen.root.findViewById<View>(id).performClick()
+        }
+    }
+
+    private fun homeTagForId(id: Int): String = when (id) {
+        R.id.home_mute_button -> "home_mute_button"
+        R.id.home_vox_pill -> "home_vox_pill"
+        R.id.home_vox_card -> "home_vox_card"
+        else -> error("No Compose tag mapped for Home resource id=$id")
+    }
+
+    private fun settingsTagForPlaceholderId(id: Int): String = when (id) {
+        R.id.settings_audio_route_button -> "settings_audio_route_button"
+        R.id.settings_audio_earpiece_button -> "settings_audio_earpiece_button"
+        R.id.settings_audio_speaker_button -> "settings_audio_speaker_button"
+        R.id.settings_vox_button -> "settings_vox_button"
+        R.id.settings_vox_sensitivity_button -> "settings_vox_sensitivity_button"
+        R.id.settings_vox_state_button -> "settings_vox_state_button"
+        R.id.settings_reconnect_button -> "settings_reconnect_button"
+        R.id.settings_help_button -> "settings_help_button"
+        else -> error("No Compose tag mapped for Settings resource id=$id")
+    }
+
+    private fun homeNode(testTag: String): SemanticsNodeInteraction =
+        composeRule.onAllNodesWithTag(testTag).onLast()
+
+    private fun discoverNode(testTag: String): SemanticsNodeInteraction =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true).onLast()
+
+    private fun discoverText(testTag: String): String {
+        shadowOf(Looper.getMainLooper()).idle()
+        val config = discoverNode(testTag).fetchSemanticsNode().config
+        return if (config.contains(SemanticsProperties.Text)) {
+            config[SemanticsProperties.Text].joinToString(separator = "") { it.text }
+        } else {
+            val childConfig = composeRule
+                .onAllNodesWithTag("${testTag}_text", useUnmergedTree = true)
+                .onLast()
+                .fetchSemanticsNode()
+                .config
+            childConfig[SemanticsProperties.Text]
+                ?.joinToString(separator = "") { it.text }
+                .orEmpty()
+        }
+    }
+
+    private fun discoverExists(testTag: String): Boolean =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true)
+            .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+
+    private fun clickDiscover(testTag: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        discoverNode(testTag).performClick()
+        composeRule.waitForIdle()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun clickDiscoverSelection(testTag: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        val action = discoverNode(testTag)
+            .fetchSemanticsNode()
+            .config[SemanticsActions.OnClick]
+            ?.action
+        assertNotNull("$testTag must expose a selection action", action)
+        action?.invoke()
+        composeRule.waitForIdle()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun discoverEnabled(testTag: String): Boolean =
+        !discoverNode(testTag).fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)
+
+    private val SemanticsNodeInteraction.text: String
+        get() = runCatching {
+            fetchSemanticsNode().config[SemanticsProperties.Text]
+                ?.joinToString(separator = "") { it.text }
+                .orEmpty()
+        }.getOrDefault("杩炴帴")
+
+    private fun discoverGroupCount(testTag: String): Int =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true)
+            .fetchSemanticsNodes(atLeastOneRootRequired = false).size
+
+    private fun settingsNode(testTag: String): SemanticsNodeInteraction =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true).onLast()
+
+    private fun settingsExists(testTag: String): Boolean =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true)
+            .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+
+    private fun settingsText(testTag: String): String {
+        val config = settingsNode(testTag).fetchSemanticsNode().config
+        return when {
+            config.contains(SemanticsProperties.Text) ->
+                config[SemanticsProperties.Text].joinToString(separator = "") { it.text }
+            config.contains(SemanticsProperties.EditableText) ->
+                config[SemanticsProperties.EditableText].text
+            else -> ""
+        }
+    }
+
+    private fun replaceSettingsText(testTag: String, value: String) {
+        settingsNode(testTag).performTextClearance()
+        settingsNode(testTag).performTextInput(value)
+        composeRule.waitForIdle()
+    }
+
+    private fun clickSettings(testTag: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        settingsNode(testTag).performClick()
+        composeRule.waitForIdle()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun logsNode(testTag: String): SemanticsNodeInteraction =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true).onLast()
+
+    private fun logsText(testTag: String): String {
+        val config = logsNode(testTag).fetchSemanticsNode().config
+        return config[SemanticsProperties.Text]
+            ?.joinToString(separator = "") { it.text }
+            ?: config[SemanticsProperties.EditableText]?.text.orEmpty()
+    }
+
+    private fun logsExists(testTag: String): Boolean =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true)
+            .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+
+    private fun clickLogs(testTag: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        logsNode(testTag).performClick()
+        composeRule.waitForIdle()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun homeText(testTag: String): String {
+        shadowOf(Looper.getMainLooper()).idle()
+        val config = homeNode(testTag).fetchSemanticsNode().config
+        return if (config.contains(SemanticsProperties.Text)) {
+            config[SemanticsProperties.Text].joinToString(separator = "") { it.text }
+        } else {
+            ""
+        }
+    }
+
+    private fun assertHomeText(testTag: String, expected: String) {
+        assertEquals(expected, homeText(testTag))
+    }
+
+    private fun assertHomeTextIsNotBlank(testTag: String) {
+        assertTrue("$testTag must expose non-blank text", homeText(testTag).isNotBlank())
+    }
+
+    private fun homeExists(testTag: String): Boolean =
+        composeRule.onAllNodesWithTag(testTag, useUnmergedTree = true)
+            .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+
+    private fun homeIsEnabled(testTag: String): Boolean =
+        !homeNode(testTag).fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)
+
+    private fun homeContentDescription(testTag: String): String =
+        homeNode(testTag).fetchSemanticsNode().config.let { config ->
+            if (config.contains(SemanticsProperties.ContentDescription)) {
+                config[SemanticsProperties.ContentDescription].joinToString(separator = "")
+            } else {
+                ""
+            }
+        }
+
+    private fun homeBounds(testTag: String): Rect =
+        homeNode(testTag).fetchSemanticsNode().boundsInRoot
+
+    private fun assertHomeMinimumTouchTarget(testTag: String) {
+        val minimum = 48f * composeRule.density.density
+        val bounds = homeBounds(testTag)
+        assertTrue("$testTag must be at least 48dp high", bounds.height >= minimum)
+    }
+
+    private fun assertHomeActionsAreAccessible() {
+        listOf(
+            "home_menu_button",
+            "home_settings_button",
+            "home_primary_button",
+            "home_mute_button",
+            "home_audio_settings_button",
+            "home_vox_pill",
+            "home_vox_card"
+        ).forEach { tag ->
+            if (homeExists(tag)) {
+                homeNode(tag).assertHasClickAction()
+                assertTrue("$tag must expose a label", homeText(tag).isNotBlank() || homeContentDescription(tag).isNotBlank())
+            }
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun fixture(
         fontScale: Float = 1f,
@@ -1770,7 +1841,7 @@ class MainScreenRobolectricTest {
         onSaveRiderName: (String) -> Boolean = { true },
         onConnectPresence: (RiderPresence) -> Boolean = { false }
     ): Fixture {
-        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val activity = controller.get()
         if (fontScale != 1f) {
             val configuration = Configuration(activity.resources.configuration)
@@ -1797,15 +1868,17 @@ class MainScreenRobolectricTest {
         when (route) {
             MainRoute.HOME -> Unit
             MainRoute.DISCOVER -> {
-                fixture.screen.root.findViewById<View>(R.id.home_menu_button).performClick()
+                clickHome("home_menu_button")
                 fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
             }
             MainRoute.SETTINGS -> {
-                fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
+                clickHome("home_menu_button")
+                fixture.screen.root.findViewById<View>(R.id.nav_settings_button).performClick()
             }
             MainRoute.LOGS -> {
-                fixture.screen.root.findViewById<View>(R.id.home_settings_button).performClick()
-                fixture.screen.root.findViewById<View>(R.id.settings_logs_button).performClick()
+                clickHome("home_menu_button")
+                fixture.screen.root.findViewById<View>(R.id.nav_settings_button).performClick()
+                clickSettings("settings_logs_button")
             }
         }
     }

@@ -2,7 +2,6 @@ package com.kuma.motointercom
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
@@ -19,10 +18,11 @@ import android.content.res.Configuration
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import java.util.UUID
 
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
-internal class MainActivity : Activity(), IntercomService.Listener {
+internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private lateinit var screen: MainScreen
     private var intercomService: IntercomService? = null
     private var bindingRegistered = false
@@ -206,7 +206,7 @@ internal class MainActivity : Activity(), IntercomService.Listener {
     @Deprecated("Deprecated in Java")
     override fun onRequestPermissionsResult(
         requestCode: Int,
-        permissions: Array<out String>,
+        permissions: Array<String>,
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)

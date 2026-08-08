@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stable host/test IDs for Compose-backed page containers and migrated semantics. -->
+    <item name="home_scroll" type="id" />
+    <item name="home_content" type="id" />
+    <item name="home_mute_button" type="id" />
+    <item name="home_vox_card" type="id" />
+    <item name="home_vox_pill" type="id" />
+
+    <item name="discover_scroll" type="id" />
+    <item name="discover_content" type="id" />
+    <item name="discover_help_button" type="id" />
+    <item name="discover_rescan_button" type="id" />
+    <item name="discover_radar_ripple" type="id" />
+
+    <item name="settings_scroll" type="id" />
+    <item name="settings_content" type="id" />
+    <item name="settings_audio_earpiece_button" type="id" />
+    <item name="settings_audio_route_button" type="id" />
+    <item name="settings_audio_speaker_button" type="id" />
+    <item name="settings_help_button" type="id" />
+    <item name="settings_reconnect_button" type="id" />
+    <item name="settings_vox_button" type="id" />
+    <item name="settings_vox_sensitivity_button" type="id" />
+    <item name="settings_vox_state_button" type="id" />
+
+    <item name="logs_scroll" type="id" />
+    <item name="logs_content" type="id" />
+    <item name="logs_text" type="id" />
+</resources>

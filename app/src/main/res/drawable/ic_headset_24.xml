@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M4,13 A8,8 0,0 1,20 13 M4,13 L4,17 A2,2 0,0 0,6 19 L7,19 L7,13 L4,13 M20,13 L20,17 A2,2 0,0 1,18 19 L17,19 L17,13 L20,13 M12,21 L16,21"
+        android:strokeColor="@color/motocom_text_primary"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

@@ -7,11 +7,8 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
-import android.text.method.ScrollingMovementMethod
-import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.RoundedCorner
@@ -19,14 +16,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import java.util.EnumMap
 
 internal class MainScreen(
@@ -53,6 +50,44 @@ internal class MainScreen(
     private val scrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val pendingRestoredScrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val logBuffer = BoundedLogBuffer(300)
+    private val homeUiState = mutableStateOf(
+        HomeScreenUiState(
+            primaryText = "",
+            detailText = "",
+            supplementalText = null,
+            peerText = "",
+            primaryActionLabel = "",
+            primaryActionEnabled = false,
+            disabledReason = null,
+            showPermissionGrantCta = false,
+            showPermissionSettingsCta = false,
+            showWifiSettingsCta = false,
+            discoverCtaLabel = "",
+            showDiscoverCta = false,
+            audioSourceText = "",
+            plannedTransportText = "",
+            connectedTransportText = "",
+            webRtcText = "",
+            bluetoothText = "",
+            voxText = "",
+            discovering = false,
+            connected = false
+        )
+    )
+    private val homeAudioLevel = mutableFloatStateOf(0f)
+    private val discoverUiState = mutableStateOf(
+        DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "",
+            supplementalText = null,
+            emptyText = "",
+            radarRunning = false
+        )
+    )
+    private val settingsUiState = mutableStateOf(
+        SettingsScreenUiState("", "", "", "", "", "", "", null, false, "")
+    )
+    private val logsUiState = mutableStateOf(LogsScreenUiState("", "", false))
 
     private var currentRoute: MainRoute = restoreMainRoute(savedState?.getString(KEY_ROUTE))
     private var windowWidthClass: MainWindowWidthClass = MainWindowWidthClass.Compact
@@ -330,7 +365,7 @@ internal class MainScreen(
 
     fun setAudioLevel(level: Float) {
         if (currentRoute != MainRoute.HOME || !animationsEnabled()) return
-        pageContainer.findViewById<VisualizerView?>(R.id.home_visualizer)?.setAmplitude(level)
+        homeAudioLevel.floatValue = level.coerceIn(0f, 1f)
     }
 
     fun appendLog(message: String) {
@@ -355,9 +390,8 @@ internal class MainScreen(
     }
 
     fun stopAnimations() {
-        pageContainer.findViewById<RippleView?>(R.id.home_ripple)?.stop()
+        homeAudioLevel.floatValue = 0f
         pageContainer.findViewById<RippleView?>(R.id.discover_radar_ripple)?.stop()
-        pageContainer.findViewById<VisualizerView?>(R.id.home_visualizer)?.stop()
     }
 
     @SuppressLint("NewApi")
@@ -481,20 +515,21 @@ internal class MainScreen(
         val isCompact = windowWidthClass == MainWindowWidthClass.Compact
         val isExpanded = windowWidthClass == MainWindowWidthClass.Expanded
         navigationRail.visibility = if (isCompact) View.GONE else View.VISIBLE
-        bottomNavigation.visibility = if (isCompact) View.VISIBLE else View.GONE
+        // Compact phone layouts follow the design's top-menu/back navigation.
+        // Keep the legacy host view for saved IDs and large-screen plumbing, but
+        // do not add a second navigation surface below the designed phone page.
+        bottomNavigation.visibility = View.GONE
         expandedDetailContainer.visibility = if (isExpanded && currentRoute != MainRoute.LOGS) {
             View.VISIBLE
         } else {
             View.GONE
         }
-        root.findViewById<ImageButton?>(R.id.home_menu_button)?.visibility =
-            if (isCompact) View.VISIBLE else View.INVISIBLE
+        if (currentRoute == MainRoute.HOME) renderHome()
         updateNavigationSelection()
         updateExpandedDetailPane()
     }
 
     private fun updateExpandedDetailPane() {
-        if (expandedDetailContainer.visibility != View.VISIBLE) return
         val title = expandedDetailContainer.findViewById<TextView>(R.id.expanded_detail_title)
         val body = expandedDetailContainer.findViewById<TextView>(R.id.expanded_detail_body)
         val status = expandedDetailContainer.findViewById<TextView>(R.id.expanded_detail_status)
@@ -571,16 +606,17 @@ internal class MainScreen(
         currentRoute = route
         closeNavigation()
         pageContainer.removeAllViews()
-        val layout = when (route) {
-            MainRoute.HOME -> R.layout.screen_home
-            MainRoute.DISCOVER -> R.layout.screen_discover_riders
-            MainRoute.SETTINGS -> R.layout.screen_settings
-            MainRoute.LOGS -> R.layout.screen_logs
+        val page = when (route) {
+            MainRoute.HOME -> createHomePage()
+            MainRoute.DISCOVER -> createDiscoverPage()
+            MainRoute.SETTINGS -> createSettingsPage()
+            MainRoute.LOGS -> createLogsPage()
         }
-        val page = inflater.inflate(layout, pageContainer, false)
         pageContainer.addView(page)
         currentScroll = page as? ScrollView
         currentScroll?.apply {
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
             setOnTouchListener { view, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN,
@@ -616,7 +652,7 @@ internal class MainScreen(
 
     private fun bindCurrentPage() {
         when (currentRoute) {
-            MainRoute.HOME -> bindHome()
+            MainRoute.HOME -> Unit
             MainRoute.DISCOVER -> bindDiscover()
             MainRoute.SETTINGS -> bindSettings()
             MainRoute.LOGS -> bindLogs()
@@ -632,42 +668,43 @@ internal class MainScreen(
         }
     }
 
-    private fun bindHome() {
-        constrainWidth(R.id.home_content)
-        pageContainer.findViewById<ImageButton>(R.id.home_menu_button).setOnClickListener {
-            showNavigation()
-        }
-        pageContainer.findViewById<ImageButton>(R.id.home_settings_button).setOnClickListener {
-            showPage(MainRoute.SETTINGS)
-        }
-        pageContainer.findViewById<Button>(R.id.home_primary_button).setOnClickListener {
-            onToggleIntercom()
-        }
-        pageContainer.findViewById<Button>(R.id.home_discover_cta).setOnClickListener {
-            showPage(MainRoute.DISCOVER)
-        }
-        pageContainer.findViewById<Button>(R.id.home_permission_grant_cta).setOnClickListener {
-            onRequestCorePermissions()
-        }
-        pageContainer.findViewById<Button>(R.id.home_permission_settings_cta).setOnClickListener {
-            onOpenPermissionSettings()
-        }
-        pageContainer.findViewById<Button>(R.id.home_wifi_settings_cta).setOnClickListener {
-            onOpenWifiSettings()
-        }
-        pageContainer.findViewById<View>(R.id.home_mute_button).setOnClickListener {
-            showPlaceholderDialog()
-        }
-        pageContainer.findViewById<View>(R.id.home_audio_settings_button).setOnClickListener {
-            restoreSettingsAudio = true
-            showPage(MainRoute.SETTINGS)
-        }
-        pageContainer.findViewById<View>(R.id.home_vox_card).setOnClickListener {
-            showPlaceholderDialog()
-        }
-        pageContainer.findViewById<View>(R.id.home_vox_pill).setOnClickListener {
-            showPlaceholderDialog()
-        }
+    private fun createHomePage(): ScrollView = ScrollView(activity).apply {
+        id = R.id.home_scroll
+        clipToPadding = false
+        isFillViewport = false
+        addView(
+            ComposeView(activity).apply {
+                id = R.id.home_content
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                setViewCompositionStrategy(
+                    ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool
+                )
+                setContent {
+                    MotoComTheme {
+                        MotoComHomeScreen(
+                            state = homeUiState.value,
+                            audioLevel = homeAudioLevel.floatValue,
+                            onMenu = ::showNavigation,
+                            onSettings = { showPage(MainRoute.SETTINGS) },
+                            onPrimaryAction = onToggleIntercom,
+                            onDiscover = { showPage(MainRoute.DISCOVER) },
+                            onPermissionGrant = onRequestCorePermissions,
+                            onPermissionSettings = onOpenPermissionSettings,
+                            onWifiSettings = onOpenWifiSettings,
+                            onMute = ::showPlaceholderDialog,
+                            onAudioSettings = {
+                                restoreSettingsAudio = true
+                                showPage(MainRoute.SETTINGS)
+                            },
+                            onVox = ::showPlaceholderDialog
+                        )
+                    }
+                }
+            }
+        )
     }
 
     private fun renderHome() {
@@ -690,80 +727,33 @@ internal class MainScreen(
             lastStoppingPeerName = lastRealPeerName,
             discoverCtaNeedsReselect = discoverCtaNeedsReselect
         )
-        pageContainer.findViewById<TextView>(R.id.home_peer_name).text = presentation.peerText
-        pageContainer.findViewById<TextView>(R.id.home_status_title).text = presentation.primaryText
-        pageContainer.findViewById<TextView>(R.id.home_status_detail).text = presentation.detailText
-        pageContainer.findViewById<TextView>(R.id.home_status_supplemental).setOptionalText(
-            presentation.supplementalText
-        )
-        pageContainer.findViewById<Button>(R.id.home_primary_button).apply {
-            text = presentation.primaryActionLabel
-            isEnabled = presentation.primaryActionEnabled
-            contentDescription = presentation.disabledReason
-                ?.takeIf { !presentation.primaryActionEnabled }
-                ?.let {
-                    activity.getString(
-                        R.string.home_primary_disabled_description,
-                        presentation.primaryActionLabel,
-                        it
-                    )
-                }
-        }
-        pageContainer.findViewById<TextView>(R.id.home_disabled_reason).setOptionalText(
-            presentation.disabledReason
-        )
-        pageContainer.findViewById<Button>(R.id.home_permission_grant_cta).visibility =
-            if (presentation.showPermissionGrantCta) View.VISIBLE else View.GONE
-        pageContainer.findViewById<Button>(R.id.home_permission_settings_cta).visibility =
-            if (presentation.showPermissionSettingsCta) View.VISIBLE else View.GONE
-        pageContainer.findViewById<Button>(R.id.home_wifi_settings_cta).visibility =
-            if (presentation.showWifiSettingsCta) View.VISIBLE else View.GONE
-        pageContainer.findViewById<Button>(R.id.home_discover_cta).apply {
-            text = presentation.discoverCtaLabel
-            visibility = if (presentation.showDiscoverCta) View.VISIBLE else View.GONE
-        }
-        pageContainer.findViewById<TextView>(R.id.home_audio_source).text =
-            presentation.audioSourceText
-        pageContainer.findViewById<TextView>(R.id.home_transport_pill).text =
-            activity.getString(R.string.home_transport_plan, presentation.plannedTransportText)
-        pageContainer.findViewById<TextView>(R.id.home_connected_transport).text =
-            activity.getString(R.string.home_transport_current, presentation.connectedTransportText)
-        pageContainer.findViewById<TextView>(R.id.home_webrtc_pill).text =
-            activity.getString(R.string.home_webrtc_state, presentation.webRtcText)
-        pageContainer.findViewById<TextView>(R.id.home_bluetooth_pill).text =
-            activity.getString(
-                R.string.home_bluetooth_state,
-                optionalPermission.bluetoothStatusText
-            )
-        pageContainer.findViewById<TextView>(R.id.home_vox_pill).text =
-            activity.getString(R.string.home_vox_pill, presentation.voxText)
-        pageContainer.findViewById<TextView>(R.id.home_vox_status).text =
-            activity.getString(R.string.home_vox_developing, presentation.voxText)
-        pageContainer.findViewById<RippleView>(R.id.home_ripple).setRunning(
-            animationsEnabled() && productState is IntercomState.Discovering
-        )
-        pageContainer.findViewById<VisualizerView>(R.id.home_visualizer).setConnected(
-            animationsEnabled() && productState is IntercomState.Connected
+        homeUiState.value = HomeScreenUiState(
+            primaryText = presentation.primaryText,
+            detailText = presentation.detailText,
+            supplementalText = presentation.supplementalText,
+            peerText = presentation.peerText,
+            primaryActionLabel = presentation.primaryActionLabel,
+            primaryActionEnabled = presentation.primaryActionEnabled,
+            disabledReason = presentation.disabledReason,
+            showPermissionGrantCta = presentation.showPermissionGrantCta,
+            showPermissionSettingsCta = presentation.showPermissionSettingsCta,
+            showWifiSettingsCta = presentation.showWifiSettingsCta,
+            discoverCtaLabel = presentation.discoverCtaLabel,
+            showDiscoverCta = presentation.showDiscoverCta,
+            audioSourceText = presentation.audioSourceText,
+            plannedTransportText = presentation.plannedTransportText,
+            connectedTransportText = presentation.connectedTransportText,
+            webRtcText = presentation.webRtcText,
+            bluetoothText = optionalPermission.bluetoothStatusText,
+            voxText = presentation.voxText,
+            discovering = animationsEnabled() && productState is IntercomState.Discovering,
+            connected = animationsEnabled() && productState is IntercomState.Connected,
+            menuVisible = windowWidthClass == MainWindowWidthClass.Compact
         )
     }
 
     private fun bindDiscover() {
-        constrainWidth(R.id.discover_content)
-        pageContainer.findViewById<ImageButton>(R.id.discover_back_button).setOnClickListener {
-            showPage(MainRoute.HOME)
-        }
-        pageContainer.findViewById<ImageButton>(R.id.discover_help_button).setOnClickListener {
-            showPlaceholderDialog()
-        }
-        pageContainer.findViewById<Button>(R.id.discover_offline_start_button).setOnClickListener {
-            onToggleIntercom()
-        }
-        pageContainer.findViewById<Button>(R.id.discover_wifi_settings_button).setOnClickListener {
-            onOpenWifiSettings()
-        }
-        pageContainer.findViewById<Button>(R.id.discover_rescan_button).setOnClickListener {
-            showPlaceholderDialog()
-        }
+        // Discover is rendered by Compose; event boundaries remain owned by MainScreen.
     }
 
     private fun renderDiscover() {
@@ -775,216 +765,144 @@ internal class MainScreen(
             connectPending = discoverConnectAwaitingState
         )
         val stateText = discoverStateText(presentation)
-        pageContainer.findViewById<TextView>(R.id.discover_state_text).text = stateText
-        pageContainer.findViewById<TextView>(R.id.discover_status_supplemental).setOptionalText(
-            supplementalStatus
-        )
-        pageContainer.findViewById<RippleView>(R.id.discover_radar_ripple).setRunning(
-            animationsEnabled() && productState is IntercomState.Discovering
-        )
-        pageContainer.findViewById<Button>(R.id.discover_offline_start_button).visibility =
-            if (presentation.offlineStartVisible) View.VISIBLE else View.GONE
-        pageContainer.findViewById<Button>(R.id.discover_wifi_settings_button).visibility =
-            if (presentation.wifiSettingsVisible) View.VISIBLE else View.GONE
-        val pairedContainer = pageContainer.findViewById<LinearLayout>(R.id.discover_paired_container)
-        val nearbyContainer = pageContainer.findViewById<LinearLayout>(R.id.discover_nearby_container)
-        val offlinePairedContainer =
-            pageContainer.findViewById<LinearLayout>(R.id.discover_offline_paired_container)
-        val renderedCardCount = pairedContainer.childCount +
-            nearbyContainer.childCount +
-            offlinePairedContainer.childCount
-        if (
-            lastRenderedDiscoverPresentation != presentation ||
-            renderedCardCount != presentation.cards.size
-        ) {
-            pairedContainer.removeAllViews()
-            nearbyContainer.removeAllViews()
-            offlinePairedContainer.removeAllViews()
-            presentation.cards.forEachIndexed { index, card ->
-                val target = when {
-                    card.offlinePaired -> offlinePairedContainer
-                    card.paired || card.preferred -> pairedContainer
-                    else -> nearbyContainer
-                }
-                target.addView(createPresenceCard(card, presentation.orderedPresences[index]))
-            }
-            lastRenderedDiscoverPresentation = presentation
-        }
-        val hasCards = presentation.cards.isNotEmpty()
-        pageContainer.findViewById<TextView>(R.id.discover_empty_text).apply {
-            visibility = if (hasCards) View.GONE else View.VISIBLE
-            text = if (
+        discoverUiState.value = DiscoverScreenUiState(
+            presentation = presentation,
+            stateText = stateText,
+            supplementalText = supplementalStatus,
+            emptyText = if (
                 presentation.wifiSettingsVisible ||
                 presentation.offlineStartVisible ||
                 presentation.readOnlyReason != null
-            ) {
-                stateText
-            } else {
-                activity.getString(R.string.discover_empty_no_presence)
-            }
-        }
-        pageContainer.findViewById<TextView>(R.id.discover_paired_label).visibility =
-            if (pairedContainer.childCount > 0) View.VISIBLE else View.GONE
-        pageContainer.findViewById<TextView>(R.id.discover_nearby_label).visibility =
-            if (nearbyContainer.childCount > 0) View.VISIBLE else View.GONE
-        pageContainer.findViewById<TextView>(R.id.discover_offline_paired_label).visibility =
-            if (offlinePairedContainer.childCount > 0) View.VISIBLE else View.GONE
+            ) stateText else activity.getString(R.string.discover_empty_no_presence),
+            radarRunning = animationsEnabled() && productState is IntercomState.Discovering
+        )
     }
 
-    private fun createPresenceCard(
-        card: DiscoverCardPresentation,
-        presence: RiderPresence
-    ): View {
-        val container = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            background = activity.getDrawableCompat(R.drawable.motocom_card)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            contentDescription = card.title
-            setOnClickListener {
-                val deviceId = presence.deviceId
-                val sessionId = presence.sessionId
-                if (deviceId != null && sessionId != null) {
-                    expandedSelectedPresence = PendingPresenceSelection(deviceId, sessionId)
-                    updateExpandedDetailPane()
+    private fun createDiscoverPage(): ScrollView = ScrollView(activity).apply {
+        id = R.id.discover_scroll
+        clipToPadding = false
+        isFillViewport = false
+        addView(
+            ComposeView(activity).apply {
+                id = R.id.discover_content
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                setViewCompositionStrategy(
+                    ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool
+                )
+                setContent {
+                    MotoComTheme {
+                        MotoComDiscoverScreen(
+                            state = discoverUiState.value,
+                            onBack = { showPage(MainRoute.HOME) },
+                            onHelp = ::showPlaceholderDialog,
+                            onStart = onToggleIntercom,
+                            onWifiSettings = onOpenWifiSettings,
+                            onRescan = ::showPlaceholderDialog,
+                            onSelectPresence = { presence ->
+                                val deviceId = presence.deviceId
+                                val sessionId = presence.sessionId
+                                if (deviceId != null && sessionId != null) {
+                                    expandedSelectedPresence = PendingPresenceSelection(deviceId, sessionId)
+                                    updateExpandedDetailPane()
+                                }
+                            },
+                            onConnect = ::connectFromDiscover
+                        )
+                    }
                 }
             }
+        )
+    }
+
+    private fun connectFromDiscover(presence: RiderPresence) {
+        val currentPresence = presences.firstOrNull {
+            it.deviceId == presence.deviceId &&
+                it.sessionId == presence.sessionId &&
+                it.isSelectableForUi()
         }
-        val facts = buildList {
-            if (card.paired) add(activity.getString(R.string.discover_fact_paired))
-            if (card.preferred) add(activity.getString(R.string.discover_fact_preferred))
-            if (!presence.isSelectableForUi()) {
-                add(activity.getString(R.string.discover_fact_unavailable))
+        if (
+            currentRoute != MainRoute.DISCOVER ||
+            productState !is IntercomState.Discovering ||
+            discoverConnectAwaitingState ||
+            currentPresence == null
+        ) {
+            if (currentPresence == null) {
+                discoverConnectAwaitingState = false
+                pendingPresenceSelection = null
+                renderDiscover()
             }
-        }.joinToString(activity.getString(R.string.discover_fact_separator))
-            .ifBlank { activity.getString(R.string.discover_fact_current) }
-        container.addView(LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(ImageView(activity).apply {
-                setImageResource(R.drawable.ic_rider_24)
-                background = activity.getDrawableCompat(R.drawable.motocom_card_soft)
-                setPadding(dp(12), dp(12), dp(12), dp(12))
-                contentDescription = null
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(48), dp(48)))
-            addView(LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(text(card.title, 20f, true))
-                addView(text(card.deviceText, 14f, false))
-                addView(text(card.transportText, 14f, false))
-                addView(text(facts, 13f, false))
-            }, LinearLayout.LayoutParams(
-                0,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                1f
-            ).apply {
-                leftMargin = dp(12)
-            })
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        if (card.connectVisible) {
-            container.addView(Button(activity).apply {
-                minHeight = dp(48)
-                text = activity.getString(
-                    if (card.connectEnabled) R.string.discover_connect else R.string.discover_connect_pending
-                )
-                contentDescription = activity.getString(
-                    if (card.connectEnabled) {
-                        R.string.discover_connect_description
-                    } else {
-                        R.string.discover_connect_pending_description
-                    },
-                    card.title
-                )
-                isAllCaps = false
-                isEnabled = card.connectEnabled
-                background = activity.getDrawableCompat(R.drawable.motocom_primary_button)
-                setTextColor(activity.getColorCompat(R.color.motocom_text_primary))
-                setOnClickListener {
-                    val currentPresence = presences.firstOrNull {
-                        it.deviceId == presence.deviceId &&
-                            it.sessionId == presence.sessionId &&
-                            it.isSelectableForUi()
-                    }
-                    if (
-                        currentRoute != MainRoute.DISCOVER ||
-                        productState !is IntercomState.Discovering ||
-                            discoverConnectAwaitingState ||
-                            currentPresence == null
-                    ) {
-                        if (currentPresence == null) {
-                            discoverConnectAwaitingState = false
-                            pendingPresenceSelection = null
-                            renderDiscover()
-                        }
-                        return@setOnClickListener
-                    }
-                    val pendingSelection = PendingPresenceSelection(
-                        deviceId = requireNotNull(currentPresence.deviceId),
-                        sessionId = requireNotNull(currentPresence.sessionId)
+            return
+        }
+        val pendingSelection = PendingPresenceSelection(
+            deviceId = requireNotNull(currentPresence.deviceId),
+            sessionId = requireNotNull(currentPresence.sessionId)
+        )
+        discoverConnectAwaitingState = true
+        pendingPresenceSelection = pendingSelection
+        val dispatched = onConnectPresence(currentPresence)
+        if (dispatched) {
+            if (currentRoute == MainRoute.DISCOVER) renderDiscover()
+        } else {
+            discoverConnectAwaitingState = false
+            pendingPresenceSelection = null
+            feedbackAfterDiscoverConnect(false)?.let(::setStatus)
+        }
+    }
+
+    private fun createSettingsPage(): ScrollView = ScrollView(activity).apply {
+        id = R.id.settings_scroll
+        clipToPadding = false
+        isFillViewport = false
+        addView(ComposeView(activity).apply {
+            id = R.id.settings_content
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
+            setContent {
+                MotoComTheme {
+                    MotoComSettingsScreen(
+                        state = settingsUiState.value,
+                        onBack = { showPage(MainRoute.HOME) },
+                        onNicknameChanged = { value ->
+                            settingsNicknameDraft = value
+                            settingsUiState.value = settingsUiState.value.copy(nickname = value)
+                        },
+                        onSaveNickname = { saveNickname() },
+                        onOptionalPermission = onRequestOptionalPermissions,
+                        onLogs = { showPage(MainRoute.LOGS) },
+                        onAbout = ::showAboutDialog,
+                        onPlaceholder = { showPlaceholderDialog() }
                     )
-                    discoverConnectAwaitingState = true
-                    pendingPresenceSelection = pendingSelection
-                    val dispatched = onConnectPresence(currentPresence)
-                    if (dispatched) {
-                        if (currentRoute == MainRoute.DISCOVER) renderDiscover()
-                    } else {
-                        discoverConnectAwaitingState = false
-                        pendingPresenceSelection = null
-                        feedbackAfterDiscoverConnect(false)?.let(::setStatus)
-                    }
                 }
-            }, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).withTop(dp(12)))
-        }
-        return container.withOuterTopMargin(dp(10))
+            }
+        })
+    }
+
+    private fun createLogsPage(): ScrollView = ScrollView(activity).apply {
+        id = R.id.logs_scroll
+        clipToPadding = false
+        isFillViewport = false
+        addView(ComposeView(activity).apply {
+            id = R.id.logs_content
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
+            setContent {
+                MotoComTheme {
+                    MotoComLogsScreen(
+                        state = logsUiState.value,
+                        onBack = { showPage(MainRoute.SETTINGS) },
+                        onCopy = ::copyLogs,
+                        onClose = { showPage(MainRoute.SETTINGS) }
+                    )
+                }
+            }
+        })
     }
 
     private fun bindSettings() {
-        constrainWidth(R.id.settings_content)
-        pageContainer.findViewById<ImageButton>(R.id.settings_back_button).setOnClickListener {
-            showPage(MainRoute.HOME)
-        }
-        pageContainer.findViewById<EditText>(R.id.settings_nickname_input).setText(settingsNicknameDraft)
-        pageContainer.findViewById<Button>(R.id.settings_save_nickname_button).setOnClickListener {
-            saveNickname()
-        }
-        listOf(
-            R.id.settings_audio_route_button,
-            R.id.settings_audio_earpiece_button,
-            R.id.settings_audio_speaker_button,
-            R.id.settings_vox_button,
-            R.id.settings_vox_sensitivity_button,
-            R.id.settings_vox_state_button,
-            R.id.settings_reconnect_button,
-            R.id.settings_help_button
-        ).forEach { id ->
-            pageContainer.findViewById<Button>(id).setOnClickListener { showPlaceholderDialog() }
-        }
-        pageContainer.findViewById<Button>(R.id.settings_optional_permission_button).setOnClickListener {
-            onRequestOptionalPermissions()
-        }
-        pageContainer.findViewById<Button>(R.id.settings_logs_button).setOnClickListener {
-            showPage(MainRoute.LOGS)
-        }
-        pageContainer.findViewById<Button>(R.id.settings_about_button).setOnClickListener {
-            showAboutDialog()
-        }
-        if (restoreSettingsAudio) {
-            restoreSettingsAudio = false
-            val audioSection = pageContainer.findViewById<View>(R.id.settings_audio_section)
-            val settingsScroll = currentScroll
-            audioSection.post {
-                if (currentRoute == MainRoute.SETTINGS && currentScroll === settingsScroll) {
-                    settingsScroll?.smoothScrollTo(0, audioSection.top)
-                }
-            }
-        }
+        // Settings is rendered by Compose; callbacks are passed by createSettingsPage().
     }
 
     private fun renderSettings() {
@@ -1005,87 +923,54 @@ internal class MainScreen(
             supplementalText = supplementalStatus,
             lastStoppingPeerName = lastRealPeerName
         )
-        pageContainer.findViewById<TextView>(R.id.settings_audio_source).text =
-            activity.getString(
-                R.string.settings_audio_summary,
-                presentation.audioSourceText,
-                optionalPermission.bluetoothStatusText
-            )
-        pageContainer.findViewById<TextView>(R.id.settings_product_state).text =
-            activity.getString(R.string.settings_state_summary, presentation.primaryText)
-        pageContainer.findViewById<TextView>(R.id.settings_attempt_facts).text =
-            activity.getString(
-                R.string.settings_attempt_summary,
-                presentation.plannedTransportText,
-                presentation.connectedTransportText,
-                presentation.webRtcText
-            )
-        pageContainer.findViewById<TextView>(R.id.settings_discovery_candidates).text =
-            activity.getString(
-                R.string.settings_discovery_candidates_summary,
-                discoveryCandidateSummary(presences)
-            )
-        pageContainer.findViewById<TextView>(R.id.settings_device_status_summary).text =
-            activity.getString(
-                R.string.settings_device_status_summary,
-                presentation.audioSourceText,
-                optionalPermission.bluetoothStatusText,
-                presentation.primaryText,
-                presentation.connectedTransportText
-            )
-        pageContainer.findViewById<TextView>(R.id.settings_optional_permission_notice).setOptionalText(
-            optionalPermission.noticeText
+        settingsUiState.value = SettingsScreenUiState(
+            nickname = settingsNicknameDraft,
+            nicknameFeedback = settingsUiState.value.nicknameFeedback,
+            audioSource = activity.getString(R.string.settings_audio_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText),
+            productState = activity.getString(R.string.settings_state_summary, presentation.primaryText),
+            attemptFacts = activity.getString(R.string.settings_attempt_summary, presentation.plannedTransportText, presentation.connectedTransportText, presentation.webRtcText),
+            discoveryCandidates = activity.getString(R.string.settings_discovery_candidates_summary, discoveryCandidateSummary(presences)),
+            deviceStatus = activity.getString(R.string.settings_device_status_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText, presentation.primaryText, presentation.connectedTransportText),
+            optionalPermissionNotice = optionalPermission.noticeText,
+            showOptionalPermissionCta = optionalPermission.showGrantCta,
+            version = activity.getString(R.string.settings_version_summary, currentVersionName())
         )
-        pageContainer.findViewById<Button>(R.id.settings_optional_permission_button).visibility =
-            if (optionalPermission.showGrantCta) View.VISIBLE else View.GONE
-        pageContainer.findViewById<TextView>(R.id.settings_version_text).text =
-            activity.getString(R.string.settings_version_summary, currentVersionName())
     }
 
     private fun saveNickname() {
-        val input = pageContainer.findViewById<EditText>(R.id.settings_nickname_input).text?.toString().orEmpty()
+        saveNicknameValue(settingsNicknameDraft)
+    }
+
+    private fun saveNicknameValue(input: String) {
         settingsNicknameDraft = input
         when (val validation = validateNickname(input)) {
             is NicknameValidation.Invalid -> {
-                pageContainer.findViewById<TextView>(R.id.settings_nickname_feedback).text =
-                    validation.message
+                settingsUiState.value = settingsUiState.value.copy(nickname = input, nicknameFeedback = validation.message)
             }
             is NicknameValidation.Valid -> {
                 val saved = onSaveRiderName(validation.value)
-                pageContainer.findViewById<TextView>(R.id.settings_nickname_feedback).text =
-                    nicknameSaveFeedback(saved, productState)
+                settingsUiState.value = settingsUiState.value.copy(
+                    nickname = if (saved) validation.value else input,
+                    nicknameFeedback = nicknameSaveFeedback(saved, productState)
+                )
                 if (saved) {
                     settingsNicknameDraft = validation.value
-                    pageContainer.findViewById<EditText>(R.id.settings_nickname_input).apply {
-                        setText(validation.value)
-                        setSelection(validation.value.length)
-                    }
                 }
             }
         }
     }
 
     private fun bindLogs() {
-        constrainWidth(R.id.logs_content)
-        pageContainer.findViewById<TextView>(R.id.logs_text).movementMethod =
-            ScrollingMovementMethod.getInstance()
-        pageContainer.findViewById<Button>(R.id.logs_back_button).setOnClickListener {
-            showPage(MainRoute.SETTINGS)
-        }
-        pageContainer.findViewById<Button>(R.id.logs_close_button).setOnClickListener {
-            showPage(MainRoute.SETTINGS)
-        }
-        pageContainer.findViewById<Button>(R.id.logs_copy_button).setOnClickListener {
-            copyLogs()
-        }
+        // Logs is rendered by Compose; clipboard ownership remains in MainScreen.
     }
 
     private fun renderLogs() {
         val snapshot = logBuffer.snapshot()
-        pageContainer.findViewById<TextView>(R.id.logs_scope_text).text = LOGS_SCOPE_TEXT
-        pageContainer.findViewById<TextView>(R.id.logs_text).text =
-            copyableLogText(snapshot).ifBlank { activity.getString(R.string.logs_empty) }
-        pageContainer.findViewById<Button>(R.id.logs_copy_button).isEnabled = snapshot.isNotEmpty()
+        logsUiState.value = LogsScreenUiState(
+            scopeText = LOGS_SCOPE_TEXT,
+            logText = copyableLogText(snapshot).ifBlank { activity.getString(R.string.logs_empty) },
+            copyEnabled = snapshot.isNotEmpty()
+        )
     }
 
     private fun copyLogs() {
@@ -1094,7 +979,6 @@ internal class MainScreen(
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("MotoCom logs", copyableLogText(snapshot)))
         Toast.makeText(activity, LOGS_COPIED_FEEDBACK, Toast.LENGTH_SHORT).show()
-        pageContainer.findViewById<TextView>(R.id.logs_text).announceForAccessibility(LOGS_COPIED_FEEDBACK)
     }
 
     private fun showPlaceholderDialog() {
@@ -1136,12 +1020,6 @@ internal class MainScreen(
     private fun saveCurrentPageScrollAndDraft() {
         currentScroll?.let {
             saveRouteScrollPosition(scrollPositions, currentRoute, it.scrollY)
-        }
-        if (currentRoute == MainRoute.SETTINGS) {
-            pageContainer.findViewById<EditText?>(R.id.settings_nickname_input)
-                ?.text
-                ?.toString()
-                ?.let { settingsNicknameDraft = it }
         }
     }
 
@@ -1275,27 +1153,8 @@ internal class MainScreen(
         navigationPanel.layoutParams = params
     }
 
-    private fun text(value: String, sizeSp: Float, bold: Boolean): TextView =
-        TextView(activity).apply {
-            text = value
-            textSize = sizeSp
-            setTextColor(activity.getColorCompat(if (bold) R.color.motocom_text_primary else R.color.motocom_text_secondary))
-            if (bold) setTypeface(Typeface.DEFAULT_BOLD)
-        }
-
     private fun animationsEnabled(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ValueAnimator.areAnimatorsEnabled()
-
-    private fun View.withOuterTopMargin(top: Int): View = apply {
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).withTop(top)
-    }
-
-    private fun LinearLayout.LayoutParams.withTop(top: Int): LinearLayout.LayoutParams = apply {
-        topMargin = top
-    }
 
     private fun TextView.setOptionalText(value: String?) {
         text = value.orEmpty()

@@ -5,10 +5,7 @@ import android.content.ComponentName
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.Looper
-import android.widget.EditText
-import android.widget.TextView
 import android.view.View
-import android.view.ViewGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -24,14 +21,65 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MainActivityRobolectricTest {
+    private fun clickHome(activity: MainActivity, tag: String) {
+        val screen = screen(activity)
+        when (tag) {
+            "home_settings_button" -> invokeShowPage(screen, MainRoute.SETTINGS)
+            "home_menu_button" -> invokePrivate(screen, "showNavigation")
+            "home_mute_button" -> invokePrivate(screen, "showPlaceholderDialog")
+            else -> error("Activity test has no direct Home action mapping for $tag")
+        }
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun homeText(activity: MainActivity, tag: String): String {
+        val state = screen(activity)::class.java.getDeclaredField("homeUiState").apply {
+            isAccessible = true
+        }.get(screen(activity)) as androidx.compose.runtime.MutableState<*>
+        val value = state.value as HomeScreenUiState
+        return when (tag) {
+            "home_audio_source" -> value.audioSourceText
+            "home_bluetooth_pill" -> value.bluetoothText
+            "home_status_supplemental" -> value.supplementalText.orEmpty()
+            else -> error("Activity test has no Home text mapping for $tag")
+        }
+    }
+
+    private fun screen(activity: MainActivity): MainScreen =
+        MainActivity::class.java.getDeclaredField("screen").apply {
+            isAccessible = true
+        }.get(activity) as MainScreen
+
+    private fun invokeShowPage(screen: MainScreen, route: MainRoute) =
+        MainScreen::class.java.getDeclaredMethod("showPage", MainRoute::class.java).apply {
+            isAccessible = true
+        }.invoke(screen, route)
+
+    private fun invokePrivate(screen: MainScreen, name: String) =
+        MainScreen::class.java.getDeclaredMethod(name).apply {
+            isAccessible = true
+        }.invoke(screen)
+
+    private fun stateValue(screen: MainScreen, fieldName: String): Any? =
+        (MainScreen::class.java.getDeclaredField(fieldName).apply {
+            isAccessible = true
+        }.get(screen) as androidx.compose.runtime.MutableState<*>).value
+
+    private fun setPrivateString(screen: MainScreen, fieldName: String, value: String) {
+        MainScreen::class.java.getDeclaredField(fieldName).apply {
+            isAccessible = true
+            set(screen, value)
+        }
+    }
+
     @Test
     fun activityOwnsXmlRoutesAndRestoresUiStateBeforeServiceStart() {
         val firstController = Robolectric.buildActivity(MainActivity::class.java).create()
         val first = firstController.get()
 
-        first.findViewById<View>(R.id.home_settings_button).performClick()
-        val draft = first.findViewById<EditText>(R.id.settings_nickname_input)
-        draft.setText("Activity Draft")
+        clickHome(first, "home_settings_button")
+        setPrivateString(screen(first), "settingsNicknameDraft", "Activity Draft")
+        invokePrivate(screen(first), "renderSettings")
 
         val savedState = Bundle()
         firstController.saveInstanceState(savedState)
@@ -44,7 +92,7 @@ class MainActivityRobolectricTest {
         assertNotNull(recreated.findViewById<View>(R.id.settings_scroll))
         assertEquals(
             "Activity Draft",
-            recreated.findViewById<EditText>(R.id.settings_nickname_input).text.toString()
+            (stateValue(screen(recreated), "settingsUiState") as SettingsScreenUiState).nickname
         )
         assertTrue(recreated.findViewById<View>(R.id.home_scroll) == null)
     }
@@ -122,7 +170,7 @@ class MainActivityRobolectricTest {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
 
-        activity.findViewById<View>(R.id.home_mute_button).performClick()
+        clickHome(activity, "home_mute_button")
         val placeholder = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("placeholder dialog was not shown")
         assertTrue(placeholder.isShowing)
@@ -174,19 +222,19 @@ class MainActivityRobolectricTest {
         activity.onRemoteRiderIdentified("回放的远端骑士")
         shadowOf(Looper.getMainLooper()).idle()
 
-        activity.findViewById<View>(R.id.home_settings_button).performClick()
-        activity.findViewById<View>(R.id.settings_logs_button).performClick()
+        clickHome(activity, "home_settings_button")
+        invokeShowPage(screen(activity), MainRoute.LOGS)
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(
             activity.getString(R.string.logs_empty),
-            activity.findViewById<android.widget.TextView>(R.id.logs_text).text.toString()
+            (stateValue(screen(activity), "logsUiState") as LogsScreenUiState).logText
         )
 
         setPrivateBoolean(activity, "replayingServiceSnapshot", false)
         activity.onStatusChanged("实时服务状态", running = true)
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(
-            activity.findViewById<android.widget.TextView>(R.id.logs_text).text
+            (stateValue(screen(activity), "logsUiState") as LogsScreenUiState).logText
                 .toString()
                 .contains("实时服务状态")
         )
@@ -206,7 +254,7 @@ class MainActivityRobolectricTest {
 
         assertEquals(
             BLUETOOTH_PERMISSION_UNAVAILABLE,
-            activity.findViewById<TextView>(R.id.home_audio_source).text.toString()
+            homeText(activity, "home_audio_source")
         )
 
         val connection = MainActivity::class.java.getDeclaredField("serviceConnection").apply {
@@ -219,19 +267,21 @@ class MainActivityRobolectricTest {
 
         assertEquals(
             "当前音频源：待机",
-            activity.findViewById<TextView>(R.id.home_audio_source).text.toString()
+            homeText(activity, "home_audio_source")
         )
         assertFalse(
-            activity.findViewById<TextView>(R.id.home_bluetooth_pill).text
-                .toString()
+            homeText(activity, "home_bluetooth_pill")
                 .contains(BLUETOOTH_CONNECTED_TEXT)
         )
 
-        activity.findViewById<View>(R.id.home_menu_button).performClick()
-        activity.findViewById<View>(R.id.nav_discover_button).performClick()
+        clickHome(activity, "home_menu_button")
+        invokeShowPage(screen(activity), MainRoute.DISCOVER)
         assertEquals(
             0,
-            activity.findViewById<ViewGroup>(R.id.discover_nearby_container).childCount
+            (stateValue(screen(activity), "discoverUiState") as DiscoverScreenUiState)
+                .presentation
+                .cards
+                .size
         )
         controller.destroy()
     }
@@ -242,7 +292,10 @@ class MainActivityRobolectricTest {
         val activity = controller.get()
         setPrivateBoolean(activity, "bindingRegistered", true)
         setPrivateBoolean(activity, "serviceConnected", false)
-        activity.findViewById<TextView>(R.id.home_status_supplemental).text = "保留当前状态"
+        setPrivateBoolean(activity, "serviceConnected", true)
+        activity.onStatusChanged("保留当前状态", running = false)
+        setPrivateBoolean(activity, "serviceConnected", false)
+        shadowOf(Looper.getMainLooper()).idle()
 
         val connection = MainActivity::class.java.getDeclaredField("serviceConnection").apply {
             isAccessible = true
@@ -253,7 +306,7 @@ class MainActivityRobolectricTest {
 
         assertEquals(
             "保留当前状态",
-            activity.findViewById<TextView>(R.id.home_status_supplemental).text.toString()
+            homeText(activity, "home_status_supplemental")
         )
         controller.destroy()
     }
@@ -263,7 +316,11 @@ class MainActivityRobolectricTest {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
         controller.stop()
-        val before = activity.findViewById<TextView>(R.id.home_status_supplemental).text.toString()
+        setPrivateBoolean(activity, "serviceConnected", true)
+        activity.onStatusChanged("保留当前状态", running = false)
+        setPrivateBoolean(activity, "serviceConnected", false)
+        shadowOf(Looper.getMainLooper()).idle()
+        val before = homeText(activity, "home_status_supplemental")
 
         val connection = MainActivity::class.java.getDeclaredField("serviceConnection").apply {
             isAccessible = true
@@ -274,7 +331,7 @@ class MainActivityRobolectricTest {
 
         assertEquals(
             before,
-            activity.findViewById<TextView>(R.id.home_status_supplemental).text.toString()
+            homeText(activity, "home_status_supplemental")
         )
         controller.destroy()
     }
