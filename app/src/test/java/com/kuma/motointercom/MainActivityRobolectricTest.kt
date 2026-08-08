@@ -26,7 +26,6 @@ class MainActivityRobolectricTest {
         when (tag) {
             "home_settings_button" -> invokeShowPage(screen, MainRoute.SETTINGS)
             "home_menu_button" -> invokePrivate(screen, "showNavigation")
-            "home_mute_button" -> invokePrivate(screen, "showPlaceholderDialog")
             else -> error("Activity test has no direct Home action mapping for $tag")
         }
         shadowOf(Looper.getMainLooper()).idle()
@@ -95,6 +94,26 @@ class MainActivityRobolectricTest {
             (stateValue(screen(recreated), "settingsUiState") as SettingsScreenUiState).nickname
         )
         assertTrue(recreated.findViewById<View>(R.id.home_scroll) == null)
+    }
+
+    @Test
+    fun activityLoadsPersistedVoxSettingsBeforeAnyServiceReplay() {
+        val application = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val preferences = AudioControlPreferences(application)
+        preferences.saveVoxSettings(
+            AudioControlSettings(voxEnabled = false, voxSensitivity = 70)
+        )
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+
+        val home = stateValue(screen(activity), "homeUiState") as HomeScreenUiState
+        assertEquals("DISABLED", home.voxText)
+        assertEquals(70, home.voxSensitivity)
+        assertFalse(home.voxEnabled)
+
+        controller.destroy()
+        preferences.saveVoxSettings(AudioControlSettings())
     }
 
     @Test
@@ -170,7 +189,7 @@ class MainActivityRobolectricTest {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
 
-        clickHome(activity, "home_mute_button")
+        invokePrivate(screen(activity), "showPlaceholderDialog")
         val placeholder = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("placeholder dialog was not shown")
         assertTrue(placeholder.isShowing)

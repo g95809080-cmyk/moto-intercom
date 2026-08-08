@@ -1,9 +1,9 @@
 package com.kuma.motointercom
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +23,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,7 +33,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.testTag
+import kotlin.math.roundToInt
 
 internal data class SettingsScreenUiState(
     val nickname: String,
@@ -60,7 +62,10 @@ internal data class SettingsScreenUiState(
     val deviceStatus: String,
     val optionalPermissionNotice: String?,
     val showOptionalPermissionCta: Boolean,
-    val version: String
+    val version: String,
+    val voxEnabled: Boolean = true,
+    val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
+    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE
 )
 
 @Composable
@@ -73,7 +78,9 @@ internal fun MotoComSettingsScreen(
     onLogs: () -> Unit,
     onAbout: () -> Unit,
     onPlaceholder: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onVoxEnabledChanged: (Boolean) -> Unit = {},
+    onVoxSensitivityChanged: (Int) -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -149,34 +156,16 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.section_vox))
         SettingsPanel {
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_vox_switch_developing),
-                tag = "settings_vox_button",
-                description = stringResource(R.string.vox_developing_description),
-                onClick = onPlaceholder,
-                icon = R.drawable.ic_mic_24
-            ) {
-                VisualSwitch()
-            }
-            SettingsPlaceholderSlider(
-                text = stringResource(R.string.settings_vox_sensitivity_developing),
-                tag = "settings_vox_sensitivity_button",
-                description = stringResource(R.string.vox_sensitivity_developing_description),
-                onClick = onPlaceholder
+            SettingsVoxSwitchRow(
+                checked = state.voxEnabled,
+                onCheckedChange = onVoxEnabledChanged
             )
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_vox_pending_developing),
-                tag = "settings_vox_state_button",
-                description = stringResource(R.string.vox_state_developing_description),
-                onClick = onPlaceholder,
-                icon = R.drawable.ic_info_24
-            ) {
-                Text(
-                    state.productState,
-                    color = colorResource(R.color.motocom_text_muted_accessible),
-                    fontSize = 12.sp
-                )
-            }
+            SettingsVoxSlider(
+                value = state.voxSensitivity,
+                enabled = state.voxEnabled,
+                onValueChange = onVoxSensitivityChanged
+            )
+            SettingsVoxStateRow(state.voxState)
         }
 
         SettingsSectionLabel(stringResource(R.string.section_audio_output))
@@ -432,21 +421,52 @@ private fun SettingsPlaceholderRow(
 }
 
 @Composable
-private fun SettingsPlaceholderSlider(
-    text: String,
-    tag: String,
-    description: String,
-    onClick: (String) -> Unit
+private fun SettingsVoxSwitchRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
 ) {
-    Column(
-        Modifier
+    val description = stringResource(R.string.settings_vox_switch_description)
+    Row(
+        modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 64.dp)
-            .clickable(role = Role.Button) { onClick(description) }
-            .semantics { contentDescription = description }
-            .testTag(tag)
-            .padding(vertical = 2.dp)
+            .defaultMinSize(minHeight = 48.dp)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .semantics {
+                contentDescription = description
+            }
+            .testTag("settings_vox_button"),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Icon(
+            painterResource(R.drawable.ic_mic_24),
+            null,
+            Modifier.size(21.dp),
+            tint = colorResource(R.color.motocom_text_muted_accessible)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            stringResource(R.string.settings_vox_switch),
+            Modifier.weight(1f),
+            color = colorResource(R.color.motocom_text_primary),
+            fontSize = 14.sp
+        )
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun SettingsVoxSlider(
+    value: Int,
+    enabled: Boolean,
+    onValueChange: (Int) -> Unit
+) {
+    val normalized = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+    val description = stringResource(R.string.settings_vox_sensitivity_description, normalized)
+    Column(Modifier.fillMaxWidth().padding(top = 2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 painterResource(R.drawable.ic_tune_24),
@@ -455,37 +475,26 @@ private fun SettingsPlaceholderSlider(
                 tint = colorResource(R.color.motocom_text_muted_accessible)
             )
             Spacer(Modifier.width(10.dp))
-            Text(text, color = colorResource(R.color.motocom_text_primary), fontSize = 14.sp)
-        }
-        SettingsSliderVisual()
-    }
-}
-
-@Composable
-private fun SettingsSliderVisual() {
-    val trackColor = colorResource(R.color.motocom_border)
-    val accentColor = colorResource(R.color.motocom_accent_green)
-    Column(Modifier.fillMaxWidth().padding(start = 31.dp, top = 3.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(20.dp)) {
-            val y = size.height / 2f
-            val start = 0f
-            val end = size.width
-            drawLine(
-                color = trackColor,
-                start = androidx.compose.ui.geometry.Offset(start, y),
-                end = androidx.compose.ui.geometry.Offset(end, y),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round
+            Text(
+                stringResource(R.string.settings_vox_sensitivity, normalized),
+                color = colorResource(R.color.motocom_text_primary),
+                fontSize = 14.sp
             )
-            drawLine(
-                color = accentColor,
-                start = androidx.compose.ui.geometry.Offset(start, y),
-                end = androidx.compose.ui.geometry.Offset(end * 0.52f, y),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawCircle(accentColor, radius = 5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(end * 0.52f, y))
         }
+        Slider(
+            value = normalized.toFloat(),
+            onValueChange = { onValueChange(it.roundToInt()) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 31.dp)
+                .semantics {
+                    contentDescription = description
+                }
+                .testTag("settings_vox_sensitivity_button"),
+            enabled = enabled,
+            valueRange = MIN_VOX_SENSITIVITY.toFloat()..MAX_VOX_SENSITIVITY.toFloat(),
+            steps = 9
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("低", color = colorResource(R.color.motocom_text_secondary), fontSize = 11.sp)
             Text("中", color = colorResource(R.color.motocom_text_secondary), fontSize = 11.sp)
@@ -495,16 +504,36 @@ private fun SettingsSliderVisual() {
 }
 
 @Composable
-private fun VisualSwitch() {
-    Box(
-        Modifier
-            .size(width = 42.dp, height = 25.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(colorResource(R.color.motocom_accent_green))
-            .padding(3.dp),
-        contentAlignment = Alignment.CenterEnd
+private fun SettingsVoxStateRow(state: VoxRuntimeState) {
+    val description = stringResource(R.string.settings_vox_state_description, state.name)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+            .semantics {
+                contentDescription = description
+            }
+            .testTag("settings_vox_state_button"),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(19.dp).clip(CircleShape).background(Color.White))
+        Icon(
+            painterResource(R.drawable.ic_info_24),
+            null,
+            Modifier.size(21.dp),
+            tint = colorResource(R.color.motocom_text_muted_accessible)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            stringResource(R.string.settings_vox_state),
+            Modifier.weight(1f),
+            color = colorResource(R.color.motocom_text_primary),
+            fontSize = 14.sp
+        )
+        Text(
+            state.name,
+            color = colorResource(R.color.motocom_text_muted_accessible),
+            fontSize = 12.sp
+        )
     }
 }
 

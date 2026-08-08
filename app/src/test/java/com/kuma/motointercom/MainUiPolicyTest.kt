@@ -317,7 +317,6 @@ class MainUiPolicyTest {
         assertEquals("已连接", presentations[5].webRtcText)
         assertEquals("未连接", presentations[6].webRtcText)
         assertTrue(presentations[0].bluetoothActive)
-        assertEquals(PLACEHOLDER_VOX_STATUS, presentations[5].voxText)
         assertEquals("supplement", presentations[0].supplementalText)
         assertEquals("点击下方启动摩声", presentations[0].primaryText)
     }

@@ -113,6 +113,7 @@ class IntercomService : Service() {
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
         fun onPresencesChanged(presences: List<RiderPresence>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
+        fun onAudioControlsChanged(snapshot: AudioControlSnapshot) = Unit
         fun onLog(message: String)
         fun onToast(message: String) = Unit
         fun onRemoteRiderIdentified(name: String) = Unit
@@ -224,6 +225,8 @@ class IntercomService : Service() {
     private var bluetoothReady = false
     private var physicalLinkReady = false
     private var mediaConnected = false
+    private var audioControls = AudioControlSettings()
+    private var voxRuntimeState = VoxRuntimeState.IDLE
     private var running = false
     private var lastStatus = READY_STATUS
     private var audioSourceStatus = AUDIO_STANDBY_STATUS
@@ -239,6 +242,10 @@ class IntercomService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        idleAudioControlSnapshot(AudioControlPreferences(this).load()).let { snapshot ->
+            audioControls = snapshot.controls
+            voxRuntimeState = snapshot.voxState
+        }
         identityStore = DataStoreLocalIdentityStore(this)
         pairingRepository = RoomPairingRepository(PairingDatabase.getInstance(this).pairingDao())
         orchestrator = SessionOrchestrator(
@@ -326,6 +333,7 @@ class IntercomService : Service() {
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
+        listener?.onAudioControlsChanged(currentAudioControlSnapshot())
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
         listener?.let(::replayActiveIncomingConfirmation)
@@ -348,6 +356,83 @@ class IntercomService : Service() {
             appInForeground = foreground
             publishConfirmationAvailability()
         }
+    }
+
+    internal fun setMuted(muted: Boolean) {
+        dispatchOnMain {
+            applyAudioControls(audioControls.copy(muted = running && muted))
+        }
+    }
+
+    internal fun setVoxSettings(voxEnabled: Boolean, voxSensitivity: Int) {
+        dispatchOnMain {
+            applyAudioControls(
+                audioControls.copy(
+                    voxEnabled = voxEnabled,
+                    voxSensitivity = voxSensitivity
+                )
+            )
+        }
+    }
+
+    private fun applyAudioControls(requested: AudioControlSettings) {
+        val next = requested.normalized().let {
+            if (running) it else it.copy(muted = false)
+        }
+        if (next == audioControls) return
+        val previous = audioControls
+        try {
+            audioSessionController?.updateAudioControls(next)
+        } catch (error: RuntimeException) {
+            handleError(error)
+            return
+        }
+        audioControls = next
+        when {
+            !running -> {
+                voxRuntimeState = if (next.voxEnabled) {
+                    VoxRuntimeState.IDLE
+                } else {
+                    VoxRuntimeState.DISABLED
+                }
+                publishAudioControls()
+            }
+            next.muted -> {
+                voxRuntimeState = VoxRuntimeState.MUTED
+                publishAudioControls()
+            }
+            !next.voxEnabled -> {
+                voxRuntimeState = VoxRuntimeState.DISABLED
+                publishAudioControls()
+            }
+            previous.voxEnabled != next.voxEnabled ||
+                previous.voxSensitivity != next.voxSensitivity -> {
+                // RiderAudioEngine synchronously replaces its gate with LISTENING before returning.
+                voxRuntimeState = VoxRuntimeState.LISTENING
+                publishAudioControls()
+            }
+            previous.muted == next.muted -> publishAudioControls()
+            // Unmute waits for RiderAudioEngine to report its current gate state.
+        }
+    }
+
+    private fun onVoxStateChanged(
+        runtimeSessionId: RuntimeSessionId,
+        callbackControls: AudioControlSettings,
+        state: VoxRuntimeState
+    ) {
+        postForRuntime(runtimeSessionId) {
+            if (callbackControls != audioControls) return@postForRuntime
+            voxRuntimeState = state
+            publishAudioControls()
+        }
+    }
+
+    private fun currentAudioControlSnapshot(): AudioControlSnapshot =
+        AudioControlSnapshot(audioControls, voxRuntimeState)
+
+    private fun publishAudioControls() {
+        listener?.onAudioControlsChanged(currentAudioControlSnapshot())
     }
 
     internal fun refreshConfirmationAvailability() {
@@ -445,6 +530,11 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
+        idleAudioControlSnapshot(audioControls).let { snapshot ->
+            audioControls = snapshot.controls
+            voxRuntimeState = snapshot.voxState
+        }
+        publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
         remoteRiderName = null
@@ -513,6 +603,10 @@ class IntercomService : Service() {
             onError = { error -> postForRuntime(runtimeSessionId) { handleError(error) } },
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
+            },
+            initialAudioControls = audioControls,
+            onVoxStateChanged = { callbackControls, state ->
+                onVoxStateChanged(runtimeSessionId, callbackControls, state)
             }
         )
     }
@@ -1312,6 +1406,11 @@ class IntercomService : Service() {
         }
         intercomManager = null
         audioSessionController = null
+        idleAudioControlSnapshot(audioControls).let { snapshot ->
+            audioControls = snapshot.controls
+            voxRuntimeState = snapshot.voxState
+        }
+        publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false

@@ -82,7 +82,6 @@ internal data class HomePresentation(
     val webRtcText: String,
     val audioSourceText: String,
     val bluetoothActive: Boolean,
-    val voxText: String,
     val supplementalText: String?
 )
 
@@ -142,7 +141,6 @@ internal fun homePresentation(
         },
         audioSourceText = audioSourceText,
         bluetoothActive = bluetoothActive,
-        voxText = PLACEHOLDER_VOX_STATUS,
         supplementalText = supplementalText
     )
 }
@@ -471,7 +469,6 @@ internal fun constrainedPanelWidth(
 internal const val PLACEHOLDER_DIALOG_TITLE = "功能开发中"
 internal const val PLACEHOLDER_DIALOG_MESSAGE = "该功能还没做好，暂时无法使用。"
 internal const val PLACEHOLDER_DIALOG_BUTTON = "确定"
-internal const val PLACEHOLDER_VOX_STATUS = "状态接口待接入"
 internal const val LOGS_SCOPE_TEXT = "仅显示本次界面会话日志"
 internal const val LOGS_COPIED_FEEDBACK = "日志已复制"
 internal const val NICKNAME_SAVE_FAILED_FEEDBACK = "保存失败，请重试"

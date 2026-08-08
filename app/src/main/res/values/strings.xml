@@ -53,16 +53,22 @@
     <string name="settings_button_description">打开设置</string>
     <string name="audio_button_description">打开音频设置</string>
     <string name="home_mute_label">静音</string>
+    <string name="home_unmute_label">已静音</string>
     <string name="home_audio_label">音频设置</string>
-    <string name="mute_developing_description">静音，功能开发中</string>
+    <string name="mute_description">静音麦克风</string>
+    <string name="unmute_description">取消麦克风静音</string>
+    <string name="mute_unavailable_description">静音麦克风，启动对讲后可用</string>
     <string name="help_developing_description">帮助与反馈，功能开发中</string>
     <string name="rescan_developing_description">重新扫描，功能开发中</string>
     <string name="audio_route_developing_description">手动选择蓝牙耳机，功能开发中</string>
     <string name="audio_earpiece_developing_description">手动切换手机听筒，功能开发中</string>
     <string name="audio_speaker_developing_description">手动切换手机外放，功能开发中</string>
-    <string name="vox_developing_description">VOX 自动开麦，功能开发中</string>
-    <string name="vox_sensitivity_developing_description">VOX 灵敏度滑块，功能开发中</string>
-    <string name="vox_state_developing_description">VOX 精确状态，功能开发中</string>
+    <string name="vox_settings_description">打开 VOX 设置</string>
+    <string name="home_vox_card_description">VOX 当前状态：%1$s，灵敏度 %2$d，打开 VOX 设置</string>
+    <string name="settings_vox_switch_description">VOX 自动开麦开关</string>
+    <string name="settings_vox_sensitivity_description">VOX 灵敏度：%1$d</string>
+    <string name="settings_vox_state_description">VOX 当前精确状态：%1$s</string>
+    <string name="vox_settings_save_failed">VOX 设置保存失败</string>
     <string name="reconnect_developing_description">自动重连，功能开发中</string>
     <string name="section_audio_output">音频输出</string>
     <string name="section_vox">VOX 自动开麦</string>
@@ -79,9 +85,9 @@
     <string name="settings_audio_bluetooth_developing">蓝牙耳机（推荐）</string>
     <string name="settings_audio_earpiece_developing">手机听筒</string>
     <string name="settings_audio_speaker_developing">手机外放</string>
-    <string name="settings_vox_switch_developing">VOX 开关</string>
-    <string name="settings_vox_sensitivity_developing">灵敏度</string>
-    <string name="settings_vox_pending_developing">精确状态</string>
+    <string name="settings_vox_switch">VOX 自动开麦</string>
+    <string name="settings_vox_sensitivity">灵敏度：%1$d</string>
+    <string name="settings_vox_state">精确状态</string>
     <string name="settings_connection_device">连接方式</string>
     <string name="settings_transport_policy">自动选择 LAN / Wi-Fi Direct</string>
     <string name="settings_device_status">设备状态</string>
@@ -101,7 +107,6 @@
     <string name="home_webrtc_state">WebRTC：%1$s</string>
     <string name="home_bluetooth_state">蓝牙：%1$s</string>
     <string name="home_vox_pill">VOX：%1$s</string>
-    <string name="home_vox_developing">%1$s · 开发中</string>
     <string name="settings_audio_summary">%1$s；蓝牙：%2$s</string>
     <string name="settings_state_summary">当前状态：%1$s</string>
     <string name="settings_attempt_summary">计划通道：%1$s；当前通道：%2$s；WebRTC：%3$s</string>
@@ -109,5 +114,4 @@
     <string name="home_vox_listening_placeholder">LISTENING</string>
     <string name="home_vox_open_placeholder">OPEN</string>
     <string name="home_vox_hangover_placeholder">HANGOVER</string>
-    <string name="home_vox_placeholder_note">精确 VOX 状态接口待接入，以下仅保留视觉结构。</string>
 </resources>

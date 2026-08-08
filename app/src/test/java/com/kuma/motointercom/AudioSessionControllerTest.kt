@@ -97,6 +97,21 @@ class AudioSessionControllerTest {
         controller.close()
     }
 
+    @Test
+    fun audioControlsAreAppliedToTheOwnedEngineAndRejectedAfterClose() {
+        val engine = FakeEngine()
+        val controller = AudioSessionController(engine, RecordingCloseable("route"))
+        val controls = AudioControlSettings(muted = true, voxSensitivity = 75)
+
+        controller.updateAudioControls(controls)
+
+        assertEquals(listOf(controls), engine.controlUpdates)
+        controller.close()
+        assertThrows(IllegalStateException::class.java) {
+            controller.updateAudioControls(AudioControlSettings())
+        }
+    }
+
     private fun callbacks(
         states: MutableList<PeerConnection.PeerConnectionState> = mutableListOf(),
         isCurrent: () -> Boolean = { true }
@@ -113,6 +128,11 @@ class AudioSessionControllerTest {
     ) : RiderMediaEngine {
         var openCount = 0
         var closeCount = 0
+        val controlUpdates = mutableListOf<AudioControlSettings>()
+
+        override fun updateAudioControls(controls: AudioControlSettings) {
+            controlUpdates += controls
+        }
 
         override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
             openCount++

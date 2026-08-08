@@ -34,6 +34,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var incomingConfirmationNonce: String? = null
     private var platformBackCallback: Any? = null
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    private val audioControlPreferences by lazy { AudioControlPreferences(this) }
+    private var preferredAudioControls = AudioControlSettings()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -45,6 +47,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             val local = service as IntercomService.LocalBinder
             intercomService = local.service()
             serviceConnected = true
+            intercomService?.setVoxSettings(
+                preferredAudioControls.voxEnabled,
+                preferredAudioControls.voxSensitivity
+            )
             replayingServiceSnapshot = true
             try {
                 intercomService?.setListener(this@MainActivity)
@@ -71,6 +77,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        preferredAudioControls = audioControlPreferences.load()
         screen = MainScreen(
             activity = this,
             initialRiderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty(),
@@ -126,6 +133,23 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             },
             onOpenPermissionSettings = {
                 openAppPermissionSettings()
+            },
+            initialAudioControls = idleAudioControlSnapshot(preferredAudioControls),
+            onSetMuted = { muted ->
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                } else {
+                    service.setMuted(muted)
+                }
+            },
+            onSetVoxEnabled = { enabled ->
+                savePreferredVoxSettings(preferredAudioControls.copy(voxEnabled = enabled))
+            },
+            onSetVoxSensitivity = { sensitivity ->
+                savePreferredVoxSettings(
+                    preferredAudioControls.copy(voxSensitivity = sensitivity)
+                )
             }
         )
         setContentView(screen.root)
@@ -260,6 +284,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onAudioControlsChanged(snapshot: AudioControlSnapshot) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            preferredAudioControls = snapshot.controls.copy(muted = false)
+            screen.setAudioControls(snapshot)
+        }
+    }
+
     override fun onLog(message: String) {
         runOnUiThread {
             if (serviceConnected) screen.appendLog(message)
@@ -316,6 +348,21 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 null
             }
         )
+    }
+
+    private fun savePreferredVoxSettings(requested: AudioControlSettings) {
+        val next = requested.normalized().copy(muted = false)
+        if (!audioControlPreferences.saveVoxSettings(next)) {
+            Toast.makeText(this, R.string.vox_settings_save_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        preferredAudioControls = next
+        val service = intercomService
+        if (service == null) {
+            screen.setAudioControls(idleAudioControlSnapshot(next))
+        } else {
+            service.setVoxSettings(next.voxEnabled, next.voxSensitivity)
+        }
     }
 
     private fun requestCorePermissions() {

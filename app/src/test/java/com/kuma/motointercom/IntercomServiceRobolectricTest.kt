@@ -1,7 +1,9 @@
 package com.kuma.motointercom
 
 import android.app.Notification
+import android.content.Context
 import android.os.SystemClock
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +16,87 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class IntercomServiceRobolectricTest {
+    @Test
+    fun listenerReplaysPersistedVoxSettingsWithoutPersistingMute() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        AudioControlPreferences(context).saveVoxSettings(
+            AudioControlSettings(muted = true, voxEnabled = false, voxSensitivity = 73)
+        )
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val snapshots = mutableListOf<AudioControlSnapshot>()
+
+        service.setListener(audioControlListener(snapshots))
+
+        assertEquals(
+            AudioControlSnapshot(
+                AudioControlSettings(muted = false, voxEnabled = false, voxSensitivity = 73),
+                VoxRuntimeState.DISABLED
+            ),
+            snapshots.last()
+        )
+        controller.destroy()
+    }
+
+    @Test
+    fun staleEngineControlSnapshotCannotOverwriteCurrentVoxState() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        AudioControlPreferences(context).saveVoxSettings(AudioControlSettings())
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val snapshots = mutableListOf<AudioControlSnapshot>()
+        val runtime = RuntimeSessionId("audio-controls-runtime")
+        setPrivate(service, "running", true)
+        setPrivate(service, "activeRuntimeSessionId", runtime.value)
+        service.setListener(audioControlListener(snapshots))
+        service.setVoxSettings(voxEnabled = true, voxSensitivity = 80)
+
+        invokeVoxState(
+            service,
+            runtime,
+            AudioControlSettings(voxEnabled = true, voxSensitivity = 50),
+            VoxRuntimeState.OPEN
+        )
+        assertEquals(80, snapshots.last().controls.voxSensitivity)
+        assertEquals(VoxRuntimeState.LISTENING, snapshots.last().voxState)
+
+        invokeVoxState(
+            service,
+            runtime,
+            AudioControlSettings(voxEnabled = true, voxSensitivity = 80),
+            VoxRuntimeState.OPEN
+        )
+        assertEquals(VoxRuntimeState.OPEN, snapshots.last().voxState)
+        controller.destroy()
+    }
+
+    @Test
+    fun stoppingRuntimeClearsTransientMuteButKeepsVoxSettings() {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        val snapshots = mutableListOf<AudioControlSnapshot>()
+        val runtime = RuntimeSessionId("muted-runtime")
+        setPrivate(service, "running", true)
+        setPrivate(service, "activeRuntimeSessionId", runtime.value)
+        service.setListener(audioControlListener(snapshots))
+        service.setVoxSettings(voxEnabled = true, voxSensitivity = 64)
+        service.setMuted(true)
+        assertEquals(VoxRuntimeState.MUTED, snapshots.last().voxState)
+
+        IntercomService::class.java.getDeclaredMethod("stopIntercom").apply {
+            isAccessible = true
+        }.invoke(service)
+
+        assertEquals(
+            AudioControlSnapshot(
+                AudioControlSettings(muted = false, voxEnabled = true, voxSensitivity = 64),
+                VoxRuntimeState.IDLE
+            ),
+            snapshots.last()
+        )
+        controller.destroy()
+    }
+
     @Test
     fun startupFailureIsReportedBeforeRuntimeIsStopped() {
         val events = mutableListOf<String>()
@@ -169,6 +252,37 @@ class IntercomServiceRobolectricTest {
         override fun onIncomingConfirmationCanceled(actionNonce: String) {
             canceled += actionNonce
         }
+    }
+
+    private fun audioControlListener(
+        snapshots: MutableList<AudioControlSnapshot>
+    ): IntercomService.Listener = object : IntercomService.Listener {
+        override fun onStatusChanged(status: String, running: Boolean) = Unit
+        override fun onAudioControlsChanged(snapshot: AudioControlSnapshot) {
+            snapshots += snapshot
+        }
+        override fun onLog(message: String) = Unit
+        override fun onError(message: String) = Unit
+    }
+
+    private fun setPrivate(service: IntercomService, fieldName: String, value: Any) {
+        IntercomService::class.java.getDeclaredField(fieldName).apply {
+            isAccessible = true
+            set(service, value)
+        }
+    }
+
+    private fun invokeVoxState(
+        service: IntercomService,
+        runtimeSessionId: RuntimeSessionId,
+        controls: AudioControlSettings,
+        state: VoxRuntimeState
+    ) {
+        IntercomService::class.java.declaredMethods.single {
+            it.name.startsWith("onVoxStateChanged") &&
+                it.parameterCount == 3 &&
+                !java.lang.reflect.Modifier.isStatic(it.modifiers)
+        }.apply { isAccessible = true }.invoke(service, runtimeSessionId.value, controls, state)
     }
 
     private fun setActiveIncomingPrompt(

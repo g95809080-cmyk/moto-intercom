@@ -31,6 +31,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
@@ -1022,7 +1023,7 @@ class MainScreenRobolectricTest {
                 homeIsEnabled("home_primary_button")
             )
             assertEquals(
-                "VOX：状态接口待接入",
+                "VOX：IDLE",
                 homeText("home_vox_pill")
             )
         }
@@ -1055,15 +1056,13 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun placeholderEntriesExposeStaticIconsWithoutChangingTheirTextContract() {
+    fun unfinishedEntriesRemainPlaceholdersWhileAudioControlsExposeRealSemantics() {
         val fixture = fixture()
-        assertTrue(homeContentDescription("home_mute_button").contains("开发中"))
+        assertFalse(homeContentDescription("home_mute_button").contains("开发中"))
+        assertTrue(homeContentDescription("home_mute_button").contains("启动对讲后可用"))
 
         openRoute(fixture, MainRoute.SETTINGS)
         val settingsPlaceholderIds = listOf(
-            R.id.settings_vox_button,
-            R.id.settings_vox_sensitivity_button,
-            R.id.settings_vox_state_button,
             R.id.settings_audio_route_button,
             R.id.settings_audio_earpiece_button,
             R.id.settings_audio_speaker_button,
@@ -1073,6 +1072,11 @@ class MainScreenRobolectricTest {
         settingsPlaceholderIds.forEach { id ->
             assertTrue(settingsExists(settingsTagForPlaceholderId(id)))
         }
+        listOf(
+            "settings_vox_button",
+            "settings_vox_sensitivity_button",
+            "settings_vox_state_button"
+        ).forEach { assertTrue(settingsExists(it)) }
 
         clickSettings("settings_back_button")
         clickHome("home_menu_button")
@@ -1084,8 +1088,8 @@ class MainScreenRobolectricTest {
         assertTrue(discoverExists("discover_rescan_button"))
 
         clickDiscover("discover_back_button")
-        assertTrue(homeContentDescription("home_vox_pill").contains("开发中"))
-        assertTrue(homeContentDescription("home_vox_card").contains("开发中"))
+        assertFalse(homeContentDescription("home_vox_pill").contains("开发中"))
+        assertTrue(homeContentDescription("home_vox_card").contains("VOX 当前状态"))
     }
 
     @Test
@@ -1101,9 +1105,10 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun placeholderButtonShowsOneDialogAndPositiveActionDismissesIt() {
+    fun remainingPlaceholderButtonShowsOneDialogAndPositiveActionDismissesIt() {
         val fixture = fixture()
-        clickHome("home_mute_button")
+        openRoute(fixture, MainRoute.DISCOVER)
+        clickDiscover("discover_help_button")
 
         val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("placeholder dialog was not shown")
         val shadow = shadowOf(dialog)
@@ -1111,7 +1116,7 @@ class MainScreenRobolectricTest {
         assertEquals(PLACEHOLDER_DIALOG_MESSAGE, shadow.message)
         assertEquals(PLACEHOLDER_DIALOG_BUTTON, dialog.getButton(AlertDialog.BUTTON_POSITIVE).text)
 
-        clickHome("home_mute_button")
+        clickDiscover("discover_help_button")
         assertTrue(dialog.isShowing)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
         shadowOf(Looper.getMainLooper()).idle()
@@ -1119,33 +1124,77 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun homeVoxFactPillOpensThePlaceholderDialog() {
+    fun homeVoxFactPillOpensTheRealSettingsPage() {
         val fixture = fixture()
 
         clickHome("home_vox_pill")
 
-        val dialog = ShadowAlertDialog.getLatestAlertDialog()
-            ?: error("placeholder dialog was not shown for the Home VOX fact pill")
-        assertTrue(dialog.isShowing)
-        assertEquals(PLACEHOLDER_DIALOG_TITLE, shadowOf(dialog).title)
-        assertEquals(PLACEHOLDER_DIALOG_MESSAGE, shadowOf(dialog).message)
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertFalse(dialog.isShowing)
+        assertNotNull(fixture.screen.root.findViewById<View>(R.id.settings_scroll))
+        assertTrue(settingsExists("settings_vox_button"))
+    }
+
+    @Test
+    fun muteAndVoxControlsDispatchRealIntentAndRenderExactServiceState() {
+        var requestedMute: Boolean? = null
+        var requestedVoxEnabled: Boolean? = null
+        var requestedSensitivity: Int? = null
+        val fixture = fixture(
+            initialAudioControls = AudioControlSnapshot(
+                controls = AudioControlSettings(
+                    muted = false,
+                    voxEnabled = true,
+                    voxSensitivity = 60
+                ),
+                voxState = VoxRuntimeState.OPEN
+            ),
+            onSetMuted = { requestedMute = it },
+            onSetVoxEnabled = { requestedVoxEnabled = it },
+            onSetVoxSensitivity = { requestedSensitivity = it }
+        )
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-audio-controls")),
+            canStart = true
+        )
+
+        assertEquals("VOX：OPEN", homeText("home_vox_pill"))
+        clickHome("home_mute_button")
+        assertEquals(true, requestedMute)
+
+        fixture.screen.setAudioControls(
+            AudioControlSnapshot(
+                controls = AudioControlSettings(
+                    muted = true,
+                    voxEnabled = true,
+                    voxSensitivity = 60
+                ),
+                voxState = VoxRuntimeState.MUTED
+            )
+        )
+        assertTrue(homeContentDescription("home_mute_button").contains("取消"))
+
+        clickHome("home_vox_card")
+        assertTrue(
+            settingsNode("settings_vox_state_button").fetchSemanticsNode()
+                .config[SemanticsProperties.ContentDescription]
+                .joinToString(separator = "")
+                .contains("MUTED")
+        )
+        clickSettings("settings_vox_button")
+        settingsNode("settings_vox_sensitivity_button")
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
+
+        assertEquals(false, requestedVoxEnabled)
+        assertEquals(80, requestedSensitivity)
     }
 
     @Test
     fun allPlaceholderControlsShareOneDialogWithoutChangingRoute() {
         val cases = listOf(
-            MainRoute.HOME to listOf(R.id.home_mute_button, R.id.home_vox_pill, R.id.home_vox_card),
             MainRoute.DISCOVER to listOf(R.id.discover_help_button, R.id.discover_rescan_button),
             MainRoute.SETTINGS to listOf(
                 R.id.settings_audio_route_button,
                 R.id.settings_audio_earpiece_button,
                 R.id.settings_audio_speaker_button,
-                R.id.settings_vox_button,
-                R.id.settings_vox_sensitivity_button,
-                R.id.settings_vox_state_button,
                 R.id.settings_reconnect_button,
                 R.id.settings_help_button
             )
@@ -1183,15 +1232,11 @@ class MainScreenRobolectricTest {
     @Test
     fun everyPlaceholderControlCanOpenTheSharedDialogOnItsOwn() {
         val cases = listOf(
-            MainRoute.HOME to listOf(R.id.home_mute_button, R.id.home_vox_pill, R.id.home_vox_card),
             MainRoute.DISCOVER to listOf(R.id.discover_help_button, R.id.discover_rescan_button),
             MainRoute.SETTINGS to listOf(
                 R.id.settings_audio_route_button,
                 R.id.settings_audio_earpiece_button,
                 R.id.settings_audio_speaker_button,
-                R.id.settings_vox_button,
-                R.id.settings_vox_sensitivity_button,
-                R.id.settings_vox_state_button,
                 R.id.settings_reconnect_button,
                 R.id.settings_help_button
             )
@@ -1839,7 +1884,11 @@ class MainScreenRobolectricTest {
         savedState: Bundle = Bundle(),
         initialRiderName: String = "",
         onSaveRiderName: (String) -> Boolean = { true },
-        onConnectPresence: (RiderPresence) -> Boolean = { false }
+        onConnectPresence: (RiderPresence) -> Boolean = { false },
+        initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
+        onSetMuted: (Boolean) -> Unit = {},
+        onSetVoxEnabled: (Boolean) -> Unit = {},
+        onSetVoxSensitivity: (Int) -> Unit = {}
     ): Fixture {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val activity = controller.get()
@@ -1858,7 +1907,11 @@ class MainScreenRobolectricTest {
             onRequestCorePermissions = {},
             onRequestOptionalPermissions = {},
             onOpenWifiSettings = {},
-            onOpenPermissionSettings = {}
+            onOpenPermissionSettings = {},
+            initialAudioControls = initialAudioControls,
+            onSetMuted = onSetMuted,
+            onSetVoxEnabled = onSetVoxEnabled,
+            onSetVoxSensitivity = onSetVoxSensitivity
         )
         activity.setContentView(screen.root)
         return Fixture(activity, screen)

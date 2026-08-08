@@ -36,7 +36,11 @@ internal class MainScreen(
     private val onRequestCorePermissions: () -> Unit,
     private val onRequestOptionalPermissions: () -> Unit,
     private val onOpenWifiSettings: () -> Unit,
-    private val onOpenPermissionSettings: () -> Unit
+    private val onOpenPermissionSettings: () -> Unit,
+    initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
+    private val onSetMuted: (Boolean) -> Unit = {},
+    private val onSetVoxEnabled: (Boolean) -> Unit = {},
+    private val onSetVoxSensitivity: (Int) -> Unit = {}
 ) {
     val root: View
 
@@ -75,6 +79,7 @@ internal class MainScreen(
         )
     )
     private val homeAudioLevel = mutableFloatStateOf(0f)
+    private var audioControlSnapshot = initialAudioControls
     private val discoverUiState = mutableStateOf(
         DiscoverScreenUiState(
             presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
@@ -287,6 +292,11 @@ internal class MainScreen(
         renderCurrentPage()
     }
 
+    fun setAudioControls(snapshot: AudioControlSnapshot) {
+        audioControlSnapshot = snapshot
+        renderCurrentPage()
+    }
+
     fun clearServiceOwnedFacts() {
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
@@ -294,6 +304,7 @@ internal class MainScreen(
         lastRealPeerName = null
         discoverConnectAwaitingState = false
         pendingPresenceSelection = null
+        audioControlSnapshot = idleAudioControlSnapshot(audioControlSnapshot.controls)
         renderCurrentPage()
     }
 
@@ -694,12 +705,12 @@ internal class MainScreen(
                             onPermissionGrant = onRequestCorePermissions,
                             onPermissionSettings = onOpenPermissionSettings,
                             onWifiSettings = onOpenWifiSettings,
-                            onMute = ::showPlaceholderDialog,
+                            onMute = onSetMuted,
                             onAudioSettings = {
                                 restoreSettingsAudio = true
                                 showPage(MainRoute.SETTINGS)
                             },
-                            onVox = ::showPlaceholderDialog
+                            onVox = { showPage(MainRoute.SETTINGS) }
                         )
                     }
                 }
@@ -745,10 +756,16 @@ internal class MainScreen(
             connectedTransportText = presentation.connectedTransportText,
             webRtcText = presentation.webRtcText,
             bluetoothText = optionalPermission.bluetoothStatusText,
-            voxText = presentation.voxText,
+            voxText = audioControlSnapshot.voxState.name,
             discovering = animationsEnabled() && productState is IntercomState.Discovering,
             connected = animationsEnabled() && productState is IntercomState.Connected,
-            menuVisible = windowWidthClass == MainWindowWidthClass.Compact
+            menuVisible = windowWidthClass == MainWindowWidthClass.Compact,
+            muted = audioControlSnapshot.controls.muted,
+            muteEnabled = productState !is IntercomState.Offline &&
+                productState !is IntercomState.Stopping,
+            voxEnabled = audioControlSnapshot.controls.voxEnabled,
+            voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
+            voxState = audioControlSnapshot.voxState
         )
     }
 
@@ -873,7 +890,9 @@ internal class MainScreen(
                         onOptionalPermission = onRequestOptionalPermissions,
                         onLogs = { showPage(MainRoute.LOGS) },
                         onAbout = ::showAboutDialog,
-                        onPlaceholder = { showPlaceholderDialog() }
+                        onPlaceholder = { showPlaceholderDialog() },
+                        onVoxEnabledChanged = onSetVoxEnabled,
+                        onVoxSensitivityChanged = onSetVoxSensitivity
                     )
                 }
             }
@@ -933,7 +952,10 @@ internal class MainScreen(
             deviceStatus = activity.getString(R.string.settings_device_status_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText, presentation.primaryText, presentation.connectedTransportText),
             optionalPermissionNotice = optionalPermission.noticeText,
             showOptionalPermissionCta = optionalPermission.showGrantCta,
-            version = activity.getString(R.string.settings_version_summary, currentVersionName())
+            version = activity.getString(R.string.settings_version_summary, currentVersionName()),
+            voxEnabled = audioControlSnapshot.controls.voxEnabled,
+            voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
+            voxState = audioControlSnapshot.voxState
         )
     }
 
