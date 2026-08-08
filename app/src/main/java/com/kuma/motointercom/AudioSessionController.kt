@@ -121,7 +121,8 @@ internal class AudioSessionController(
             ),
             onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
             initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
-            onEarpieceActive: () -> Unit = {}
+            onEarpieceActive: () -> Unit = {},
+            onExternalAudioActive: (String) -> Unit = {}
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,
@@ -137,6 +138,7 @@ internal class AudioSessionController(
                     onScoDisconnected = onScoDisconnected,
                     onSpeakerFallback = onSpeakerFallback,
                     onEarpieceActive = onEarpieceActive,
+                    onExternalAudioActive = onExternalAudioActive,
                     onError = onError
                 )
                 route.select(initialAudioRoute)

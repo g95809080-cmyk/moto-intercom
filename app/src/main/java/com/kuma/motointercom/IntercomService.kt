@@ -653,6 +653,13 @@ class IntercomService : Service() {
                     updateStageStatus()
                 }
             },
+            onExternalAudioActive = { outputLabel ->
+                postForRuntime(runtimeSessionId) {
+                    bluetoothReady = false
+                    publishAudioSource("当前音频源：$outputLabel", bluetooth = false)
+                    updateStageStatus()
+                }
+            },
             onError = { error -> postForRuntime(runtimeSessionId) { handleError(error) } },
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
