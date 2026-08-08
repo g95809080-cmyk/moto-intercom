@@ -3,7 +3,10 @@ package com.kuma.motointercom
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -94,6 +97,26 @@ class PairingRepositoryTest {
 
         assertNull(repository.getByDeviceId("peer-a"))
         assertFalse(repository.getAll().any(PairingRecord::isPreferred))
+    }
+
+    @Test
+    fun laterForgetWinsAfterAnEarlierConnectedSaveWasAlreadyQueued() = runBlocking {
+        val writeGate = Mutex(locked = true)
+        val serializedRepository = RoomPairingRepository(database.pairingDao(), writeGate)
+        var forgotten = false
+
+        val save = launch(start = CoroutineStart.UNDISPATCHED) {
+            serializedRepository.saveConnectedPeer(record("peer-race"))
+        }
+        val forget = launch(start = CoroutineStart.UNDISPATCHED) {
+            forgotten = serializedRepository.forget("peer-race")
+        }
+        writeGate.unlock()
+        save.join()
+        forget.join()
+
+        assertTrue(forgotten)
+        assertNull(serializedRepository.getByDeviceId("peer-race"))
     }
 
     private fun record(deviceId: String, connectedAt: Long = 10L) = PairingRecord(

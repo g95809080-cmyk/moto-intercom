@@ -3,6 +3,8 @@ package com.kuma.motointercom
 import java.security.MessageDigest
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 interface PairingRepository {
     fun observeAll(): Flow<List<PairingRecord>>
@@ -18,7 +20,8 @@ interface PairingRepository {
 }
 
 internal class RoomPairingRepository(
-    private val dao: PairingDao
+    private val dao: PairingDao,
+    private val mutationMutex: Mutex = Mutex()
 ) : PairingRepository {
     override fun observeAll(): Flow<List<PairingRecord>> = dao.observeAll()
 
@@ -30,39 +33,43 @@ internal class RoomPairingRepository(
     override suspend fun saveConnectedPeer(record: PairingRecord) {
         val deviceId = record.remoteDeviceId.trim()
         require(deviceId.isNotBlank()) { "Remote device ID must not be blank" }
-        dao.saveConnected(
-            record.copy(
-                remoteDeviceId = deviceId,
-                remoteNickname = record.remoteNickname.trim(),
-                deviceName = record.deviceName.trim(),
-                localAlias = record.localAlias.trim(),
-                shortCode = record.shortCode.ifBlank { shortCode(deviceId) },
-                isPreferred = false,
-                failureCount = record.failureCount.coerceAtLeast(0)
+        mutationMutex.withLock {
+            dao.saveConnected(
+                record.copy(
+                    remoteDeviceId = deviceId,
+                    remoteNickname = record.remoteNickname.trim(),
+                    deviceName = record.deviceName.trim(),
+                    localAlias = record.localAlias.trim(),
+                    shortCode = record.shortCode.ifBlank { shortCode(deviceId) },
+                    isPreferred = false,
+                    failureCount = record.failureCount.coerceAtLeast(0)
+                )
             )
-        )
+        }
     }
 
     override suspend fun setPreferred(deviceId: String): Boolean =
-        dao.setPreferred(deviceId.trim())
+        mutationMutex.withLock { dao.setPreferred(deviceId.trim()) }
 
     override suspend fun clearPreferred(deviceId: String): Boolean =
-        dao.clearPreferred(deviceId.trim()) == 1
+        mutationMutex.withLock { dao.clearPreferred(deviceId.trim()) == 1 }
 
     override suspend fun updateLastConnectedAt(
         deviceId: String,
         connectedAt: Long,
         transport: String?
-    ): Boolean = dao.updateLastConnectedAt(deviceId.trim(), connectedAt, transport) == 1
+    ): Boolean = mutationMutex.withLock {
+        dao.updateLastConnectedAt(deviceId.trim(), connectedAt, transport) == 1
+    }
 
     override suspend fun incrementFailureCount(deviceId: String): Boolean =
-        dao.incrementFailureCount(deviceId.trim()) == 1
+        mutationMutex.withLock { dao.incrementFailureCount(deviceId.trim()) == 1 }
 
     override suspend fun clearFailureCount(deviceId: String): Boolean =
-        dao.clearFailureCount(deviceId.trim()) == 1
+        mutationMutex.withLock { dao.clearFailureCount(deviceId.trim()) == 1 }
 
     override suspend fun forget(deviceId: String): Boolean =
-        dao.forget(deviceId.trim()) == 1
+        mutationMutex.withLock { dao.forget(deviceId.trim()) == 1 }
 
     private fun shortCode(deviceId: String): String =
         MessageDigest.getInstance("SHA-256")

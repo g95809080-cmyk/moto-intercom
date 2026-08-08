@@ -181,6 +181,71 @@ class DiscoverScreenComposeTest {
         assertEquals("paired-device", managedDeviceId)
     }
 
+    @Test
+    fun offlinePairedRiderKeepsLocalManagementWithoutOfferingAConnection() {
+        val offline = selectablePresence("offline-paired").copy(
+            candidates = listOf(
+                PresenceTransportCandidate(
+                    transport = Transport.LAN,
+                    endpointId = "expired-offline-paired",
+                    address = "127.0.0.1",
+                    port = 1234,
+                    lastSeenElapsedRealtimeMs = 1L,
+                    isAvailable = false
+                )
+            ),
+            pairing = PairingRecord(
+                remoteDeviceId = "offline-paired",
+                remoteNickname = "Offline Rider",
+                deviceName = "Offline Phone",
+                localAlias = "Offline Rider",
+                shortCode = "4321",
+                pairedAt = 1L,
+                lastConnectedAt = 2L,
+                isPreferred = false,
+                lastTransport = "LAN",
+                failureCount = 0
+            )
+        )
+        var managed = false
+        val state = DiscoverScreenUiState(
+            presentation = discoverPresentation(
+                state = IntercomState.Discovering(RuntimeSessionId("runtime-offline-management")),
+                presences = listOf(offline)
+            ),
+            stateText = "Choose a rider",
+            supplementalText = null,
+            emptyText = "No riders",
+            radarRunning = false
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    state = state,
+                    onBack = {},
+                    onHelp = {},
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = {},
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = { managed = it.deviceId == "offline-paired" }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("discover_manage_offline-paired")
+            .assertIsDisplayed()
+            .performClick()
+        assertTrue(
+            composeRule.onAllNodesWithTag("discover_connect_offline-paired")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .isEmpty()
+        )
+        assertTrue(managed)
+    }
+
     private fun selectablePresence(deviceId: String): RiderPresence = RiderPresence(
         deviceId = deviceId,
         sessionId = RuntimeSessionId("session-$deviceId"),

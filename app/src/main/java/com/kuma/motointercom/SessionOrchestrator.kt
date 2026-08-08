@@ -41,6 +41,7 @@ internal class SessionOrchestrator(
         attemptIdFactory = attemptIdFactory
     )
     private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
+    private val persistedConnectedAttempts = mutableSetOf<ConnectionAttemptId>()
 
     val state: StateFlow<IntercomState> = mutableState.asStateFlow()
     val effects: Flow<SessionEffect> = effectChannel.receiveAsFlow()
@@ -106,7 +107,7 @@ internal class SessionOrchestrator(
             mutableState.value = next
             signalingControl.onProductTransition(previous, next, event)
             resetConfirmationAvailabilityIfNeeded(event, next)
-            maybePersistConnectedPeer(next)
+            maybePersistConnectedPeer(previous, next)
             controlDecision.effects.forEach { effectChannel.send(it) }
             return true
         }
@@ -115,7 +116,7 @@ internal class SessionOrchestrator(
         mutableState.value = transition.state
         signalingControl.onProductTransition(previous, transition.state, event)
         resetConfirmationAvailabilityIfNeeded(event, transition.state)
-        maybePersistConnectedPeer(transition.state)
+        maybePersistConnectedPeer(previous, transition.state)
         transition.effects.forEach { effectChannel.send(it) }
         return true
     }
@@ -138,11 +139,16 @@ internal class SessionOrchestrator(
     ) {
         if (event is SessionEvent.RuntimeStarted || next == IntercomState.Offline) {
             confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
+            persistedConnectedAttempts.clear()
         }
     }
 
-    private suspend fun maybePersistConnectedPeer(state: IntercomState) {
+    private suspend fun maybePersistConnectedPeer(
+        previous: IntercomState,
+        state: IntercomState
+    ) {
         val connected = state as? IntercomState.Connected ?: return
+        if (previous is IntercomState.Connected && previous.attempt == connected.attempt) return
         val deviceId = connected.peer.deviceId?.takeIf(String::isNotBlank)
         if (deviceId == null || !connected.peer.isVerifiedFor(connected.attempt.targetLock)) {
             onLog(
@@ -151,6 +157,7 @@ internal class SessionOrchestrator(
             )
             return
         }
+        if (!persistedConnectedAttempts.add(connected.attemptId)) return
         try {
             pairingRepository.saveConnectedPeer(
                 PairingRecord(

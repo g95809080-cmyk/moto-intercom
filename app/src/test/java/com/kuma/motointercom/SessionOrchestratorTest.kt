@@ -427,6 +427,34 @@ class SessionOrchestratorTest {
 
             assertEquals(listOf("peer-lan"), repository.saved.map(PairingRecord::remoteDeviceId))
             assertEquals("LAN", repository.saved.single().lastTransport)
+
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        runtime,
+                        ConfirmationAvailability(
+                            appForeground = true,
+                            notificationAvailable = true
+                        )
+                    )
+                )
+            )
+            assertEquals(1, repository.saved.size)
+
+            repository.saved.clear()
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        runtime,
+                        ConfirmationAvailability(
+                            appForeground = false,
+                            notificationAvailable = true
+                        )
+                    )
+                )
+            )
+            assertTrue(repository.saved.isEmpty())
+            assertTrue(orchestrator.state.value is IntercomState.Connected)
         } finally {
             orchestrator.close()
         }

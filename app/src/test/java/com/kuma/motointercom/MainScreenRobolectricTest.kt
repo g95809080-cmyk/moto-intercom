@@ -503,7 +503,33 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun expiredPairingDialogCannotDispatchAndServiceFailureStaysOnDiscover() {
+    fun offlinePairedRiderCanManageTheCurrentLocalRecordWithoutConnecting() {
+        val requests = mutableListOf<Pair<String, Boolean>>()
+        val fixture = fixture(
+            onSetPairingPreferred = { deviceId, preferred ->
+                requests += deviceId to preferred
+                true
+            }
+        )
+        openRoute(fixture, MainRoute.DISCOVER)
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-offline-local-pairing")),
+            canStart = true
+        )
+        fixture.screen.setPresences(listOf(offlinePairedPresence()))
+
+        assertFalse(discoverExists("discover_connect_device-offline"))
+        clickDiscover("discover_manage_device-offline")
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("offline pairing management dialog was not shown")
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(listOf("device-offline" to true), requests)
+    }
+
+    @Test
+    fun removedPairingRecordClosesItsDialogAndServiceFailureStaysOnDiscover() {
         var preferenceDispatches = 0
         val stale = fixture(
             onSetPairingPreferred = { _, _ ->
@@ -521,7 +547,23 @@ class MainScreenRobolectricTest {
         val staleDialog = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("stale pairing dialog was not shown")
 
-        stale.screen.setPresences(emptyList())
+        stale.screen.setPresences(
+            listOf(
+                pairedPresence().copy(
+                    candidates = listOf(
+                        PresenceTransportCandidate(
+                            transport = Transport.LAN,
+                            endpointId = "expired-device-a",
+                            address = "127.0.0.1",
+                            port = 1234,
+                            lastSeenElapsedRealtimeMs = 1L,
+                            isAvailable = false
+                        )
+                    ),
+                    pairing = null
+                )
+            )
+        )
 
         assertFalse(staleDialog.isShowing)
         staleDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
