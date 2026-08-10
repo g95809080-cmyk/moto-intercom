@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import android.app.AlertDialog
 import android.content.ComponentName
+import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.Looper
@@ -26,7 +27,6 @@ class MainActivityRobolectricTest {
         when (tag) {
             "home_settings_button" -> invokeShowPage(screen, MainRoute.SETTINGS)
             "home_menu_button" -> invokePrivate(screen, "showNavigation")
-            "home_mute_button" -> invokePrivate(screen, "showPlaceholderDialog")
             else -> error("Activity test has no direct Home action mapping for $tag")
         }
         shadowOf(Looper.getMainLooper()).idle()
@@ -97,6 +97,157 @@ class MainActivityRobolectricTest {
         assertTrue(recreated.findViewById<View>(R.id.home_scroll) == null)
     }
 
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun manualDiscoveryRefreshWithoutABoundServiceReportsUnavailable() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val mainScreen = screen(activity)
+        mainScreen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-unbound-refresh")),
+            canStart = true
+        )
+        invokeShowPage(mainScreen, MainRoute.DISCOVER)
+        val refresh = MainScreen::class.java
+            .getDeclaredField("onRequestDiscoveryRefresh")
+            .apply { isAccessible = true }
+            .get(mainScreen) as () -> Unit
+
+        refresh()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(
+            SERVICE_UNAVAILABLE_STATUS,
+            (stateValue(mainScreen, "discoverUiState") as DiscoverScreenUiState).supplementalText
+        )
+        controller.destroy()
+    }
+
+    @Test
+    fun activityLoadsPersistedVoxSettingsBeforeAnyServiceReplay() {
+        val application = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val preferences = AudioControlPreferences(application)
+        preferences.saveVoxSettings(
+            AudioControlSettings(voxEnabled = false, voxSensitivity = 70)
+        )
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+
+        val home = stateValue(screen(activity), "homeUiState") as HomeScreenUiState
+        assertEquals("DISABLED", home.voxText)
+        assertEquals(70, home.voxSensitivity)
+        assertFalse(home.voxEnabled)
+
+        controller.destroy()
+        preferences.saveVoxSettings(AudioControlSettings())
+    }
+
+    @Test
+    fun activityLoadsAndPersistsAutomaticReconnectBeforeServiceReplay() {
+        val application = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val preferences = application.getSharedPreferences("moto_intercom", android.content.Context.MODE_PRIVATE)
+        preferences.edit().putBoolean("automatic_reconnect_enabled", false).commit()
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val mainScreen = screen(activity)
+
+        assertFalse(
+            MainActivity::class.java.getDeclaredField("automaticReconnectEnabled").apply {
+                isAccessible = true
+            }.getBoolean(activity)
+        )
+        invokeShowPage(mainScreen, MainRoute.SETTINGS)
+        assertFalse(
+            (stateValue(mainScreen, "settingsUiState") as SettingsScreenUiState)
+                .automaticReconnectEnabled
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val callback = MainScreen::class.java.getDeclaredField("onAutomaticReconnectChanged").apply {
+            isAccessible = true
+        }.get(mainScreen) as (Boolean) -> Unit
+        callback(true)
+
+        assertTrue(preferences.getBoolean("automatic_reconnect_enabled", false))
+        controller.destroy()
+    }
+
+    @Test
+    fun feedbackUsesAnExplicitUserChooserWithoutAttachingSessionLogs() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        val activity = controller.get()
+
+        MainActivity::class.java.getDeclaredMethod("sendFeedback", String::class.java).apply {
+            isAccessible = true
+        }.invoke(activity, "1.1.0")
+
+        val chooser = shadowOf(activity).nextStartedActivity
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        val payload = chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+            ?: error("feedback chooser is missing its send Intent")
+        assertEquals(Intent.ACTION_SEND, payload.action)
+        assertEquals("text/plain", payload.type)
+        assertTrue(payload.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().contains("MotoCom"))
+        val expectedBody = activity.getString(
+            R.string.feedback_body,
+            "1.1.0",
+            "${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})"
+        )
+        assertEquals(expectedBody, payload.getStringExtra(Intent.EXTRA_TEXT))
+        assertEquals(null, payload.data)
+        payload.clipData?.let { clipData ->
+            repeat(clipData.itemCount) { index ->
+                val item = clipData.getItemAt(index)
+                assertEquals(null, item.uri)
+                assertFalse(item.text?.toString().orEmpty().contains("session log", ignoreCase = true))
+            }
+        }
+        assertEquals(
+            0,
+            payload.flags and (
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                )
+        )
+    }
+
+    @Test
+    fun activityOwnsAndPersistsPreferredAudioRouteBeforeServiceReplay() {
+        val application = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val preferences = AudioRoutePreferences(application)
+        preferences.save(AudioRouteSelection.EARPIECE)
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+
+        assertEquals(
+            AudioRouteSelection.EARPIECE,
+            MainScreen::class.java.getDeclaredField("preferredAudioRoute").apply {
+                isAccessible = true
+            }.get(screen(activity))
+        )
+
+        MainActivity::class.java.getDeclaredMethod(
+            "savePreferredAudioRoute",
+            AudioRouteSelection::class.java
+        ).apply { isAccessible = true }.invoke(activity, AudioRouteSelection.SPEAKER)
+
+        assertEquals(AudioRouteSelection.SPEAKER, AudioRoutePreferences(application).load())
+        assertEquals(
+            AudioRouteSelection.SPEAKER,
+            MainScreen::class.java.getDeclaredField("preferredAudioRoute").apply {
+                isAccessible = true
+            }.get(screen(activity))
+        )
+
+        controller.destroy()
+        preferences.save(AudioRouteSelection.BLUETOOTH)
+    }
+
     @Test
     fun processRestartDoesNotRestoreSavedRouteFromAnotherProcess() {
         val savedState = Bundle().apply {
@@ -139,6 +290,40 @@ class MainActivityRobolectricTest {
     }
 
     @Test
+    fun incomingConfirmationDismissesPairingManagementBeforeTakingPriority() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val mainScreen = screen(activity)
+        val presence = pairedPresence()
+        invokeShowPage(mainScreen, MainRoute.DISCOVER)
+        mainScreen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-pairing-priority")),
+            canStart = true
+        )
+        mainScreen.setPresences(listOf(presence))
+        MainScreen::class.java.getDeclaredMethod(
+            "showPairingManagement",
+            RiderPresence::class.java
+        ).apply { isAccessible = true }.invoke(mainScreen, presence)
+        val pairingDialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("pairing management dialog was not shown")
+        assertTrue(pairingDialog.isShowing)
+
+        showIncomingConfirmation(activity, incomingPrompt("pairing-priority", "Incoming Rider"))
+        val incomingDialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("incoming confirmation dialog was not shown")
+
+        assertFalse(pairingDialog.isShowing)
+        assertTrue(incomingDialog.isShowing)
+        assertEquals(
+            activity.getString(R.string.incoming_confirmation_title, "Incoming Rider"),
+            shadowOf(incomingDialog).title
+        )
+        incomingDialog.dismiss()
+        controller.destroy()
+    }
+
+    @Test
     fun replacedIncomingDialogCannotActOnTheCurrentRequest() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
@@ -166,20 +351,20 @@ class MainActivityRobolectricTest {
     }
 
     @Test
-    fun incomingConfirmationSupersedesPlaceholderDialog() {
+    fun incomingConfirmationSupersedesHelpDialog() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
 
-        clickHome(activity, "home_mute_button")
-        val placeholder = ShadowAlertDialog.getLatestAlertDialog()
-            ?: error("placeholder dialog was not shown")
-        assertTrue(placeholder.isShowing)
+        invokePrivate(screen(activity), "showHelpDialog")
+        val help = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("help dialog was not shown")
+        assertTrue(help.isShowing)
 
         showIncomingConfirmation(activity, incomingPrompt("incoming-nonce", "Incoming Rider"))
         val incoming = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("incoming dialog was not shown")
 
-        assertFalse(placeholder.isShowing)
+        assertFalse(help.isShowing)
         assertTrue(incoming.isShowing)
         assertEquals(
             activity.getString(R.string.incoming_confirmation_title, "Incoming Rider"),
@@ -394,6 +579,37 @@ class MainActivityRobolectricTest {
                 )
             ),
             pairing = null
+        )
+    )
+
+    private fun pairedPresence(): RiderPresence = RiderPresence(
+        deviceId = "paired-device",
+        sessionId = RuntimeSessionId("paired-session"),
+        nickname = "Paired Rider",
+        deviceName = "Paired Phone",
+        protocolVersion = 2,
+        lastSeenElapsedRealtimeMs = 1L,
+        candidates = listOf(
+            PresenceTransportCandidate(
+                transport = Transport.LAN,
+                endpointId = "paired-endpoint",
+                address = "127.0.0.1",
+                port = 1234,
+                lastSeenElapsedRealtimeMs = 1L,
+                isAvailable = true
+            )
+        ),
+        pairing = PairingRecord(
+            remoteDeviceId = "paired-device",
+            remoteNickname = "Paired Rider",
+            deviceName = "Paired Phone",
+            localAlias = "Paired Rider",
+            shortCode = "1234",
+            pairedAt = 1L,
+            lastConnectedAt = 2L,
+            isPreferred = false,
+            lastTransport = "LAN",
+            failureCount = 0
         )
     )
 }

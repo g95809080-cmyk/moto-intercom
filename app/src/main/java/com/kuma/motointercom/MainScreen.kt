@@ -36,7 +36,19 @@ internal class MainScreen(
     private val onRequestCorePermissions: () -> Unit,
     private val onRequestOptionalPermissions: () -> Unit,
     private val onOpenWifiSettings: () -> Unit,
-    private val onOpenPermissionSettings: () -> Unit
+    private val onOpenPermissionSettings: () -> Unit,
+    initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
+    initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+    initialAutomaticReconnectEnabled: Boolean = true,
+    private val onSetMuted: (Boolean) -> Unit = {},
+    private val onSetVoxEnabled: (Boolean) -> Unit = {},
+    private val onSetVoxSensitivity: (Int) -> Unit = {},
+    private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+    private val onAutomaticReconnectChanged: (Boolean) -> Unit = {},
+    private val onRequestDiscoveryRefresh: () -> Unit = {},
+    private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
+    private val onForgetPairing: (String) -> Boolean = { false },
+    private val onSendFeedback: (String) -> Unit = {}
 ) {
     val root: View
 
@@ -75,13 +87,15 @@ internal class MainScreen(
         )
     )
     private val homeAudioLevel = mutableFloatStateOf(0f)
+    private var audioControlSnapshot = initialAudioControls
     private val discoverUiState = mutableStateOf(
         DiscoverScreenUiState(
             presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
             stateText = "",
             supplementalText = null,
             emptyText = "",
-            radarRunning = false
+            radarRunning = false,
+            rescanEnabled = false
         )
     )
     private val settingsUiState = mutableStateOf(
@@ -99,6 +113,8 @@ internal class MainScreen(
     private var discoverCtaNeedsReselect = false
     private var audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
     private var bluetoothActive = false
+    private var preferredAudioRoute = initialPreferredAudioRoute
+    private var automaticReconnectEnabled = initialAutomaticReconnectEnabled
     private var wifiUnavailable = false
     private var bluetoothPermissionMissing = false
     private var notificationPermissionMissing = false
@@ -111,7 +127,10 @@ internal class MainScreen(
         savedState?.getString(KEY_NICKNAME_DRAFT),
         initialRiderName
     )
-    private var placeholderDialog: AlertDialog? = null
+    private var helpDialog: AlertDialog? = null
+    private var pairingManagementDialog: AlertDialog? = null
+    private var forgetPairingDialog: AlertDialog? = null
+    private var activePairingDeviceId: String? = null
     private var navigationFocusReturn: View? = null
     private var incomingConfirmationVisible = false
     private var restoreSettingsAudio = false
@@ -179,8 +198,8 @@ internal class MainScreen(
                 closeNavigation()
                 true
             }
-            BackNavigation.DismissPlaceholder -> {
-                dismissPlaceholderDialog()
+            BackNavigation.DismissTransientDialog -> {
+                dismissTransientDialogs()
                 true
             }
             BackNavigation.IgnoreIncomingConfirmation -> true
@@ -196,9 +215,14 @@ internal class MainScreen(
         showPage(MainRoute.HOME)
     }
 
-    fun dismissPlaceholderDialog() {
-        placeholderDialog?.dismiss()
-        placeholderDialog = null
+    fun dismissHelpDialog() {
+        helpDialog?.dismiss()
+        helpDialog = null
+    }
+
+    fun dismissTransientDialogs() {
+        dismissHelpDialog()
+        dismissPairingDialogs()
     }
 
     fun setIncomingConfirmationVisible(visible: Boolean) {
@@ -287,6 +311,21 @@ internal class MainScreen(
         renderCurrentPage()
     }
 
+    fun setAutomaticReconnectEnabled(enabled: Boolean) {
+        automaticReconnectEnabled = enabled
+        renderSettings()
+    }
+
+    fun setAudioControls(snapshot: AudioControlSnapshot) {
+        audioControlSnapshot = snapshot
+        renderCurrentPage()
+    }
+
+    fun setPreferredAudioRoute(selection: AudioRouteSelection) {
+        preferredAudioRoute = selection
+        renderCurrentPage()
+    }
+
     fun clearServiceOwnedFacts() {
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
@@ -294,6 +333,7 @@ internal class MainScreen(
         lastRealPeerName = null
         discoverConnectAwaitingState = false
         pendingPresenceSelection = null
+        audioControlSnapshot = idleAudioControlSnapshot(audioControlSnapshot.controls)
         renderCurrentPage()
     }
 
@@ -346,6 +386,9 @@ internal class MainScreen(
 
     fun setPresences(value: List<RiderPresence>) {
         presences = value.toList()
+        activePairingDeviceId?.let { deviceId ->
+            if (currentPairedPresence(deviceId) == null) dismissPairingDialogs()
+        }
         val pending = pendingPresenceSelection
         if (
             discoverConnectAwaitingState &&
@@ -694,12 +737,12 @@ internal class MainScreen(
                             onPermissionGrant = onRequestCorePermissions,
                             onPermissionSettings = onOpenPermissionSettings,
                             onWifiSettings = onOpenWifiSettings,
-                            onMute = ::showPlaceholderDialog,
+                            onMute = onSetMuted,
                             onAudioSettings = {
                                 restoreSettingsAudio = true
                                 showPage(MainRoute.SETTINGS)
                             },
-                            onVox = ::showPlaceholderDialog
+                            onVox = { showPage(MainRoute.SETTINGS) }
                         )
                     }
                 }
@@ -745,10 +788,16 @@ internal class MainScreen(
             connectedTransportText = presentation.connectedTransportText,
             webRtcText = presentation.webRtcText,
             bluetoothText = optionalPermission.bluetoothStatusText,
-            voxText = presentation.voxText,
+            voxText = audioControlSnapshot.voxState.name,
             discovering = animationsEnabled() && productState is IntercomState.Discovering,
             connected = animationsEnabled() && productState is IntercomState.Connected,
-            menuVisible = windowWidthClass == MainWindowWidthClass.Compact
+            menuVisible = windowWidthClass == MainWindowWidthClass.Compact,
+            muted = audioControlSnapshot.controls.muted,
+            muteEnabled = productState !is IntercomState.Offline &&
+                productState !is IntercomState.Stopping,
+            voxEnabled = audioControlSnapshot.controls.voxEnabled,
+            voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
+            voxState = audioControlSnapshot.voxState
         )
     }
 
@@ -774,7 +823,10 @@ internal class MainScreen(
                 presentation.offlineStartVisible ||
                 presentation.readOnlyReason != null
             ) stateText else activity.getString(R.string.discover_empty_no_presence),
-            radarRunning = animationsEnabled() && productState is IntercomState.Discovering
+            radarRunning = animationsEnabled() && productState is IntercomState.Discovering,
+            rescanEnabled = productState is IntercomState.Discovering &&
+                !wifiUnavailable &&
+                !discoverConnectAwaitingState
         )
     }
 
@@ -797,10 +849,10 @@ internal class MainScreen(
                         MotoComDiscoverScreen(
                             state = discoverUiState.value,
                             onBack = { showPage(MainRoute.HOME) },
-                            onHelp = ::showPlaceholderDialog,
+                            onHelp = ::showHelpDialog,
                             onStart = onToggleIntercom,
                             onWifiSettings = onOpenWifiSettings,
-                            onRescan = ::showPlaceholderDialog,
+                            onRescan = onRequestDiscoveryRefresh,
                             onSelectPresence = { presence ->
                                 val deviceId = presence.deviceId
                                 val sessionId = presence.sessionId
@@ -809,7 +861,8 @@ internal class MainScreen(
                                     updateExpandedDetailPane()
                                 }
                             },
-                            onConnect = ::connectFromDiscover
+                            onConnect = ::connectFromDiscover,
+                            onManagePairing = ::showPairingManagement
                         )
                     }
                 }
@@ -852,6 +905,106 @@ internal class MainScreen(
         }
     }
 
+    private fun showPairingManagement(presence: RiderPresence) {
+        if (incomingConfirmationVisible || currentRoute != MainRoute.DISCOVER) return
+        val deviceId = presence.deviceId ?: return
+        val currentPresence = currentPairedPresence(deviceId) ?: return
+        val pairing = requireNotNull(currentPresence.pairing)
+        val riderName = currentPresence.displayName.ifBlank {
+            activity.getString(R.string.pairing_rider_fallback)
+        }
+        val deviceName = currentPresence.deviceName.ifBlank {
+            activity.getString(R.string.version_unavailable)
+        }
+        val requestedPreferred = !pairing.isPreferred
+
+        dismissTransientDialogs()
+        activePairingDeviceId = deviceId
+        pairingManagementDialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.pairing_manage_title)
+            .setMessage(
+                activity.getString(
+                    R.string.pairing_manage_message,
+                    riderName,
+                    deviceName
+                )
+            )
+            .setPositiveButton(
+                if (requestedPreferred) {
+                    R.string.pairing_set_preferred
+                } else {
+                    R.string.pairing_clear_preferred
+                }
+            ) { _, _ ->
+                val current = currentPairedPresence(deviceId) ?: return@setPositiveButton
+                if (current.pairing?.isPreferred == requestedPreferred) return@setPositiveButton
+                if (!onSetPairingPreferred(deviceId, requestedPreferred)) {
+                    setStatus(SERVICE_UNAVAILABLE_STATUS)
+                }
+            }
+            .setNeutralButton(R.string.pairing_forget) { _, _ ->
+                currentPairedPresence(deviceId)?.let(::showForgetPairingConfirmation)
+            }
+            .setNegativeButton(R.string.pairing_cancel, null)
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener {
+                    if (pairingManagementDialog === dialog) {
+                        pairingManagementDialog = null
+                        if (forgetPairingDialog == null) activePairingDeviceId = null
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun showForgetPairingConfirmation(presence: RiderPresence) {
+        val deviceId = presence.deviceId ?: return
+        val currentPresence = currentPairedPresence(deviceId) ?: return
+        val riderName = currentPresence.displayName.ifBlank {
+            activity.getString(R.string.pairing_rider_fallback)
+        }
+
+        dismissPairingDialogs()
+        activePairingDeviceId = deviceId
+        forgetPairingDialog = AlertDialog.Builder(activity)
+            .setTitle(activity.getString(R.string.pairing_forget_title, riderName))
+            .setMessage(
+                activity.getString(
+                    R.string.pairing_forget_message,
+                    activity.getString(R.string.pairing_forget_connection_note)
+                )
+            )
+            .setPositiveButton(R.string.pairing_forget) { _, _ ->
+                if (currentPairedPresence(deviceId) == null) return@setPositiveButton
+                if (!onForgetPairing(deviceId)) setStatus(SERVICE_UNAVAILABLE_STATUS)
+            }
+            .setNegativeButton(R.string.pairing_cancel, null)
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener {
+                    if (forgetPairingDialog === dialog) {
+                        forgetPairingDialog = null
+                        if (pairingManagementDialog == null) activePairingDeviceId = null
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun currentPairedPresence(deviceId: String): RiderPresence? =
+        presences.firstOrNull {
+            it.deviceId == deviceId && it.pairing?.remoteDeviceId == deviceId
+        }
+
+    private fun dismissPairingDialogs() {
+        pairingManagementDialog?.dismiss()
+        pairingManagementDialog = null
+        forgetPairingDialog?.dismiss()
+        forgetPairingDialog = null
+        activePairingDeviceId = null
+    }
+
     private fun createSettingsPage(): ScrollView = ScrollView(activity).apply {
         id = R.id.settings_scroll
         clipToPadding = false
@@ -873,7 +1026,11 @@ internal class MainScreen(
                         onOptionalPermission = onRequestOptionalPermissions,
                         onLogs = { showPage(MainRoute.LOGS) },
                         onAbout = ::showAboutDialog,
-                        onPlaceholder = { showPlaceholderDialog() }
+                        onHelp = ::showHelpDialog,
+                        onVoxEnabledChanged = onSetVoxEnabled,
+                        onVoxSensitivityChanged = onSetVoxSensitivity,
+                        onAudioRouteSelected = onSelectAudioRoute,
+                        onAutomaticReconnectChanged = onAutomaticReconnectChanged
                     )
                 }
             }
@@ -933,7 +1090,12 @@ internal class MainScreen(
             deviceStatus = activity.getString(R.string.settings_device_status_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText, presentation.primaryText, presentation.connectedTransportText),
             optionalPermissionNotice = optionalPermission.noticeText,
             showOptionalPermissionCta = optionalPermission.showGrantCta,
-            version = activity.getString(R.string.settings_version_summary, currentVersionName())
+            version = activity.getString(R.string.settings_version_summary, currentVersionName()),
+            voxEnabled = audioControlSnapshot.controls.voxEnabled,
+            voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
+            voxState = audioControlSnapshot.voxState,
+            preferredAudioRoute = preferredAudioRoute,
+            automaticReconnectEnabled = automaticReconnectEnabled
         )
     }
 
@@ -981,15 +1143,18 @@ internal class MainScreen(
         Toast.makeText(activity, LOGS_COPIED_FEEDBACK, Toast.LENGTH_SHORT).show()
     }
 
-    private fun showPlaceholderDialog() {
-        if (!shouldShowPlaceholderDialog(placeholderDialog?.isShowing == true)) return
-        placeholderDialog = AlertDialog.Builder(activity)
-            .setTitle(PLACEHOLDER_DIALOG_TITLE)
-            .setMessage(PLACEHOLDER_DIALOG_MESSAGE)
-            .setPositiveButton(PLACEHOLDER_DIALOG_BUTTON, null)
+    private fun showHelpDialog() {
+        if (!shouldShowTransientDialog(helpDialog?.isShowing == true)) return
+        helpDialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.help_title)
+            .setMessage(R.string.help_message)
+            .setPositiveButton(R.string.help_send_feedback) { _, _ ->
+                onSendFeedback(currentVersionName())
+            }
+            .setNegativeButton(R.string.help_close, null)
             .create()
             .also { dialog ->
-                dialog.setOnDismissListener { placeholderDialog = null }
+                dialog.setOnDismissListener { helpDialog = null }
                 dialog.show()
             }
     }
@@ -1013,7 +1178,9 @@ internal class MainScreen(
     private fun currentChrome(): RouteChrome = RouteChrome(
         route = currentRoute,
         navigationOpen = navigationPanel.visibility == View.VISIBLE,
-        placeholderVisible = placeholderDialog?.isShowing == true,
+        transientDialogVisible = helpDialog?.isShowing == true ||
+            pairingManagementDialog?.isShowing == true ||
+            forgetPairingDialog?.isShowing == true,
         incomingConfirmationVisible = incomingConfirmationVisible
     )
 

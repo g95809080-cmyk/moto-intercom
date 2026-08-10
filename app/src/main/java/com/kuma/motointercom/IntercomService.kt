@@ -17,16 +17,42 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
+import java.util.concurrent.CancellationException
 
 private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
+
+internal class DiscoveryRefreshGate {
+    private var nextGeneration = 0L
+    private var activeGeneration: Long? = null
+
+    fun begin(): Long? {
+        if (activeGeneration != null) return null
+        val generation = ++nextGeneration
+        activeGeneration = generation
+        return generation
+    }
+
+    fun accepts(generation: Long): Boolean = activeGeneration == generation
+
+    fun complete(generation: Long) {
+        if (activeGeneration == generation) activeGeneration = null
+    }
+
+    fun cancel() {
+        activeGeneration = null
+    }
+}
 
 internal fun restartDiscoveryDelayMillis(nextAttempt: ConnectionAttempt?): Long =
     if (nextAttempt?.trigger == ConnectionTrigger.RECOVERY) 0L else PEER_RECONNECT_BACKOFF_MS
@@ -111,8 +137,10 @@ class IntercomService : Service() {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
+        fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) = Unit
         fun onPresencesChanged(presences: List<RiderPresence>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
+        fun onAudioControlsChanged(snapshot: AudioControlSnapshot) = Unit
         fun onLog(message: String)
         fun onToast(message: String) = Unit
         fun onRemoteRiderIdentified(name: String) = Unit
@@ -133,11 +161,13 @@ class IntercomService : Service() {
         removeCallbacks = mainHandler::removeCallbacks,
         restart = ::restartAfterRecoveryCleanup
     )
+    private val discoveryRefreshGate = DiscoveryRefreshGate()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val presenceAggregator = PresenceAggregator(SystemClock::elapsedRealtime)
 
     private lateinit var identityStore: LocalIdentityStore
     private lateinit var pairingRepository: PairingRepository
+    private val pairingMutationMutex = Mutex()
     private lateinit var orchestrator: SessionOrchestrator
     private val attemptDeadlineScheduler = AttemptDeadlineScheduler(
         elapsedRealtime = SystemClock::elapsedRealtime,
@@ -224,10 +254,14 @@ class IntercomService : Service() {
     private var bluetoothReady = false
     private var physicalLinkReady = false
     private var mediaConnected = false
+    private var audioControls = AudioControlSettings()
+    private var audioControlRevision = 0L
+    private var voxRuntimeState = VoxRuntimeState.IDLE
     private var running = false
     private var lastStatus = READY_STATUS
     private var audioSourceStatus = AUDIO_STANDBY_STATUS
     private var audioSourceBluetooth = false
+    private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
     private var appInForeground = false
@@ -275,6 +309,24 @@ class IntercomService : Service() {
         when (intent?.action) {
             ACTION_START_INTERCOM -> {
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()
+                setPreferredAudioRoute(
+                    audioRouteSelectionFromPersisted(
+                        intent.getStringExtra(EXTRA_PREFERRED_AUDIO_ROUTE)
+                    )
+                )
+                setVoxSettings(
+                    voxEnabled = intent.getBooleanExtra(
+                        EXTRA_VOX_ENABLED,
+                        audioControls.voxEnabled
+                    ),
+                    voxSensitivity = intent.getIntExtra(
+                        EXTRA_VOX_SENSITIVITY,
+                        audioControls.voxSensitivity
+                    )
+                )
+                setAutomaticReconnectEnabled(
+                    intent.getBooleanExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, true)
+                )
                 if (!hasRequiredRuntimePermissions()) {
                     publishStatus("缺少必要权限，无法启动摩声")
                     stopSelf(startId)
@@ -326,6 +378,8 @@ class IntercomService : Service() {
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
+        listener?.onAudioRouteSelectionChanged(preferredAudioRoute)
+        listener?.onAudioControlsChanged(currentAudioControlSnapshot())
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
         listener?.let(::replayActiveIncomingConfirmation)
@@ -348,6 +402,229 @@ class IntercomService : Service() {
             appInForeground = foreground
             publishConfirmationAvailability()
         }
+    }
+
+    internal fun setMuted(muted: Boolean) {
+        dispatchOnMain {
+            applyAudioControls(audioControls.copy(muted = running && muted))
+        }
+    }
+
+    internal fun setVoxSettings(voxEnabled: Boolean, voxSensitivity: Int) {
+        dispatchOnMain {
+            applyAudioControls(
+                audioControls.copy(
+                    voxEnabled = voxEnabled,
+                    voxSensitivity = voxSensitivity
+                )
+            )
+        }
+    }
+
+    internal fun setPreferredAudioRoute(selection: AudioRouteSelection) {
+        dispatchOnMain {
+            val changed = selection != preferredAudioRoute
+            preferredAudioRoute = selection
+            if (changed) listener?.onAudioRouteSelectionChanged(selection)
+            try {
+                audioSessionController?.updateAudioRoute(selection)
+            } catch (error: RuntimeException) {
+                handleError(error)
+            }
+        }
+    }
+
+    internal fun setAutomaticReconnectEnabled(enabled: Boolean) {
+        dispatchOnMain {
+            orchestrator.dispatch(SessionEvent.AutomaticReconnectChanged(enabled))
+        }
+    }
+
+    internal fun setPairingPreferred(deviceId: String, preferred: Boolean) {
+        val normalizedDeviceId = deviceId.trim()
+        if (normalizedDeviceId.isBlank()) {
+            publishToast(
+                getString(
+                    R.string.pairing_record_missing,
+                    getString(R.string.pairing_rider_fallback)
+                )
+            )
+            return
+        }
+        serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairingMutationMutex.withLock {
+                try {
+                    val record = pairingRepository.getByDeviceId(normalizedDeviceId)
+                    if (record == null) {
+                        publishMissingPairing()
+                        return@withLock
+                    }
+                    val riderName = pairingRiderName(record)
+                    if (record.isPreferred == preferred) {
+                        publishPairingPreferenceFeedback(riderName, preferred)
+                        return@withLock
+                    }
+                    val changed = if (preferred) {
+                        pairingRepository.setPreferred(normalizedDeviceId)
+                    } else {
+                        pairingRepository.clearPreferred(normalizedDeviceId)
+                    }
+                    if (changed) {
+                        publishPairingPreferenceFeedback(riderName, preferred)
+                    } else {
+                        val current = pairingRepository.getByDeviceId(normalizedDeviceId)
+                        when {
+                            current == null -> publishMissingPairing(riderName)
+                            current.isPreferred == preferred ->
+                                publishPairingPreferenceFeedback(pairingRiderName(current), preferred)
+                            else -> publishToast(getString(R.string.pairing_update_failed))
+                        }
+                    }
+                } catch (canceled: CancellationException) {
+                    throw canceled
+                } catch (error: Exception) {
+                    publishLog("Pairing preference update failed: ${error.message ?: error.javaClass.simpleName}")
+                    publishToast(getString(R.string.pairing_update_failed))
+                }
+            }
+        }
+    }
+
+    internal fun forgetPairing(deviceId: String) {
+        val normalizedDeviceId = deviceId.trim()
+        if (normalizedDeviceId.isBlank()) {
+            publishMissingPairing()
+            return
+        }
+        serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairingMutationMutex.withLock {
+                try {
+                    val record = pairingRepository.getByDeviceId(normalizedDeviceId)
+                    if (record == null) {
+                        publishMissingPairing()
+                        return@withLock
+                    }
+                    val riderName = pairingRiderName(record)
+                    val forgotten = pairingRepository.forget(normalizedDeviceId)
+                    if (forgotten) {
+                        publishToast(getString(R.string.pairing_forgotten, riderName))
+                    } else {
+                        publishMissingPairing(riderName)
+                    }
+                } catch (canceled: CancellationException) {
+                    throw canceled
+                } catch (error: Exception) {
+                    publishLog("Forget pairing failed: ${error.message ?: error.javaClass.simpleName}")
+                    publishToast(getString(R.string.pairing_update_failed))
+                }
+            }
+        }
+    }
+
+    private fun publishPairingPreferenceFeedback(riderName: String, preferred: Boolean) {
+        publishToast(
+            getString(
+                if (preferred) {
+                    R.string.pairing_preferred_saved
+                } else {
+                    R.string.pairing_preferred_cleared
+                },
+                riderName
+            )
+        )
+    }
+
+    private fun publishMissingPairing(
+        riderName: String = getString(R.string.pairing_rider_fallback)
+    ) {
+        publishToast(getString(R.string.pairing_record_missing, riderName))
+    }
+
+    private fun pairingRiderName(record: PairingRecord): String =
+        record.localAlias.trim()
+            .ifBlank { record.remoteNickname.trim() }
+            .ifBlank { record.deviceName.trim() }
+            .ifBlank { getString(R.string.pairing_rider_fallback) }
+
+    private fun applyAudioControls(requested: AudioControlSettings) {
+        val next = requested.normalized().let {
+            if (running) it else it.copy(muted = false)
+        }
+        if (next == audioControls) return
+        val previous = audioControls
+        val nextVersioned = VersionedAudioControls(
+            revision = audioControlRevision + 1,
+            settings = next
+        )
+        try {
+            audioSessionController?.updateAudioControls(nextVersioned)
+        } catch (error: RuntimeException) {
+            handleError(error)
+            return
+        }
+        audioControls = next
+        audioControlRevision = nextVersioned.revision
+        when {
+            !running -> {
+                voxRuntimeState = if (next.voxEnabled) {
+                    VoxRuntimeState.IDLE
+                } else {
+                    VoxRuntimeState.DISABLED
+                }
+                publishAudioControls()
+            }
+            next.muted -> {
+                voxRuntimeState = VoxRuntimeState.MUTED
+                publishAudioControls()
+            }
+            !next.voxEnabled -> {
+                voxRuntimeState = VoxRuntimeState.DISABLED
+                publishAudioControls()
+            }
+            audioSessionController == null -> {
+                voxRuntimeState = VoxRuntimeState.IDLE
+                publishAudioControls()
+            }
+            previous.voxEnabled != next.voxEnabled ||
+                previous.voxSensitivity != next.voxSensitivity -> {
+                // With an engine, the gate is synchronously replaced before this returns.
+                voxRuntimeState = VoxRuntimeState.LISTENING
+                publishAudioControls()
+            }
+            previous.muted == next.muted -> publishAudioControls()
+            // Unmute waits for RiderAudioEngine to report its current gate state.
+        }
+    }
+
+    private fun onVoxStateChanged(
+        runtimeSessionId: RuntimeSessionId,
+        callbackControls: VersionedAudioControls,
+        state: VoxRuntimeState
+    ) {
+        postForRuntime(runtimeSessionId) {
+            if (
+                callbackControls.revision != audioControlRevision ||
+                callbackControls.settings != audioControls
+            ) {
+                return@postForRuntime
+            }
+            voxRuntimeState = state
+            publishAudioControls()
+        }
+    }
+
+    private fun currentAudioControlSnapshot(): AudioControlSnapshot =
+        AudioControlSnapshot(audioControls, voxRuntimeState)
+
+    private fun publishAudioControls() {
+        listener?.onAudioControlsChanged(currentAudioControlSnapshot())
+    }
+
+    private fun resetSessionAudioControls() {
+        val snapshot = idleAudioControlSnapshot(audioControls)
+        if (snapshot.controls != audioControls) audioControlRevision++
+        audioControls = snapshot.controls
+        voxRuntimeState = snapshot.voxState
     }
 
     internal fun refreshConfirmationAvailability() {
@@ -425,6 +702,22 @@ class IntercomService : Service() {
         }
     }
 
+    internal fun requestDiscoveryRefresh() {
+        mainHandler.post {
+            if (!running) return@post
+            val runtimeSessionId = activeRuntimeSessionId ?: return@post
+            val generation = discoveryRefreshGate.begin() ?: return@post
+            val queued = orchestrator.dispatch(
+                SessionEvent.DiscoveryRefreshRequested(runtimeSessionId, generation)
+            ) { accepted ->
+                if (!accepted) {
+                    dispatchOnMain { discoveryRefreshGate.complete(generation) }
+                }
+            }
+            if (!queued) discoveryRefreshGate.complete(generation)
+        }
+    }
+
     private fun startIntercom() {
         if (running) {
             publishStatus(lastStatus)
@@ -445,6 +738,8 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
+        resetSessionAudioControls()
+        publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
         remoteRiderName = null
@@ -510,10 +805,32 @@ class IntercomService : Service() {
                     updateStageStatus()
                 }
             },
+            onEarpieceActive = {
+                postForRuntime(runtimeSessionId) {
+                    bluetoothReady = false
+                    publishAudioSource(AUDIO_EARPIECE_STATUS, bluetooth = false)
+                    updateStageStatus()
+                }
+            },
+            onExternalAudioActive = { outputLabel ->
+                postForRuntime(runtimeSessionId) {
+                    bluetoothReady = false
+                    publishAudioSource("当前音频源：$outputLabel", bluetooth = false)
+                    updateStageStatus()
+                }
+            },
             onError = { error -> postForRuntime(runtimeSessionId) { handleError(error) } },
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
-            }
+            },
+            initialAudioControls = VersionedAudioControls(
+                revision = audioControlRevision,
+                settings = audioControls
+            ),
+            onVoxStateChanged = { callbackControls, state ->
+                onVoxStateChanged(runtimeSessionId, callbackControls, state)
+            },
+            initialAudioRoute = preferredAudioRoute
         )
     }
 
@@ -1128,9 +1445,11 @@ class IntercomService : Service() {
         runtimeSessionId: RuntimeSessionId,
         nextAttempt: ConnectionAttempt?,
         restartDelayMillis: Long = restartDiscoveryDelayMillis(nextAttempt),
-        resetEffect: SessionEffect.ResetWirelessEnvironment? = null
-    ) {
-        if (!running || activeRuntimeSessionId != runtimeSessionId) return
+        resetEffect: SessionEffect.ResetWirelessEnvironment? = null,
+        cleanupStatus: String = SIGNAL_LOST_STATUS,
+        discoveryRefreshGeneration: Long? = null
+    ): Boolean {
+        if (!running || activeRuntimeSessionId != runtimeSessionId) return false
         if (
             resetEffect != null &&
             !canExecuteResetWirelessEnvironmentEffect(
@@ -1141,18 +1460,19 @@ class IntercomService : Service() {
                 orchestrator.pendingInboundRequest
             )
         ) {
-            return
+            return false
         }
         val request = RecoveryCleanupRequest(
             runtimeSessionId = runtimeSessionId,
             nextAttempt = nextAttempt,
             restartDelayMillis = restartDelayMillis,
-            resetEffect = resetEffect
+            resetEffect = resetEffect,
+            discoveryRefreshGeneration = discoveryRefreshGeneration
         )
-        if (recoveryCleanupCoordinator.updateIfActive(request)) return
-        val token = activeSession ?: return
-        if (!isSessionCurrent(token)) return
-        if (localDeviceId.isBlank()) return
+        if (recoveryCleanupCoordinator.updateIfActive(request)) return true
+        val token = activeSession ?: return false
+        if (!isSessionCurrent(token)) return false
+        if (localDeviceId.isBlank()) return false
         val cleanupToken = recoveryCleanupCoordinator.start(request)
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
@@ -1191,7 +1511,7 @@ class IntercomService : Service() {
                 physicalLinkReady = false
                 mediaConnected = false
                 remoteRiderName = null
-                publishStatus(SIGNAL_LOST_STATUS)
+                publishStatus(cleanupStatus)
             },
             resumeDiscovery = { resumedRuntimeSessionId ->
                 if (resumedRuntimeSessionId == runtimeSessionId) {
@@ -1200,14 +1520,19 @@ class IntercomService : Service() {
             },
             onError = ::handleError
         ).abortAndResumeDiscovery()
+        return true
     }
 
     private fun restartAfterRecoveryCleanup(request: RecoveryCleanupRequest): Boolean {
+        fun completeManualRefresh() {
+            request.discoveryRefreshGeneration?.let(discoveryRefreshGate::complete)
+        }
         if (
             !running ||
             activeSession != null ||
             activeRuntimeSessionId != request.runtimeSessionId
         ) {
+            completeManualRefresh()
             return true
         }
         val resetEffect = request.resetEffect
@@ -1221,6 +1546,21 @@ class IntercomService : Service() {
                 orchestrator.pendingInboundRequest
             )
         ) {
+            completeManualRefresh()
+            return false
+        }
+        if (
+            resetEffect == null &&
+            request.nextAttempt == null &&
+            !canResumePassiveDiscovery(
+                request.runtimeSessionId,
+                orchestrator.state.value,
+                orchestrator.currentAttempt,
+                orchestrator.activeControlAttempt,
+                orchestrator.pendingInboundRequest
+            )
+        ) {
+            completeManualRefresh()
             return false
         }
         if (
@@ -1231,9 +1571,13 @@ class IntercomService : Service() {
             )
         ) {
             publishLog("忽略已过期或已替换的恢复尝试")
+            completeManualRefresh()
             return false
         }
-        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: return false
+        val deviceId = localDeviceId.takeIf(String::isNotBlank) ?: run {
+            completeManualRefresh()
+            return false
+        }
         val recoveryToken = sessions.start()
         activeSession = recoveryToken
         publishLog("重新启动车友发现")
@@ -1246,6 +1590,7 @@ class IntercomService : Service() {
         ) {
             activeSession = null
             sessions.invalidate()
+            completeManualRefresh()
             return false
         }
         startDiscoveryTransports(
@@ -1259,6 +1604,7 @@ class IntercomService : Service() {
                 SessionEvent.ResetCompleted(it.runtimeSessionId, it.failedAttemptId)
             )
         }
+        completeManualRefresh()
         return true
     }
 
@@ -1278,6 +1624,7 @@ class IntercomService : Service() {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
         recoveryCleanupCoordinator.cancel()
+        discoveryRefreshGate.cancel()
         attemptDeadlineScheduler.cancel()
         attemptMilestoneScheduler.cancel()
         controlChannelCloseDeadlineScheduler.cancel()
@@ -1312,6 +1659,8 @@ class IntercomService : Service() {
         }
         intercomManager = null
         audioSessionController = null
+        resetSessionAudioControls()
+        publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false
@@ -1379,6 +1728,34 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.RefreshDiscovery -> {
+                if (!discoveryRefreshGate.accepts(effect.generation)) return
+                if (
+                    canExecuteRefreshDiscoveryEffect(
+                        effect,
+                        orchestrator.state.value,
+                        orchestrator.currentAttempt,
+                        orchestrator.activeControlAttempt,
+                        orchestrator.pendingInboundRequest
+                    )
+                ) {
+                    val started = abortResourcesAndResumeDiscovery(
+                        runtimeSessionId = effect.runtimeSessionId,
+                        nextAttempt = null,
+                        restartDelayMillis = 0L,
+                        cleanupStatus = RESCANNING_STATUS,
+                        discoveryRefreshGeneration = effect.generation
+                    )
+                    if (started) {
+                        publishLog("手动重新扫描附近车友")
+                    } else {
+                        discoveryRefreshGate.complete(effect.generation)
+                        publishLog("重新扫描请求未启动新的发现轮次")
+                    }
+                } else {
+                    discoveryRefreshGate.complete(effect.generation)
+                }
+            }
             is SessionEffect.RetireTargetedTransport -> {
                 if (orchestrator.currentAttempt == effect.attempt) {
                     retireTargetedTransport(effect.attempt, effect.transport)
@@ -2099,6 +2476,12 @@ class IntercomService : Service() {
         const val ACTION_ACCEPT_INCOMING = "com.kuma.motointercom.action.ACCEPT_INCOMING"
         const val ACTION_REJECT_INCOMING = "com.kuma.motointercom.action.REJECT_INCOMING"
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
+        private const val EXTRA_VOX_ENABLED = "com.kuma.motointercom.extra.VOX_ENABLED"
+        private const val EXTRA_VOX_SENSITIVITY = "com.kuma.motointercom.extra.VOX_SENSITIVITY"
+        private const val EXTRA_PREFERRED_AUDIO_ROUTE =
+            "com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE"
+        private const val EXTRA_AUTOMATIC_RECONNECT_ENABLED =
+            "com.kuma.motointercom.extra.AUTOMATIC_RECONNECT_ENABLED"
         private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
         private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
         private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
@@ -2112,7 +2495,8 @@ class IntercomService : Service() {
         private const val NOTIFICATION_ID = 2601
         private const val INCOMING_NOTIFICATION_ID = 2602
         private const val AUDIO_STANDBY_STATUS = "当前音频源：待机"
-        private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放（无蓝牙）"
+        private const val AUDIO_EARPIECE_STATUS = "当前音频源：手机听筒"
+        private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放"
         private const val READY_STATUS = "请点击下方启动对讲"
         private const val SEARCHING_STATUS = "无线配对中，请把两台手机靠近.."
         private const val PEER_FOUND_STATUS = "已发现车友"
@@ -2120,13 +2504,24 @@ class IntercomService : Service() {
         private const val MEDIA_INITIALIZING_STATUS = "媒体初始化中"
         private const val VOICE_CONNECTED_STATUS = "语音通道已连接"
         private const val SIGNAL_LOST_STATUS = "队友信号丢失，等待重新连接..."
+        private const val RESCANNING_STATUS = "正在重新扫描附近车友..."
         private const val ENDED_STATUS = "对讲已结束"
         private const val BLUETOOTH_RETRY_STATUS = "头盔蓝牙已断开，正在尝试重连..."
 
-        fun startIntent(context: Context, riderName: String = ""): Intent =
+        internal fun startIntent(
+            context: Context,
+            riderName: String = "",
+            audioControls: AudioControlSettings = AudioControlSettings(),
+            preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+            automaticReconnectEnabled: Boolean = true
+        ): Intent =
             Intent(context, IntercomService::class.java)
                 .setAction(ACTION_START_INTERCOM)
                 .putExtra(EXTRA_RIDER_NAME, riderName)
+                .putExtra(EXTRA_VOX_ENABLED, audioControls.voxEnabled)
+                .putExtra(EXTRA_VOX_SENSITIVITY, audioControls.normalized().voxSensitivity)
+                .putExtra(EXTRA_PREFERRED_AUDIO_ROUTE, preferredAudioRoute.name)
+                .putExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, automaticReconnectEnabled)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)
@@ -2251,6 +2646,31 @@ internal fun canExecuteAbortAttemptEffect(
     activeAttempt == null &&
     pendingInbound == null &&
     terminalOutcome != null
+
+internal fun canExecuteRefreshDiscoveryEffect(
+    effect: SessionEffect.RefreshDiscovery,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = canResumePassiveDiscovery(
+    effect.runtimeSessionId,
+    currentState,
+    currentAttempt,
+    activeAttempt,
+    pendingInbound
+)
+
+internal fun canResumePassiveDiscovery(
+    runtimeSessionId: RuntimeSessionId,
+    currentState: IntercomState,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    pendingInbound: PendingInboundRequest?
+): Boolean = currentState == IntercomState.Discovering(runtimeSessionId) &&
+    currentAttempt == null &&
+    activeAttempt == null &&
+    pendingInbound == null
 
 internal fun canFinalizeActiveSessionReleaseEffect(
     effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery,

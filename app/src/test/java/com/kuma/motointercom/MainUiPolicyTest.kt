@@ -60,7 +60,7 @@ class MainUiPolicyTest {
                 RouteChrome(
                     MainRoute.LOGS,
                     navigationOpen = true,
-                    placeholderVisible = true,
+                    transientDialogVisible = true,
                     incomingConfirmationVisible = true
                 )
             )
@@ -70,8 +70,8 @@ class MainUiPolicyTest {
             resolveBackNavigation(RouteChrome(MainRoute.LOGS, incomingConfirmationVisible = true))
         )
         assertEquals(
-            BackNavigation.DismissPlaceholder,
-            resolveBackNavigation(RouteChrome(MainRoute.LOGS, placeholderVisible = true))
+            BackNavigation.DismissTransientDialog,
+            resolveBackNavigation(RouteChrome(MainRoute.LOGS, transientDialogVisible = true))
         )
         assertEquals(
             BackNavigation.NavigateTo(MainRoute.SETTINGS),
@@ -169,9 +169,9 @@ class MainUiPolicyTest {
     }
 
     @Test
-    fun placeholderAndHiddenLogPoliciesAvoidDuplicateOrHiddenUiWork() {
-        assertTrue(shouldShowPlaceholderDialog(alreadyShowing = false))
-        assertFalse(shouldShowPlaceholderDialog(alreadyShowing = true))
+    fun transientDialogAndHiddenLogPoliciesAvoidDuplicateOrHiddenUiWork() {
+        assertTrue(shouldShowTransientDialog(alreadyShowing = false))
+        assertFalse(shouldShowTransientDialog(alreadyShowing = true))
         assertTrue(shouldRenderLogAppend(MainRoute.LOGS))
         assertFalse(shouldRenderLogAppend(MainRoute.HOME))
         assertFalse(shouldRenderLogAppend(MainRoute.DISCOVER))
@@ -317,7 +317,6 @@ class MainUiPolicyTest {
         assertEquals("已连接", presentations[5].webRtcText)
         assertEquals("未连接", presentations[6].webRtcText)
         assertTrue(presentations[0].bluetoothActive)
-        assertEquals(PLACEHOLDER_VOX_STATUS, presentations[5].voxText)
         assertEquals("supplement", presentations[0].supplementalText)
         assertEquals("点击下方启动摩声", presentations[0].primaryText)
     }
@@ -944,10 +943,7 @@ class MainUiPolicyTest {
     }
 
     @Test
-    fun placeholderDialogCopyIsExactAndLogsCopyPreservesOrder() {
-        assertEquals("功能开发中", PLACEHOLDER_DIALOG_TITLE)
-        assertEquals("该功能还没做好，暂时无法使用。", PLACEHOLDER_DIALOG_MESSAGE)
-        assertEquals("确定", PLACEHOLDER_DIALOG_BUTTON)
+    fun logsCopyPreservesOrder() {
         assertEquals("仅显示本次界面会话日志", LOGS_SCOPE_TEXT)
         assertEquals("日志已复制", LOGS_COPIED_FEEDBACK)
         assertEquals("one\ntwo\nthree", copyableLogText(listOf("one", "two", "three")))

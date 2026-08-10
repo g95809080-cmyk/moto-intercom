@@ -46,6 +46,27 @@ class IntercomStateMachineTest {
     }
 
     @Test
+    fun manualDiscoveryRefreshRequiresTheCurrentDiscoveringRuntime() {
+        val event = SessionEvent.DiscoveryRefreshRequested(runtime, generation = 1L)
+
+        assertEquals(
+            SessionTransition(
+                state = IntercomState.Discovering(runtime),
+                effects = listOf(SessionEffect.RefreshDiscovery(runtime, generation = 1L))
+            ),
+            reduceIntercomState(IntercomState.Discovering(runtime), event)
+        )
+        assertNull(reduceIntercomState(IntercomState.Offline, event))
+        assertNull(
+            reduceIntercomState(
+                IntercomState.Discovering(RuntimeSessionId("runtime-stale")),
+                event
+            )
+        )
+        assertNull(reduceIntercomState(IntercomState.Connecting(attempt), event))
+    }
+
+    @Test
     fun presenceSelectionIsReservedForCoordinator() {
         assertNull(
             reduceIntercomState(

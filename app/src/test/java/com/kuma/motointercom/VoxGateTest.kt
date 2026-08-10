@@ -1,6 +1,7 @@
 package com.kuma.motointercom
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoxGateTest {
@@ -19,5 +20,16 @@ class VoxGateTest {
         val decision = VoxGate(enabled = false).update(0.0, 0)
         assertEquals(VoxGate.State.BYPASS, decision.state)
         assertEquals(1.0, decision.trackVolume, 0.0)
+    }
+
+    @Test
+    fun higherSensitivityUsesALowerOpeningThresholdWhileDefaultIsUnchanged() {
+        val low = VoxGate(enabled = true, sensitivity = 0).update(20.0, 100)
+        val normal = VoxGate(enabled = true, sensitivity = 50).update(20.0, 100)
+        val high = VoxGate(enabled = true, sensitivity = 100).update(20.0, 100)
+
+        assertTrue(low.openThreshold > normal.openThreshold)
+        assertEquals(40.0, normal.openThreshold, 0.0)
+        assertTrue(normal.openThreshold > high.openThreshold)
     }
 }

@@ -1,6 +1,9 @@
 package com.kuma.motointercom
 
-internal class VoxGate(private val enabled: Boolean) {
+internal class VoxGate(
+    private val enabled: Boolean,
+    sensitivity: Int = DEFAULT_VOX_SENSITIVITY
+) {
     enum class State { BYPASS, LISTENING, OPEN, HANGOVER }
 
     data class Decision(
@@ -19,13 +22,23 @@ internal class VoxGate(private val enabled: Boolean) {
     private var aboveCloseStartedAt = 0L
     private var lastVoiceAt = 0L
     private var hangoverStartedAt = 0L
+    private val baseOpenThreshold = sensitivity.coerceIn(
+        MIN_VOX_SENSITIVITY,
+        MAX_VOX_SENSITIVITY
+    ).let { normalizedSensitivity ->
+        DEFAULT_OPEN_THRESHOLD +
+            (DEFAULT_VOX_SENSITIVITY - normalizedSensitivity) * SENSITIVITY_DB_PER_STEP
+    }
+
+    @Synchronized
+    fun currentState(): State = state
 
     @Synchronized
     fun update(level: Double, nowMs: Long): Decision {
         if (!enabled) return decision(State.BYPASS, changed = false)
         if (calibrationUntil == 0L) calibrationUntil = nowMs + CALIBRATION_MS
 
-        var openThreshold = maxOf(BASE_OPEN_THRESHOLD, noiseFloor + NOISE_MARGIN)
+        var openThreshold = maxOf(baseOpenThreshold, noiseFloor + NOISE_MARGIN)
         var closeThreshold = openThreshold - HYSTERESIS
         val previous = state
 
@@ -37,7 +50,7 @@ internal class VoxGate(private val enabled: Boolean) {
                 if (calibrating || level < openThreshold) {
                     noiseFloor = (noiseFloor + alpha * (level - noiseFloor))
                         .coerceIn(MIN_NOISE_FLOOR, MAX_NOISE_FLOOR)
-                    openThreshold = maxOf(BASE_OPEN_THRESHOLD, noiseFloor + NOISE_MARGIN)
+                    openThreshold = maxOf(baseOpenThreshold, noiseFloor + NOISE_MARGIN)
                     closeThreshold = openThreshold - HYSTERESIS
                 }
 
@@ -111,15 +124,16 @@ internal class VoxGate(private val enabled: Boolean) {
         state = value,
         trackVolume = if (value == State.LISTENING) MUTED_VOLUME else OPEN_VOLUME,
         stateChanged = changed,
-        openThreshold = BASE_OPEN_THRESHOLD,
-        closeThreshold = BASE_OPEN_THRESHOLD - HYSTERESIS,
+        openThreshold = baseOpenThreshold,
+        closeThreshold = baseOpenThreshold - HYSTERESIS,
         noiseFloor = noiseFloor
     )
 
     private companion object {
         const val OPEN_VOLUME = 1.0
         const val MUTED_VOLUME = 0.0
-        const val BASE_OPEN_THRESHOLD = 40.0
+        const val DEFAULT_OPEN_THRESHOLD = 40.0
+        const val SENSITIVITY_DB_PER_STEP = 0.24
         const val NOISE_MARGIN = 8.0
         const val HYSTERESIS = 5.0
         const val ATTACK_MS = 25L

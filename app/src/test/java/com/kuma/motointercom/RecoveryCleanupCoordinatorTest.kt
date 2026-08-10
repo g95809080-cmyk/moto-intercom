@@ -2,10 +2,57 @@ package com.kuma.motointercom
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RecoveryCleanupCoordinatorTest {
+    @Test
+    fun lateDuplicateRefreshEffectCannotRestartTheNewDiscoveryGeneration() {
+        val tasks = TaskQueue()
+        val gate = DiscoveryRefreshGate()
+        val restarted = mutableListOf<RecoveryCleanupRequest>()
+        var wifiDirectRebuilds = 0
+        var lanRebuilds = 0
+        val coordinator = RecoveryCleanupCoordinator(
+            postDelayed = tasks::post,
+            removeCallbacks = tasks::remove,
+            restart = {
+                restarted += it
+                wifiDirectRebuilds++
+                lanRebuilds++
+                it.discoveryRefreshGeneration?.let(gate::complete)
+                true
+            }
+        )
+
+        fun deliverRefreshEffect(generation: Long) {
+            if (!gate.accepts(generation)) return
+            val request = RecoveryCleanupRequest(
+                runtimeSessionId = RuntimeSessionId("runtime-current"),
+                nextAttempt = null,
+                restartDelayMillis = 0L,
+                discoveryRefreshGeneration = generation
+            )
+            if (coordinator.updateIfActive(request)) return
+            val token = coordinator.start(request)
+            coordinator.complete(token)
+        }
+
+        val firstGeneration = requireNotNull(gate.begin())
+        assertNull(gate.begin())
+        deliverRefreshEffect(firstGeneration)
+        tasks.runNext()
+        deliverRefreshEffect(firstGeneration)
+
+        assertEquals(1, restarted.size)
+        assertEquals(firstGeneration, restarted.single().discoveryRefreshGeneration)
+        assertEquals(1, wifiDirectRebuilds)
+        assertEquals(1, lanRebuilds)
+        assertFalse(tasks.hasTasks())
+        assertTrue(requireNotNull(gate.begin()) > firstGeneration)
+    }
+
     @Test
     fun completedCleanupReschedulesForTheLatestRequest() {
         val tasks = TaskQueue()

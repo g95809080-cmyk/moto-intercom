@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -11,6 +12,69 @@ import org.junit.Test
 
 class SessionOrchestratorTest {
     private val runtime = RuntimeSessionId("runtime-current")
+
+    @Test
+    fun manualDiscoveryRefreshEmitsOneExactEffectAndRejectsStaleRuntime() = runBlocking {
+        val orchestrator = orchestrator()
+        try {
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.DiscoveryRefreshRequested(runtime, generation = 1L)
+                )
+            )
+            assertEquals(
+                SessionEffect.RefreshDiscovery(runtime, generation = 1L),
+                orchestrator.effects.first()
+            )
+            assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
+
+            assertFalse(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.DiscoveryRefreshRequested(
+                        RuntimeSessionId("runtime-stale"),
+                        generation = 2L
+                    )
+                )
+            )
+        } finally {
+            orchestrator.close()
+        }
+    }
+
+    @Test
+    fun manualDiscoveryRefreshEffectRequiresIdleDiscoveryForTheExactRuntime() {
+        val effect = SessionEffect.RefreshDiscovery(runtime, generation = 1L)
+        val activeAttempt = attempt("attempt-active", "peer-a", Transport.LAN)
+
+        assertTrue(
+            canExecuteRefreshDiscoveryEffect(
+                effect,
+                IntercomState.Discovering(runtime),
+                currentAttempt = null,
+                activeAttempt = null,
+                pendingInbound = null
+            )
+        )
+        assertFalse(
+            canExecuteRefreshDiscoveryEffect(
+                effect,
+                IntercomState.Discovering(RuntimeSessionId("runtime-stale")),
+                currentAttempt = null,
+                activeAttempt = null,
+                pendingInbound = null
+            )
+        )
+        assertFalse(
+            canExecuteRefreshDiscoveryEffect(
+                effect,
+                IntercomState.Connecting(activeAttempt),
+                currentAttempt = activeAttempt,
+                activeAttempt = null,
+                pendingInbound = null
+            )
+        )
+    }
 
     @Test
     fun connectedThenImmediateDisconnectCannotRemainStaleConnected() = runBlocking {
@@ -427,6 +491,34 @@ class SessionOrchestratorTest {
 
             assertEquals(listOf("peer-lan"), repository.saved.map(PairingRecord::remoteDeviceId))
             assertEquals("LAN", repository.saved.single().lastTransport)
+
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        runtime,
+                        ConfirmationAvailability(
+                            appForeground = true,
+                            notificationAvailable = true
+                        )
+                    )
+                )
+            )
+            assertEquals(1, repository.saved.size)
+
+            repository.saved.clear()
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.ConfirmationAvailabilityChanged(
+                        runtime,
+                        ConfirmationAvailability(
+                            appForeground = false,
+                            notificationAvailable = true
+                        )
+                    )
+                )
+            )
+            assertTrue(repository.saved.isEmpty())
+            assertTrue(orchestrator.state.value is IntercomState.Connected)
         } finally {
             orchestrator.close()
         }
@@ -470,7 +562,7 @@ class SessionOrchestratorTest {
         }
 
         override suspend fun setPreferred(deviceId: String): Boolean = false
-        override suspend fun clearPreferred() = Unit
+        override suspend fun clearPreferred(deviceId: String): Boolean = false
         override suspend fun updateLastConnectedAt(
             deviceId: String,
             connectedAt: Long,

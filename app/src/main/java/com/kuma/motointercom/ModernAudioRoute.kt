@@ -9,39 +9,57 @@ import java.io.Closeable
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
+internal interface CommunicationDeviceRoute : Closeable {
+    fun register()
+    fun routeTo(selection: AudioRouteSelection): ModernAudioRoute.RouteResult
+    fun currentName(): String?
+    fun clear()
+    fun isActive(selection: AudioRouteSelection): Boolean
+    fun stateSummary(): String
+}
+
 @RequiresApi(Build.VERSION_CODES.S)
 internal class ModernAudioRoute(
     private val audioManager: AudioManager,
     private val callbackExecutor: Executor,
     private val onBluetoothConnected: (String) -> Unit,
     private val onDeviceLost: () -> Unit
-) : Closeable {
-    enum class RouteResult { ROUTED, NO_BLUETOOTH_DEVICE, REJECTED }
+) : CommunicationDeviceRoute {
+    enum class RouteResult { ROUTED, NO_MATCHING_DEVICE, REJECTED }
 
     private val initialDevice = audioManager.communicationDevice
     private val closed = AtomicBoolean(false)
     private val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
         if (closed.get()) return@OnCommunicationDeviceChangedListener
         if (isBluetooth(device)) {
-            onBluetoothConnected(device?.productName?.toString().orEmpty())
+            onBluetoothConnected(device?.let(::safeProductName).orEmpty())
         } else {
             onDeviceLost()
         }
     }
     private var registered = false
 
-    fun register() {
+    override fun register() {
         if (registered || closed.get()) return
         audioManager.addOnCommunicationDeviceChangedListener(callbackExecutor, listener)
         registered = true
     }
 
-    fun route(): RouteResult {
+    override fun routeTo(selection: AudioRouteSelection): RouteResult {
         if (closed.get()) return RouteResult.REJECTED
         val target = audioManager.availableCommunicationDevices
-            .filter(::isBluetooth)
-            .minByOrNull { if (it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) 0 else 1 }
-            ?: return RouteResult.NO_BLUETOOTH_DEVICE
+            .filter { matches(selection, it) }
+            .minByOrNull {
+                if (
+                    selection == AudioRouteSelection.BLUETOOTH &&
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                ) {
+                    0
+                } else {
+                    1
+                }
+            }
+            ?: return RouteResult.NO_MATCHING_DEVICE
         Log.i(TAG, "selected target=${summary(target)}")
         return if (audioManager.setCommunicationDevice(target)) {
             RouteResult.ROUTED
@@ -50,29 +68,26 @@ internal class ModernAudioRoute(
         }
     }
 
-    fun currentName(): String? =
+    override fun currentName(): String? =
         audioManager.communicationDevice
             ?.takeIf(::isBluetooth)
-            ?.productName
-            ?.toString()
+            ?.let(::safeProductName)
             ?.takeIf(String::isNotBlank)
 
-    fun clear() {
+    override fun clear() {
         if (!closed.get()) audioManager.clearCommunicationDevice()
     }
 
-    fun routeToSpeaker(): Boolean {
-        if (closed.get()) return false
-        val speaker = audioManager.availableCommunicationDevices
-            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-            ?: return false
-        return audioManager.setCommunicationDevice(speaker)
-    }
+    override fun isActive(selection: AudioRouteSelection): Boolean =
+        !closed.get() && when (selection) {
+            AudioRouteSelection.BLUETOOTH -> isBluetooth(audioManager.communicationDevice)
+            AudioRouteSelection.EARPIECE ->
+                audioManager.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            AudioRouteSelection.SPEAKER ->
+                audioManager.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        }
 
-    fun isSpeakerActive(): Boolean =
-        !closed.get() && audioManager.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-
-    fun stateSummary(): String =
+    override fun stateSummary(): String =
         "communicationDevice=${summary(audioManager.communicationDevice)}, " +
             "available=${audioManager.availableCommunicationDevices.joinToString(prefix = "[", postfix = "]", transform = ::summary)}"
 
@@ -98,6 +113,13 @@ internal class ModernAudioRoute(
         device?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
             device?.type == AudioDeviceInfo.TYPE_BLE_HEADSET
 
+    private fun matches(selection: AudioRouteSelection, device: AudioDeviceInfo): Boolean =
+        when (selection) {
+            AudioRouteSelection.BLUETOOTH -> isBluetooth(device)
+            AudioRouteSelection.EARPIECE -> device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            AudioRouteSelection.SPEAKER -> device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        }
+
     private fun summary(device: AudioDeviceInfo?): String {
         if (device == null) return "none"
         val typeName = when (device.type) {
@@ -107,8 +129,12 @@ internal class ModernAudioRoute(
             else -> "TYPE_${device.type}"
         }
         return "id=${device.id}, type=$typeName(${device.type}), " +
-            "productName=${device.productName}, address=${device.address.ifBlank { "-" }}"
+            "productName=${safeProductName(device).ifBlank { "-" }}, " +
+            "address=${device.address.ifBlank { "-" }}"
     }
+
+    private fun safeProductName(device: AudioDeviceInfo): String =
+        runCatching { device.productName?.toString().orEmpty() }.getOrDefault("")
 
     private companion object {
         const val TAG = "ModernAudioRoute"

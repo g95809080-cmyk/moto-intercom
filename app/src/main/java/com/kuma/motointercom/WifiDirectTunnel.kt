@@ -256,6 +256,7 @@ internal class WifiDirectTunnel(
             return true
         }
         if (!restrictIngress(attempt)) return false
+        cancelPendingRetry()
         retryPause.clear()
         groupValidationGate.cancel()
         validatingGroup = false
@@ -264,6 +265,7 @@ internal class WifiDirectTunnel(
         targetAttempt = attempt
         targetAddress = null
         connectTargetIfAvailable()
+        schedulePendingRetryIfNeeded()
         return true
     }
 
@@ -821,6 +823,7 @@ internal class WifiDirectTunnel(
         val reason = when {
             record[TXT_APP_ID] != APP_ID -> "appId 不匹配"
             record[TXT_PROTOCOL_VERSION] != PROTOCOL_VERSION -> "protocolVersion 不兼容"
+            record[TXT_DEVICE_ID].isNullOrBlank() -> "缺少 deviceId"
             record[TXT_SESSION_ID].isNullOrBlank() -> "缺少 sessionId"
             else -> null
         }
@@ -888,18 +891,14 @@ internal class WifiDirectTunnel(
             return
         }
 
-        // Legacy instances remain provisional when a vendor omits TXT callbacks.
-        acceptPeer(
-            device,
-            DiscoveryIdentityClaim(
-                claimedDeviceId = null,
-                sourceSessionId = null,
-                nickname = device.deviceName.orEmpty(),
-                deviceName = device.deviceName.orEmpty(),
-                protocolVersion = 0
-            ),
-            "MotoCom DNS-SD 服务校验通过 instance=$instanceName type=$registrationType"
-        )
+        // Legacy instances remain provisional until TXT supplies a stable identity.
+        val address = normalizedAddress(device.deviceAddress)
+        if (address.isBlank()) return
+        peerDevices[address] = device
+        val snapshot = peerRegistry.markPending(address)
+        logPeerPending(device, "legacy DNS-SD instance 等待 TXT 身份 instance=$instanceName")
+        publishPeers(snapshot)
+        schedulePendingRetryIfNeeded()
     }
 
     private fun acceptPeer(

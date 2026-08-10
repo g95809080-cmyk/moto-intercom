@@ -7,14 +7,13 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.webrtc.PeerConnection
-import java.io.Closeable
 
 class AudioSessionControllerTest {
     @Test
     fun mediaReplacementReusesPlatformResourcesAndRejectsStaleCallbacks() {
         val closeOrder = mutableListOf<String>()
         val engine = FakeEngine(closeOrder)
-        val route = RecordingCloseable("route", closeOrder)
+        val route = RecordingRoute("route", closeOrder)
         val controller = AudioSessionController(engine, route)
         val states = mutableListOf<PeerConnection.PeerConnectionState>()
 
@@ -53,7 +52,7 @@ class AudioSessionControllerTest {
     @Test
     fun concurrentMediaSessionFailsClosed() {
         val engine = FakeEngine()
-        val controller = AudioSessionController(engine, RecordingCloseable("route"))
+        val controller = AudioSessionController(engine, RecordingRoute("route"))
         val first = controller.openMediaSession(callbacks())
 
         assertThrows(IllegalStateException::class.java) {
@@ -68,7 +67,7 @@ class AudioSessionControllerTest {
     @Test
     fun upstreamMediaContextAlsoInvalidatesCallbackLease() {
         val engine = FakeEngine()
-        val controller = AudioSessionController(engine, RecordingCloseable("route"))
+        val controller = AudioSessionController(engine, RecordingRoute("route"))
         var upstreamCurrent = true
         val session = controller.openMediaSession(
             callbacks(isCurrent = { upstreamCurrent })
@@ -84,7 +83,7 @@ class AudioSessionControllerTest {
     @Test
     fun failedOpenClearsLeaseForRetry() {
         val engine = FakeEngine(failFirstOpen = true)
-        val controller = AudioSessionController(engine, RecordingCloseable("route"))
+        val controller = AudioSessionController(engine, RecordingRoute("route"))
 
         assertThrows(IllegalStateException::class.java) {
             controller.openMediaSession(callbacks())
@@ -95,6 +94,44 @@ class AudioSessionControllerTest {
 
         controller.closeMediaSession(retry)
         controller.close()
+    }
+
+    @Test
+    fun audioControlsAreAppliedToTheOwnedEngineAndRejectedAfterClose() {
+        val engine = FakeEngine()
+        val controller = AudioSessionController(engine, RecordingRoute("route"))
+        val controls = VersionedAudioControls(
+            revision = 1,
+            settings = AudioControlSettings(muted = true, voxSensitivity = 75)
+        )
+
+        controller.updateAudioControls(controls)
+
+        assertEquals(listOf(controls), engine.controlUpdates)
+        controller.close()
+        assertThrows(IllegalStateException::class.java) {
+            controller.updateAudioControls(
+                VersionedAudioControls(2, AudioControlSettings())
+            )
+        }
+    }
+
+    @Test
+    fun audioRouteSelectionsAreAppliedToTheOwnedRouteAndRejectedAfterClose() {
+        val route = RecordingRoute("route")
+        val controller = AudioSessionController(FakeEngine(), route)
+
+        controller.updateAudioRoute(AudioRouteSelection.EARPIECE)
+        controller.updateAudioRoute(AudioRouteSelection.SPEAKER)
+
+        assertEquals(
+            listOf(AudioRouteSelection.EARPIECE, AudioRouteSelection.SPEAKER),
+            route.selections
+        )
+        controller.close()
+        assertThrows(IllegalStateException::class.java) {
+            controller.updateAudioRoute(AudioRouteSelection.BLUETOOTH)
+        }
     }
 
     private fun callbacks(
@@ -113,6 +150,11 @@ class AudioSessionControllerTest {
     ) : RiderMediaEngine {
         var openCount = 0
         var closeCount = 0
+        val controlUpdates = mutableListOf<VersionedAudioControls>()
+
+        override fun updateAudioControls(controls: VersionedAudioControls) {
+            controlUpdates += controls
+        }
 
         override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
             openCount++
@@ -149,11 +191,16 @@ class AudioSessionControllerTest {
         }
     }
 
-    private class RecordingCloseable(
+    private class RecordingRoute(
         private val name: String,
         private val closeOrder: MutableList<String> = mutableListOf()
-    ) : Closeable {
+    ) : RiderAudioRoute {
         var closeCount = 0
+        val selections = mutableListOf<AudioRouteSelection>()
+
+        override fun select(selection: AudioRouteSelection) {
+            selections += selection
+        }
 
         override fun close() {
             closeCount++

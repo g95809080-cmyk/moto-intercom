@@ -3,10 +3,14 @@ package com.kuma.motointercom
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -43,7 +47,7 @@ class HomeScreenComposeTest {
             connectedTransportText = "未连接",
             webRtcText = "未连接",
             bluetoothText = "蓝牙状态不可用",
-            voxText = "状态接口待接入",
+            voxText = "IDLE",
             discovering = false,
             connected = false
         )
@@ -78,5 +82,67 @@ class HomeScreenComposeTest {
             .assertHasClickAction()
 
         composeRule.runOnIdle { assertTrue(menuClicked.get()) }
+    }
+
+    @Test
+    fun muteAndVoxExposeRealStateAndCallbacks() {
+        var requestedMute: Boolean? = null
+        var voxOpened = false
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComHomeScreen(
+                    state = HomeScreenUiState(
+                        primaryText = "已连接",
+                        detailText = "对讲可用",
+                        supplementalText = null,
+                        peerText = "Road Captain",
+                        primaryActionLabel = "断开",
+                        primaryActionEnabled = true,
+                        disabledReason = null,
+                        showPermissionGrantCta = false,
+                        showPermissionSettingsCta = false,
+                        showWifiSettingsCta = false,
+                        discoverCtaLabel = "",
+                        showDiscoverCta = false,
+                        audioSourceText = "当前音频源：蓝牙耳机",
+                        plannedTransportText = "Wi-Fi Direct",
+                        connectedTransportText = "Wi-Fi Direct",
+                        webRtcText = "已连接",
+                        bluetoothText = "已连接",
+                        voxText = "OPEN",
+                        discovering = false,
+                        connected = true,
+                        muted = true,
+                        muteEnabled = true,
+                        voxEnabled = true,
+                        voxSensitivity = 70,
+                        voxState = VoxRuntimeState.OPEN
+                    ),
+                    audioLevel = 0.5f,
+                    onMenu = {},
+                    onSettings = {},
+                    onPrimaryAction = {},
+                    onDiscover = {},
+                    onPermissionGrant = {},
+                    onPermissionSettings = {},
+                    onWifiSettings = {},
+                    onMute = { requestedMute = it },
+                    onAudioSettings = {},
+                    onVox = { voxOpened = true }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("home_mute_button")
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.onNodeWithText("灵敏度：70").fetchSemanticsNode()
+        composeRule.onNodeWithText("开麦\nOPEN").fetchSemanticsNode()
+        composeRule.onNodeWithTag("home_vox_card")
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+
+        composeRule.runOnIdle {
+            assertEquals(false, requestedMute)
+            assertTrue(voxOpened)
+        }
     }
 }

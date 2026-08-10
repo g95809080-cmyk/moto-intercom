@@ -34,6 +34,11 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var incomingConfirmationNonce: String? = null
     private var platformBackCallback: Any? = null
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    private val audioControlPreferences by lazy { AudioControlPreferences(this) }
+    private var preferredAudioControls = AudioControlSettings()
+    private val audioRoutePreferences by lazy { AudioRoutePreferences(this) }
+    private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
+    private var automaticReconnectEnabled = true
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -45,6 +50,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             val local = service as IntercomService.LocalBinder
             intercomService = local.service()
             serviceConnected = true
+            intercomService?.setPreferredAudioRoute(preferredAudioRoute)
+            intercomService?.setAutomaticReconnectEnabled(automaticReconnectEnabled)
+            intercomService?.setVoxSettings(
+                preferredAudioControls.voxEnabled,
+                preferredAudioControls.voxSensitivity
+            )
             replayingServiceSnapshot = true
             try {
                 intercomService?.setListener(this@MainActivity)
@@ -71,6 +82,9 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        preferredAudioControls = audioControlPreferences.load()
+        preferredAudioRoute = audioRoutePreferences.load()
+        automaticReconnectEnabled = prefs.getBoolean(KEY_AUTOMATIC_RECONNECT_ENABLED, true)
         screen = MainScreen(
             activity = this,
             initialRiderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty(),
@@ -112,6 +126,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     }
                 }
             },
+            onRequestDiscoveryRefresh = {
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                } else {
+                    service.requestDiscoveryRefresh()
+                }
+            },
             onSaveRiderName = { name ->
                 prefs.edit().putString(KEY_RIDER_NAME, name).commit()
             },
@@ -126,7 +148,49 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             },
             onOpenPermissionSettings = {
                 openAppPermissionSettings()
-            }
+            },
+            initialAudioControls = idleAudioControlSnapshot(preferredAudioControls),
+            initialPreferredAudioRoute = preferredAudioRoute,
+            initialAutomaticReconnectEnabled = automaticReconnectEnabled,
+            onSetMuted = { muted ->
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                } else {
+                    service.setMuted(muted)
+                }
+            },
+            onSetVoxEnabled = { enabled ->
+                savePreferredVoxSettings(preferredAudioControls.copy(voxEnabled = enabled))
+            },
+            onSetVoxSensitivity = { sensitivity ->
+                savePreferredVoxSettings(
+                    preferredAudioControls.copy(voxSensitivity = sensitivity)
+                )
+            },
+            onSelectAudioRoute = ::savePreferredAudioRoute,
+            onAutomaticReconnectChanged = ::saveAutomaticReconnectSetting,
+            onSetPairingPreferred = { deviceId, preferred ->
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                    false
+                } else {
+                    service.setPairingPreferred(deviceId, preferred)
+                    true
+                }
+            },
+            onForgetPairing = { deviceId ->
+                val service = intercomService
+                if (service == null) {
+                    showServiceUnavailable()
+                    false
+                } else {
+                    service.forgetPairing(deviceId)
+                    true
+                }
+            },
+            onSendFeedback = ::sendFeedback
         )
         setContentView(screen.root)
         registerPlatformBackCallback()
@@ -248,6 +312,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            preferredAudioRoute = selection
+            screen.setPreferredAudioRoute(selection)
+        }
+    }
+
     override fun onPresencesChanged(presences: List<RiderPresence>) {
         runOnUiThread {
             if (serviceConnected) screen.setPresences(presences)
@@ -257,6 +329,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onAudioLevelChanged(level: Float) {
         runOnUiThread {
             if (serviceConnected) screen.setAudioLevel(level)
+        }
+    }
+
+    override fun onAudioControlsChanged(snapshot: AudioControlSnapshot) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            preferredAudioControls = snapshot.controls.copy(muted = false)
+            screen.setAudioControls(snapshot)
         }
     }
 
@@ -318,6 +398,65 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         )
     }
 
+    private fun savePreferredVoxSettings(requested: AudioControlSettings) {
+        val next = requested.normalized().copy(muted = false)
+        if (!audioControlPreferences.saveVoxSettings(next)) {
+            Toast.makeText(this, R.string.vox_settings_save_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        preferredAudioControls = next
+        val service = intercomService
+        if (service == null) {
+            screen.setAudioControls(idleAudioControlSnapshot(next))
+        } else {
+            service.setVoxSettings(next.voxEnabled, next.voxSensitivity)
+        }
+    }
+
+    private fun savePreferredAudioRoute(selection: AudioRouteSelection) {
+        if (!audioRoutePreferences.save(selection)) {
+            Toast.makeText(this, R.string.audio_route_save_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        preferredAudioRoute = selection
+        screen.setPreferredAudioRoute(selection)
+        intercomService?.setPreferredAudioRoute(selection)
+    }
+
+    private fun saveAutomaticReconnectSetting(enabled: Boolean) {
+        if (!prefs.edit().putBoolean(KEY_AUTOMATIC_RECONNECT_ENABLED, enabled).commit()) {
+            Toast.makeText(this, R.string.automatic_reconnect_save_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        automaticReconnectEnabled = enabled
+        screen.setAutomaticReconnectEnabled(enabled)
+        intercomService?.setAutomaticReconnectEnabled(enabled)
+    }
+
+    private fun sendFeedback(versionName: String) {
+        val payload = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(
+                Intent.EXTRA_SUBJECT,
+                getString(R.string.feedback_subject, versionName)
+            )
+            .putExtra(
+                Intent.EXTRA_TEXT,
+                getString(
+                    R.string.feedback_body,
+                    versionName,
+                    "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+                )
+            )
+        val chooser = Intent.createChooser(
+            payload,
+            getString(R.string.feedback_chooser_title)
+        )
+        runCatching { startActivity(chooser) }.onFailure {
+            Toast.makeText(this, R.string.feedback_unavailable, Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun requestCorePermissions() {
         val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
         if (missing.isEmpty()) {
@@ -371,7 +510,13 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
 
         val riderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty()
-        val intent = IntercomService.startIntent(this, riderName)
+        val intent = IntercomService.startIntent(
+            context = this,
+            riderName = riderName,
+            audioControls = preferredAudioControls,
+            preferredAudioRoute = preferredAudioRoute,
+            automaticReconnectEnabled = automaticReconnectEnabled
+        )
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
@@ -462,7 +607,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     private fun showIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
-        screen.dismissPlaceholderDialog()
+        screen.dismissTransientDialogs()
         dismissIncomingConfirmation()
         screen.setIncomingConfirmationVisible(true)
         incomingConfirmationNonce = prompt.actionNonce
@@ -542,6 +687,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         const val RC_WIFI_PANEL = 1003
         const val PREFS_NAME = "moto_intercom"
         const val KEY_RIDER_NAME = "rider_name"
+        const val KEY_AUTOMATIC_RECONNECT_ENABLED = "automatic_reconnect_enabled"
         const val KEY_PROCESS_SESSION_TOKEN = "process_session_token"
         val PROCESS_SESSION_TOKEN: String = UUID.randomUUID().toString()
         const val READY_STATUS = "请点击下方启动对讲"

@@ -1,9 +1,9 @@
 package com.kuma.motointercom
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +23,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,7 +33,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -39,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
@@ -49,6 +51,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.testTag
+import kotlin.math.roundToInt
 
 internal data class SettingsScreenUiState(
     val nickname: String,
@@ -60,7 +63,12 @@ internal data class SettingsScreenUiState(
     val deviceStatus: String,
     val optionalPermissionNotice: String?,
     val showOptionalPermissionCta: Boolean,
-    val version: String
+    val version: String,
+    val voxEnabled: Boolean = true,
+    val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
+    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
+    val preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+    val automaticReconnectEnabled: Boolean = true
 )
 
 @Composable
@@ -72,8 +80,12 @@ internal fun MotoComSettingsScreen(
     onOptionalPermission: () -> Unit,
     onLogs: () -> Unit,
     onAbout: () -> Unit,
-    onPlaceholder: (String) -> Unit,
-    modifier: Modifier = Modifier
+    onHelp: () -> Unit,
+    modifier: Modifier = Modifier,
+    onVoxEnabledChanged: (Boolean) -> Unit = {},
+    onVoxSensitivityChanged: (Int) -> Unit = {},
+    onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
+    onAutomaticReconnectChanged: (Boolean) -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -149,78 +161,66 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.section_vox))
         SettingsPanel {
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_vox_switch_developing),
+            SettingsSwitchRow(
+                title = stringResource(R.string.settings_vox_switch),
+                description = stringResource(R.string.settings_vox_switch_description),
+                icon = R.drawable.ic_mic_24,
                 tag = "settings_vox_button",
-                description = stringResource(R.string.vox_developing_description),
-                onClick = onPlaceholder,
-                icon = R.drawable.ic_mic_24
-            ) {
-                VisualSwitch()
-            }
-            SettingsPlaceholderSlider(
-                text = stringResource(R.string.settings_vox_sensitivity_developing),
-                tag = "settings_vox_sensitivity_button",
-                description = stringResource(R.string.vox_sensitivity_developing_description),
-                onClick = onPlaceholder
+                checked = state.voxEnabled,
+                onCheckedChange = onVoxEnabledChanged
             )
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_vox_pending_developing),
-                tag = "settings_vox_state_button",
-                description = stringResource(R.string.vox_state_developing_description),
-                onClick = onPlaceholder,
-                icon = R.drawable.ic_info_24
-            ) {
-                Text(
-                    state.productState,
-                    color = colorResource(R.color.motocom_text_muted_accessible),
-                    fontSize = 12.sp
-                )
-            }
+            SettingsVoxSlider(
+                value = state.voxSensitivity,
+                enabled = state.voxEnabled,
+                onValueChange = onVoxSensitivityChanged
+            )
+            SettingsVoxStateRow(state.voxState)
         }
 
         SettingsSectionLabel(stringResource(R.string.section_audio_output))
         SettingsPanel {
             SettingsFact(state.audioSource, "settings_audio_source", hidden = true)
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_audio_bluetooth_developing),
+            SettingsAudioRouteRow(
+                text = stringResource(R.string.settings_audio_bluetooth),
                 tag = "settings_audio_route_button",
-                description = stringResource(R.string.audio_route_developing_description),
-                onClick = onPlaceholder,
+                description = stringResource(R.string.audio_route_description),
+                selected = state.preferredAudioRoute == AudioRouteSelection.BLUETOOTH,
+                onClick = { onAudioRouteSelected(AudioRouteSelection.BLUETOOTH) },
                 icon = R.drawable.ic_headset_24
-            ) {
-                RadioMark(
-                    selected = state.audioSource.contains("蓝牙耳机") &&
-                        !state.audioSource.contains("未连接")
-                )
-            }
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_audio_earpiece_developing),
+            )
+            SettingsAudioRouteRow(
+                text = stringResource(R.string.settings_audio_earpiece),
                 tag = "settings_audio_earpiece_button",
-                description = stringResource(R.string.audio_earpiece_developing_description),
-                onClick = onPlaceholder,
+                description = stringResource(R.string.audio_earpiece_description),
+                selected = state.preferredAudioRoute == AudioRouteSelection.EARPIECE,
+                onClick = { onAudioRouteSelected(AudioRouteSelection.EARPIECE) },
                 icon = R.drawable.ic_audio_24
-            ) { RadioMark(selected = false) }
-            SettingsPlaceholderRow(
-                text = stringResource(R.string.settings_audio_speaker_developing),
+            )
+            SettingsAudioRouteRow(
+                text = stringResource(R.string.settings_audio_speaker),
                 tag = "settings_audio_speaker_button",
-                description = stringResource(R.string.audio_speaker_developing_description),
-                onClick = onPlaceholder,
+                description = stringResource(R.string.audio_speaker_description),
+                selected = state.preferredAudioRoute == AudioRouteSelection.SPEAKER,
+                onClick = { onAudioRouteSelected(AudioRouteSelection.SPEAKER) },
                 icon = R.drawable.ic_audio_24
-            ) { RadioMark(selected = false) }
+            )
         }
 
         SettingsSectionLabel(stringResource(R.string.settings_connection_device))
         SettingsPanel {
-            val reconnectDescription = stringResource(R.string.reconnect_developing_description)
-            SettingsNavigationRow(
-                title = "优先使用 Wi-Fi Direct（P2P）",
-                subtitle = state.attemptFacts,
+            SettingsSwitchRow(
+                title = stringResource(R.string.settings_auto_reconnect),
+                description = stringResource(R.string.settings_auto_reconnect_description),
+                icon = R.drawable.ic_refresh_24,
                 tag = "settings_reconnect_button",
-                description = reconnectDescription,
-                onClick = { onPlaceholder(reconnectDescription) },
-                icon = R.drawable.ic_wifi_24
+                checked = state.automaticReconnectEnabled,
+                onCheckedChange = onAutomaticReconnectChanged
             )
+            SettingsFact(
+                stringResource(R.string.settings_transport_policy),
+                "settings_transport_policy"
+            )
+            SettingsFact(state.attemptFacts, "settings_attempt_facts")
             SettingsFact(state.productState, "settings_product_state")
             SettingsFact(state.discoveryCandidates, "settings_discovery_candidates")
         }
@@ -247,19 +247,11 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.section_advanced_settings))
         SettingsPanel {
-            val reconnectDescription = stringResource(R.string.reconnect_developing_description)
-            val helpDescription = stringResource(R.string.help_developing_description)
+            val helpDescription = stringResource(R.string.help_description)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                SettingsAdvancedAction(
-                    icon = R.drawable.ic_refresh_24,
-                    text = stringResource(R.string.settings_auto_reconnect_developing),
-                    tag = "settings_reconnect_button_advanced",
-                    description = reconnectDescription,
-                    onClick = { onPlaceholder(reconnectDescription) }
-                )
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_clipboard_24,
                     text = stringResource(R.string.settings_logs),
@@ -269,10 +261,10 @@ internal fun MotoComSettingsScreen(
                 )
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_help_24,
-                    text = stringResource(R.string.settings_help_developing),
+                    text = stringResource(R.string.settings_help),
                     tag = "settings_help_button",
                     description = helpDescription,
-                    onClick = { onPlaceholder(helpDescription) }
+                    onClick = onHelp
                 )
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_info_24,
@@ -397,20 +389,23 @@ private fun SettingsSecondaryButton(text: String, tag: String, onClick: () -> Un
 }
 
 @Composable
-private fun SettingsPlaceholderRow(
+private fun SettingsAudioRouteRow(
     text: String,
     tag: String,
     description: String,
-    onClick: (String) -> Unit,
-    icon: Int,
-    trailing: @Composable () -> Unit
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: Int
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 44.dp)
-            .clickable(role = Role.Button) { onClick(description) }
-            .semantics { contentDescription = description }
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics {
+                contentDescription = description
+                this.selected = selected
+            }
             .testTag(tag),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -427,26 +422,60 @@ private fun SettingsPlaceholderRow(
             color = colorResource(R.color.motocom_text_primary),
             fontSize = 14.sp
         )
-        trailing()
+        RadioMark(selected)
     }
 }
 
 @Composable
-private fun SettingsPlaceholderSlider(
-    text: String,
-    tag: String,
+private fun SettingsSwitchRow(
+    title: String,
     description: String,
-    onClick: (String) -> Unit
+    icon: Int,
+    tag: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
 ) {
-    Column(
-        Modifier
+    Row(
+        modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 64.dp)
-            .clickable(role = Role.Button) { onClick(description) }
-            .semantics { contentDescription = description }
-            .testTag(tag)
-            .padding(vertical = 2.dp)
+            .defaultMinSize(minHeight = 48.dp)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .semantics {
+                contentDescription = description
+            }
+            .testTag(tag),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Icon(
+            painterResource(icon),
+            null,
+            Modifier.size(21.dp),
+            tint = colorResource(R.color.motocom_text_muted_accessible)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            title,
+            Modifier.weight(1f),
+            color = colorResource(R.color.motocom_text_primary),
+            fontSize = 14.sp
+        )
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun SettingsVoxSlider(
+    value: Int,
+    enabled: Boolean,
+    onValueChange: (Int) -> Unit
+) {
+    val normalized = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+    val description = stringResource(R.string.settings_vox_sensitivity_description, normalized)
+    Column(Modifier.fillMaxWidth().padding(top = 2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 painterResource(R.drawable.ic_tune_24),
@@ -455,37 +484,26 @@ private fun SettingsPlaceholderSlider(
                 tint = colorResource(R.color.motocom_text_muted_accessible)
             )
             Spacer(Modifier.width(10.dp))
-            Text(text, color = colorResource(R.color.motocom_text_primary), fontSize = 14.sp)
-        }
-        SettingsSliderVisual()
-    }
-}
-
-@Composable
-private fun SettingsSliderVisual() {
-    val trackColor = colorResource(R.color.motocom_border)
-    val accentColor = colorResource(R.color.motocom_accent_green)
-    Column(Modifier.fillMaxWidth().padding(start = 31.dp, top = 3.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(20.dp)) {
-            val y = size.height / 2f
-            val start = 0f
-            val end = size.width
-            drawLine(
-                color = trackColor,
-                start = androidx.compose.ui.geometry.Offset(start, y),
-                end = androidx.compose.ui.geometry.Offset(end, y),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round
+            Text(
+                stringResource(R.string.settings_vox_sensitivity, normalized),
+                color = colorResource(R.color.motocom_text_primary),
+                fontSize = 14.sp
             )
-            drawLine(
-                color = accentColor,
-                start = androidx.compose.ui.geometry.Offset(start, y),
-                end = androidx.compose.ui.geometry.Offset(end * 0.52f, y),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawCircle(accentColor, radius = 5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(end * 0.52f, y))
         }
+        Slider(
+            value = normalized.toFloat(),
+            onValueChange = { onValueChange(it.roundToInt()) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 31.dp)
+                .semantics {
+                    contentDescription = description
+                }
+                .testTag("settings_vox_sensitivity_button"),
+            enabled = enabled,
+            valueRange = MIN_VOX_SENSITIVITY.toFloat()..MAX_VOX_SENSITIVITY.toFloat(),
+            steps = 9
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("低", color = colorResource(R.color.motocom_text_secondary), fontSize = 11.sp)
             Text("中", color = colorResource(R.color.motocom_text_secondary), fontSize = 11.sp)
@@ -495,16 +513,36 @@ private fun SettingsSliderVisual() {
 }
 
 @Composable
-private fun VisualSwitch() {
-    Box(
-        Modifier
-            .size(width = 42.dp, height = 25.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(colorResource(R.color.motocom_accent_green))
-            .padding(3.dp),
-        contentAlignment = Alignment.CenterEnd
+private fun SettingsVoxStateRow(state: VoxRuntimeState) {
+    val description = stringResource(R.string.settings_vox_state_description, state.name)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+            .semantics {
+                contentDescription = description
+            }
+            .testTag("settings_vox_state_button"),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(19.dp).clip(CircleShape).background(Color.White))
+        Icon(
+            painterResource(R.drawable.ic_info_24),
+            null,
+            Modifier.size(21.dp),
+            tint = colorResource(R.color.motocom_text_muted_accessible)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            stringResource(R.string.settings_vox_state),
+            Modifier.weight(1f),
+            color = colorResource(R.color.motocom_text_primary),
+            fontSize = 14.sp
+        )
+        Text(
+            state.name,
+            color = colorResource(R.color.motocom_text_muted_accessible),
+            fontSize = 12.sp
+        )
     }
 }
 
@@ -532,34 +570,6 @@ private fun RadioMark(selected: Boolean) {
         } else {
             Box(Modifier.size(18.dp).clip(CircleShape).background(Color.Transparent).semantics { })
         }
-    }
-}
-
-@Composable
-private fun SettingsNavigationRow(
-    title: String,
-    subtitle: String,
-    tag: String,
-    description: String,
-    onClick: () -> Unit,
-    icon: Int
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 44.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description }
-            .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(painterResource(icon), null, Modifier.size(21.dp), tint = colorResource(R.color.motocom_text_muted_accessible))
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = colorResource(R.color.motocom_text_primary), fontSize = 14.sp)
-            Text(subtitle, color = colorResource(R.color.motocom_text_secondary), fontSize = 12.sp)
-        }
-        Icon(painterResource(R.drawable.ic_chevron_right_24), null, Modifier.size(18.dp), tint = colorResource(R.color.motocom_text_muted_accessible))
     }
 }
 
@@ -615,7 +625,7 @@ private fun SettingsScreenPreview() {
             onOptionalPermission = {},
             onLogs = {},
             onAbout = {},
-            onPlaceholder = {}
+            onHelp = {}
         )
     }
 }

@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,7 +81,12 @@ internal data class HomeScreenUiState(
     val voxText: String,
     val discovering: Boolean,
     val connected: Boolean,
-    val menuVisible: Boolean = true
+    val menuVisible: Boolean = true,
+    val muted: Boolean = false,
+    val muteEnabled: Boolean = false,
+    val voxEnabled: Boolean = true,
+    val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
+    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE
 )
 
 /** Compose equivalent of the former screen_home.xml hierarchy. */
@@ -95,7 +101,7 @@ internal fun MotoComHomeScreen(
     onPermissionGrant: () -> Unit,
     onPermissionSettings: () -> Unit,
     onWifiSettings: () -> Unit,
-    onMute: () -> Unit,
+    onMute: (Boolean) -> Unit,
     onAudioSettings: () -> Unit,
     onVox: () -> Unit,
     modifier: Modifier = Modifier
@@ -258,7 +264,9 @@ private fun CircleIconButton(
     description: String,
     testTag: String,
     onClick: () -> Unit,
-    surface: Boolean = true
+    surface: Boolean = true,
+    enabled: Boolean = true,
+    isSelected: Boolean = false
 ) {
     Box(
         modifier = Modifier
@@ -267,20 +275,30 @@ private fun CircleIconButton(
             .then(
                 if (surface) {
                     Modifier
-                        .background(MaterialTheme.colorScheme.surface)
+                        .background(
+                            if (isSelected) {
+                                colorResource(R.color.motocom_accent_green_soft)
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            }
+                        )
                         .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
                 } else {
                     Modifier
                 }
             )
             .testTag(testTag)
-            .semantics { contentDescription = description }
-            .clickable(role = Role.Button, onClick = onClick),
+            .semantics {
+                contentDescription = description
+                if (isSelected) selected = true
+                if (!enabled) disabled()
+            }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Image(
             painter = painter,
-            contentDescription = description,
+            contentDescription = null,
             modifier = Modifier.size(24.dp)
         )
     }
@@ -292,7 +310,9 @@ private fun LabeledIconButton(
     description: String,
     label: String,
     testTag: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    isSelected: Boolean = false
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -302,7 +322,9 @@ private fun LabeledIconButton(
             painter = painter,
             description = description,
             testTag = testTag,
-            onClick = onClick
+            onClick = onClick,
+            enabled = enabled,
+            isSelected = isSelected
         )
         Spacer(Modifier.height(4.dp))
         Text(
@@ -423,7 +445,7 @@ private fun StatusCard(state: HomeScreenUiState, onVox: () -> Unit) {
                     .defaultMinSize(minHeight = dimensionResource(R.dimen.motocom_control_min_height))
                     .clickable(role = Role.Button, onClick = onVox),
                 leadingIcon = painterResource(R.drawable.ic_mic_24),
-                contentDescription = stringResource(R.string.vox_developing_description),
+                contentDescription = stringResource(R.string.vox_settings_description),
                 testTag = "home_vox_pill"
             )
             FactPill(
@@ -598,7 +620,7 @@ private fun AudioCard(state: HomeScreenUiState, audioLevel: Float) {
 private fun MainControls(
     state: HomeScreenUiState,
     onPrimaryAction: () -> Unit,
-    onMute: () -> Unit,
+    onMute: (Boolean) -> Unit,
     onAudioSettings: () -> Unit
 ) {
     val disabledDescription = state.disabledReason?.let {
@@ -618,10 +640,18 @@ private fun MainControls(
         ) {
             LabeledIconButton(
                 painter = painterResource(R.drawable.ic_mute_24),
-                description = stringResource(R.string.mute_developing_description),
-                label = stringResource(R.string.home_mute_label),
+                description = when {
+                    state.muted -> stringResource(R.string.unmute_description)
+                    state.muteEnabled -> stringResource(R.string.mute_description)
+                    else -> stringResource(R.string.mute_unavailable_description)
+                },
+                label = stringResource(
+                    if (state.muted) R.string.home_unmute_label else R.string.home_mute_label
+                ),
                 testTag = "home_mute_button",
-                onClick = onMute
+                onClick = { onMute(!state.muted) },
+                enabled = state.muteEnabled,
+                isSelected = state.muted
             )
             Spacer(Modifier.width(dimensionResource(R.dimen.motocom_main_control_gap)))
             val controlContainer = if (state.connected) {
@@ -707,7 +737,11 @@ private fun MainControls(
 
 @Composable
 private fun VoxCard(state: HomeScreenUiState, onClick: () -> Unit) {
-    val voxDescription = stringResource(R.string.vox_developing_description)
+    val voxDescription = stringResource(
+        R.string.home_vox_card_description,
+        state.voxText,
+        state.voxSensitivity
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -732,26 +766,38 @@ private fun VoxCard(state: HomeScreenUiState, onClick: () -> Unit) {
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = "灵敏度：待接入",
+                text = "灵敏度：${state.voxSensitivity}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
         }
         Spacer(Modifier.height(4.dp))
-        VoxTimeline()
+        VoxTimeline(state.voxState)
         Row(
             modifier = Modifier.fillMaxWidth().testTag("home_vox_state_row"),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            VoxState(stringResource(R.string.home_vox_listening_placeholder), Modifier.weight(1f))
-            VoxState(stringResource(R.string.home_vox_open_placeholder), Modifier.weight(1f))
-            VoxState(stringResource(R.string.home_vox_hangover_placeholder), Modifier.weight(1f))
+            VoxState(
+                stringResource(R.string.home_vox_listening_placeholder),
+                state.voxState == VoxRuntimeState.LISTENING,
+                Modifier.weight(1f)
+            )
+            VoxState(
+                stringResource(R.string.home_vox_open_placeholder),
+                state.voxState == VoxRuntimeState.OPEN,
+                Modifier.weight(1f)
+            )
+            VoxState(
+                stringResource(R.string.home_vox_hangover_placeholder),
+                state.voxState == VoxRuntimeState.HANGOVER,
+                Modifier.weight(1f)
+            )
         }
     }
 }
 
 @Composable
-private fun VoxTimeline() {
+private fun VoxTimeline(state: VoxRuntimeState) {
     val track = colorResource(R.color.motocom_border)
     val green = colorResource(R.color.motocom_accent_green)
     val orange = Color(0xFFFFA31A)
@@ -760,15 +806,26 @@ private fun VoxTimeline() {
         val left = 8.dp.toPx()
         val right = size.width - left
         drawLine(track, Offset(left, y), Offset(right, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-        drawLine(green, Offset(left, y), Offset(right * 0.68f, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(Color(0xFFCBD5E1), radius = 6.dp.toPx(), center = Offset(left + 42.dp.toPx(), y))
-        drawCircle(green, radius = 6.dp.toPx(), center = Offset(right * 0.55f, y))
-        drawCircle(orange, radius = 6.dp.toPx(), center = Offset(right - 42.dp.toPx(), y))
+        drawCircle(
+            if (state == VoxRuntimeState.LISTENING) green else Color(0xFFCBD5E1),
+            radius = 6.dp.toPx(),
+            center = Offset(left + 42.dp.toPx(), y)
+        )
+        drawCircle(
+            if (state == VoxRuntimeState.OPEN) green else Color(0xFFCBD5E1),
+            radius = 6.dp.toPx(),
+            center = Offset(right * 0.55f, y)
+        )
+        drawCircle(
+            if (state == VoxRuntimeState.HANGOVER) orange else Color(0xFFCBD5E1),
+            radius = 6.dp.toPx(),
+            center = Offset(right - 42.dp.toPx(), y)
+        )
     }
 }
 
 @Composable
-private fun VoxState(text: String, modifier: Modifier) {
+private fun VoxState(text: String, active: Boolean, modifier: Modifier) {
     Box(
         modifier = modifier
             .defaultMinSize(minHeight = 40.dp)
@@ -782,9 +839,14 @@ private fun VoxState(text: String, modifier: Modifier) {
         }
         Text(
             text = "$title\n$text",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (active) {
+                colorResource(R.color.motocom_accent_green_dark)
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
             fontSize = 10.sp,
             lineHeight = 15.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
             textAlign = TextAlign.Center
         )
     }
@@ -836,9 +898,10 @@ private fun MotoComHomeScreenPreview() {
                 connectedTransportText = "未连接",
                 webRtcText = "未连接",
                 bluetoothText = "蓝牙状态不可用",
-                voxText = "状态接口待接入",
+                voxText = "IDLE",
                 discovering = false,
-                connected = false
+                connected = false,
+                voxState = VoxRuntimeState.IDLE
             ),
             audioLevel = 0f,
             onMenu = {},

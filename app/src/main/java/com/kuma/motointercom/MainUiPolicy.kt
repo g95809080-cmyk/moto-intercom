@@ -34,7 +34,7 @@ internal fun shouldRecordToggle(action: PrimaryIntercomAction, startAccepted: Bo
 
 internal sealed interface BackNavigation {
     data object CloseNavigation : BackNavigation
-    data object DismissPlaceholder : BackNavigation
+    data object DismissTransientDialog : BackNavigation
     data object IgnoreIncomingConfirmation : BackNavigation
     data class NavigateTo(val route: MainRoute) : BackNavigation
     data object SystemDefault : BackNavigation
@@ -43,7 +43,7 @@ internal sealed interface BackNavigation {
 internal data class RouteChrome(
     val route: MainRoute,
     val navigationOpen: Boolean = false,
-    val placeholderVisible: Boolean = false,
+    val transientDialogVisible: Boolean = false,
     val incomingConfirmationVisible: Boolean = false
 )
 
@@ -56,7 +56,7 @@ internal fun restoreNicknameDraft(savedDraft: String?, initialName: String): Str
 internal fun resolveBackNavigation(chrome: RouteChrome): BackNavigation = when {
     chrome.incomingConfirmationVisible -> BackNavigation.IgnoreIncomingConfirmation
     chrome.navigationOpen -> BackNavigation.CloseNavigation
-    chrome.placeholderVisible -> BackNavigation.DismissPlaceholder
+    chrome.transientDialogVisible -> BackNavigation.DismissTransientDialog
     chrome.route == MainRoute.LOGS -> BackNavigation.NavigateTo(MainRoute.SETTINGS)
     chrome.route == MainRoute.DISCOVER || chrome.route == MainRoute.SETTINGS -> {
         BackNavigation.NavigateTo(MainRoute.HOME)
@@ -82,7 +82,6 @@ internal data class HomePresentation(
     val webRtcText: String,
     val audioSourceText: String,
     val bluetoothActive: Boolean,
-    val voxText: String,
     val supplementalText: String?
 )
 
@@ -142,7 +141,6 @@ internal fun homePresentation(
         },
         audioSourceText = audioSourceText,
         bluetoothActive = bluetoothActive,
-        voxText = PLACEHOLDER_VOX_STATUS,
         supplementalText = supplementalText
     )
 }
@@ -431,7 +429,7 @@ internal fun shouldDismissIncomingConfirmation(
     canceledNonce: String
 ): Boolean = activeNonce == canceledNonce
 
-internal fun shouldShowPlaceholderDialog(alreadyShowing: Boolean): Boolean = !alreadyShowing
+internal fun shouldShowTransientDialog(alreadyShowing: Boolean): Boolean = !alreadyShowing
 
 internal fun shouldRenderLogAppend(route: MainRoute): Boolean = route == MainRoute.LOGS
 
@@ -468,10 +466,6 @@ internal fun constrainedPanelWidth(
     preferredWidth: Int
 ): Int = minOf(preferredWidth, availableWidth.coerceAtLeast(0))
 
-internal const val PLACEHOLDER_DIALOG_TITLE = "功能开发中"
-internal const val PLACEHOLDER_DIALOG_MESSAGE = "该功能还没做好，暂时无法使用。"
-internal const val PLACEHOLDER_DIALOG_BUTTON = "确定"
-internal const val PLACEHOLDER_VOX_STATUS = "状态接口待接入"
 internal const val LOGS_SCOPE_TEXT = "仅显示本次界面会话日志"
 internal const val LOGS_COPIED_FEEDBACK = "日志已复制"
 internal const val NICKNAME_SAVE_FAILED_FEEDBACK = "保存失败，请重试"

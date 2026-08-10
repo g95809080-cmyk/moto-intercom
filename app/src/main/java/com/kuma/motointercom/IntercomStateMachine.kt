@@ -11,6 +11,17 @@ enum class WebRtcConnectionState {
 internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
+    data class AutomaticReconnectChanged(val enabled: Boolean) : SessionEvent
+
+    data class DiscoveryRefreshRequested(
+        val runtimeSessionId: RuntimeSessionId,
+        val generation: Long
+    ) : SessionEvent {
+        init {
+            require(generation > 0L) { "Discovery refresh generation must be positive" }
+        }
+    }
+
     data class IncomingAccepted(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -217,6 +228,15 @@ internal sealed interface SessionEvent {
 }
 
 internal sealed interface SessionEffect {
+    data class RefreshDiscovery(
+        val runtimeSessionId: RuntimeSessionId,
+        val generation: Long
+    ) : SessionEffect {
+        init {
+            require(generation > 0L) { "Discovery refresh generation must be positive" }
+        }
+    }
+
     data class OpenTargetedTransport(
         val attempt: ConnectionAttempt,
         val transport: Transport = attempt.preferredTransport
@@ -357,6 +377,14 @@ internal fun reduceIntercomState(
         transition(IntercomState.Discovering(event.runtimeSessionId))
             .takeIf { current == IntercomState.Offline }
 
+    is SessionEvent.DiscoveryRefreshRequested ->
+        transition(
+            current,
+            effects = listOf(
+                SessionEffect.RefreshDiscovery(event.runtimeSessionId, event.generation)
+            )
+        ).takeIf { current == IntercomState.Discovering(event.runtimeSessionId) }
+
     is SessionEvent.ConnectRequested ->
         transition(IntercomState.Connecting(event.attempt))
             .takeIf {
@@ -369,6 +397,7 @@ internal fun reduceIntercomState(
     is SessionEvent.TunnelReady -> reduceTunnelReady(current, event)
 
     is SessionEvent.ControlChannelVerified,
+    is SessionEvent.AutomaticReconnectChanged,
     is SessionEvent.IncomingConnectRequest,
     is SessionEvent.RemoteConnectAccepted,
     is SessionEvent.RemoteConnectRejected,
