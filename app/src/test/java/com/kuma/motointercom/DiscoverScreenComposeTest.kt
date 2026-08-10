@@ -98,6 +98,37 @@ class DiscoverScreenComposeTest {
     }
 
     @Test
+    fun helpEntryRoutesTheRealHelpAction() {
+        var helpRequests = 0
+        val state = DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "Choose a rider",
+            supplementalText = null,
+            emptyText = "No riders",
+            radarRunning = false
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    state = state,
+                    onBack = {},
+                    onHelp = { helpRequests++ },
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = {},
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("discover_help_button").performClick()
+        assertEquals(1, helpRequests)
+    }
+
+    @Test
     fun offlineStateRoutesStartAction() {
         var started = false
         val state = DiscoverScreenUiState(

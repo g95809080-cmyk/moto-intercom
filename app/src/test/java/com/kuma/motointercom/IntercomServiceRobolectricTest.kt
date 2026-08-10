@@ -9,9 +9,12 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,11 +24,17 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class IntercomServiceRobolectricTest {
+    @Before
+    fun resetPairingDatabaseSingleton() {
+        pairingDatabaseInstanceField().set(null, null)
+    }
+
     @Test
     fun manualDiscoveryRefreshWithoutReadyResourcesIsCoalescedWithCurrentStartup() = runBlocking {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
@@ -55,7 +64,7 @@ class IntercomServiceRobolectricTest {
 
         assertTrue(logs.contains("重新扫描请求未启动新的发现轮次"))
         assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
-        controller.destroy()
+        destroyAndAwait(controller)
         Unit
     }
 
@@ -78,7 +87,7 @@ class IntercomServiceRobolectricTest {
             ),
             snapshots.last()
         )
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -92,7 +101,8 @@ class IntercomServiceRobolectricTest {
                 voxEnabled = false,
                 voxSensitivity = 73
             ),
-            preferredAudioRoute = AudioRouteSelection.EARPIECE
+            preferredAudioRoute = AudioRouteSelection.EARPIECE,
+            automaticReconnectEnabled = false
         )
 
         assertEquals("Road Captain", intent.getStringExtra(IntercomService.EXTRA_RIDER_NAME))
@@ -107,6 +117,12 @@ class IntercomServiceRobolectricTest {
         assertEquals(
             AudioRouteSelection.EARPIECE.name,
             intent.getStringExtra("com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE")
+        )
+        assertFalse(
+            intent.getBooleanExtra(
+                "com.kuma.motointercom.extra.AUTOMATIC_RECONNECT_ENABLED",
+                true
+            )
         )
     }
 
@@ -125,7 +141,7 @@ class IntercomServiceRobolectricTest {
             listOf(AudioRouteSelection.BLUETOOTH, AudioRouteSelection.EARPIECE),
             selections
         )
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -165,7 +181,7 @@ class IntercomServiceRobolectricTest {
             VoxRuntimeState.OPEN
         )
         assertEquals(VoxRuntimeState.OPEN, snapshots.last().voxState)
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -192,7 +208,7 @@ class IntercomServiceRobolectricTest {
             ),
             snapshots.last()
         )
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -257,7 +273,7 @@ class IntercomServiceRobolectricTest {
 
         assertEquals(current, activeIncomingPrompt(service))
         assertTrue(canceled.isEmpty())
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -275,7 +291,7 @@ class IntercomServiceRobolectricTest {
         service.setListener(recordingListener(replayed))
 
         assertEquals(listOf(prompt), replayed)
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -306,7 +322,7 @@ class IntercomServiceRobolectricTest {
         )
         service.setListener(listener)
         assertTrue(replayed.isEmpty())
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -334,7 +350,7 @@ class IntercomServiceRobolectricTest {
                 ?.toString()
                 ?.contains("Socket 身份") == false
         )
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -385,7 +401,7 @@ class IntercomServiceRobolectricTest {
         )
         assertTrue(states.isNotEmpty())
         assertTrue(states.all { it == IntercomState.Offline })
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -410,7 +426,7 @@ class IntercomServiceRobolectricTest {
             ),
             toasts.last()
         )
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     @Test
@@ -436,7 +452,7 @@ class IntercomServiceRobolectricTest {
         awaitMainCallback(callback)
         assertFalse(repository.record("peer-a")?.isPreferred == true)
         assertTrue(repository.record("peer-b")?.isPreferred == true)
-        controller.destroy()
+        destroyAndAwait(controller)
     }
 
     private fun recordingListener(
@@ -574,6 +590,29 @@ class IntercomServiceRobolectricTest {
         lastTransport = "LAN",
         failureCount = 0
     )
+
+    private fun destroyAndAwait(controller: ServiceController<IntercomService>) {
+        val service = controller.get()
+        val scope = IntercomService::class.java.getDeclaredField("serviceScope").apply {
+            isAccessible = true
+        }.get(service) as CoroutineScope
+        val completion = CountDownLatch(1)
+        scope.coroutineContext[Job]?.invokeOnCompletion { completion.countDown() }
+            ?: completion.countDown()
+
+        controller.destroy()
+
+        assertTrue(
+            "IntercomService coroutine scope did not stop",
+            completion.await(5L, TimeUnit.SECONDS)
+        )
+        val databaseField = pairingDatabaseInstanceField()
+        (databaseField.get(null) as? PairingDatabase)?.close()
+        databaseField.set(null, null)
+    }
+
+    private fun pairingDatabaseInstanceField() =
+        PairingDatabase::class.java.getDeclaredField("instance").apply { isAccessible = true }
 
     private class RecordingPairingRepository(
         vararg initialRecords: PairingRecord,

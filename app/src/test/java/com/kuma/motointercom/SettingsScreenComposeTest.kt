@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -50,7 +51,7 @@ class SettingsScreenComposeTest {
                     onOptionalPermission = {},
                     onLogs = {},
                     onAbout = {},
-                    onPlaceholder = {}
+                    onHelp = {}
                 )
             }
         }
@@ -91,7 +92,7 @@ class SettingsScreenComposeTest {
                     onOptionalPermission = {},
                     onLogs = {},
                     onAbout = {},
-                    onPlaceholder = {},
+                    onHelp = {},
                     onVoxEnabledChanged = { enabled = it },
                     onVoxSensitivityChanged = { sensitivity = it }
                 )
@@ -112,7 +113,7 @@ class SettingsScreenComposeTest {
     @Test
     fun audioRouteRowsExposePersistedSelectionAndRealCallbacks() {
         var selected: AudioRouteSelection? = null
-        var placeholderCount = 0
+        var helpCount = 0
         composeRule.setContent {
             MotoComTheme {
                 MotoComSettingsScreen(
@@ -135,7 +136,7 @@ class SettingsScreenComposeTest {
                     onOptionalPermission = {},
                     onLogs = {},
                     onAbout = {},
-                    onPlaceholder = { placeholderCount++ },
+                    onHelp = { helpCount++ },
                     onAudioRouteSelected = { selected = it }
                 )
             }
@@ -149,7 +150,80 @@ class SettingsScreenComposeTest {
 
         composeRule.runOnIdle {
             assertEquals(AudioRouteSelection.SPEAKER, selected)
-            assertEquals(0, placeholderCount)
+            assertEquals(0, helpCount)
         }
+    }
+
+    @Test
+    fun automaticReconnectExposesPersistedSwitchStateAndRealCallback() {
+        var requested: Boolean? = null
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "Rider",
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        attemptFacts = "No attempt",
+                        discoveryCandidates = "No candidates",
+                        deviceStatus = "Ready",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0",
+                        automaticReconnectEnabled = false
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = {},
+                    onAutomaticReconnectChanged = { requested = it }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("settings_reconnect_button")
+            .assertIsOff()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+
+        composeRule.runOnIdle { assertEquals(true, requested) }
+    }
+
+    @Test
+    fun helpEntryRoutesARealHelpAction() {
+        var helpRequests = 0
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "Rider",
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        attemptFacts = "No attempt",
+                        discoveryCandidates = "No candidates",
+                        deviceStatus = "Ready",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0"
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = { helpRequests++ }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("settings_help_button")
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+
+        composeRule.runOnIdle { assertEquals(1, helpRequests) }
     }
 }

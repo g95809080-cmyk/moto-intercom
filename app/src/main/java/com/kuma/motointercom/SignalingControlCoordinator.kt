@@ -66,6 +66,7 @@ internal class SignalingControlCoordinator(
     private var pendingInbound: PendingInboundRequest? = null
     @Volatile
     private var targetedTransportRace: TargetedTransportRace? = null
+    private var automaticReconnectEnabled = true
 
     internal val currentAttempt: ConnectionAttempt?
         get() = ownedAttempt
@@ -87,6 +88,10 @@ internal class SignalingControlCoordinator(
     ): SignalingControlDecision? {
         pruneCompleted()
         return when (event) {
+            is SessionEvent.AutomaticReconnectChanged -> {
+                automaticReconnectEnabled = event.enabled
+                accepted(state = current)
+            }
             is SessionEvent.ConnectRequested -> adoptOutboundAttempt(current, event)
             is SessionEvent.ConnectPresenceRequested -> connectPresenceRequested(current, event)
             is SessionEvent.AttemptReplaced -> replaceOwnedAttempt(current, event)
@@ -567,11 +572,11 @@ internal class SignalingControlCoordinator(
         outcome: ConnectionAttemptTerminalOutcome,
         restartConnectedDiscovery: Boolean
     ): SignalingControlDecision = when (current) {
-        is IntercomState.Connected -> recoverConnectedAttempt(
-            current,
-            outcome,
-            restartConnectedDiscovery
-        )
+        is IntercomState.Connected -> if (automaticReconnectEnabled) {
+            recoverConnectedAttempt(current, outcome, restartConnectedDiscovery)
+        } else {
+            finishConnectedAttemptWithoutRecovery(current, outcome)
+        }
         is IntercomState.Connecting,
         is IntercomState.Optimizing -> terminateOwnedAttempt(current, attempt, outcome)
         is IntercomState.Recovering -> if (restartConnectedDiscovery) {
@@ -580,6 +585,30 @@ internal class SignalingControlCoordinator(
             accepted(state = current)
         }
         else -> rejected()
+    }
+
+    private fun finishConnectedAttemptWithoutRecovery(
+        current: IntercomState.Connected,
+        outcome: ConnectionAttemptTerminalOutcome
+    ): SignalingControlDecision {
+        val context = active?.takeIf { it.attempt == current.attempt }
+        if (context?.phase == SignalingAttemptPhase.TERMINATING) {
+            return finishAttemptImmediately(current, context)
+        }
+        if (context != null) {
+            return finishActiveSessionDisconnect(
+                current = current,
+                context = context,
+                logicalOutcome = outcome
+            )
+        }
+        clearOwnedAttempt(current.attempt)
+        return accepted(
+            state = IntercomState.Discovering(current.runtimeSessionId),
+            effects = listOf(
+                SessionEffect.ReleaseActiveSessionAndContinueDiscovery(current.attempt)
+            )
+        )
     }
 
     private fun restartRecoveringAttempt(

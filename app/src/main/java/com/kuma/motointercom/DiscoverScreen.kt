@@ -197,7 +197,7 @@ private fun DiscoverHeader(onBack: () -> Unit, onHelp: () -> Unit) {
         )
         DiscoverIconButton(
             "discover_help_button",
-            stringResource(R.string.help_developing_description),
+            stringResource(R.string.help_description),
             R.drawable.ic_help_24,
             onHelp
         )

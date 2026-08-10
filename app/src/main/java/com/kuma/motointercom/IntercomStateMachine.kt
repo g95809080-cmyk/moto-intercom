@@ -11,6 +11,8 @@ enum class WebRtcConnectionState {
 internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
+    data class AutomaticReconnectChanged(val enabled: Boolean) : SessionEvent
+
     data class DiscoveryRefreshRequested(
         val runtimeSessionId: RuntimeSessionId,
         val generation: Long
@@ -395,6 +397,7 @@ internal fun reduceIntercomState(
     is SessionEvent.TunnelReady -> reduceTunnelReady(current, event)
 
     is SessionEvent.ControlChannelVerified,
+    is SessionEvent.AutomaticReconnectChanged,
     is SessionEvent.IncomingConnectRequest,
     is SessionEvent.RemoteConnectAccepted,
     is SessionEvent.RemoteConnectRejected,

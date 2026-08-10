@@ -211,6 +211,6 @@ private fun ConnectedSettingsPreview() {
         onOptionalPermission = {},
         onLogs = {},
         onAbout = {},
-        onPlaceholder = {}
+        onHelp = {}
     )
 }

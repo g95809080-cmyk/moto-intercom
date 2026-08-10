@@ -276,7 +276,7 @@ class MainScreenRobolectricTest {
         assertNotNull(pageContainer.findViewById<View>(R.id.discover_scroll))
 
         clickDiscover("discover_help_button")
-        dismissPlaceholder()
+        dismissHelp()
         clickDiscover("discover_back_button")
 
         clickHome("home_settings_button")
@@ -1244,19 +1244,22 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun unfinishedEntriesRemainPlaceholdersWhileAudioControlsExposeRealSemantics() {
+    fun settingsAndHelpEntriesExposeRealAccessibleSemantics() {
         val fixture = fixture()
         assertFalse(homeContentDescription("home_mute_button").contains("开发中"))
         assertTrue(homeContentDescription("home_mute_button").contains("启动对讲后可用"))
 
         openRoute(fixture, MainRoute.SETTINGS)
-        val settingsPlaceholderIds = listOf(
-            R.id.settings_reconnect_button,
-            R.id.settings_help_button
-        )
-        settingsPlaceholderIds.forEach { id ->
-            assertTrue(settingsExists(settingsTagForPlaceholderId(id)))
-        }
+        assertTrue(settingsExists("settings_reconnect_button"))
+        assertTrue(settingsExists("settings_help_button"))
+        val reconnectDescription = settingsNode("settings_reconnect_button")
+            .fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
+            .joinToString(separator = "")
+        val helpDescription = settingsNode("settings_help_button")
+            .fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
+            .joinToString(separator = "")
+        assertFalse(reconnectDescription.contains("开发中"))
+        assertFalse(helpDescription.contains("开发中"))
         listOf(
             "settings_vox_button",
             "settings_vox_sensitivity_button",
@@ -1267,8 +1270,13 @@ class MainScreenRobolectricTest {
         clickHome("home_menu_button")
         fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
         val discoverHelp = discoverNode("discover_help_button")
-        assertTrue("Discover help placeholder should exist", discoverExists("discover_help_button"))
+        assertTrue("Discover help action should exist", discoverExists("discover_help_button"))
         assertTrue(discoverHelp.fetchSemanticsNode().config.contains(SemanticsProperties.ContentDescription))
+        assertFalse(
+            discoverHelp.fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
+                .joinToString(separator = "")
+                .contains("开发中")
+        )
         assertTrue(discoverExists("discover_rescan_button"))
         assertFalse(
             discoverNode("discover_rescan_button")
@@ -1351,22 +1359,32 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun remainingPlaceholderButtonShowsOneDialogAndPositiveActionDismissesIt() {
-        val fixture = fixture()
+    fun helpButtonShowsOneRealDialogAndRoutesFeedbackWithTheCurrentVersion() {
+        var feedbackVersion: String? = null
+        val fixture = fixture(onSendFeedback = { feedbackVersion = it })
         openRoute(fixture, MainRoute.DISCOVER)
         clickDiscover("discover_help_button")
 
-        val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("placeholder dialog was not shown")
+        val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("help dialog was not shown")
         val shadow = shadowOf(dialog)
-        assertEquals(PLACEHOLDER_DIALOG_TITLE, shadow.title)
-        assertEquals(PLACEHOLDER_DIALOG_MESSAGE, shadow.message)
-        assertEquals(PLACEHOLDER_DIALOG_BUTTON, dialog.getButton(AlertDialog.BUTTON_POSITIVE).text)
+        assertEquals(fixture.activity.getString(R.string.help_title), shadow.title)
+        assertEquals(fixture.activity.getString(R.string.help_message), shadow.message)
+        assertEquals(
+            fixture.activity.getString(R.string.help_send_feedback),
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).text
+        )
 
         clickDiscover("discover_help_button")
+        assertSame(dialog, ShadowAlertDialog.getLatestAlertDialog())
         assertTrue(dialog.isShowing)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertFalse(dialog.isShowing)
+        assertEquals(
+            fixture.activity.packageManager
+                .getPackageInfo(fixture.activity.packageName, 0).versionName,
+            feedbackVersion
+        )
     }
 
     @Test
@@ -1434,69 +1452,38 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun allPlaceholderControlsShareOneDialogWithoutChangingRoute() {
+    fun discoverAndSettingsHelpUseTheSameRealDialogContractWithoutChangingRoute() {
         val cases = listOf(
-            MainRoute.DISCOVER to listOf(R.id.discover_help_button),
-            MainRoute.SETTINGS to listOf(
-                R.id.settings_reconnect_button,
-                R.id.settings_help_button
-            )
+            MainRoute.DISCOVER to "discover_help_button",
+            MainRoute.SETTINGS to "settings_help_button"
         )
 
-        cases.forEach { (route, placeholderIds) ->
+        cases.forEach { (route, tag) ->
             val fixture = fixture()
             openRoute(fixture, route)
             val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
             val pageId = when (route) {
-                MainRoute.HOME -> R.id.home_scroll
                 MainRoute.DISCOVER -> R.id.discover_scroll
                 MainRoute.SETTINGS -> R.id.settings_scroll
-                MainRoute.LOGS -> error("Logs has no placeholder controls")
+                else -> error("No help entry on $route")
             }
 
-            clickPlaceholder(fixture, route, placeholderIds.first())
+            when (route) {
+                MainRoute.DISCOVER -> clickDiscover(tag)
+                MainRoute.SETTINGS -> clickSettings(tag)
+                else -> error("No help entry on $route")
+            }
             val dialog = ShadowAlertDialog.getLatestAlertDialog()
-                ?: error("placeholder dialog was not shown for $route")
+                ?: error("help dialog was not shown for $route")
+
             assertTrue(dialog.isShowing)
-
-            placeholderIds.drop(1).forEach { id ->
-                clickPlaceholder(fixture, route, id)
-                assertSame(dialog, ShadowAlertDialog.getLatestAlertDialog())
-                assertTrue(dialog.isShowing)
-            }
-
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            assertEquals(fixture.activity.getString(R.string.help_title), shadowOf(dialog).title)
+            assertEquals(fixture.activity.getString(R.string.help_message), shadowOf(dialog).message)
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
             shadowOf(Looper.getMainLooper()).idle()
+
             assertFalse(dialog.isShowing)
             assertNotNull(pageContainer.findViewById<View>(pageId))
-        }
-    }
-
-    @Test
-    fun everyPlaceholderControlCanOpenTheSharedDialogOnItsOwn() {
-        val cases = listOf(
-            MainRoute.DISCOVER to listOf(R.id.discover_help_button),
-            MainRoute.SETTINGS to listOf(
-                R.id.settings_reconnect_button,
-                R.id.settings_help_button
-            )
-        )
-
-        cases.forEach { (route, placeholderIds) ->
-            placeholderIds.forEach { id ->
-                val fixture = fixture()
-                openRoute(fixture, route)
-                clickPlaceholder(fixture, route, id)
-
-                val dialog = ShadowAlertDialog.getLatestAlertDialog()
-                    ?: error("placeholder dialog was not shown for $route#$id")
-                assertTrue(dialog.isShowing)
-                assertEquals(PLACEHOLDER_DIALOG_TITLE, shadowOf(dialog).title)
-                assertEquals(PLACEHOLDER_DIALOG_MESSAGE, shadowOf(dialog).message)
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                shadowOf(Looper.getMainLooper()).idle()
-                assertFalse(dialog.isShowing)
-            }
         }
     }
 
@@ -1862,10 +1849,10 @@ class MainScreenRobolectricTest {
         )
     }
 
-    private fun dismissPlaceholder() {
-        val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("placeholder dialog was not shown")
-        assertEquals(PLACEHOLDER_DIALOG_TITLE, shadowOf(dialog).title)
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+    private fun dismissHelp() {
+        val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("help dialog was not shown")
+        assertEquals(dialog.context.getString(R.string.help_title), shadowOf(dialog).title)
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertFalse(dialog.isShowing)
     }
@@ -1895,49 +1882,6 @@ class MainScreenRobolectricTest {
         shadowOf(Looper.getMainLooper()).idle()
         composeRule.onAllNodesWithTag(testTag).onLast().performClick()
         shadowOf(Looper.getMainLooper()).idle()
-    }
-
-    private fun clickPlaceholder(fixture: Fixture, route: MainRoute, id: Int) {
-        if (route == MainRoute.HOME) {
-            clickHome(homeTagForId(id))
-        } else if (route == MainRoute.DISCOVER) {
-            clickDiscover(
-                when (id) {
-                    R.id.discover_help_button -> "discover_help_button"
-                    R.id.discover_rescan_button -> "discover_rescan_button"
-                    else -> error("No Compose tag mapped for Discover resource id=$id")
-                }
-            )
-        } else if (route == MainRoute.SETTINGS) {
-            clickSettings(
-                when (id) {
-                    R.id.settings_vox_button -> "settings_vox_button"
-                    R.id.settings_vox_sensitivity_button -> "settings_vox_sensitivity_button"
-                    R.id.settings_vox_state_button -> "settings_vox_state_button"
-                    R.id.settings_reconnect_button -> "settings_reconnect_button"
-                    R.id.settings_help_button -> "settings_help_button"
-                    else -> error("No Compose tag mapped for Settings resource id=$id")
-                }
-            )
-        } else {
-            fixture.screen.root.findViewById<View>(id).performClick()
-        }
-    }
-
-    private fun homeTagForId(id: Int): String = when (id) {
-        R.id.home_mute_button -> "home_mute_button"
-        R.id.home_vox_pill -> "home_vox_pill"
-        R.id.home_vox_card -> "home_vox_card"
-        else -> error("No Compose tag mapped for Home resource id=$id")
-    }
-
-    private fun settingsTagForPlaceholderId(id: Int): String = when (id) {
-        R.id.settings_vox_button -> "settings_vox_button"
-        R.id.settings_vox_sensitivity_button -> "settings_vox_sensitivity_button"
-        R.id.settings_vox_state_button -> "settings_vox_state_button"
-        R.id.settings_reconnect_button -> "settings_reconnect_button"
-        R.id.settings_help_button -> "settings_help_button"
-        else -> error("No Compose tag mapped for Settings resource id=$id")
     }
 
     private fun homeNode(testTag: String): SemanticsNodeInteraction =
@@ -2121,10 +2065,13 @@ class MainScreenRobolectricTest {
         onConnectPresence: (RiderPresence) -> Boolean = { false },
         initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
         initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+        initialAutomaticReconnectEnabled: Boolean = true,
         onSetMuted: (Boolean) -> Unit = {},
         onSetVoxEnabled: (Boolean) -> Unit = {},
         onSetVoxSensitivity: (Int) -> Unit = {},
         onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+        onAutomaticReconnectChanged: (Boolean) -> Unit = {},
+        onSendFeedback: (String) -> Unit = {},
         onRequestDiscoveryRefresh: () -> Unit = {},
         onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
         onForgetPairing: (String) -> Boolean = { false }
@@ -2149,10 +2096,13 @@ class MainScreenRobolectricTest {
             onOpenPermissionSettings = {},
             initialAudioControls = initialAudioControls,
             initialPreferredAudioRoute = initialPreferredAudioRoute,
+            initialAutomaticReconnectEnabled = initialAutomaticReconnectEnabled,
             onSetMuted = onSetMuted,
             onSetVoxEnabled = onSetVoxEnabled,
             onSetVoxSensitivity = onSetVoxSensitivity,
             onSelectAudioRoute = onSelectAudioRoute,
+            onAutomaticReconnectChanged = onAutomaticReconnectChanged,
+            onSendFeedback = onSendFeedback,
             onRequestDiscoveryRefresh = onRequestDiscoveryRefresh,
             onSetPairingPreferred = onSetPairingPreferred,
             onForgetPairing = onForgetPairing

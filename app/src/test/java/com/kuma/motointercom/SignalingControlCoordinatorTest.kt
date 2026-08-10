@@ -1323,6 +1323,89 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun automaticReconnectDisabledEndsUnexpectedLossInDiscoveryWithoutRecovery() = runBlocking {
+        var recoveryAttemptsCreated = 0
+        harness(
+            attemptIdFactory = {
+                recoveryAttemptsCreated++
+                ConnectionAttemptId("unexpected-recovery-$recoveryAttemptsCreated")
+            }
+        ).use { harness ->
+            val attempt = outboundAttempt()
+            harness.start(attempt)
+            val owner = requesterChannel(CHANNEL_A, attempt)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.ControlChannelVerified(RUNTIME_A, owner)
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.SendConnectRequest)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A,
+                        attempt.id,
+                        owner.channelId,
+                        owner.wireRequestKey
+                    )
+                )
+            )
+            assertTrue(harness.nextEffect() is SessionEffect.StartWebRtc)
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A,
+                        attempt.id,
+                        WebRtcConnectionState.CONNECTED,
+                        500L
+                    )
+                )
+            )
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AutomaticReconnectChanged(enabled = false)
+                )
+            )
+            assertFalse(harness.hasPendingEffect())
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.SignalingDisconnected(RUNTIME_A, attempt.id)
+                )
+            )
+
+            val cleanup = listOf(harness.nextEffect(), harness.nextEffect())
+            assertTrue(cleanup.any { it is SessionEffect.CloseControlChannel })
+            assertTrue(
+                cleanup.any { it == SessionEffect.ReleaseActiveSessionAndContinueDiscovery(attempt) }
+            )
+            assertFalse(cleanup.any { it is SessionEffect.RestartDiscovery })
+            assertFalse(cleanup.any { it is SessionEffect.ScheduleAttemptDeadline })
+            assertTrue(harness.orchestrator.state.value is IntercomState.Discovering)
+            assertNull(harness.orchestrator.currentAttempt)
+            assertEquals(0, recoveryAttemptsCreated)
+        }
+    }
+
+    @Test
+    fun automaticReconnectChangeDoesNotInterruptAnActiveRecoveryAttempt() = runBlocking {
+        val recoveryIds = ArrayDeque(listOf(ConnectionAttemptId(RECOVERY_ATTEMPT)))
+        harness(attemptIdFactory = recoveryIds::removeFirst).use { harness ->
+            val recovering = enterRecovery(harness)
+
+            assertTrue(
+                harness.orchestrator.dispatchAndAwait(
+                    SessionEvent.AutomaticReconnectChanged(enabled = false)
+                )
+            )
+
+            assertEquals(recovering, harness.orchestrator.state.value)
+            assertEquals(recovering.attempt, harness.orchestrator.currentAttempt)
+            assertFalse(harness.hasPendingEffect())
+        }
+    }
+
+    @Test
     fun remoteExplicitDisconnectDuringRecoveryEndsWithoutRetryOrFailureIncrement() = runBlocking {
         val recoveryIds = ArrayDeque(
             listOf(ConnectionAttemptId("30000000-0000-4000-8000-000000000021"))

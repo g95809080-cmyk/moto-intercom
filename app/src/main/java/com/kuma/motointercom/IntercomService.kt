@@ -324,6 +324,9 @@ class IntercomService : Service() {
                         audioControls.voxSensitivity
                     )
                 )
+                setAutomaticReconnectEnabled(
+                    intent.getBooleanExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, true)
+                )
                 if (!hasRequiredRuntimePermissions()) {
                     publishStatus("缺少必要权限，无法启动摩声")
                     stopSelf(startId)
@@ -428,6 +431,12 @@ class IntercomService : Service() {
             } catch (error: RuntimeException) {
                 handleError(error)
             }
+        }
+    }
+
+    internal fun setAutomaticReconnectEnabled(enabled: Boolean) {
+        dispatchOnMain {
+            orchestrator.dispatch(SessionEvent.AutomaticReconnectChanged(enabled))
         }
     }
 
@@ -2471,6 +2480,8 @@ class IntercomService : Service() {
         private const val EXTRA_VOX_SENSITIVITY = "com.kuma.motointercom.extra.VOX_SENSITIVITY"
         private const val EXTRA_PREFERRED_AUDIO_ROUTE =
             "com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE"
+        private const val EXTRA_AUTOMATIC_RECONNECT_ENABLED =
+            "com.kuma.motointercom.extra.AUTOMATIC_RECONNECT_ENABLED"
         private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
         private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
         private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
@@ -2501,7 +2512,8 @@ class IntercomService : Service() {
             context: Context,
             riderName: String = "",
             audioControls: AudioControlSettings = AudioControlSettings(),
-            preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH
+            preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+            automaticReconnectEnabled: Boolean = true
         ): Intent =
             Intent(context, IntercomService::class.java)
                 .setAction(ACTION_START_INTERCOM)
@@ -2509,6 +2521,7 @@ class IntercomService : Service() {
                 .putExtra(EXTRA_VOX_ENABLED, audioControls.voxEnabled)
                 .putExtra(EXTRA_VOX_SENSITIVITY, audioControls.normalized().voxSensitivity)
                 .putExtra(EXTRA_PREFERRED_AUDIO_ROUTE, preferredAudioRoute.name)
+                .putExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, automaticReconnectEnabled)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)

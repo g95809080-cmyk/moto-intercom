@@ -74,7 +74,15 @@
     <string name="mute_description">静音麦克风</string>
     <string name="unmute_description">取消麦克风静音</string>
     <string name="mute_unavailable_description">静音麦克风，启动对讲后可用</string>
-    <string name="help_developing_description">帮助与反馈，功能开发中</string>
+    <string name="help_description">打开帮助与反馈</string>
+    <string name="help_title">帮助与反馈</string>
+    <string name="help_message">快速使用：\n1. 两台手机打开 Wi-Fi，并授予麦克风和附近设备权限。\n2. 点击“开始对讲”，在“发现车友”中选择对方。\n3. 连接后可静音，并在设置中调整 VOX 和音频输出。\n4. 遇到问题可在“日志”页复制诊断信息，发送前请自行检查内容。\n\n发送反馈不会自动附带日志、录音或身份信息。</string>
+    <string name="help_send_feedback">发送反馈</string>
+    <string name="help_close">关闭</string>
+    <string name="feedback_chooser_title">选择反馈应用</string>
+    <string name="feedback_subject">MotoCom %1$s 使用反馈</string>
+    <string name="feedback_body">请描述问题、复现步骤和预期结果：\n\n应用版本：%1$s\nAndroid：%2$s\n\n不会自动附带对讲日志；如需提供日志，请先在日志页复制并确认内容。</string>
+    <string name="feedback_unavailable">未找到可发送反馈的应用</string>
     <string name="rescan_description">重新扫描附近车友</string>
     <string name="rescan_unavailable_description">重新扫描，当前状态不可用</string>
     <string name="audio_route_description">选择蓝牙耳机作为首选音频输出</string>
@@ -87,7 +95,7 @@
     <string name="settings_vox_state_description">VOX 当前精确状态：%1$s</string>
     <string name="vox_settings_save_failed">VOX 设置保存失败</string>
     <string name="audio_route_save_failed">音频输出设置保存失败</string>
-    <string name="reconnect_developing_description">自动重连，功能开发中</string>
+    <string name="automatic_reconnect_save_failed">自动重连设置保存失败</string>
     <string name="section_audio_output">音频输出</string>
     <string name="section_vox">VOX 自动开麦</string>
     <string name="discover_identity_notice">发现信息仅用于选择目标；真正连接仍需当前通道身份检查。</string>
@@ -115,8 +123,9 @@
     <string name="settings_app_version">App 版本</string>
     <string name="settings_version_summary">当前版本：%1$s</string>
     <string name="version_unavailable">版本信息不可用</string>
-    <string name="settings_auto_reconnect_developing">自动重连</string>
-    <string name="settings_help_developing">帮助与反馈</string>
+    <string name="settings_auto_reconnect">自动重连</string>
+    <string name="settings_auto_reconnect_description">连接意外中断后自动恢复原车友</string>
+    <string name="settings_help">帮助与反馈</string>
     <string name="logs_back_settings">返回设置</string>
     <string name="logs_title">日志诊断</string>
     <string name="logs_close">关闭</string>

@@ -39,13 +39,16 @@ internal class MainScreen(
     private val onOpenPermissionSettings: () -> Unit,
     initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
     initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+    initialAutomaticReconnectEnabled: Boolean = true,
     private val onSetMuted: (Boolean) -> Unit = {},
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
     private val onSetVoxSensitivity: (Int) -> Unit = {},
     private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+    private val onAutomaticReconnectChanged: (Boolean) -> Unit = {},
     private val onRequestDiscoveryRefresh: () -> Unit = {},
     private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
-    private val onForgetPairing: (String) -> Boolean = { false }
+    private val onForgetPairing: (String) -> Boolean = { false },
+    private val onSendFeedback: (String) -> Unit = {}
 ) {
     val root: View
 
@@ -111,6 +114,7 @@ internal class MainScreen(
     private var audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
     private var bluetoothActive = false
     private var preferredAudioRoute = initialPreferredAudioRoute
+    private var automaticReconnectEnabled = initialAutomaticReconnectEnabled
     private var wifiUnavailable = false
     private var bluetoothPermissionMissing = false
     private var notificationPermissionMissing = false
@@ -123,7 +127,7 @@ internal class MainScreen(
         savedState?.getString(KEY_NICKNAME_DRAFT),
         initialRiderName
     )
-    private var placeholderDialog: AlertDialog? = null
+    private var helpDialog: AlertDialog? = null
     private var pairingManagementDialog: AlertDialog? = null
     private var forgetPairingDialog: AlertDialog? = null
     private var activePairingDeviceId: String? = null
@@ -194,7 +198,7 @@ internal class MainScreen(
                 closeNavigation()
                 true
             }
-            BackNavigation.DismissPlaceholder -> {
+            BackNavigation.DismissTransientDialog -> {
                 dismissTransientDialogs()
                 true
             }
@@ -211,13 +215,13 @@ internal class MainScreen(
         showPage(MainRoute.HOME)
     }
 
-    fun dismissPlaceholderDialog() {
-        placeholderDialog?.dismiss()
-        placeholderDialog = null
+    fun dismissHelpDialog() {
+        helpDialog?.dismiss()
+        helpDialog = null
     }
 
     fun dismissTransientDialogs() {
-        dismissPlaceholderDialog()
+        dismissHelpDialog()
         dismissPairingDialogs()
     }
 
@@ -305,6 +309,11 @@ internal class MainScreen(
         audioSourceText = audioSourcePresentation(status, bluetooth)
         bluetoothActive = bluetooth
         renderCurrentPage()
+    }
+
+    fun setAutomaticReconnectEnabled(enabled: Boolean) {
+        automaticReconnectEnabled = enabled
+        renderSettings()
     }
 
     fun setAudioControls(snapshot: AudioControlSnapshot) {
@@ -840,7 +849,7 @@ internal class MainScreen(
                         MotoComDiscoverScreen(
                             state = discoverUiState.value,
                             onBack = { showPage(MainRoute.HOME) },
-                            onHelp = ::showPlaceholderDialog,
+                            onHelp = ::showHelpDialog,
                             onStart = onToggleIntercom,
                             onWifiSettings = onOpenWifiSettings,
                             onRescan = onRequestDiscoveryRefresh,
@@ -1017,10 +1026,11 @@ internal class MainScreen(
                         onOptionalPermission = onRequestOptionalPermissions,
                         onLogs = { showPage(MainRoute.LOGS) },
                         onAbout = ::showAboutDialog,
-                        onPlaceholder = { showPlaceholderDialog() },
+                        onHelp = ::showHelpDialog,
                         onVoxEnabledChanged = onSetVoxEnabled,
                         onVoxSensitivityChanged = onSetVoxSensitivity,
-                        onAudioRouteSelected = onSelectAudioRoute
+                        onAudioRouteSelected = onSelectAudioRoute,
+                        onAutomaticReconnectChanged = onAutomaticReconnectChanged
                     )
                 }
             }
@@ -1084,7 +1094,8 @@ internal class MainScreen(
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
             voxState = audioControlSnapshot.voxState,
-            preferredAudioRoute = preferredAudioRoute
+            preferredAudioRoute = preferredAudioRoute,
+            automaticReconnectEnabled = automaticReconnectEnabled
         )
     }
 
@@ -1132,15 +1143,18 @@ internal class MainScreen(
         Toast.makeText(activity, LOGS_COPIED_FEEDBACK, Toast.LENGTH_SHORT).show()
     }
 
-    private fun showPlaceholderDialog() {
-        if (!shouldShowPlaceholderDialog(placeholderDialog?.isShowing == true)) return
-        placeholderDialog = AlertDialog.Builder(activity)
-            .setTitle(PLACEHOLDER_DIALOG_TITLE)
-            .setMessage(PLACEHOLDER_DIALOG_MESSAGE)
-            .setPositiveButton(PLACEHOLDER_DIALOG_BUTTON, null)
+    private fun showHelpDialog() {
+        if (!shouldShowTransientDialog(helpDialog?.isShowing == true)) return
+        helpDialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.help_title)
+            .setMessage(R.string.help_message)
+            .setPositiveButton(R.string.help_send_feedback) { _, _ ->
+                onSendFeedback(currentVersionName())
+            }
+            .setNegativeButton(R.string.help_close, null)
             .create()
             .also { dialog ->
-                dialog.setOnDismissListener { placeholderDialog = null }
+                dialog.setOnDismissListener { helpDialog = null }
                 dialog.show()
             }
     }
@@ -1164,7 +1178,7 @@ internal class MainScreen(
     private fun currentChrome(): RouteChrome = RouteChrome(
         route = currentRoute,
         navigationOpen = navigationPanel.visibility == View.VISIBLE,
-        placeholderVisible = placeholderDialog?.isShowing == true ||
+        transientDialogVisible = helpDialog?.isShowing == true ||
             pairingManagementDialog?.isShowing == true ||
             forgetPairingDialog?.isShowing == true,
         incomingConfirmationVisible = incomingConfirmationVisible

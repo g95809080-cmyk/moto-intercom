@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import android.app.AlertDialog
 import android.content.ComponentName
+import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.Looper
@@ -143,6 +144,78 @@ class MainActivityRobolectricTest {
     }
 
     @Test
+    fun activityLoadsAndPersistsAutomaticReconnectBeforeServiceReplay() {
+        val application = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val preferences = application.getSharedPreferences("moto_intercom", android.content.Context.MODE_PRIVATE)
+        preferences.edit().putBoolean("automatic_reconnect_enabled", false).commit()
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val mainScreen = screen(activity)
+
+        assertFalse(
+            MainActivity::class.java.getDeclaredField("automaticReconnectEnabled").apply {
+                isAccessible = true
+            }.getBoolean(activity)
+        )
+        invokeShowPage(mainScreen, MainRoute.SETTINGS)
+        assertFalse(
+            (stateValue(mainScreen, "settingsUiState") as SettingsScreenUiState)
+                .automaticReconnectEnabled
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val callback = MainScreen::class.java.getDeclaredField("onAutomaticReconnectChanged").apply {
+            isAccessible = true
+        }.get(mainScreen) as (Boolean) -> Unit
+        callback(true)
+
+        assertTrue(preferences.getBoolean("automatic_reconnect_enabled", false))
+        controller.destroy()
+    }
+
+    @Test
+    fun feedbackUsesAnExplicitUserChooserWithoutAttachingSessionLogs() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        val activity = controller.get()
+
+        MainActivity::class.java.getDeclaredMethod("sendFeedback", String::class.java).apply {
+            isAccessible = true
+        }.invoke(activity, "1.1.0")
+
+        val chooser = shadowOf(activity).nextStartedActivity
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        val payload = chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+            ?: error("feedback chooser is missing its send Intent")
+        assertEquals(Intent.ACTION_SEND, payload.action)
+        assertEquals("text/plain", payload.type)
+        assertTrue(payload.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().contains("MotoCom"))
+        val expectedBody = activity.getString(
+            R.string.feedback_body,
+            "1.1.0",
+            "${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})"
+        )
+        assertEquals(expectedBody, payload.getStringExtra(Intent.EXTRA_TEXT))
+        assertEquals(null, payload.data)
+        payload.clipData?.let { clipData ->
+            repeat(clipData.itemCount) { index ->
+                val item = clipData.getItemAt(index)
+                assertEquals(null, item.uri)
+                assertFalse(item.text?.toString().orEmpty().contains("session log", ignoreCase = true))
+            }
+        }
+        assertEquals(
+            0,
+            payload.flags and (
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                )
+        )
+    }
+
+    @Test
     fun activityOwnsAndPersistsPreferredAudioRouteBeforeServiceReplay() {
         val application = androidx.test.core.app.ApplicationProvider
             .getApplicationContext<android.content.Context>()
@@ -278,20 +351,20 @@ class MainActivityRobolectricTest {
     }
 
     @Test
-    fun incomingConfirmationSupersedesPlaceholderDialog() {
+    fun incomingConfirmationSupersedesHelpDialog() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()
 
-        invokePrivate(screen(activity), "showPlaceholderDialog")
-        val placeholder = ShadowAlertDialog.getLatestAlertDialog()
-            ?: error("placeholder dialog was not shown")
-        assertTrue(placeholder.isShowing)
+        invokePrivate(screen(activity), "showHelpDialog")
+        val help = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("help dialog was not shown")
+        assertTrue(help.isShowing)
 
         showIncomingConfirmation(activity, incomingPrompt("incoming-nonce", "Incoming Rider"))
         val incoming = ShadowAlertDialog.getLatestAlertDialog()
             ?: error("incoming dialog was not shown")
 
-        assertFalse(placeholder.isShowing)
+        assertFalse(help.isShowing)
         assertTrue(incoming.isShowing)
         assertEquals(
             activity.getString(R.string.incoming_confirmation_title, "Incoming Rider"),

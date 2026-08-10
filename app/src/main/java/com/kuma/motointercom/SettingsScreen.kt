@@ -67,7 +67,8 @@ internal data class SettingsScreenUiState(
     val voxEnabled: Boolean = true,
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
     val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
-    val preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH
+    val preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+    val automaticReconnectEnabled: Boolean = true
 )
 
 @Composable
@@ -79,11 +80,12 @@ internal fun MotoComSettingsScreen(
     onOptionalPermission: () -> Unit,
     onLogs: () -> Unit,
     onAbout: () -> Unit,
-    onPlaceholder: (String) -> Unit,
+    onHelp: () -> Unit,
     modifier: Modifier = Modifier,
     onVoxEnabledChanged: (Boolean) -> Unit = {},
     onVoxSensitivityChanged: (Int) -> Unit = {},
-    onAudioRouteSelected: (AudioRouteSelection) -> Unit = {}
+    onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
+    onAutomaticReconnectChanged: (Boolean) -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -159,7 +161,11 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.section_vox))
         SettingsPanel {
-            SettingsVoxSwitchRow(
+            SettingsSwitchRow(
+                title = stringResource(R.string.settings_vox_switch),
+                description = stringResource(R.string.settings_vox_switch_description),
+                icon = R.drawable.ic_mic_24,
+                tag = "settings_vox_button",
                 checked = state.voxEnabled,
                 onCheckedChange = onVoxEnabledChanged
             )
@@ -202,15 +208,19 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.settings_connection_device))
         SettingsPanel {
-            val reconnectDescription = stringResource(R.string.reconnect_developing_description)
-            SettingsNavigationRow(
-                title = stringResource(R.string.settings_transport_policy),
-                subtitle = state.attemptFacts,
+            SettingsSwitchRow(
+                title = stringResource(R.string.settings_auto_reconnect),
+                description = stringResource(R.string.settings_auto_reconnect_description),
+                icon = R.drawable.ic_refresh_24,
                 tag = "settings_reconnect_button",
-                description = reconnectDescription,
-                onClick = { onPlaceholder(reconnectDescription) },
-                icon = R.drawable.ic_wifi_24
+                checked = state.automaticReconnectEnabled,
+                onCheckedChange = onAutomaticReconnectChanged
             )
+            SettingsFact(
+                stringResource(R.string.settings_transport_policy),
+                "settings_transport_policy"
+            )
+            SettingsFact(state.attemptFacts, "settings_attempt_facts")
             SettingsFact(state.productState, "settings_product_state")
             SettingsFact(state.discoveryCandidates, "settings_discovery_candidates")
         }
@@ -237,19 +247,11 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.section_advanced_settings))
         SettingsPanel {
-            val reconnectDescription = stringResource(R.string.reconnect_developing_description)
-            val helpDescription = stringResource(R.string.help_developing_description)
+            val helpDescription = stringResource(R.string.help_description)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                SettingsAdvancedAction(
-                    icon = R.drawable.ic_refresh_24,
-                    text = stringResource(R.string.settings_auto_reconnect_developing),
-                    tag = "settings_reconnect_button_advanced",
-                    description = reconnectDescription,
-                    onClick = { onPlaceholder(reconnectDescription) }
-                )
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_clipboard_24,
                     text = stringResource(R.string.settings_logs),
@@ -259,10 +261,10 @@ internal fun MotoComSettingsScreen(
                 )
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_help_24,
-                    text = stringResource(R.string.settings_help_developing),
+                    text = stringResource(R.string.settings_help),
                     tag = "settings_help_button",
                     description = helpDescription,
-                    onClick = { onPlaceholder(helpDescription) }
+                    onClick = onHelp
                 )
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_info_24,
@@ -387,41 +389,6 @@ private fun SettingsSecondaryButton(text: String, tag: String, onClick: () -> Un
 }
 
 @Composable
-private fun SettingsPlaceholderRow(
-    text: String,
-    tag: String,
-    description: String,
-    onClick: (String) -> Unit,
-    icon: Int,
-    trailing: @Composable () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 44.dp)
-            .clickable(role = Role.Button) { onClick(description) }
-            .semantics { contentDescription = description }
-            .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            painterResource(icon),
-            null,
-            Modifier.size(21.dp),
-            tint = colorResource(R.color.motocom_text_muted_accessible)
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text,
-            Modifier.weight(1f),
-            color = colorResource(R.color.motocom_text_primary),
-            fontSize = 14.sp
-        )
-        trailing()
-    }
-}
-
-@Composable
 private fun SettingsAudioRouteRow(
     text: String,
     tag: String,
@@ -460,11 +427,14 @@ private fun SettingsAudioRouteRow(
 }
 
 @Composable
-private fun SettingsVoxSwitchRow(
+private fun SettingsSwitchRow(
+    title: String,
+    description: String,
+    icon: Int,
+    tag: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val description = stringResource(R.string.settings_vox_switch_description)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -477,18 +447,18 @@ private fun SettingsVoxSwitchRow(
             .semantics {
                 contentDescription = description
             }
-            .testTag("settings_vox_button"),
+            .testTag(tag),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            painterResource(R.drawable.ic_mic_24),
+            painterResource(icon),
             null,
             Modifier.size(21.dp),
             tint = colorResource(R.color.motocom_text_muted_accessible)
         )
         Spacer(Modifier.width(10.dp))
         Text(
-            stringResource(R.string.settings_vox_switch),
+            title,
             Modifier.weight(1f),
             color = colorResource(R.color.motocom_text_primary),
             fontSize = 14.sp
@@ -604,34 +574,6 @@ private fun RadioMark(selected: Boolean) {
 }
 
 @Composable
-private fun SettingsNavigationRow(
-    title: String,
-    subtitle: String,
-    tag: String,
-    description: String,
-    onClick: () -> Unit,
-    icon: Int
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 44.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description }
-            .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(painterResource(icon), null, Modifier.size(21.dp), tint = colorResource(R.color.motocom_text_muted_accessible))
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = colorResource(R.color.motocom_text_primary), fontSize = 14.sp)
-            Text(subtitle, color = colorResource(R.color.motocom_text_secondary), fontSize = 12.sp)
-        }
-        Icon(painterResource(R.drawable.ic_chevron_right_24), null, Modifier.size(18.dp), tint = colorResource(R.color.motocom_text_muted_accessible))
-    }
-}
-
-@Composable
 private fun SettingsAdvancedAction(
     icon: Int,
     text: String,
@@ -683,7 +625,7 @@ private fun SettingsScreenPreview() {
             onOptionalPermission = {},
             onLogs = {},
             onAbout = {},
-            onPlaceholder = {}
+            onHelp = {}
         )
     }
 }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.kuma.motointercom"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testApplicationId = "com.kuma.motointercom.instrumentation"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
