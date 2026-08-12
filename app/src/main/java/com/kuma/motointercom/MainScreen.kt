@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.MotionEvent
-import android.view.RoundedCorner
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -1386,33 +1385,11 @@ internal fun calculateSafeWindowInsets(insets: WindowInsets): IntArray =
                 WindowInsets.Type.systemGestures() or
                 WindowInsets.Type.mandatorySystemGestures()
         )
-        val roundedInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            intArrayOf(
-                maxOf(
-                    insets.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)?.radius ?: 0,
-                    insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)?.radius ?: 0
-                ),
-                maxOf(
-                    insets.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)?.radius ?: 0,
-                    insets.getRoundedCorner(RoundedCorner.POSITION_TOP_RIGHT)?.radius ?: 0
-                ),
-                maxOf(
-                    insets.getRoundedCorner(RoundedCorner.POSITION_TOP_RIGHT)?.radius ?: 0,
-                    insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT)?.radius ?: 0
-                ),
-                maxOf(
-                    insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)?.radius ?: 0,
-                    insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT)?.radius ?: 0
-                )
-            )
-        } else {
-            intArrayOf(0, 0, 0, 0)
-        }
         intArrayOf(
-            maxOf(safeInsets.left, roundedInsets[0]),
-            maxOf(safeInsets.top, roundedInsets[1]),
-            maxOf(safeInsets.right, roundedInsets[2]),
-            maxOf(safeInsets.bottom, roundedInsets[3])
+            safeInsets.left,
+            safeInsets.top,
+            safeInsets.right,
+            safeInsets.bottom
         )
     } else {
         @Suppress("DEPRECATION")

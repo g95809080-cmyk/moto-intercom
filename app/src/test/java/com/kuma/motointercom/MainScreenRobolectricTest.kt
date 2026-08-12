@@ -1124,7 +1124,7 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun gestureAndRoundedCornerInsetsJoinTheHostSafePadding() {
+    fun gestureInsetsDoNotTreatRoundedCornerRadiusAsContentPadding() {
         val insets = WindowInsets.Builder()
             .setInsets(
                 WindowInsets.Type.systemGestures(),
@@ -1143,7 +1143,7 @@ class MainScreenRobolectricTest {
         val calculated = calculateSafeWindowInsets(insets)
 
         assertEquals(24, calculated[0])
-        assertEquals(18, calculated[1])
+        assertEquals(8, calculated[1])
         assertEquals(28, calculated[2])
         assertEquals(32, calculated[3])
     }
