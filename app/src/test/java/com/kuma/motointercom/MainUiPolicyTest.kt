@@ -332,7 +332,7 @@ class MainUiPolicyTest {
 
         assertEquals(PrimaryIntercomAction.START, presentation.primaryAction)
         assertTrue(presentation.primaryActionEnabled)
-        assertEquals("缺少必要权限", presentation.disabledReason)
+        assertEquals(null, presentation.disabledReason)
         assertFalse(presentation.showPermissionGrantCta)
         assertFalse(presentation.showPermissionSettingsCta)
 
@@ -343,6 +343,7 @@ class MainUiPolicyTest {
             bluetoothActive = false,
             permissionRequestAttempted = true
         )
+        assertEquals("缺少必要权限", afterAttempt.disabledReason)
         assertTrue(afterAttempt.showPermissionSettingsCta)
     }
 

@@ -407,7 +407,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         val canStart = hasCorePermissions()
         screen.setIntercomState(intercomState, canStart)
         screen.setPermissionStatus(
-            if (intercomState == IntercomState.Offline) {
+            if (intercomState == IntercomState.Offline && (canStart || screen.permissionRequestWasAttempted())) {
                 if (canStart) READY_STATUS else PERMISSION_REQUIRED_STATUS
             } else {
                 null

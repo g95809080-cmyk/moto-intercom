@@ -113,7 +113,7 @@ internal fun homePresentation(
             state == IntercomState.Offline && canStart && wifiUnavailable -> WIFI_UNAVAILABLE_TEXT
             state == IntercomState.Offline && canStart -> null
             state is IntercomState.Stopping -> "正在释放连接和音频资源"
-            state == IntercomState.Offline -> "缺少必要权限"
+            state == IntercomState.Offline && permissionRequestAttempted -> "缺少必要权限"
             else -> null
         },
         showPermissionGrantCta = false,

@@ -74,7 +74,7 @@ class MainScreenRobolectricTest {
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
 
         assertNotNull(pageContainer.findViewById<View>(R.id.home_scroll))
-        composeRule.onNodeWithTag("home_primary_button").assertIsNotEnabled()
+        composeRule.onNodeWithTag("home_primary_button").assertIsEnabled()
         assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
 
         clickHome("home_menu_button")
@@ -1505,6 +1505,7 @@ class MainScreenRobolectricTest {
     @Test
     fun permissionRefreshClearsOfflineDisabledReasonWhenStartBecomesAvailable() {
         val fixture = fixture()
+        fixture.screen.markPermissionRequestAttempted()
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
         homeNode("home_primary_button").assertIsNotEnabled()
         assertHomeText("home_disabled_reason", "缺少必要权限")

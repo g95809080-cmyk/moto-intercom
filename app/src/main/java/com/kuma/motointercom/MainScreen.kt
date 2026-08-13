@@ -314,6 +314,8 @@ internal class MainScreen(
         renderCurrentPage()
     }
 
+    fun permissionRequestWasAttempted(): Boolean = permissionRequestAttempted
+
     fun setAudioSource(status: String, bluetooth: Boolean) {
         audioSourceText = audioSourcePresentation(status, bluetooth)
         bluetoothActive = bluetooth
