@@ -11,9 +11,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -66,6 +68,42 @@ class IntercomServiceRobolectricTest {
         assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
         destroyAndAwait(controller)
         Unit
+    }
+
+    @Test
+    fun preferredPresenceSnapshotStartsAnAutoPairedAttempt() = runBlocking {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        try {
+            val service = controller.get()
+            val runtime = RuntimeSessionId("auto-connect-runtime")
+            val orchestrator = IntercomService::class.java.getDeclaredField("orchestrator").apply {
+                isAccessible = true
+            }.get(service) as SessionOrchestrator
+            setPrivate(service, "running", true)
+            setPrivate(service, "activeRuntimeSessionId", runtime.value)
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
+
+            val publish = IntercomService::class.java.getDeclaredMethod(
+                "publishPresenceSnapshot",
+                PresenceSnapshot::class.java
+            ).apply { isAccessible = true }
+            publish.invoke(
+                service,
+                PresenceSnapshot(
+                    presences = listOf(preferredPresence()),
+                    nextExpiryElapsedRealtimeMs = null
+                )
+            )
+
+            withTimeout(1_000L) {
+                while (orchestrator.state.value !is IntercomState.Connecting) delay(10L)
+            }
+            val attempt = requireNotNull(orchestrator.currentAttempt)
+            assertEquals(ConnectionTrigger.AUTO_PAIRED, attempt.trigger)
+            assertEquals("preferred-device", attempt.targetDeviceId)
+        } finally {
+            destroyAndAwait(controller)
+        }
     }
 
     @Test
@@ -589,6 +627,26 @@ class IntercomServiceRobolectricTest {
         isPreferred = false,
         lastTransport = "LAN",
         failureCount = 0
+    )
+
+    private fun preferredPresence() = RiderPresence(
+        deviceId = "preferred-device",
+        sessionId = RuntimeSessionId("preferred-session"),
+        nickname = "Preferred Rider",
+        deviceName = "Preferred Phone",
+        protocolVersion = 2,
+        lastSeenElapsedRealtimeMs = 1L,
+        candidates = listOf(
+            PresenceTransportCandidate(
+                transport = Transport.LAN,
+                endpointId = "preferred-endpoint",
+                address = "127.0.0.1",
+                port = 1234,
+                lastSeenElapsedRealtimeMs = 1L,
+                isAvailable = true
+            )
+        ),
+        pairing = pairingRecord("preferred-device").copy(isPreferred = true)
     )
 
     private fun destroyAndAwait(controller: ServiceController<IntercomService>) {

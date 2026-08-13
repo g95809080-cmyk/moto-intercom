@@ -270,6 +270,7 @@ class IntercomService : Service() {
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var localDeviceId = ""
     private var presenceExpiryGeneration = 0
+    private var autoConnectTargetKey: PreferredAutoConnectTargetKey? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -738,6 +739,7 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
+        autoConnectTargetKey = null
         resetSessionAudioControls()
         publishAudioControls()
         bluetoothReady = false
@@ -1634,6 +1636,7 @@ class IntercomService : Service() {
         activeRuntimeSessionId = null
         localDeviceId = ""
         running = false
+        autoConnectTargetKey = null
         publishPresenceSnapshot(presenceAggregator.clear())
         drainSignalingSessions().forEach(SignalingSessionV2::close)
         lanDiscovery?.close()
@@ -2271,6 +2274,7 @@ class IntercomService : Service() {
 
     private fun publishPresenceSnapshot(snapshot: PresenceSnapshot) {
         listener?.onPresencesChanged(snapshot.presences)
+        maybeAutoConnectPreferred(snapshot)
         val generation = ++presenceExpiryGeneration
         val expiry = snapshot.nextExpiryElapsedRealtimeMs ?: return
         val delayMs = (expiry - SystemClock.elapsedRealtime()).coerceAtLeast(1L)
@@ -2278,6 +2282,41 @@ class IntercomService : Service() {
             if (generation != presenceExpiryGeneration) return@postDelayed
             publishPresenceSnapshot(presenceAggregator.expire())
         }, delayMs)
+    }
+
+    private fun maybeAutoConnectPreferred(snapshot: PresenceSnapshot) {
+        if (!running) return
+        val runtimeSessionId = activeRuntimeSessionId ?: return
+        val target = preferredAutoConnectTarget(
+            state = orchestrator.state.value,
+            presences = snapshot.presences
+        ) ?: run {
+            if (orchestrator.state.value is IntercomState.Discovering) {
+                autoConnectTargetKey = null
+            }
+            return
+        }
+        if (target.key == autoConnectTargetKey) return
+
+        autoConnectTargetKey = target.key
+        val queued = orchestrator.dispatch(
+            SessionEvent.ConnectPresenceRequested(
+                runtimeSessionId = runtimeSessionId,
+                targetDeviceId = target.deviceId,
+                targetSessionId = target.sessionId,
+                availableTransports = target.availableTransports,
+                trigger = ConnectionTrigger.AUTO_PAIRED
+            )
+        ) { accepted ->
+            if (!accepted) {
+                dispatchOnMain {
+                    if (autoConnectTargetKey == target.key) autoConnectTargetKey = null
+                }
+            }
+        }
+        if (!queued && autoConnectTargetKey == target.key) {
+            autoConnectTargetKey = null
+        }
     }
 
     private fun markDiscoveryUnavailable() {

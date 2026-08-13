@@ -44,7 +44,8 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val targetDeviceId: String,
         val targetSessionId: RuntimeSessionId,
-        val availableTransports: Set<Transport>
+        val availableTransports: Set<Transport>,
+        val trigger: ConnectionTrigger = ConnectionTrigger.USER
     ) : SessionEvent
 
     data class AttemptReplaced(val attempt: ConnectionAttempt) : SessionEvent

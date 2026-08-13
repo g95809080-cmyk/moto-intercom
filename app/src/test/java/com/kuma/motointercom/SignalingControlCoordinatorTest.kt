@@ -1605,6 +1605,20 @@ class SignalingControlCoordinatorTest {
     }
 
     @Test
+    fun autoPairedPresenceCreatesAnAutoPairedConnectionAttempt() = runBlocking {
+        harness(attemptIdFactory = { ConnectionAttemptId(ATTEMPT_A) }).use { harness ->
+            val attempt = harness.startPresence(
+                availableTransports = setOf(Transport.LAN),
+                trigger = ConnectionTrigger.AUTO_PAIRED
+            )
+
+            assertEquals(ConnectionTrigger.AUTO_PAIRED, attempt.trigger)
+            assertEquals(DEVICE_B, attempt.targetDeviceId)
+            assertEquals(RUNTIME_B, attempt.targetLock.expectedRemoteSessionId)
+        }
+    }
+
+    @Test
     fun preferredArrivalDuringOptimizationWinsAndCleansFallback() = runBlocking {
         harness(pairedDeviceIds = setOf(DEVICE_A)).use { harness ->
             harness.startRuntime()
@@ -3640,7 +3654,10 @@ class SignalingControlCoordinatorTest {
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(attempt)))
         }
 
-        suspend fun startPresence(availableTransports: Set<Transport>): ConnectionAttempt {
+        suspend fun startPresence(
+            availableTransports: Set<Transport>,
+            trigger: ConnectionTrigger = ConnectionTrigger.USER
+        ): ConnectionAttempt {
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(RUNTIME_A)))
             assertTrue(
                 orchestrator.dispatchAndAwait(
@@ -3648,7 +3665,8 @@ class SignalingControlCoordinatorTest {
                         runtimeSessionId = RUNTIME_A,
                         targetDeviceId = DEVICE_B,
                         targetSessionId = RUNTIME_B,
-                        availableTransports = availableTransports
+                        availableTransports = availableTransports,
+                        trigger = trigger
                     )
                 )
             )

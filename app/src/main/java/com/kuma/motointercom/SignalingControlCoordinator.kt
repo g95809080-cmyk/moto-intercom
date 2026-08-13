@@ -232,7 +232,7 @@ internal class SignalingControlCoordinator(
             id = newAttemptId,
             runtimeSessionId = event.runtimeSessionId,
             targetLock = TargetLock(event.targetDeviceId, event.targetSessionId),
-            trigger = ConnectionTrigger.USER,
+            trigger = event.trigger,
             channelPlan = plan,
             deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
         )
