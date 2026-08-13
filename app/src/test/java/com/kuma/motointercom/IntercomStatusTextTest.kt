@@ -52,6 +52,33 @@ class IntercomStatusTextTest {
         )
     }
 
+    @Test
+    fun connectedNotificationDoesNotKeepStaleMediaInitializationCopy() {
+        val connected = IntercomState.Connected(
+            attempt = ConnectionAttemptFixture.create(
+                clock = FakeMonotonicClock(MonotonicTimestamp(1L)),
+                id = ConnectionAttemptId("attempt-connected"),
+                targetDeviceId = "device-b",
+                expectedRemoteSessionId = RuntimeSessionId("runtime-b"),
+                trigger = ConnectionTrigger.AUTO_PAIRED,
+                preferredTransport = Transport.WIFI_DIRECT
+            ),
+            peer = PeerIdentity(
+                deviceId = "device-b",
+                nickname = "车友 B",
+                runtimeSessionId = RuntimeSessionId("runtime-b"),
+                isDeviceIdVerified = true
+            ),
+            connectedAt = 2L,
+            transport = Transport.WIFI_DIRECT
+        )
+
+        assertEquals(
+            "语音通道已连接",
+            foregroundNotificationText(connected, "媒体初始化中")
+        )
+    }
+
     private fun recoveringState(
         nickname: String,
         deviceName: String

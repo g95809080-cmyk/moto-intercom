@@ -2384,8 +2384,20 @@ class IntercomService : Service() {
     }
 
     private fun updateNotification() {
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        manager.notify(NOTIFICATION_ID, buildNotification())
+        val notification = buildNotification()
+        if (running) {
+            runCatching {
+                // MIUI can keep the original foreground-service record when the
+                // same notification is updated only through NotificationManager.
+                startForeground(NOTIFICATION_ID, notification)
+            }.onFailure {
+                getSystemService(NotificationManager::class.java)
+                    ?.notify(NOTIFICATION_ID, notification)
+            }
+            return
+        }
+        getSystemService(NotificationManager::class.java)
+            ?.notify(NOTIFICATION_ID, notification)
     }
 
     private fun buildNotification(): Notification {

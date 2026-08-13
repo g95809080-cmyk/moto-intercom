@@ -21,6 +21,7 @@ internal fun foregroundNotificationText(
     state: IntercomState,
     fallback: String
 ): String = when (state) {
+    is IntercomState.Connected -> "语音通道已连接"
     is IntercomState.Recovering,
     is IntercomState.Resetting -> intercomStatusDetail(state)
     else -> fallback
