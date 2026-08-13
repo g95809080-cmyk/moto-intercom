@@ -19,10 +19,21 @@ internal fun intercomStatusDetail(state: IntercomState): String = when (state) {
 
 internal fun foregroundNotificationText(
     state: IntercomState,
-    fallback: String
-): String = when (state) {
-    is IntercomState.Connected -> "语音通道已连接"
-    is IntercomState.Recovering,
-    is IntercomState.Resetting -> intercomStatusDetail(state)
-    else -> fallback
+    fallback: String,
+    audioInterruption: AudioInterruptionState = AudioInterruptionState.NORMAL
+): String {
+    when (audioInterruption) {
+        AudioInterruptionState.PHONE_RINGING,
+        AudioInterruptionState.PHONE_ACTIVE -> return "对讲已暂停"
+        AudioInterruptionState.RESUMING -> return "正在恢复对讲音频"
+        AudioInterruptionState.FOCUS_LOST -> return "音频被其他应用占用"
+        AudioInterruptionState.ROUTE_UNAVAILABLE -> return "通信设备暂不可用"
+        AudioInterruptionState.NORMAL -> Unit
+    }
+    return when (state) {
+        is IntercomState.Connected -> "语音通道已连接"
+        is IntercomState.Recovering,
+        is IntercomState.Resetting -> intercomStatusDetail(state)
+        else -> fallback
+    }
 }

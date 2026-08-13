@@ -28,7 +28,8 @@ internal class AudioRouteController(
     private val onEarpieceActive: () -> Unit = {},
     private val onExternalAudioActive: (String) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
-    private val modernRouteFactory: (() -> CommunicationDeviceRoute)? = null
+    private val modernRouteFactory: (() -> CommunicationDeviceRoute)? = null,
+    private val onRouteReady: () -> Unit = {}
 ) : RiderAudioRoute {
 
     private val appContext = context.applicationContext
@@ -146,6 +147,33 @@ internal class AudioRouteController(
         }
     }
 
+    override fun suspendForInterruption(restoreMode: Boolean) {
+        if (closed.get()) return
+        val request = synchronized(routeRequestLock) {
+            VersionedAudioRouteSelection(routeRequest.revision + 1, routeRequest.selection).also {
+                routeRequest = it
+                wantBluetoothSco = false
+                bluetoothReported = false
+                bluetoothReportRevision = null
+            }
+        }
+        cancelSpeakerFallbackRetry()
+        cancelPhoneRouteVerification()
+        ROUTE_EXECUTOR.execute {
+            if (!isCurrentRouteRequest(request)) return@execute
+            try {
+                if (restoreMode) audioManager.mode = AudioManager.MODE_NORMAL
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    modernRoute?.clear()
+                } else {
+                    stopLegacySco()
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "failed to suspend audio route for interruption", t)
+            }
+        }
+    }
+
     private fun selectBluetooth(request: VersionedAudioRouteSelection) {
         if (!isCurrentRouteRequest(request) || !wantBluetoothSco) return
         legacyFallbackActive = false
@@ -224,6 +252,7 @@ internal class AudioRouteController(
             AudioRouteSelection.SPEAKER -> postMainForRoute(request) { onSpeakerFallback(false) }
             AudioRouteSelection.BLUETOOTH -> Unit
         }
+        postMainForRoute(request, onRouteReady)
     }
 
     private fun completeExternalAudioRoute(
@@ -239,6 +268,7 @@ internal class AudioRouteController(
         bluetoothReported = false
         bluetoothReportRevision = null
         postMainForRoute(request) { onExternalAudioActive(outputLabel) }
+        postMainForRoute(request, onRouteReady)
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
@@ -278,7 +308,9 @@ internal class AudioRouteController(
         phoneRouteVerificationRunnable = null
     }
 
-    fun reset() {
+    fun reset() = closeRoute(restoreInitialState = true)
+
+    override fun closeRoute(restoreInitialState: Boolean) {
         if (!closed.compareAndSet(false, true)) return
         wantBluetoothSco = false
         cancelSpeakerFallbackRetry()
@@ -289,17 +321,21 @@ internal class AudioRouteController(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val route = modernRoute
                     modernRoute = null
-                    restoreStep { initialMode?.let { audioManager.mode = it } }
-                    restoreStep { route?.close() }
+                    if (restoreInitialState) {
+                        restoreStep { initialMode?.let { audioManager.mode = it } }
+                    }
+                    restoreStep { route?.close(restoreInitialState) }
                 } else {
                     restoreStep { stopLegacySco() }
-                    restoreStep {
-                        initialSpeakerphoneOn?.let {
-                            @Suppress("DEPRECATION")
-                            audioManager.isSpeakerphoneOn = it
+                    if (restoreInitialState) {
+                        restoreStep {
+                            initialSpeakerphoneOn?.let {
+                                @Suppress("DEPRECATION")
+                                audioManager.isSpeakerphoneOn = it
+                            }
                         }
+                        restoreStep { initialMode?.let { audioManager.mode = it } }
                     }
-                    restoreStep { initialMode?.let { audioManager.mode = it } }
                 }
             } finally {
                 unregisterReceiver()
@@ -308,7 +344,7 @@ internal class AudioRouteController(
         }
     }
 
-    override fun close() = reset()
+    override fun close() = closeRoute(restoreInitialState = true)
 
     private fun captureInitialState() {
         if (initialMode != null) return
@@ -546,6 +582,7 @@ internal class AudioRouteController(
             postMainForRoute(request, onScoDisconnected)
         }
         postMainForRoute(request) { onSpeakerFallback(noBluetooth) }
+        postMainForRoute(request, onRouteReady)
     }
 
     private fun cancelSpeakerFallbackRetry() {
@@ -597,6 +634,7 @@ internal class AudioRouteController(
         bluetoothReported = true
         bluetoothReportRevision = request.revision
         postMainForRoute(request) { onScoConnected(name.ifBlank { "头盔蓝牙" }) }
+        postMainForRoute(request, onRouteReady)
     }
 
     private fun bluetoothDeviceName(): String {

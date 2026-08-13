@@ -5,6 +5,7 @@ import android.Manifest
 internal object PermissionPolicy {
     fun corePermissions(apiLevel: Int): List<String> = buildList {
         add(Manifest.permission.RECORD_AUDIO)
+        add(Manifest.permission.READ_PHONE_STATE)
         if (apiLevel >= 33) {
             add(Manifest.permission.NEARBY_WIFI_DEVICES)
         } else {

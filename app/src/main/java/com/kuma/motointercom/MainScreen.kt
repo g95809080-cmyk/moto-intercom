@@ -107,6 +107,7 @@ internal class MainScreen(
     private var currentScroll: ScrollView? = null
     private var productState: IntercomState = IntercomState.Offline
     private var canStartIntercom = false
+    private var permissionRequestAttempted = false
     private var supplementalStatus: String? = null
     private var permissionStatus: String? = null
     private var discoverCtaNeedsReselect = false
@@ -305,6 +306,11 @@ internal class MainScreen(
             supplementalStatus = message
         }
         permissionStatus = message
+        renderCurrentPage()
+    }
+
+    fun markPermissionRequestAttempted() {
+        permissionRequestAttempted = true
         renderCurrentPage()
     }
 
@@ -636,7 +642,8 @@ internal class MainScreen(
                     wifiUnavailable = wifiUnavailable,
                     supplementalText = supplementalStatus,
                     lastStoppingPeerName = lastRealPeerName,
-                    discoverCtaNeedsReselect = discoverCtaNeedsReselect
+                    discoverCtaNeedsReselect = discoverCtaNeedsReselect,
+                    permissionRequestAttempted = permissionRequestAttempted
                 )
                 title.text = activity.getString(R.string.nav_home)
                 body.text = presentation.detailText
@@ -650,7 +657,8 @@ internal class MainScreen(
                     bluetoothActive = bluetoothActive,
                     wifiUnavailable = wifiUnavailable,
                     supplementalText = supplementalStatus,
-                    lastStoppingPeerName = lastRealPeerName
+                    lastStoppingPeerName = lastRealPeerName,
+                    permissionRequestAttempted = permissionRequestAttempted
                 )
                 title.text = activity.getString(R.string.nav_settings)
                 body.text = activity.getString(
@@ -799,7 +807,8 @@ internal class MainScreen(
             wifiUnavailable = wifiUnavailable,
             supplementalText = supplementalStatus,
             lastStoppingPeerName = lastRealPeerName,
-            discoverCtaNeedsReselect = discoverCtaNeedsReselect
+            discoverCtaNeedsReselect = discoverCtaNeedsReselect,
+            permissionRequestAttempted = permissionRequestAttempted
         )
         homeUiState.value = HomeScreenUiState(
             primaryText = presentation.primaryText,
@@ -1109,7 +1118,8 @@ internal class MainScreen(
             ),
             bluetoothActive = optionalPermission.bluetoothActive,
             supplementalText = supplementalStatus,
-            lastStoppingPeerName = lastRealPeerName
+            lastStoppingPeerName = lastRealPeerName,
+            permissionRequestAttempted = permissionRequestAttempted
         )
         settingsUiState.value = SettingsScreenUiState(
             nickname = settingsNicknameDraft,

@@ -54,6 +54,8 @@ internal interface RiderMediaSession : Closeable {
 internal interface RiderMediaEngine : Closeable {
     fun updateAudioControls(controls: VersionedAudioControls)
     fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
+    fun suspendAudio() = Unit
+    fun resumeAudio() = Unit
 }
 
 internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
@@ -107,6 +109,7 @@ internal class RiderAudioEngine(
     private var gateState = voxGate.currentState()
     private var lastPublishedVoxSnapshot: Pair<VersionedAudioControls, VoxRuntimeState>? = null
     private var engineState = EngineState.INITIALIZING
+    @Volatile private var audioSuspended = false
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
     private val sessionLock = Any()
@@ -140,6 +143,27 @@ internal class RiderAudioEngine(
         if (!accepted) return
         applyCurrentTrackVolume()
         publishCurrentVoxState()
+    }
+
+    override fun suspendAudio() {
+        audioSuspended = true
+        runRtc {
+            peerConnection?.setAudioRecording(false)
+            peerConnection?.setAudioPlayout(false)
+            audioDeviceModule?.setMicrophoneMute(true)
+            audioDeviceModule?.setSpeakerMute(true)
+        }
+    }
+
+    override fun resumeAudio() {
+        audioSuspended = false
+        runRtc {
+            if (engineState != EngineState.READY) return@runRtc
+            audioDeviceModule?.setMicrophoneMute(false)
+            audioDeviceModule?.setSpeakerMute(false)
+            peerConnection?.setAudioRecording(true)
+            peerConnection?.setAudioPlayout(true)
+        }
     }
 
     private fun initializeRtc() {
@@ -326,6 +350,12 @@ internal class RiderAudioEngine(
         initWebRtcOnce(appContext)
 
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
             // 低延迟优先；耳机/头盔链路里这比高保真更重要。
             .setUseLowLatency(true)
             // 采集端 PCM 钩子：在 WebRTC 编码前做 VOX 门限判断。
@@ -360,8 +390,10 @@ internal class RiderAudioEngine(
 
         peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
-        peerConnection!!.setAudioRecording(true)
-        peerConnection!!.setAudioPlayout(true)
+        peerConnection!!.setAudioRecording(!audioSuspended)
+        peerConnection!!.setAudioPlayout(!audioSuspended)
+        audioDeviceModule?.setMicrophoneMute(audioSuspended)
+        audioDeviceModule?.setSpeakerMute(audioSuspended)
     }
 
     private fun createLocalAudioTrack() = mediaStep("local audio track 创建") {

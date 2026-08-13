@@ -93,11 +93,12 @@ internal fun homePresentation(
     wifiUnavailable: Boolean = false,
     supplementalText: String? = null,
     lastStoppingPeerName: String? = null,
-    discoverCtaNeedsReselect: Boolean = false
+    discoverCtaNeedsReselect: Boolean = false,
+    permissionRequestAttempted: Boolean = false
 ): HomePresentation {
     val primaryAction = primaryIntercomAction(state)
     val primaryEnabled = when (state) {
-        IntercomState.Offline -> canStart
+        IntercomState.Offline -> true
         is IntercomState.Stopping -> false
         else -> true
     }
@@ -115,8 +116,9 @@ internal fun homePresentation(
             state == IntercomState.Offline -> "缺少必要权限"
             else -> null
         },
-        showPermissionGrantCta = state == IntercomState.Offline && !canStart,
-        showPermissionSettingsCta = state == IntercomState.Offline && !canStart,
+        showPermissionGrantCta = false,
+        showPermissionSettingsCta = state == IntercomState.Offline && !canStart &&
+            permissionRequestAttempted,
         showWifiSettingsCta = state == IntercomState.Offline && canStart && wifiUnavailable,
         showDiscoverCta = showDiscoverCta,
         discoverCtaLabel = if (showDiscoverCta && discoverCtaNeedsReselect) {

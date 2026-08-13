@@ -322,7 +322,7 @@ class MainUiPolicyTest {
     }
 
     @Test
-    fun offlineHomeDisablesStartWhenPermissionsAreMissing() {
+    fun offlineHomeKeepsStartActionAvailableToRequestPermissions() {
         val presentation = homePresentation(
             state = IntercomState.Offline,
             canStart = false,
@@ -331,10 +331,19 @@ class MainUiPolicyTest {
         )
 
         assertEquals(PrimaryIntercomAction.START, presentation.primaryAction)
-        assertFalse(presentation.primaryActionEnabled)
+        assertTrue(presentation.primaryActionEnabled)
         assertEquals("缺少必要权限", presentation.disabledReason)
-        assertTrue(presentation.showPermissionGrantCta)
-        assertTrue(presentation.showPermissionSettingsCta)
+        assertFalse(presentation.showPermissionGrantCta)
+        assertFalse(presentation.showPermissionSettingsCta)
+
+        val afterAttempt = homePresentation(
+            state = IntercomState.Offline,
+            canStart = false,
+            audioSourceText = AUDIO_SOURCE_STANDBY_TEXT,
+            bluetoothActive = false,
+            permissionRequestAttempted = true
+        )
+        assertTrue(afterAttempt.showPermissionSettingsCta)
     }
 
     @Test
