@@ -408,14 +408,22 @@ internal class CommunicationAudioCoordinator(
     }
 
     private fun onPhoneStateChanged(next: PhoneCallState) {
+        val previous: PhoneCallState
+        val active: Boolean
         synchronized(lock) {
+            previous = phoneCallState
             phoneCallState = next
-            if (!mediaActive) return
+            active = mediaActive
         }
+        if (!active || previous == next && next == PhoneCallState.IDLE) return
         if (next == PhoneCallState.IDLE) {
             requestFocusAndRoute()
-        } else {
+        } else if (previous == PhoneCallState.IDLE) {
             suspendForPhone(next)
+        } else {
+            // RINGING -> OFFHOOK is still one phone interruption. Update only
+            // the local label; do not repeatedly tear down focus and routing.
+            publish(phoneStateToInterruption(next))
         }
     }
 
@@ -429,7 +437,7 @@ internal class CommunicationAudioCoordinator(
                 if (phoneState == PhoneCallState.IDLE) {
                     suspendForFocus()
                 } else {
-                    suspendForPhone(phoneState)
+                    publish(phoneStateToInterruption(phoneState))
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {

@@ -56,7 +56,7 @@ class CommunicationAudioCoordinatorTest {
 
         harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
         assertEquals(AudioInterruptionState.FOCUS_LOST, harness.states.last())
-        assertEquals(1, harness.engine.suspendCount)
+        assertEquals(2, harness.engine.suspendCount)
 
         harness.focus.emit(AudioManager.AUDIOFOCUS_GAIN)
         assertEquals(AudioInterruptionState.RESUMING, harness.states.last())
