@@ -122,6 +122,7 @@ internal class MainScreen(
     private var lastRealPeerName: String? = null
     private var discoverConnectAwaitingState = false
     private var pendingPresenceSelection: PendingPresenceSelection? = null
+    private var pendingPresenceExpiry: Runnable? = null
     private var settingsNicknameDraft = restoreNicknameDraft(
         savedState?.getString(KEY_NICKNAME_DRAFT),
         initialRiderName
@@ -246,10 +247,12 @@ internal class MainScreen(
             !navigateAfterDiscoverConnect &&
             !shouldKeepDiscoverConnectPending(state)
         ) {
+            cancelPendingPresenceExpiry()
             discoverConnectAwaitingState = false
             pendingPresenceSelection = null
         }
         if (navigateAfterDiscoverConnect) {
+            cancelPendingPresenceExpiry()
             discoverConnectAwaitingState = false
             pendingPresenceSelection = null
         }
@@ -275,6 +278,7 @@ internal class MainScreen(
     }
 
     fun setIntercomError(message: String) {
+        cancelPendingPresenceExpiry()
         discoverConnectAwaitingState = false
         pendingPresenceSelection = null
         permissionStatus = null
@@ -326,6 +330,7 @@ internal class MainScreen(
     }
 
     fun clearServiceOwnedFacts() {
+        cancelPendingPresenceExpiry()
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
         presences = emptyList()
@@ -394,8 +399,9 @@ internal class MainScreen(
             pending != null &&
             presences.none { it.matchesPendingSelection(pending) }
         ) {
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+            schedulePendingPresenceExpiry(pending)
+        } else if (pending != null && presences.any { it.matchesPendingSelection(pending) }) {
+            cancelPendingPresenceExpiry()
         }
         when (currentRoute) {
             MainRoute.DISCOVER -> renderDiscover()
@@ -403,6 +409,32 @@ internal class MainScreen(
             else -> Unit
         }
         updateExpandedDetailPane()
+    }
+
+    private fun schedulePendingPresenceExpiry(pending: PendingPresenceSelection) {
+        cancelPendingPresenceExpiry()
+        val expiry = Runnable {
+            pendingPresenceExpiry = null
+            if (
+                currentRoute != MainRoute.DISCOVER ||
+                !discoverConnectAwaitingState ||
+                pendingPresenceSelection != pending ||
+                productState !is IntercomState.Discovering ||
+                presences.any { it.matchesPendingSelection(pending) }
+            ) {
+                return@Runnable
+            }
+            discoverConnectAwaitingState = false
+            pendingPresenceSelection = null
+            renderDiscover()
+        }
+        pendingPresenceExpiry = expiry
+        root.postDelayed(expiry, DISCOVER_CONNECT_PENDING_GRACE_MS)
+    }
+
+    private fun cancelPendingPresenceExpiry() {
+        pendingPresenceExpiry?.let(root::removeCallbacks)
+        pendingPresenceExpiry = null
     }
 
     fun setAudioLevel(level: Float) {
@@ -1373,6 +1405,7 @@ internal class MainScreen(
         const val KEY_EXPANDED_SELECTED_DEVICE_ID = "expanded_selected_device_id"
         const val KEY_EXPANDED_SELECTED_SESSION_ID = "expanded_selected_session_id"
         const val KEY_SCROLL_PREFIX = "scroll_"
+        const val DISCOVER_CONNECT_PENDING_GRACE_MS = 2_000L
     }
 }
 

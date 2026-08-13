@@ -1660,6 +1660,7 @@ class MainScreenRobolectricTest {
         assertFalse(discoverEnabled("discover_connect_device-a"))
 
         fixture.screen.setPresences(emptyList())
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(2_001L))
         fixture.screen.setPresences(listOf(presence))
 
         assertTrue(discoverEnabled("discover_connect_device-a"))
@@ -1749,6 +1750,33 @@ class MainScreenRobolectricTest {
             SERVICE_UNAVAILABLE_STATUS,
             discoverText("discover_status_supplemental")
         )
+    }
+
+    @Test
+    fun discoverConnectNavigatesHomeWhenTargetSnapshotDisappearsBeforeConnectingState() {
+        val fixture = fixture(onConnectPresence = { true })
+        val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
+        val runtime = RuntimeSessionId("runtime-discover-connect-race")
+
+        openRoute(fixture, MainRoute.DISCOVER)
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(runtime),
+            canStart = true
+        )
+        fixture.screen.setPresences(listOf(selectablePresence()))
+
+        clickDiscover("discover_connect_device-a")
+        fixture.screen.setPresences(emptyList())
+        fixture.screen.setIntercomState(
+            IntercomState.Connecting(uiAttempt(runtime)),
+            canStart = true
+        )
+
+        assertNotNull(
+            "a transient discovery snapshot must not strand a successful connection on Discover",
+            pageContainer.findViewById<View>(R.id.home_scroll)
+        )
+        assertNull(pageContainer.findViewById<View>(R.id.discover_scroll))
     }
 
     @Test
