@@ -1,17 +1,109 @@
 package com.kuma.motointercom
 
 import android.media.AudioManager
+import android.os.Looper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class CommunicationAudioCoordinatorTest {
+    @Test
+    fun mediaStartedDuringAnActivePhoneCallWaitsForCallEndAndRouteReady() {
+        val harness = Harness(initialPhoneState = PhoneCallState.OFFHOOK)
+        harness.coordinator.start()
+        assertEquals(AudioInterruptionState.PHONE_ACTIVE, harness.states.last())
+
+        harness.coordinator.beginMediaSession()
+        assertEquals(0, harness.focus.requestCount)
+        assertEquals(1, harness.engine.suspendCount)
+        assertEquals(0, harness.engine.resumeCount)
+
+        harness.phone.emit(PhoneCallState.IDLE)
+        assertEquals(AudioInterruptionState.RESUMING, harness.states.last())
+        assertEquals(1, harness.focus.requestCount)
+        assertEquals(2, harness.engine.suspendCount)
+        assertEquals(0, harness.engine.resumeCount)
+
+        harness.coordinator.onRouteReady()
+        assertEquals(AudioInterruptionState.NORMAL, harness.states.last())
+        assertEquals(1, harness.engine.resumeCount)
+        harness.coordinator.close()
+    }
+
+    @Test
+    fun duplicatePhoneCallbacksDoNotRepeatAudioTeardown() {
+        val harness = Harness()
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+        harness.coordinator.onRouteReady()
+
+        harness.phone.emit(PhoneCallState.RINGING)
+        harness.phone.emit(PhoneCallState.RINGING)
+        harness.phone.emit(PhoneCallState.OFFHOOK)
+        harness.phone.emit(PhoneCallState.OFFHOOK)
+
+        assertEquals(AudioInterruptionState.PHONE_ACTIVE, harness.states.last())
+        assertEquals(2, harness.engine.suspendCount)
+        assertEquals(1, harness.route.suspendCount)
+        assertEquals(1, harness.focus.abandonCount)
+        harness.coordinator.close()
+    }
+
+    @Test
+    fun focusChangesDuringPhoneCallKeepPhonePriorityWithoutNewAudioOperations() {
+        val harness = Harness()
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+        harness.coordinator.onRouteReady()
+        harness.phone.emit(PhoneCallState.OFFHOOK)
+        val suspendCount = harness.engine.suspendCount
+        val resumeCount = harness.engine.resumeCount
+        val requestCount = harness.focus.requestCount
+
+        harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+        harness.focus.emit(AudioManager.AUDIOFOCUS_GAIN)
+
+        assertEquals(AudioInterruptionState.PHONE_ACTIVE, harness.states.last())
+        assertEquals(suspendCount, harness.engine.suspendCount)
+        assertEquals(resumeCount, harness.engine.resumeCount)
+        assertEquals(requestCount, harness.focus.requestCount)
+        harness.coordinator.close()
+    }
+
+    @Test
+    fun delayedFocusRetriesThenWaitsForRouteBeforeResuming() {
+        val harness = Harness(
+            focusResults = listOf(AudioFocusResult.DELAYED, AudioFocusResult.GRANTED)
+        )
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+
+        assertEquals(AudioInterruptionState.RESUMING, harness.states.last())
+        assertEquals(1, harness.focus.requestCount)
+        assertEquals(0, harness.activateRouteCount)
+        assertEquals(1, harness.engine.suspendCount)
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_000L))
+
+        assertEquals(2, harness.focus.requestCount)
+        assertEquals(1, harness.activateRouteCount)
+        assertEquals(2, harness.engine.suspendCount)
+        assertEquals(0, harness.engine.resumeCount)
+
+        harness.coordinator.onRouteReady()
+        assertEquals(1, harness.engine.resumeCount)
+        assertEquals(AudioInterruptionState.NORMAL, harness.states.last())
+        harness.coordinator.close()
+    }
+
     @Test
     fun phoneCallSuspendsBothDirectionsAndResumesOnlyAfterRouteReady() {
         val harness = Harness()
@@ -114,11 +206,14 @@ class CommunicationAudioCoordinatorTest {
         harness.coordinator.close()
     }
 
-    private class Harness {
+    private class Harness(
+        initialPhoneState: PhoneCallState = PhoneCallState.IDLE,
+        focusResults: List<AudioFocusResult> = emptyList()
+    ) {
         val engine = FakeEngine()
         val route = FakeRoute()
-        val focus = FakeFocus()
-        val phone = FakePhone()
+        val focus = FakeFocus(focusResults.toMutableList())
+        val phone = FakePhone(initialPhoneState)
         val prompt = FakePrompt()
         val states = mutableListOf<AudioInterruptionState>()
         var activateRouteCount = 0
@@ -168,7 +263,9 @@ class CommunicationAudioCoordinatorTest {
         override fun close() = Unit
     }
 
-    private class FakeFocus : IntercomAudioFocus {
+    private class FakeFocus(
+        private val results: MutableList<AudioFocusResult>
+    ) : IntercomAudioFocus {
         private var listener: ((Int) -> Unit)? = null
         var requestCount = 0
         var abandonCount = 0
@@ -179,7 +276,7 @@ class CommunicationAudioCoordinatorTest {
 
         override fun request(): AudioFocusResult {
             requestCount++
-            return AudioFocusResult.GRANTED
+            return results.removeFirstOrNull() ?: AudioFocusResult.GRANTED
         }
 
         override fun abandon() {
@@ -193,9 +290,10 @@ class CommunicationAudioCoordinatorTest {
         override fun close() = Unit
     }
 
-    private class FakePhone : IntercomPhoneState {
+    private class FakePhone(
+        private var state: PhoneCallState
+    ) : IntercomPhoneState {
         private var listener: ((PhoneCallState) -> Unit)? = null
-        private var state = PhoneCallState.IDLE
 
         override fun start(listener: (PhoneCallState) -> Unit) {
             this.listener = listener

@@ -705,6 +705,7 @@ class MainScreenRobolectricTest {
     @Test
     fun longLabelControlsCanGrowWhileKeepingMinimumTouchTargets() {
         val fixture = fixture()
+        fixture.screen.markPermissionRequestAttempted()
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
         assertHomeMinimumTouchTarget("home_permission_settings_cta")
         fixture.screen.setIntercomState(
@@ -811,6 +812,7 @@ class MainScreenRobolectricTest {
     @Config(qualifiers = "w360dp-h640dp-420dpi")
     fun compactHomeCoreControlAndPermissionActionsRemainReachable() {
         val fixture = fixture()
+        fixture.screen.markPermissionRequestAttempted()
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
         fixture.screen.setPermissionStatus("缺少必要权限，请先授权")
         fixture.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
@@ -818,7 +820,7 @@ class MainScreenRobolectricTest {
 
         val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
         val row = homeBounds("home_main_control_row")
-        val permissionGrant = homeBounds("home_permission_grant_cta")
+        val permissionSettings = homeBounds("home_permission_settings_cta")
 
         assertTrue(
             "Home core control should start within the compact first viewport",
@@ -831,8 +833,8 @@ class MainScreenRobolectricTest {
             row.top - maxScrollY >= 0 && row.bottom - maxScrollY <= scroll.height
         )
         assertTrue(
-            "Permission grant action should be fully reachable after compact scrolling",
-            permissionGrant.top - maxScrollY >= 0 && permissionGrant.bottom - maxScrollY <= scroll.height
+            "Permission settings action should be fully reachable after compact scrolling",
+            permissionSettings.top - maxScrollY >= 0 && permissionSettings.bottom - maxScrollY <= scroll.height
         )
     }
 
@@ -1507,7 +1509,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         fixture.screen.markPermissionRequestAttempted()
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
-        homeNode("home_primary_button").assertIsNotEnabled()
+        homeNode("home_primary_button").assertIsEnabled()
         assertHomeText("home_disabled_reason", "缺少必要权限")
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
