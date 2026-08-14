@@ -78,6 +78,22 @@ class AndroidAudioPlatformRobolectricTest {
     }
 
     @Test
+    fun missingPhonePermissionLeavesPhoneStateUnregistered() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        shadowOf(context as Application).denyPermissions(Manifest.permission.READ_PHONE_STATE)
+        val phone = AndroidIntercomPhoneState(context)
+        val states = mutableListOf<PhoneCallState>()
+
+        phone.start(states::add)
+        try {
+            assertEquals(PhoneCallState.IDLE, phone.currentState())
+            assertEquals(emptyList<PhoneCallState>(), states)
+        } finally {
+            phone.close()
+        }
+    }
+
+    @Test
     @Config(sdk = [29])
     fun legacyPhoneStateListenerPublishesRingingOffhookAndIdle() {
         val context = ApplicationProvider.getApplicationContext<Context>()

@@ -14,6 +14,7 @@ import android.telephony.PhoneStateListener
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
+import androidx.annotation.RequiresApi
 import java.io.Closeable
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -195,6 +196,7 @@ internal class AndroidIntercomPhoneState(context: Context) : IntercomPhoneState 
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     private fun registerModern() {
         val managers = subscriptionManagers()
         val callbacks = managers.map { subscription ->
@@ -229,7 +231,12 @@ internal class AndroidIntercomPhoneState(context: Context) : IntercomPhoneState 
     }
 
     private fun subscriptionManagers(): List<SubscriptionPhoneManager> {
-        val ids = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+        val canReadPhoneState = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            appContext.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) ==
+            PackageManager.PERMISSION_GRANTED
+        val ids = if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1 && canReadPhoneState
+        ) {
             runCatching {
                 subscriptionManager?.activeSubscriptionInfoList
                     ?.map { it.subscriptionId }

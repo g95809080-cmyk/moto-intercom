@@ -8,8 +8,8 @@
 
 | 层级 | 执行方式 | 结果 |
 | --- | --- | --- |
-| JVM / Robolectric | `:app:testDebugUnitTest`，从临时 `Z:` 映射盘运行 | 550 tests，0 failures，0 errors，0 skipped |
-| 音频焦点平台适配 | `AndroidAudioPlatformRobolectricTest` | 3 tests：`MAY_DUCK` 属性、request/abandon 同一对象、音乐流音量不变；API 35/29 电话回调 |
+| JVM / Robolectric | `:app:testDebugUnitTest`，从临时 `Z:` 映射盘运行 | 551 tests，0 failures，0 errors，0 skipped |
+| 音频焦点平台适配 | `AndroidAudioPlatformRobolectricTest` | 4 tests：`MAY_DUCK` 属性、request/abandon 同一对象、音乐流音量不变、无 `READ_PHONE_STATE` 时不注册；API 35/29 电话回调 |
 | 协调器状态机 | `CommunicationAudioCoordinatorTest` | 覆盖来电前启动、RINGING/OFFHOOK/IDLE、焦点丢失/恢复、永久焦点丢失不误判、延迟焦点、路由就绪、重复回调、用户停止后的迟到回调 |
 | WebRTC 音频生命周期 | 两台 API 36 AVD 的 `RiderAudioEngineHotSessionTest` | 2/2 通过；暂停/恢复时 PeerConnection 保持存活，音频闸门切换成功 |
 | 合成音频 | API 36 AVD 的 `SyntheticAudioMetricsTest` | 3/3 通过；暂停帧被拒绝，恢复后同一流继续接收 |
