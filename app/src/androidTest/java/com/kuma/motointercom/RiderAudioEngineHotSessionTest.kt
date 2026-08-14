@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -18,6 +19,45 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class RiderAudioEngineHotSessionTest {
+    @Test
+    fun suspendAndResumeToggleAudioGateWithoutClosingHotSession() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            instrumentation.uiAutomation.grantRuntimePermission(
+                context.packageName,
+                Manifest.permission.RECORD_AUDIO
+            )
+        }
+
+        val errors = LinkedBlockingQueue<Throwable>()
+        val engine = RiderAudioEngine(
+            context = context,
+            onEngineError = errors::offer,
+            isRuntimeCurrent = { true }
+        )
+        try {
+            val sdp = CountDownLatch(1)
+            val session = engine.openSession(callbacks(sdp, errors))
+            session.createOffer()
+            assertTrue("SDP was not generated", sdp.await(10, TimeUnit.SECONDS))
+            assertFalse(audioSuspended(engine))
+
+            engine.suspendAudio()
+            assertTrue("suspendAudio did not close the audio gate", audioSuspended(engine))
+            assertTrue("suspendAudio must keep the hot PeerConnection", field(engine, "peerConnection") != null)
+
+            engine.resumeAudio()
+            assertFalse("resumeAudio did not reopen the audio gate", audioSuspended(engine))
+            assertTrue("resumeAudio must keep the hot PeerConnection", field(engine, "peerConnection") != null)
+            assertNull("unexpected media error", errors.poll(2, TimeUnit.SECONDS))
+
+            session.close()
+        } finally {
+            engine.close()
+        }
+    }
+
     @Test
     fun sequentialPeerConnectionsReuseHotAudioPlatformResources() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -97,6 +137,9 @@ class RiderAudioEngineHotSessionTest {
             isAccessible = true
             get(engine)
         }
+
+    private fun audioSuspended(engine: RiderAudioEngine): Boolean =
+        field(engine, "audioSuspended") as Boolean
 
     private fun awaitPeerClosed(engine: RiderAudioEngine): Boolean {
         val deadline = SystemClock.elapsedRealtime() + 2_000L

@@ -79,6 +79,42 @@ class IntercomStatusTextTest {
         )
     }
 
+    @Test
+    fun foregroundNotificationShowsLocalAudioInterruptionWithoutChangingIntercomState() {
+        val connected = IntercomState.Connected(
+            attempt = ConnectionAttemptFixture.create(
+                clock = FakeMonotonicClock(MonotonicTimestamp(1L)),
+                id = ConnectionAttemptId("attempt-audio"),
+                targetDeviceId = "device-b",
+                expectedRemoteSessionId = RuntimeSessionId("runtime-b"),
+                trigger = ConnectionTrigger.AUTO_PAIRED,
+                preferredTransport = Transport.WIFI_DIRECT
+            ),
+            peer = PeerIdentity(
+                deviceId = "device-b",
+                nickname = "车友 B",
+                runtimeSessionId = RuntimeSessionId("runtime-b"),
+                isDeviceIdVerified = true
+            ),
+            connectedAt = 2L,
+            transport = Transport.WIFI_DIRECT
+        )
+
+        assertEquals(
+            "对讲已暂停",
+            foregroundNotificationText(
+                connected,
+                "generic",
+                AudioInterruptionState.PHONE_ACTIVE
+            )
+        )
+        assertEquals("正在恢复对讲音频", foregroundNotificationText(
+            connected,
+            "generic",
+            AudioInterruptionState.RESUMING
+        ))
+    }
+
     private fun recoveringState(
         nickname: String,
         deviceName: String

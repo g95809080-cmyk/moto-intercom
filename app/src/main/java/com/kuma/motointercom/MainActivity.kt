@@ -312,6 +312,23 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onAudioInterruptionChanged(state: AudioInterruptionState) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            screen.setStatus(
+                when (state) {
+                    AudioInterruptionState.PHONE_RINGING,
+                    AudioInterruptionState.PHONE_ACTIVE -> "对讲已暂停"
+                    AudioInterruptionState.FOCUS_LOST -> "音频被其他应用占用"
+                    AudioInterruptionState.RESUMING -> "正在恢复对讲音频"
+                    AudioInterruptionState.ROUTE_UNAVAILABLE -> "通信设备暂不可用"
+                    AudioInterruptionState.NORMAL -> return@runOnUiThread
+                },
+                appendLog = false
+            )
+        }
+    }
+
     override fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) {
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
@@ -390,7 +407,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         val canStart = hasCorePermissions()
         screen.setIntercomState(intercomState, canStart)
         screen.setPermissionStatus(
-            if (intercomState == IntercomState.Offline) {
+            if (intercomState == IntercomState.Offline && (canStart || screen.permissionRequestWasAttempted())) {
                 if (canStart) READY_STATUS else PERMISSION_REQUIRED_STATUS
             } else {
                 null
@@ -458,6 +475,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     private fun requestCorePermissions() {
+        screen.markPermissionRequestAttempted()
         val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
         if (missing.isEmpty()) {
             refreshCorePermissionPresentation()
@@ -498,6 +516,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
         when (startPrecondition(canStart, wifiAvailable)) {
             StartPrecondition.MISSING_CORE_PERMISSION -> {
+                screen.setPermissionStatus("启动对讲需要录音和电话状态权限")
                 requestCorePermissions()
                 return false
             }

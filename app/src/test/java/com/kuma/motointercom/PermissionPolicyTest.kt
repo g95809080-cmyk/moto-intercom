@@ -12,6 +12,7 @@ class PermissionPolicyTest {
         assertEquals(
             setOf(
                 Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.READ_PHONE_STATE,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ),
@@ -24,10 +25,19 @@ class PermissionPolicyTest {
     }
 
     @Test
-    fun bluetoothDenialDoesNotBlockCoreIntercom() {
+    fun bluetoothDenialDoesNotBlockCoreIntercomWhenPhonePermissionIsGranted() {
         assertTrue(
             PermissionPolicy.canStart(32) {
                 it != Manifest.permission.BLUETOOTH_CONNECT
+            }
+        )
+    }
+
+    @Test
+    fun phonePermissionDenialBlocksIntercomStart() {
+        assertFalse(
+            PermissionPolicy.canStart(32) {
+                it != Manifest.permission.READ_PHONE_STATE
             }
         )
     }

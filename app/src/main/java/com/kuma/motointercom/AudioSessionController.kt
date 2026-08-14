@@ -5,18 +5,23 @@ import java.io.Closeable
 
 internal interface RiderAudioRoute : Closeable {
     fun select(selection: AudioRouteSelection)
+    fun suspendForInterruption(restoreMode: Boolean = false) = Unit
+    fun closeRoute(restoreInitialState: Boolean) = close()
 }
 
 /** Owns audio platform resources for one online runtime. */
 internal class AudioSessionController(
     private val engine: RiderMediaEngine,
-    private val route: RiderAudioRoute
+    private val route: RiderAudioRoute,
+    initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
+    private val audioCoordinator: CommunicationAudioCoordinator? = null
 ) : Closeable {
 
     private val lock = Any()
     private var closed = false
     private var activeLease: Any? = null
     private var activeSession: RiderMediaSession? = null
+    private var preferredAudioRoute = initialAudioRoute
 
     fun updateAudioControls(controls: VersionedAudioControls) {
         synchronized(lock) {
@@ -28,8 +33,16 @@ internal class AudioSessionController(
     fun updateAudioRoute(selection: AudioRouteSelection) {
         synchronized(lock) {
             check(!closed) { "audio session controller is closed" }
-            route.select(selection)
+            preferredAudioRoute = selection
+            if (activeSession != null || audioCoordinator == null) {
+                val canApply = audioCoordinator?.canApplyPreferredRoute() ?: true
+                if (canApply) route.select(selection)
+            }
         }
+    }
+
+    internal fun preferredAudioRoute(): AudioRouteSelection = synchronized(lock) {
+        preferredAudioRoute
     }
 
     fun openMediaSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
@@ -40,6 +53,16 @@ internal class AudioSessionController(
                 "an audio media session is already active"
             }
             activeLease = lease
+        }
+
+        try {
+            audioCoordinator?.beginMediaSession()
+        } catch (t: Throwable) {
+            synchronized(lock) {
+                activeLease = null
+                activeSession = null
+            }
+            throw t
         }
 
         val guardedCallbacks = callbacks.copy(
@@ -70,6 +93,7 @@ internal class AudioSessionController(
                     activeSession = null
                 }
             }
+            audioCoordinator?.endMediaSession()
             throw t
         }
     }
@@ -84,7 +108,13 @@ internal class AudioSessionController(
                 false
             }
         }
-        if (shouldClose) session.close()
+        if (shouldClose) {
+            try {
+                session.close()
+            } finally {
+                audioCoordinator?.endMediaSession()
+            }
+        }
     }
 
     override fun close() {
@@ -101,9 +131,17 @@ internal class AudioSessionController(
                 if (failure == null) failure = it else failure?.addSuppressed(it)
             }
         }
+        val phoneCallActive = audioCoordinator?.isPhoneCallActive() == true
         closeSafely(session)
+        closeSafely(audioCoordinator)
         closeSafely(engine)
-        closeSafely(route)
+        runCatching {
+            route.closeRoute(
+                restoreInitialState = !phoneCallActive
+            )
+        }.exceptionOrNull()?.let {
+            if (failure == null) failure = it else failure?.addSuppressed(it)
+        }
         failure?.let { throw it }
     }
 
@@ -122,7 +160,8 @@ internal class AudioSessionController(
             onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
             initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
             onEarpieceActive: () -> Unit = {},
-            onExternalAudioActive: (String) -> Unit = {}
+            onExternalAudioActive: (String) -> Unit = {},
+            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {}
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,
@@ -132,6 +171,8 @@ internal class AudioSessionController(
                 onVoxStateChanged = onVoxStateChanged
             )
             return try {
+                var controller: AudioSessionController? = null
+                var coordinator: CommunicationAudioCoordinator? = null
                 val route = AudioRouteController(
                     context = context,
                     onScoConnected = onScoConnected,
@@ -139,10 +180,27 @@ internal class AudioSessionController(
                     onSpeakerFallback = onSpeakerFallback,
                     onEarpieceActive = onEarpieceActive,
                     onExternalAudioActive = onExternalAudioActive,
-                    onError = onError
+                    onError = onError,
+                    onRouteReady = { coordinator?.onRouteReady() }
                 )
-                route.select(initialAudioRoute)
-                AudioSessionController(engine, route)
+                coordinator = CommunicationAudioCoordinator(
+                    engine = engine,
+                    route = route,
+                    audioFocus = AndroidIntercomAudioFocus(context),
+                    phoneState = AndroidIntercomPhoneState(context),
+                    activateRoute = {
+                        route.select(controller?.preferredAudioRoute() ?: initialAudioRoute)
+                    },
+                    onStateChanged = onAudioInterruptionChanged
+                )
+                controller = AudioSessionController(
+                    engine = engine,
+                    route = route,
+                    initialAudioRoute = initialAudioRoute,
+                    audioCoordinator = coordinator
+                )
+                coordinator?.start()
+                controller ?: error("audio session controller was not created")
             } catch (t: Throwable) {
                 engine.close()
                 throw t

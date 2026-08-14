@@ -16,6 +16,7 @@ internal interface CommunicationDeviceRoute : Closeable {
     fun clear()
     fun isActive(selection: AudioRouteSelection): Boolean
     fun stateSummary(): String
+    fun close(restoreInitialState: Boolean) = close()
 }
 
 @RequiresApi(Build.VERSION_CODES.S)
@@ -91,7 +92,7 @@ internal class ModernAudioRoute(
         "communicationDevice=${summary(audioManager.communicationDevice)}, " +
             "available=${audioManager.availableCommunicationDevices.joinToString(prefix = "[", postfix = "]", transform = ::summary)}"
 
-    override fun close() {
+    override fun close(restoreInitialState: Boolean) {
         if (!closed.compareAndSet(false, true)) return
         if (registered) {
             registered = false
@@ -101,13 +102,17 @@ internal class ModernAudioRoute(
                 Log.w(TAG, "communication device listener was already removed", t)
             }
         }
-        if (initialDevice == null) {
+        if (!restoreInitialState) {
+            audioManager.clearCommunicationDevice()
+        } else if (initialDevice == null) {
             audioManager.clearCommunicationDevice()
         } else if (!audioManager.setCommunicationDevice(initialDevice)) {
             Log.w(TAG, "failed to restore initial communicationDevice=${summary(initialDevice)}")
             audioManager.clearCommunicationDevice()
         }
     }
+
+    override fun close() = close(restoreInitialState = true)
 
     private fun isBluetooth(device: AudioDeviceInfo?): Boolean =
         device?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||

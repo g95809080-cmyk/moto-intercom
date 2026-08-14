@@ -137,6 +137,7 @@ class IntercomService : Service() {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
+        fun onAudioInterruptionChanged(state: AudioInterruptionState) = Unit
         fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) = Unit
         fun onPresencesChanged(presences: List<RiderPresence>) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
@@ -261,6 +262,7 @@ class IntercomService : Service() {
     private var lastStatus = READY_STATUS
     private var audioSourceStatus = AUDIO_STANDBY_STATUS
     private var audioSourceBluetooth = false
+    private var audioInterruptionState = AudioInterruptionState.NORMAL
     private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
@@ -379,6 +381,7 @@ class IntercomService : Service() {
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
+        listener?.onAudioInterruptionChanged(audioInterruptionState)
         listener?.onAudioRouteSelectionChanged(preferredAudioRoute)
         listener?.onAudioControlsChanged(currentAudioControlSnapshot())
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
@@ -621,6 +624,19 @@ class IntercomService : Service() {
         listener?.onAudioControlsChanged(currentAudioControlSnapshot())
     }
 
+    private fun onAudioInterruptionChanged(state: AudioInterruptionState) {
+        audioInterruptionState = state
+        listener?.onAudioInterruptionChanged(state)
+        when (state) {
+            AudioInterruptionState.PHONE_RINGING,
+            AudioInterruptionState.PHONE_ACTIVE -> publishStatus(AUDIO_PAUSED_STATUS)
+            AudioInterruptionState.RESUMING -> publishStatus(AUDIO_RESUMING_STATUS)
+            AudioInterruptionState.FOCUS_LOST -> publishStatus(AUDIO_FOCUS_LOST_STATUS)
+            AudioInterruptionState.ROUTE_UNAVAILABLE -> publishStatus(AUDIO_ROUTE_UNAVAILABLE_STATUS)
+            AudioInterruptionState.NORMAL -> updateStageStatus()
+        }
+    }
+
     private fun resetSessionAudioControls() {
         val snapshot = idleAudioControlSnapshot(audioControls)
         if (snapshot.controls != audioControls) audioControlRevision++
@@ -744,6 +760,7 @@ class IntercomService : Service() {
         publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
+        audioInterruptionState = AudioInterruptionState.NORMAL
         remoteRiderName = null
         publishPresenceSnapshot(presenceAggregator.clear())
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
@@ -821,7 +838,7 @@ class IntercomService : Service() {
                     updateStageStatus()
                 }
             },
-            onError = { error -> postForRuntime(runtimeSessionId) { handleError(error) } },
+            onError = { error -> postForRuntime(runtimeSessionId) { handleAudioRouteError(error) } },
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
             },
@@ -832,7 +849,10 @@ class IntercomService : Service() {
             onVoxStateChanged = { callbackControls, state ->
                 onVoxStateChanged(runtimeSessionId, callbackControls, state)
             },
-            initialAudioRoute = preferredAudioRoute
+            initialAudioRoute = preferredAudioRoute,
+            onAudioInterruptionChanged = { state ->
+                postForRuntime(runtimeSessionId) { onAudioInterruptionChanged(state) }
+            }
         )
     }
 
@@ -1667,6 +1687,7 @@ class IntercomService : Service() {
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false
+        audioInterruptionState = AudioInterruptionState.NORMAL
         remoteRiderName = null
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
         publishStatus(ENDED_STATUS)
@@ -2264,6 +2285,19 @@ class IntercomService : Service() {
         }
 
     private fun updateStageStatus() {
+        if (audioInterruptionState != AudioInterruptionState.NORMAL) {
+            publishStatus(
+                when (audioInterruptionState) {
+                    AudioInterruptionState.PHONE_RINGING,
+                    AudioInterruptionState.PHONE_ACTIVE -> AUDIO_PAUSED_STATUS
+                    AudioInterruptionState.RESUMING -> AUDIO_RESUMING_STATUS
+                    AudioInterruptionState.FOCUS_LOST -> AUDIO_FOCUS_LOST_STATUS
+                    AudioInterruptionState.ROUTE_UNAVAILABLE -> AUDIO_ROUTE_UNAVAILABLE_STATUS
+                    AudioInterruptionState.NORMAL -> return
+                }
+            )
+            return
+        }
         when {
             mediaConnected -> publishStatus(VOICE_CONNECTED_STATUS)
             physicalLinkReady -> publishStatus(MEDIA_INITIALIZING_STATUS)
@@ -2355,6 +2389,13 @@ class IntercomService : Service() {
         dispatchOnMain { listener?.onError(message) }
     }
 
+    private fun handleAudioRouteError(t: Throwable) {
+        // Route loss is recoverable while media remains active; the coordinator
+        // keeps waiting for a verified route. Only an actual runtime failure is
+        // surfaced as an error, avoiding a false failure prompt during handoff.
+        publishLog("通信设备路由异常：${t.message ?: t.javaClass.simpleName}")
+    }
+
     private fun hasRequiredRuntimePermissions(): Boolean {
         return PermissionPolicy.canStart(Build.VERSION.SDK_INT) {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
@@ -2404,7 +2445,8 @@ class IntercomService : Service() {
         ensureNotificationChannel()
         val notificationText = foregroundNotificationText(
             orchestrator.state.value,
-            lastStatus
+            lastStatus,
+            audioInterruptionState
         )
 
         val contentIntent = PendingIntent.getActivity(
@@ -2558,6 +2600,10 @@ class IntercomService : Service() {
         private const val RESCANNING_STATUS = "正在重新扫描附近车友..."
         private const val ENDED_STATUS = "对讲已结束"
         private const val BLUETOOTH_RETRY_STATUS = "头盔蓝牙已断开，正在尝试重连..."
+        private const val AUDIO_PAUSED_STATUS = "对讲已暂停"
+        private const val AUDIO_RESUMING_STATUS = "正在恢复对讲音频"
+        private const val AUDIO_FOCUS_LOST_STATUS = "音频被其他应用占用"
+        private const val AUDIO_ROUTE_UNAVAILABLE_STATUS = "通信设备暂不可用"
 
         internal fun startIntent(
             context: Context,
