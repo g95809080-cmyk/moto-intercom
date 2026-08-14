@@ -13,6 +13,7 @@
 | 协调器状态机 | `CommunicationAudioCoordinatorTest` | 覆盖来电前启动、RINGING/OFFHOOK/IDLE、焦点丢失/恢复、永久焦点丢失不误判、延迟焦点、路由就绪、重复回调、用户停止后的迟到回调 |
 | WebRTC 音频生命周期 | 两台 API 36 AVD 的 `RiderAudioEngineHotSessionTest` | 2/2 通过；暂停/恢复时 PeerConnection 保持存活，音频闸门切换成功 |
 | 合成音频 | API 36 AVD 的 `SyntheticAudioMetricsTest` | 3/3 通过；暂停帧被拒绝，恢复后同一流继续接收 |
+| 系统 Audio Focus | API 36 AVD 的合成媒体焦点客户端 | 1/1 通过；媒体焦点客户端收到 `AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK` |
 | 其他 instrumentation | recovery、reset、disconnect、Sprint 4、启动/兼容性契约、UI smoke | 通过 |
 
 测试代码：
@@ -20,6 +21,7 @@
 - `app/src/test/java/com/kuma/motointercom/AndroidAudioPlatformRobolectricTest.kt`
 - `app/src/test/java/com/kuma/motointercom/CommunicationAudioCoordinatorTest.kt`
 - `app/src/androidTest/java/com/kuma/motointercom/RiderAudioEngineHotSessionTest.kt`
+- `app/src/androidTest/java/com/kuma/motointercom/AudioFocusInterruptionInstrumentationTest.kt`
 
 ## Windows 测试运行注意
 
@@ -38,7 +40,7 @@ subst Z: /D
 ## 当前无法由无真机环境证明的项目
 
 1. 小米 6/13 的实际 Audio Policy、蓝牙 HFP/SCO/BLE Audio、通话路由和物理串音。
-2. 第三方音乐/导航 App 是否真的收到并遵守 `MAY_DUCK`，以及释放焦点后的原状态恢复。
+2. 任意指定第三方音乐/导航 App 是否真的遵守 `MAY_DUCK`，以及释放焦点后的原状态恢复；模拟器已证明系统会向合成媒体焦点客户端发送 `AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK`。
 3. 真实蜂窝电话或其他 VoIP 来电期间的系统电话音频隔离。当前 AOSP ATD 模拟器中 `adb emu gsm call/accept/cancel` 未改变 `telephony.registry` 的 `mCallState`。
 4. AOSP ATD 模拟器的 NSD/Wi-Fi Direct；NSD 注册失败，两个 AVD 还共享同一 NAT 地址，无法完成现有跨实例网络脚本。
 
