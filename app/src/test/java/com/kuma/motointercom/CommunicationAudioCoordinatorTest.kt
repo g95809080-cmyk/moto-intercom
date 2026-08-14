@@ -189,6 +189,21 @@ class CommunicationAudioCoordinatorTest {
     }
 
     @Test
+    fun permanentFocusLossDoesNotSuspendIntercom() {
+        val harness = Harness()
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+        harness.coordinator.onRouteReady()
+        val suspendCount = harness.engine.suspendCount
+
+        harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS)
+
+        assertEquals(AudioInterruptionState.NORMAL, harness.states.last())
+        assertEquals(suspendCount, harness.engine.suspendCount)
+        harness.coordinator.close()
+    }
+
+    @Test
     fun stoppingMediaPreventsLateFocusGainFromResumingAudio() {
         val harness = Harness()
         harness.coordinator.start()
