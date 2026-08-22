@@ -45,8 +45,9 @@ final class BootstrapTests: XCTestCase {
 
     func testBLEFragmentExpires() throws {
         let chunk = try XCTUnwrap(BLEFragmenter.fragment(
-            Data("payload".utf8),
-            messageID: "00000000-0000-4000-8000-000000000099"
+            Data(repeating: 0xA5, count: 9),
+            messageID: "00000000-0000-4000-8000-000000000099",
+            maxPacketBytes: 20
         ).first)
         var reassembler = BLEReassembler(timeout: 1)
         XCTAssertNil(reassembler.append(chunk, now: Date(timeIntervalSince1970: 10)))

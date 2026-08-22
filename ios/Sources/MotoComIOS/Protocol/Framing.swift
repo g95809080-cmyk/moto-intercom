@@ -38,7 +38,7 @@ public struct LengthPrefixedFrameDecoder: Sendable {
             let total = 4 + Int(length)
             guard buffer.count >= total else { break }
             frames.append(Data(buffer[4..<total]))
-            buffer.removeFirst(total)
+            buffer = Data(buffer.dropFirst(total))
         }
         return frames
     }

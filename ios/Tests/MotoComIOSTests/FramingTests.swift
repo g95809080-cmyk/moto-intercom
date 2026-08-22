@@ -16,7 +16,7 @@ final class FramingTests: XCTestCase {
     }
 
     func testInvalidLengthIsRejected() throws {
-        let bytes = Data([0x00, 0x02, 0x00, 0x00])
+        let bytes = Data([0x00, 0x02, 0x00, 0x01])
         var decoder = LengthPrefixedFrameDecoder()
         XCTAssertThrowsError(try decoder.append(bytes))
     }
