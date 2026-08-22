@@ -5,8 +5,8 @@ public struct MotoComRootView: View {
     @StateObject private var session: SessionCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
-    public init(session: SessionCoordinator = SessionCoordinator()) {
-        _session = StateObject(wrappedValue: session)
+    public init(session: SessionCoordinator? = nil) {
+        _session = StateObject(wrappedValue: session ?? SessionCoordinator())
     }
 
     public var body: some View {
