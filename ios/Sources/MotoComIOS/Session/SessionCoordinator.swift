@@ -3,6 +3,9 @@ import Combine
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(Network)
+import Network
+#endif
 
 @MainActor
 public final class SessionCoordinator: ObservableObject {
@@ -44,16 +47,17 @@ public final class SessionCoordinator: ObservableObject {
         deviceName: String = "iPhone",
         identityStore: StableIdentityStore = StableIdentityStore(),
         pairingStore: PairingStore = PairingStore(),
-        audio: AudioSessionController = AudioSessionController(),
+        audio: AudioSessionController? = nil,
         webRTCEngine: WebRTCEngine = WebRTCEngineFactory.makeDefault()
     ) {
         self.nickname = nickname
         self.deviceName = deviceName
         self.identityStore = identityStore
         self.pairingStore = pairingStore
-        self.audio = audio
+        let resolvedAudio = audio ?? AudioSessionController()
+        self.audio = resolvedAudio
         self.networkBootstrap = NetworkBootstrapCoordinator()
-        self.webRTC = WebRTCSessionCoordinator(engine: webRTCEngine, audio: audio)
+        self.webRTC = WebRTCSessionCoordinator(engine: webRTCEngine, audio: resolvedAudio)
         self.webRTC.onAudioReadinessChanged = { [weak self] in
             self?.updateAudioReady()
         }

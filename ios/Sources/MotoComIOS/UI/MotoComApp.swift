@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 public struct MotoComRootView: View {
     @StateObject private var session: SessionCoordinator
     @Environment(\.scenePhase) private var scenePhase

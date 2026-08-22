@@ -295,7 +295,7 @@ extension BLEBootstrapCoordinator: CBPeripheralDelegate {
         if let data = characteristic.value { consume(data) }
     }
 
-    public func peripheralIsReady(toWriteWithoutResponse peripheral: CBPeripheral) {
+    public func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
         flushCentralWrites()
     }
 }
