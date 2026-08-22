@@ -98,7 +98,7 @@ public final class BLEBootstrapCoordinator: NSObject, @unchecked Sendable {
 
     public func send(_ message: BootstrapMessage) throws {
         let data = try BootstrapCodec.encode(message)
-        if let peripheral = connectedPeripheral, let characteristic = writeCharacteristic {
+        if let peripheral = connectedPeripheral, writeCharacteristic != nil {
             let maximum = peripheral.maximumWriteValueLength(for: .withoutResponse)
             guard maximum > BLEFragmenter.headerBytes else {
                 throw MotoComError.invalidFrame("BLE write MTU is too small")

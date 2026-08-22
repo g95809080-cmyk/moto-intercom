@@ -137,7 +137,7 @@ public final class SessionCoordinator: ObservableObject {
             self.pairings = await pairingStore.all()
             if !self.pairings.isEmpty { self.startDiscovery() }
         }
-        audio.onInterruptionChanged = { [weak self] interrupted in
+        self.audio.onInterruptionChanged = { [weak self] interrupted in
             guard let self else { return }
             self.webRTC.handleAudioInterruption(interrupted)
             if interrupted {
@@ -148,7 +148,7 @@ public final class SessionCoordinator: ObservableObject {
                 self.updateAudioReady()
             }
         }
-        audio.onRouteChanged = { [weak self] route in
+        self.audio.onRouteChanged = { [weak self] route in
             guard let self else { return }
             if route == .unavailable {
                 self.phase = .recovering

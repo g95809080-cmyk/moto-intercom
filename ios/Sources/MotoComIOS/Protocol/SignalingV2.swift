@@ -122,7 +122,7 @@ public final class SignalingV2Codec {
     public init() {}
 
     public func encode(_ envelope: SignalingEnvelope) throws -> Data {
-        var root: [String: Any] = [
+        let root: [String: Any] = [
             "protocolVersion": envelope.protocolVersion,
             "type": envelope.message.type.rawValue,
             "attemptId": envelope.attemptID,
@@ -203,7 +203,8 @@ public final class SignalingV2Codec {
         case .answer(let sdpJSON):
             return ["sdp": try boundedPayload(sdpJSON, name: "sdp", maximum: Self.maxSDPBytes)]
         case .candidate(let json):
-            guard ++encodedCandidateCount <= Self.maxCandidates else {
+            encodedCandidateCount += 1
+            guard encodedCandidateCount <= Self.maxCandidates else {
                 throw MotoComError.invalidFrame("too many encoded candidates")
             }
             try requireByteLimit(json, name: "candidate", maximum: Self.maxCandidateBytes)
@@ -256,7 +257,8 @@ public final class SignalingV2Codec {
             return .answer(sdpJSON: try boundedPayload(try string(payload, key: "sdp"), name: "sdp", maximum: Self.maxSDPBytes))
         case .candidate:
             try requireExactKeys(payload, expected: ["candidate"])
-            guard ++decodedCandidateCount <= Self.maxCandidates else {
+            decodedCandidateCount += 1
+            guard decodedCandidateCount <= Self.maxCandidates else {
                 throw MotoComError.invalidFrame("too many decoded candidates")
             }
             let candidate = try jsonData(try object(payload, key: "candidate"))

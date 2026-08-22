@@ -75,7 +75,7 @@ public final class AudioSessionController: NSObject, ObservableObject {
         try audioSession.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.allowBluetooth, .defaultToSpeaker]
+            options: [.allowBluetoothHFP, .defaultToSpeaker]
         )
         try audioSession.setActive(true, options: [])
         restorePreferredRoute()
