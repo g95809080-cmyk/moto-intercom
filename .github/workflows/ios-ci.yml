@@ -1,0 +1,81 @@
+name: iOS Package CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feat/multi-audio-intercom
+    paths:
+      - ios/**
+      - .github/workflows/ios-ci.yml
+  pull_request:
+    paths:
+      - ios/**
+      - .github/workflows/ios-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-simulator-tests:
+    name: Build and test iOS package on Simulator
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Inspect Xcode and available simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+
+      - name: Select an available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          device_line="$(xcrun simctl list devices available | grep -m1 'iPhone')"
+          device_id="$(printf '%s\n' "$device_line" | grep -oE '[0-9A-F-]{36}' | head -n1)"
+          test -n "$device_id"
+          echo "device_id=$device_id" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $device_line"
+
+      - name: Discover Swift package schemes
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -list -packagePath ios | tee "$RUNNER_TEMP/motocom-package-list.txt"
+          scheme="$(awk '/Schemes:/{found=1; next} found && NF {print $1; exit}' "$RUNNER_TEMP/motocom-package-list.txt")"
+          test -n "$scheme"
+          echo "scheme=$scheme" >> "$GITHUB_OUTPUT"
+
+      - name: Build and run protocol tests on iOS Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -packagePath ios \
+            -scheme "${{ steps.package.outputs.scheme }}" \
+            -destination "id=${{ steps.simulator.outputs.device_id }}" \
+            -derivedDataPath "$RUNNER_TEMP/motocom-derived-data" \
+            CODE_SIGNING_ALLOWED=NO \
+            test \
+            -resultBundlePath "$RUNNER_TEMP/motocom-ios-tests.xcresult"
+
+      - name: Upload Xcode test result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: motocom-ios-xcresult-${{ github.run_number }}
+          path: ${{ runner.temp }}/motocom-ios-tests.xcresult
+          if-no-files-found: warn
+          retention-days: 14

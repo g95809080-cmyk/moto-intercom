@@ -1,0 +1,1 @@
+{"attemptId":"00000000-0000-4000-8000-000000000001","payload":{"capabilities":["BLE_BOOTSTRAP","LAN"],"deviceName":"iPhone X","nickname":"骑士","requestRole":"REQUESTER"},"protocolVersion":2,"sourceDeviceId":"00000000-0000-4000-8000-000000000011","sourceSessionId":"00000000-0000-4000-8000-000000000033","targetDeviceId":"00000000-0000-4000-8000-000000000022","type":"HELLO"}

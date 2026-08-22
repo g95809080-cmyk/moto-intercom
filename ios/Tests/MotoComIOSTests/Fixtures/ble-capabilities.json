@@ -1,0 +1,1 @@
+{"app":"motocom","capabilities":["BLE_BOOTSTRAP","IOS_PEER_TO_PEER","LAN"],"deviceId":"00000000-0000-4000-8000-000000000011","networkRole":"EITHER","platform":"IOS","protocolVersion":2,"sessionId":"00000000-0000-4000-8000-000000000033","tcpPort":8890}
