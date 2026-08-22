@@ -51,19 +51,20 @@ jobs:
       - name: Discover Swift package schemes
         id: package
         shell: bash
+        working-directory: ios
         run: |
           set -euo pipefail
-          xcodebuild -list -packagePath ios | tee "$RUNNER_TEMP/motocom-package-list.txt"
+          xcodebuild -list | tee "$RUNNER_TEMP/motocom-package-list.txt"
           scheme="$(awk '/Schemes:/{found=1; next} found && NF {print $1; exit}' "$RUNNER_TEMP/motocom-package-list.txt")"
           test -n "$scheme"
           echo "scheme=$scheme" >> "$GITHUB_OUTPUT"
 
       - name: Build and run protocol tests on iOS Simulator
         shell: bash
+        working-directory: ios
         run: |
           set -euo pipefail
           xcodebuild \
-            -packagePath ios \
             -scheme "${{ steps.package.outputs.scheme }}" \
             -destination "id=${{ steps.simulator.outputs.device_id }}" \
             -derivedDataPath "$RUNNER_TEMP/motocom-derived-data" \
