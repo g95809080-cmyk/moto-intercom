@@ -22,13 +22,8 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MainActivityRobolectricTest {
-    private fun clickHome(activity: MainActivity, tag: String) {
-        val screen = screen(activity)
-        when (tag) {
-            "home_settings_button" -> invokeShowPage(screen, MainRoute.SETTINGS)
-            "home_menu_button" -> invokePrivate(screen, "showNavigation")
-            else -> error("Activity test has no direct Home action mapping for $tag")
-        }
+    private fun clickBottomNavigation(activity: MainActivity, id: Int) {
+        screen(activity).root.findViewById<View>(id).performClick()
         shadowOf(Looper.getMainLooper()).idle()
     }
 
@@ -77,7 +72,7 @@ class MainActivityRobolectricTest {
         val firstController = Robolectric.buildActivity(MainActivity::class.java).create()
         val first = firstController.get()
 
-        clickHome(first, "home_settings_button")
+        clickBottomNavigation(first, R.id.bottom_nav_settings_button)
         setPrivateString(screen(first), "settingsNicknameDraft", "Activity Draft")
         invokePrivate(screen(first), "renderSettings")
 
@@ -407,7 +402,7 @@ class MainActivityRobolectricTest {
         activity.onRemoteRiderIdentified("回放的远端骑士")
         shadowOf(Looper.getMainLooper()).idle()
 
-        clickHome(activity, "home_settings_button")
+        clickBottomNavigation(activity, R.id.bottom_nav_settings_button)
         invokeShowPage(screen(activity), MainRoute.LOGS)
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(
@@ -459,8 +454,7 @@ class MainActivityRobolectricTest {
                 .contains(BLUETOOTH_CONNECTED_TEXT)
         )
 
-        clickHome(activity, "home_menu_button")
-        invokeShowPage(screen(activity), MainRoute.DISCOVER)
+        clickBottomNavigation(activity, R.id.bottom_nav_discover_button)
         assertEquals(
             0,
             (stateValue(screen(activity), "discoverUiState") as DiscoverScreenUiState)

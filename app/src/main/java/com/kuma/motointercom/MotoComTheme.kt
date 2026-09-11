@@ -17,10 +17,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 @Composable
 internal fun MotoComTheme(content: @Composable () -> Unit) {
     val colorScheme = lightColorScheme(
-        primary = colorResource(R.color.motocom_accent_green),
-        onPrimary = colorResource(R.color.motocom_text_primary),
+        primary = colorResource(R.color.motocom_accent_green_dark),
+        onPrimary = Color.White,
         primaryContainer = colorResource(R.color.motocom_accent_green_soft),
         onPrimaryContainer = colorResource(R.color.motocom_text_primary),
+        secondary = colorResource(R.color.motocom_accent_green_dark),
+        onSecondary = Color.White,
+        secondaryContainer = colorResource(R.color.motocom_surface_soft),
+        onSecondaryContainer = colorResource(R.color.motocom_text_primary),
+        tertiary = colorResource(R.color.motocom_accent_green_dark),
+        onTertiary = Color.White,
+        tertiaryContainer = colorResource(R.color.motocom_accent_green_soft),
+        onTertiaryContainer = colorResource(R.color.motocom_text_primary),
+        surfaceContainer = colorResource(R.color.motocom_surface),
+        surfaceContainerHigh = colorResource(R.color.motocom_surface_soft),
+        surfaceContainerHighest = colorResource(R.color.motocom_surface_soft),
         background = colorResource(R.color.motocom_background),
         onBackground = colorResource(R.color.motocom_text_primary),
         surface = colorResource(R.color.motocom_surface),

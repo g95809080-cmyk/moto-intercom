@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <dimen name="motocom_content_max_width">520dp</dimen>
-    <dimen name="motocom_page_horizontal_padding">20dp</dimen>
+    <dimen name="motocom_page_horizontal_padding">24dp</dimen>
     <dimen name="motocom_page_vertical_padding">18dp</dimen>
     <dimen name="motocom_card_padding">18dp</dimen>
     <dimen name="motocom_home_card_padding">14dp</dimen>
@@ -11,10 +11,10 @@
     <dimen name="motocom_card_radius">18dp</dimen>
     <dimen name="motocom_control_min_height">48dp</dimen>
     <dimen name="motocom_icon_button_size">48dp</dimen>
-    <dimen name="motocom_main_control_size">128dp</dimen>
-    <dimen name="motocom_main_control_gap">8dp</dimen>
+    <dimen name="motocom_main_control_size">112dp</dimen>
+    <dimen name="motocom_main_control_gap">24dp</dimen>
     <dimen name="motocom_gap">12dp</dimen>
-    <dimen name="motocom_gap_large">18dp</dimen>
+    <dimen name="motocom_gap_large">22dp</dimen>
     <dimen name="motocom_logs_viewport_height">240dp</dimen>
     <dimen name="motocom_avatar_size">88dp</dimen>
     <dimen name="motocom_panel_width">292dp</dimen>

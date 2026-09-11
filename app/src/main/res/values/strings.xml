@@ -141,4 +141,6 @@
     <string name="home_vox_listening_placeholder">LISTENING</string>
     <string name="home_vox_open_placeholder">OPEN</string>
     <string name="home_vox_hangover_placeholder">HANGOVER</string>
+    <string name="discover_details_message">设备：%1$s\n发现时可用通道：%2$s\n配对：%3$s\n\n这是发现信息快照；连接请使用列表中的“连接”按钮。</string>
+    <string name="discover_not_paired">未配对</string>
 </resources>

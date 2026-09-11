@@ -44,8 +44,8 @@ internal fun MotoComLogsScreen(
             Text(state.scopeText, Modifier.padding(top = 6.dp).testTag("logs_scope_text"), color = colorResource(R.color.motocom_text_secondary), fontSize = 14.sp)
             Text(
                 state.logText,
-                Modifier.fillMaxWidth().padding(top = dimensionResource(R.dimen.motocom_gap)).height(dimensionResource(R.dimen.motocom_logs_viewport_height)).background(colorResource(R.color.motocom_surface_soft), RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))).verticalScroll(rememberScrollState()).padding(12.dp).testTag("logs_text"),
-                color = colorResource(R.color.motocom_text_primary), fontSize = 12.sp, fontFamily = FontFamily.Monospace
+                Modifier.fillMaxWidth().padding(top = dimensionResource(R.dimen.motocom_gap)).height(dimensionResource(R.dimen.motocom_logs_viewport_height)).background(colorResource(R.color.motocom_console), RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))).verticalScroll(rememberScrollState()).padding(12.dp).testTag("logs_text"),
+                color = colorResource(R.color.motocom_on_console_secondary), fontSize = 13.sp, lineHeight = 21.sp, fontFamily = FontFamily.Monospace
             )
             LogsButton(stringResource(R.string.logs_copy_all), "logs_copy_button", onCopy, enabled = state.copyEnabled, primary = true)
             LogsButton(stringResource(R.string.logs_close), "logs_close_button", onClose)

@@ -122,46 +122,34 @@
             android:layout_height="wrap_content"
             android:background="@color/motocom_surface"
             android:orientation="horizontal"
-            android:paddingLeft="8dp"
-            android:paddingTop="4dp"
-            android:paddingRight="8dp"
-            android:paddingBottom="4dp"
-            android:visibility="gone">
-
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
             <Button
                 android:id="@+id/bottom_nav_home_button"
+                style="@style/MotoComBottomNavItem"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:background="@drawable/motocom_secondary_button"
-                android:minHeight="64dp"
-                android:text="@string/nav_home"
-                android:textAllCaps="false"
-                android:textColor="@color/motocom_text_primary" />
-
+                android:drawableTop="@drawable/ic_home_24"
+                android:text="@string/nav_home" />
             <Button
                 android:id="@+id/bottom_nav_discover_button"
+                style="@style/MotoComBottomNavItem"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:background="@drawable/motocom_secondary_button"
-                android:minHeight="64dp"
-                android:text="@string/nav_discover"
-                android:textAllCaps="false"
-                android:textColor="@color/motocom_text_primary" />
-
+                android:drawableTop="@drawable/ic_radar_24"
+                android:text="@string/nav_discover" />
             <Button
                 android:id="@+id/bottom_nav_settings_button"
+                style="@style/MotoComBottomNavItem"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:background="@drawable/motocom_secondary_button"
-                android:minHeight="64dp"
-                android:text="@string/nav_settings"
-                android:textAllCaps="false"
-                android:textColor="@color/motocom_text_primary" />
+                android:drawableTop="@drawable/ic_settings_24"
+                android:text="@string/nav_settings" />
         </LinearLayout>
     </LinearLayout>
 

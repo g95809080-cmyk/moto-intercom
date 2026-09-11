@@ -113,6 +113,7 @@ internal class MainScreen(
     private var discoverCtaNeedsReselect = false
     private var audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
     private var bluetoothActive = false
+    private var audioReady = false
     private var preferredAudioRoute = initialPreferredAudioRoute
     private var automaticReconnectEnabled = initialAutomaticReconnectEnabled
     private var wifiUnavailable = false
@@ -129,12 +130,11 @@ internal class MainScreen(
         initialRiderName
     )
     private var helpDialog: AlertDialog? = null
+    private var presenceDetailsDialog: AlertDialog? = null
     private var pairingManagementDialog: AlertDialog? = null
     private var forgetPairingDialog: AlertDialog? = null
     private var activePairingDeviceId: String? = null
-    private var navigationFocusReturn: View? = null
     private var incomingConfirmationVisible = false
-    private var restoreSettingsAudio = false
     private var logBottomFollowPending = false
     private var userScrollView: ScrollView? = null
     private var expandedSelectedPresence: PendingPresenceSelection? = savedState?.let { state ->
@@ -223,6 +223,7 @@ internal class MainScreen(
 
     fun dismissTransientDialogs() {
         dismissHelpDialog()
+        presenceDetailsDialog?.dismiss()
         dismissPairingDialogs()
     }
 
@@ -231,6 +232,7 @@ internal class MainScreen(
     }
 
     fun setIntercomState(state: IntercomState, canStart: Boolean) {
+        if (state !is IntercomState.Connected) audioReady = false
         if (state !is IntercomState.Offline && supplementalStatus == permissionStatus) {
             supplementalStatus = null
         }
@@ -322,6 +324,12 @@ internal class MainScreen(
         renderCurrentPage()
     }
 
+    fun setAudioReady(ready: Boolean) {
+        audioReady = ready && productState is IntercomState.Connected
+        renderCurrentPage()
+        updateExpandedDetailPane()
+    }
+
     fun setAutomaticReconnectEnabled(enabled: Boolean) {
         automaticReconnectEnabled = enabled
         renderSettings()
@@ -341,6 +349,7 @@ internal class MainScreen(
         cancelPendingPresenceExpiry()
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
+        audioReady = false
         presences = emptyList()
         lastRealPeerName = null
         discoverConnectAwaitingState = false
@@ -542,37 +551,12 @@ internal class MainScreen(
         }
     }
 
-    private fun showNavigation() {
-        if (windowWidthClass != MainWindowWidthClass.Compact) return
-        navigationFocusReturn = root.findFocus()
-        constrainNavigationPanelWidth()
-        pageContainer.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        navigationScrim.visibility = View.VISIBLE
-        navigationScrim.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-        navigationPanel.visibility = View.VISIBLE
-        navigationPanel.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-        updateNavigationSelection()
-        navigationPanel.findViewById<View>(
-            when (currentRoute) {
-                MainRoute.HOME -> R.id.nav_home_button
-                MainRoute.DISCOVER -> R.id.nav_discover_button
-                MainRoute.SETTINGS,
-                MainRoute.LOGS -> R.id.nav_settings_button
-            }
-        )?.requestFocus()
-    }
-
     private fun closeNavigation() {
-        val focusToRestore = navigationFocusReturn
-        navigationFocusReturn = null
         navigationScrim.visibility = View.GONE
         navigationScrim.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         navigationPanel.visibility = View.GONE
         navigationPanel.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         pageContainer.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-        focusToRestore
-            ?.takeIf { it.visibility == View.VISIBLE }
-            ?.requestFocus()
     }
 
     private fun updateAdaptiveLayout(forcedWidthClass: MainWindowWidthClass? = null) {
@@ -594,13 +578,9 @@ internal class MainScreen(
             if (windowWidthClass != MainWindowWidthClass.Compact) closeNavigation()
         }
 
-        val isCompact = windowWidthClass == MainWindowWidthClass.Compact
         val isExpanded = windowWidthClass == MainWindowWidthClass.Expanded
-        navigationRail.visibility = if (isCompact) View.GONE else View.VISIBLE
-        // Compact phone layouts follow the design's top-menu/back navigation.
-        // Keep the legacy host view for saved IDs and large-screen plumbing, but
-        // do not add a second navigation surface below the designed phone page.
-        bottomNavigation.visibility = View.GONE
+        navigationRail.visibility = View.GONE
+        bottomNavigation.visibility = View.VISIBLE
         expandedDetailContainer.visibility = if (isExpanded && currentRoute != MainRoute.LOGS) {
             View.VISIBLE
         } else {
@@ -645,7 +625,8 @@ internal class MainScreen(
                     supplementalText = supplementalStatus,
                     lastStoppingPeerName = lastRealPeerName,
                     discoverCtaNeedsReselect = discoverCtaNeedsReselect,
-                    permissionRequestAttempted = permissionRequestAttempted
+                    permissionRequestAttempted = permissionRequestAttempted,
+                    audioReady = audioReady
                 )
                 title.text = activity.getString(R.string.nav_home)
                 body.text = presentation.detailText
@@ -660,7 +641,8 @@ internal class MainScreen(
                     wifiUnavailable = wifiUnavailable,
                     supplementalText = supplementalStatus,
                     lastStoppingPeerName = lastRealPeerName,
-                    permissionRequestAttempted = permissionRequestAttempted
+                    permissionRequestAttempted = permissionRequestAttempted,
+                    audioReady = audioReady
                 )
                 title.text = activity.getString(R.string.nav_settings)
                 body.text = activity.getString(
@@ -677,13 +659,17 @@ internal class MainScreen(
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     private fun showPage(route: MainRoute) {
+        showPage(route, focusAudio = false)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showPage(route: MainRoute, focusAudio: Boolean) {
         if (route == currentRoute && pageContainer.childCount > 0) {
             closeNavigation()
             return
         }
-        val focusSettingsAudio = route == MainRoute.SETTINGS && restoreSettingsAudio
+        presenceDetailsDialog?.dismiss()
         saveCurrentPageScrollAndDraft()
         stopAnimations()
         logBottomFollowPending = false
@@ -693,7 +679,7 @@ internal class MainScreen(
         val page = when (route) {
             MainRoute.HOME -> createHomePage()
             MainRoute.DISCOVER -> createDiscoverPage()
-            MainRoute.SETTINGS -> createSettingsPage()
+            MainRoute.SETTINGS -> createSettingsPage(focusAudio)
             MainRoute.LOGS -> createLogsPage()
         }
         pageContainer.addView(page)
@@ -729,7 +715,7 @@ internal class MainScreen(
         } else {
             renderCurrentPage()
         }
-        restoreCurrentScroll(skip = focusSettingsAudio)
+        if (!focusAudio) restoreCurrentScroll()
         updateNavigationSelection()
         updateAdaptiveLayout()
     }
@@ -771,18 +757,13 @@ internal class MainScreen(
                         MotoComHomeScreen(
                             state = homeUiState.value,
                             audioLevel = homeAudioLevel.floatValue,
-                            onMenu = ::showNavigation,
-                            onSettings = { showPage(MainRoute.SETTINGS) },
                             onPrimaryAction = onToggleIntercom,
                             onDiscover = { showPage(MainRoute.DISCOVER) },
                             onPermissionGrant = onRequestCorePermissions,
                             onPermissionSettings = onOpenPermissionSettings,
                             onWifiSettings = onOpenWifiSettings,
                             onMute = onSetMuted,
-                            onAudioSettings = {
-                                restoreSettingsAudio = true
-                                showPage(MainRoute.SETTINGS)
-                            },
+                            onAudioSettings = { showPage(MainRoute.SETTINGS, focusAudio = true) },
                             onVox = { showPage(MainRoute.SETTINGS) }
                         )
                     }
@@ -810,7 +791,8 @@ internal class MainScreen(
             supplementalText = supplementalStatus,
             lastStoppingPeerName = lastRealPeerName,
             discoverCtaNeedsReselect = discoverCtaNeedsReselect,
-            permissionRequestAttempted = permissionRequestAttempted
+            permissionRequestAttempted = permissionRequestAttempted,
+            audioReady = audioReady
         )
         homeUiState.value = HomeScreenUiState(
             primaryText = presentation.primaryText,
@@ -831,9 +813,9 @@ internal class MainScreen(
             webRtcText = presentation.webRtcText,
             bluetoothText = optionalPermission.bluetoothStatusText,
             voxText = audioControlSnapshot.voxState.name,
-            discovering = animationsEnabled() && productState is IntercomState.Discovering,
-            connected = animationsEnabled() && productState is IntercomState.Connected,
-            menuVisible = windowWidthClass == MainWindowWidthClass.Compact,
+            discovering = productState is IntercomState.Discovering,
+            connected = productState is IntercomState.Connected && audioReady,
+            animationsEnabled = animationsEnabled(),
             muted = audioControlSnapshot.controls.muted,
             muteEnabled = productState !is IntercomState.Offline &&
                 productState !is IntercomState.Stopping,
@@ -865,7 +847,8 @@ internal class MainScreen(
                 presentation.offlineStartVisible ||
                 presentation.readOnlyReason != null
             ) stateText else activity.getString(R.string.discover_empty_no_presence),
-            radarRunning = animationsEnabled() && productState is IntercomState.Discovering,
+            radarRunning = productState is IntercomState.Discovering,
+            animationsEnabled = animationsEnabled(),
             rescanEnabled = productState is IntercomState.Discovering &&
                 !wifiUnavailable &&
                 !discoverConnectAwaitingState
@@ -895,14 +878,7 @@ internal class MainScreen(
                             onStart = onToggleIntercom,
                             onWifiSettings = onOpenWifiSettings,
                             onRescan = onRequestDiscoveryRefresh,
-                            onSelectPresence = { presence ->
-                                val deviceId = presence.deviceId
-                                val sessionId = presence.sessionId
-                                if (deviceId != null && sessionId != null) {
-                                    expandedSelectedPresence = PendingPresenceSelection(deviceId, sessionId)
-                                    updateExpandedDetailPane()
-                                }
-                            },
+                            onSelectPresence = ::showPresenceDetails,
                             onConnect = ::connectFromDiscover,
                             onManagePairing = ::showPairingManagement
                         )
@@ -910,6 +886,37 @@ internal class MainScreen(
                 }
             }
         )
+    }
+
+    private fun showPresenceDetails(presence: RiderPresence) {
+        if (windowWidthClass == MainWindowWidthClass.Expanded) {
+            val deviceId = presence.deviceId
+            val sessionId = presence.sessionId
+            if (deviceId != null && sessionId != null) {
+                expandedSelectedPresence = PendingPresenceSelection(deviceId, sessionId)
+                updateExpandedDetailPane()
+                return
+            }
+        }
+        if (presenceDetailsDialog?.isShowing == true) return
+        val presentation = discoverPresentation(productState, presences)
+        val index = presentation.orderedPresences.indexOf(presence)
+        if (index < 0) return
+        val card = presentation.cards[index]
+        presenceDetailsDialog = AlertDialog.Builder(activity)
+            .setTitle(card.title)
+            .setMessage(activity.getString(
+                R.string.discover_details_message,
+                card.deviceText,
+                card.transportText,
+                activity.getString(if (card.paired) R.string.discover_fact_paired else R.string.discover_not_paired)
+            ))
+            .setPositiveButton(R.string.help_close, null)
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener { presenceDetailsDialog = null }
+                dialog.show()
+            }
     }
 
     private fun connectFromDiscover(presence: RiderPresence) {
@@ -1047,7 +1054,9 @@ internal class MainScreen(
         activePairingDeviceId = null
     }
 
-    private fun createSettingsPage(): ScrollView = ScrollView(activity).apply {
+    private fun createSettingsPage(focusAudio: Boolean): ScrollView = ScrollView(activity).apply {
+        val scrollHost = this
+        var audioFocusPending = focusAudio
         id = R.id.settings_scroll
         clipToPadding = false
         isFillViewport = false
@@ -1072,7 +1081,16 @@ internal class MainScreen(
                         onVoxEnabledChanged = onSetVoxEnabled,
                         onVoxSensitivityChanged = onSetVoxSensitivity,
                         onAudioRouteSelected = onSelectAudioRoute,
-                        onAutomaticReconnectChanged = onAutomaticReconnectChanged
+                        onAutomaticReconnectChanged = onAutomaticReconnectChanged,
+                        onAudioSectionPositioned = { offset ->
+                            if (audioFocusPending) {
+                                audioFocusPending = false
+                                saveRouteScrollPosition(scrollPositions, MainRoute.SETTINGS, offset)
+                                scrollHost.post {
+                                    if (currentScroll === scrollHost) scrollHost.scrollTo(0, offset)
+                                }
+                            }
+                        }
                     )
                 }
             }
@@ -1121,7 +1139,8 @@ internal class MainScreen(
             bluetoothActive = optionalPermission.bluetoothActive,
             supplementalText = supplementalStatus,
             lastStoppingPeerName = lastRealPeerName,
-            permissionRequestAttempted = permissionRequestAttempted
+            permissionRequestAttempted = permissionRequestAttempted,
+            audioReady = audioReady
         )
         settingsUiState.value = SettingsScreenUiState(
             nickname = settingsNicknameDraft,
@@ -1222,6 +1241,7 @@ internal class MainScreen(
         route = currentRoute,
         navigationOpen = navigationPanel.visibility == View.VISIBLE,
         transientDialogVisible = helpDialog?.isShowing == true ||
+            presenceDetailsDialog?.isShowing == true ||
             pairingManagementDialog?.isShowing == true ||
             forgetPairingDialog?.isShowing == true,
         incomingConfirmationVisible = incomingConfirmationVisible
@@ -1234,10 +1254,8 @@ internal class MainScreen(
     }
 
     private fun restoreCurrentScroll(
-        skip: Boolean = false,
         finalizeActivityRestore: Boolean = false
     ) {
-        if (skip) return
         val scroll = currentScroll ?: return
         val scrollY = pendingRestoredScrollPositions[currentRoute]
             ?: restoredRouteScrollPosition(scrollPositions, currentRoute)
@@ -1310,9 +1328,13 @@ internal class MainScreen(
                     null
                 }
             }
-            setBackgroundResource(
-                if (selected) R.drawable.motocom_pill_green else R.drawable.motocom_secondary_button
-            )
+            val isBottomItem = id == R.id.bottom_nav_home_button ||
+                id == R.id.bottom_nav_discover_button || id == R.id.bottom_nav_settings_button
+            if (!isBottomItem) {
+                setBackgroundResource(
+                    if (selected) R.drawable.motocom_pill_green else R.drawable.motocom_secondary_button
+                )
+            }
         }
     }
 

@@ -1,6 +1,10 @@
 package com.kuma.motointercom
 
 import android.content.Context
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -48,6 +52,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = {},
@@ -81,6 +86,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = {},
@@ -111,6 +117,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = { helpRequests++ },
@@ -142,6 +149,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = {},
@@ -196,6 +204,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = {},
@@ -252,6 +261,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = {},
@@ -266,6 +276,7 @@ class DiscoverScreenComposeTest {
         }
 
         composeRule.onNodeWithTag("discover_manage_paired-device")
+            .performScrollTo()
             .assertIsDisplayed()
             .assertHasClickAction()
             .performClick()
@@ -318,6 +329,7 @@ class DiscoverScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     onBack = {},
                     onHelp = {},
@@ -332,6 +344,7 @@ class DiscoverScreenComposeTest {
         }
 
         composeRule.onNodeWithTag("discover_manage_offline-paired")
+            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
         assertTrue(

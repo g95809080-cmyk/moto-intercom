@@ -55,6 +55,136 @@ class MainScreenRobolectricTest {
     @get:Rule
     val composeRule = createEmptyComposeRule()
 
+    @Test
+    fun disablingSystemAnimationsPreservesConnectedAndDiscoveringState() {
+        val animator = android.animation.ValueAnimator::class.java
+        val setScale = animator.getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType)
+        val originalScale = animator.getDeclaredMethod("getDurationScale").invoke(null) as Float
+        try {
+            setScale.invoke(null, 0f)
+            assertFalse(android.animation.ValueAnimator.areAnimatorsEnabled())
+            val fixture = fixture()
+            val runtime = RuntimeSessionId("runtime-reduced-motion")
+            val peer = PeerIdentity("peer-motion", "Road Captain", "Pixel", RuntimeSessionId("peer-runtime"), true)
+            fixture.screen.setIntercomState(
+                IntercomState.Connected(uiAttempt(runtime), peer, connectedAt = 1L, transport = Transport.LAN),
+                canStart = true
+            )
+            fixture.screen.setAudioReady(true)
+
+            fun state(fieldName: String): Any? {
+                val field = MainScreen::class.java.getDeclaredField(fieldName).apply { isAccessible = true }
+                return (field.get(fixture.screen) as androidx.compose.runtime.State<*>).value
+            }
+            val connected = state("homeUiState") as HomeScreenUiState
+            assertTrue(connected.connected)
+            assertFalse(connected.animationsEnabled)
+            assertTrue(connected.primaryActionEnabled)
+            composeRule.onNodeWithTag("home_primary_button").assertIsEnabled()
+
+            fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
+            val discovering = state("homeUiState") as HomeScreenUiState
+            assertTrue(discovering.discovering)
+            assertFalse(discovering.connected)
+            assertFalse(discovering.animationsEnabled)
+            openRoute(fixture, MainRoute.DISCOVER)
+            val radar = state("discoverUiState") as DiscoverScreenUiState
+            assertTrue(radar.radarRunning)
+            assertTrue(radar.rescanEnabled)
+            assertFalse(radar.animationsEnabled)
+            discoverNode("discover_rescan_button").assertIsEnabled()
+        } finally {
+            setScale.invoke(null, originalScale)
+        }
+    }
+
+    @Test
+    fun bottomTabsPreserveSettingsDraftAndScrollAfterAudioShortcut() {
+        val fixture = fixture(initialRiderName = "Original")
+        clickHome("home_audio_settings_button")
+        replaceSettingsText("settings_nickname_input", "Unsaved rider")
+        measureAtWidth(fixture, 360, 640)
+        val root = fixture.screen.root
+        val settings = root.findViewById<ScrollView>(R.id.settings_scroll)
+        settings.scrollTo(0, 200)
+        val before = settings.scrollY
+        assertTrue(before > 0)
+        root.findViewById<Button>(R.id.bottom_nav_discover_button).performClick()
+        composeRule.waitForIdle()
+        root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
+        composeRule.waitForIdle()
+        measureAtWidth(fixture, 360, 640)
+        assertEquals("Unsaved rider", settingsText("settings_nickname_input"))
+        assertEquals(before, root.findViewById<ScrollView>(R.id.settings_scroll).scrollY)
+    }
+
+    @Test
+    fun settingsReflectsAudioReadinessThroughLossAndRecovery() {
+        val fixture = fixture()
+        val runtime = RuntimeSessionId("runtime-readiness")
+        val peer = PeerIdentity("peer-a", "Rider B", "Pixel", RuntimeSessionId("peer-runtime"), true)
+        fixture.screen.setIntercomState(IntercomState.Connected(uiAttempt(runtime), peer, 1L, Transport.LAN), true)
+        openRoute(fixture, MainRoute.SETTINGS)
+        listOf(false, true, false, true).forEach { ready ->
+            fixture.screen.setAudioReady(ready)
+            val expected = if (ready) "语音通道已连接" else "正在等待音频就绪"
+            assertTrue(settingsText("settings_product_state").contains(expected))
+            assertTrue(settingsText("settings_device_status_summary").contains(expected))
+            assertEquals(!ready, settingsText("settings_attempt_facts").contains("待音频"))
+        }
+    }
+
+    @Test
+    fun audioShortcutPositionsAudioSectionAndDoesNotResetLaterTabScroll() {
+        val fixture = fixture()
+        clickHome("home_audio_settings_button")
+        composeRule.waitForIdle()
+        measureAtWidth(fixture, 360, 640)
+        val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.settings_scroll)
+        assertTrue("audio shortcut must scroll beyond personal and VOX sections: ${scroll.scrollY}", scroll.scrollY > 300)
+        val section = settingsNode("settings_audio_section").fetchSemanticsNode().boundsInRoot
+        assertTrue("audio heading must be positioned at viewport top: $section, scroll=${scroll.scrollY}",
+            kotlin.math.abs(section.top - scroll.scrollY) < 100f)
+        scroll.scrollTo(0, scroll.scrollY + 100)
+        val before = scroll.scrollY
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
+        composeRule.waitForIdle()
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
+        composeRule.waitForIdle()
+        measureAtWidth(fixture, 360, 640)
+        assertEquals(before, fixture.screen.root.findViewById<ScrollView>(R.id.settings_scroll).scrollY)
+    }
+
+    @Test
+    fun compactPresenceDetailsIsVisibleWithoutConnectingAndBackDismissesIt() {
+        var connections = 0
+        val fixture = fixture(onConnectPresence = { connections++; true })
+        openRoute(fixture, MainRoute.DISCOVER)
+        fixture.screen.setIntercomState(IntercomState.Discovering(RuntimeSessionId("details-runtime")), true)
+        fixture.screen.setPresences(listOf(selectablePresence()))
+        clickDiscoverSelection("discover_select_device-a")
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        assertTrue(dialog.isShowing)
+        assertTrue(shadowOf(dialog).message.toString().contains("发现时可用通道"))
+        assertEquals(0, connections)
+        assertTrue(fixture.screen.handleBack())
+        assertFalse(dialog.isShowing)
+        assertNotNull(fixture.screen.root.findViewById<View>(R.id.discover_scroll))
+    }
+
+    @Test
+    fun offlinePairedPresenceWithoutSessionStillShowsDetailsAndCleansUp() {
+        val fixture = fixture()
+        openRoute(fixture, MainRoute.DISCOVER)
+        fixture.screen.setPresences(listOf(offlinePairedPresence().copy(sessionId = null)))
+        clickDiscoverSelection("discover_select_device-offline")
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        assertTrue(dialog.isShowing)
+        assertTrue(shadowOf(dialog).message.toString().contains("暂无可用通道"))
+        fixture.screen.dismissTransientDialogs()
+        assertFalse(dialog.isShowing)
+    }
+
     private val connectButton: SemanticsNodeInteraction
         get() = discoverNode("discover_connect_device-a")
 
@@ -68,74 +198,40 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun topLevelRoutesAndNavigationPanelStayUiOnly() {
+    fun bottomNavigationIsPersistentAndHighlightsEveryDestination() {
         val fixture = fixture()
         val root = fixture.screen.root
-        val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-
-        assertNotNull(pageContainer.findViewById<View>(R.id.home_scroll))
-        composeRule.onNodeWithTag("home_primary_button").assertIsEnabled()
-        assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
-
-        clickHome("home_menu_button")
-        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navigation_panel).visibility)
-        assertFlexibleButton(root.findViewById(R.id.nav_home_button))
-        assertFlexibleButton(root.findViewById(R.id.nav_discover_button))
-        assertFlexibleButton(root.findViewById(R.id.nav_settings_button))
-        assertEquals("当前页面", root.findViewById<Button>(R.id.nav_home_button).stateDescription)
+        composeRule.onNodeWithTag("home_menu_button").assertDoesNotExist()
+        composeRule.onNodeWithTag("home_settings_button").assertDoesNotExist()
+        listOf(R.id.bottom_nav_discover_button, R.id.bottom_nav_settings_button, R.id.bottom_nav_home_button).forEach { id ->
+            root.findViewById<Button>(id).performClick()
+            assertEquals(View.VISIBLE, root.findViewById<View>(R.id.bottom_navigation).visibility)
+            assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
+            assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_rail).visibility)
+            listOf(R.id.bottom_nav_home_button, R.id.bottom_nav_discover_button, R.id.bottom_nav_settings_button).forEach { candidate ->
+                assertEquals(candidate == id, root.findViewById<Button>(candidate).isSelected)
+            }
+            assertEquals("当前页面", root.findViewById<Button>(id).stateDescription)
+        }
+        root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
+        clickSettings("settings_logs_button")
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.bottom_navigation).visibility)
+        assertTrue(root.findViewById<Button>(R.id.bottom_nav_settings_button).isSelected)
         assertTrue(fixture.screen.handleBack())
-        assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
-
-        clickHome("home_settings_button")
-        assertNotNull(pageContainer.findViewById<View>(R.id.settings_scroll))
-        assertTrue(settingsExists("settings_discovery_candidates"))
-        assertTrue(fixture.screen.handleBack())
-        assertNotNull(pageContainer.findViewById<View>(R.id.home_scroll))
+        assertTrue(settingsExists("settings_nickname_input"))
     }
 
     @Test
-    fun requiredWindowMatrixSwitchesNavigationAndExpandedPane() {
-        val cases = listOf(
-            Triple(360, 640, MainWindowWidthClass.Compact),
-            Triple(412, 915, MainWindowWidthClass.Compact),
-            Triple(915, 412, MainWindowWidthClass.Expanded),
-            Triple(700, 900, MainWindowWidthClass.Medium),
-            Triple(840, 1200, MainWindowWidthClass.Expanded),
-            Triple(1200, 840, MainWindowWidthClass.Expanded)
-        )
-
-        cases.forEach { (widthDp, heightDp, expectedClass) ->
+    fun requiredWindowMatrixKeepsBottomNavigationAndExpandedDetails() {
+        listOf(360 to 640, 412 to 915, 915 to 412, 700 to 900, 840 to 1200, 1200 to 840).forEach { (width, height) ->
             val fixture = fixture()
-            measureAtWidth(fixture, widthDp, heightDp)
-            fixture.screen.onWindowSizeChanged(widthDp, heightDp)
+            measureAtWidth(fixture, width, height)
+            fixture.screen.onWindowSizeChanged(width, height)
             val root = fixture.screen.root
-            if (expectedClass == MainWindowWidthClass.Compact) {
-                assertEquals(
-                    "width=${widthDp}dp expected compact top-menu navigation without bottom navigation",
-                    View.GONE,
-                    root.findViewById<View>(R.id.bottom_navigation).visibility
-                )
-                assertEquals(
-                    "width=${widthDp}dp expected compact without rail",
-                    View.GONE,
-                    root.findViewById<View>(R.id.navigation_rail).visibility
-                )
-            } else {
-                assertEquals(
-                    "width=${widthDp}dp expected rail without bottom navigation",
-                    View.GONE,
-                    root.findViewById<View>(R.id.bottom_navigation).visibility
-                )
-                assertEquals(
-                    "width=${widthDp}dp expected rail",
-                    View.VISIBLE,
-                    root.findViewById<View>(R.id.navigation_rail).visibility
-                )
-            }
-            assertEquals(
-                if (expectedClass == MainWindowWidthClass.Expanded) View.VISIBLE else View.GONE,
-                root.findViewById<View>(R.id.expanded_detail_container).visibility
-            )
+            assertEquals(View.VISIBLE, root.findViewById<View>(R.id.bottom_navigation).visibility)
+            assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_rail).visibility)
+            assertEquals(if (width >= 840) View.VISIBLE else View.GONE,
+                root.findViewById<View>(R.id.expanded_detail_container).visibility)
         }
     }
 
@@ -143,22 +239,17 @@ class MainScreenRobolectricTest {
     fun compactNavigationAndScrollableContentRemainUsableAtLargeFontScales() {
         listOf(1.5f, 2.0f).forEach { fontScale ->
             val fixture = fixture(fontScale = fontScale)
-            measureAtWidth(fixture, widthDp = 360, heightDp = 640)
-            fixture.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
+            measureAtWidth(fixture, 360, 640)
             val root = fixture.screen.root
-            val bottomNavigation = root.findViewById<View>(R.id.bottom_navigation)
-            assertEquals(View.GONE, bottomNavigation.visibility)
-            clickHome("home_menu_button")
-            assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navigation_panel).visibility)
-            assertFlexibleButton(root.findViewById(R.id.nav_home_button))
-            assertFlexibleButton(root.findViewById(R.id.nav_discover_button))
-            assertFlexibleButton(root.findViewById(R.id.nav_settings_button))
-            assertTrue(fixture.screen.handleBack())
-            assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_panel).visibility)
-            val scroll = root.findViewById<ScrollView>(R.id.home_scroll)
-            val content = root.findViewById<View>(R.id.home_content)
-            assertTrue(content.right <= scroll.width)
-            assertTrue(content.bottom >= scroll.height || content.height > 0)
+            val navigation = root.findViewById<View>(R.id.bottom_navigation)
+            assertEquals(View.VISIBLE, navigation.visibility)
+            listOf(R.id.bottom_nav_home_button, R.id.bottom_nav_discover_button, R.id.bottom_nav_settings_button).forEach { id ->
+                val button = root.findViewById<Button>(id)
+                assertFlexibleButton(button)
+                assertTrue(button.bottom <= navigation.height)
+            }
+            val page = root.findViewById<View>(R.id.main_content_row)
+            assertTrue(page.bottom <= navigation.top)
         }
     }
 
@@ -173,32 +264,15 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun navigationPanelIsAccessibilityModalAndRestoresPageFocus() {
+    fun bottomNavigationLeavesPageAccessibleAndDoesNotReplaceCurrentPage() {
         val fixture = fixture()
         val root = fixture.screen.root
-        val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        val homeContent = root.findViewById<ComposeView>(R.id.home_content)
-        homeContent.requestFocus()
-
-        clickHome("home_menu_button")
-
-        assertEquals(
-            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
-            pageContainer.importantForAccessibility
-        )
-        assertEquals(
-            View.IMPORTANT_FOR_ACCESSIBILITY_YES,
-            root.findViewById<View>(R.id.navigation_panel).importantForAccessibility
-        )
-        assertTrue(root.findViewById<View>(R.id.nav_home_button).hasFocus())
-
-        assertTrue(fixture.screen.handleBack())
-
-        assertEquals(
-            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
-            pageContainer.importantForAccessibility
-        )
-        assertTrue(homeContent.hasFocus())
+        val content = root.findViewById<View>(R.id.home_content)
+        root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
+        assertSame(content, root.findViewById<View>(R.id.home_content))
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
+            root.findViewById<View>(R.id.page_container).importantForAccessibility)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_scrim).visibility)
     }
 
     @Test
@@ -259,7 +333,7 @@ class MainScreenRobolectricTest {
             homeText("home_audio_source")
         )
 
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         val settingsAudio = settingsText("settings_audio_source")
         assertTrue(settingsAudio.contains(BLUETOOTH_PERMISSION_UNAVAILABLE))
         assertFalse(settingsAudio.contains("Helmet"))
@@ -271,15 +345,14 @@ class MainScreenRobolectricTest {
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
 
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
         assertNotNull(pageContainer.findViewById<View>(R.id.discover_scroll))
 
         clickDiscover("discover_help_button")
         dismissHelp()
         clickDiscover("discover_back_button")
 
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         clickSettings("settings_logs_button")
         assertNotNull(pageContainer.findViewById<View>(R.id.logs_scroll))
         clickLogs("logs_back_button")
@@ -652,7 +725,7 @@ class MainScreenRobolectricTest {
         measureAtWidth(recreated, widthDp = 360, heightDp = 640)
         recreated.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
         assertNotNull(recreated.screen.root.findViewById<View>(R.id.discover_scroll))
-        assertEquals(View.GONE, recreated.screen.root.findViewById<View>(R.id.bottom_navigation).visibility)
+        assertEquals(View.VISIBLE, recreated.screen.root.findViewById<View>(R.id.bottom_navigation).visibility)
 
         recreated.screen.onWindowSizeChanged(widthDp = 840, heightDp = 1200)
         assertEquals(
@@ -694,7 +767,7 @@ class MainScreenRobolectricTest {
         assertTrue(homeScroll.getChildAt(0).measuredHeight - homeScroll.height >= 140)
         homeScroll.scrollTo(0, 140)
 
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         clickSettings("settings_back_button")
         shadowOf(Looper.getMainLooper()).idle()
 
@@ -714,14 +787,13 @@ class MainScreenRobolectricTest {
         )
         assertHomeMinimumTouchTarget("home_discover_cta")
 
-        clickHome("home_menu_button")
-        fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
+        fixture.screen.root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
         fixture.screen.setWifiUnavailable(true)
         assertTrue(discoverExists("discover_wifi_settings_button"))
         assertTrue(discoverExists("discover_rescan_button"))
 
         clickDiscover("discover_back_button")
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         assertTrue(settingsExists("settings_save_nickname_button"))
         assertTrue(settingsExists("settings_audio_route_button"))
         assertTrue(settingsExists("settings_about_button"))
@@ -734,7 +806,7 @@ class MainScreenRobolectricTest {
     @Test
     fun nicknameInputCanGrowWhileKeepingMinimumTouchTarget() {
         val fixture = fixture()
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
 
         assertTrue(settingsExists("settings_nickname_input"))
     }
@@ -742,7 +814,7 @@ class MainScreenRobolectricTest {
     @Test
     fun aboutDialogUsesTheRealVersionAndHasNoInventedServiceClaims() {
         val fixture = fixture()
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         clickSettings("settings_about_button")
 
         val dialog = ShadowAlertDialog.getLatestAlertDialog()
@@ -848,7 +920,7 @@ class MainScreenRobolectricTest {
         assertTrue(discoverExists("discover_title"))
 
         clickDiscover("discover_back_button")
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         measureAtWidth(fixture, widthDp = 360)
         assertTrue(settingsExists("settings_title"))
     }
@@ -1071,33 +1143,32 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun navigationPanelControlsStayInsideShortLandscapeViewport() {
+    fun bottomNavigationControlsStayInsideShortLandscapeViewport() {
         val fixture = fixture(fontScale = 1.3f)
-        clickHome("home_menu_button")
-        measureAtWidth(fixture, widthDp = 640, heightDp = 360)
-
+        measureAtWidth(fixture, 640, 360)
         val root = fixture.screen.root
-        val panel = root.findViewById<View>(R.id.navigation_panel)
-        assertTrue(panel.bottom <= root.height)
-        listOf(R.id.nav_home_button, R.id.nav_discover_button, R.id.nav_settings_button).forEach { id ->
+        val navigation = root.findViewById<View>(R.id.bottom_navigation)
+        assertTrue(navigation.bottom <= root.height)
+        listOf(R.id.bottom_nav_home_button, R.id.bottom_nav_discover_button, R.id.bottom_nav_settings_button).forEach { id ->
             val button = root.findViewById<View>(id)
-            assertTrue("navigation control $id must stay inside landscape panel", button.bottom <= panel.bottom)
+            assertTrue(button.bottom <= navigation.height)
+            assertTrue(button.width > 0)
         }
     }
 
     @Test
     fun confirmedVisualTokensAndAccessibleMutedTextRemainLocked() {
         val fixture = fixture()
-        assertEquals(Color.parseColor("#F7F9FC"), fixture.activity.getColor(R.color.motocom_background))
-        assertEquals(Color.parseColor("#78D900"), fixture.activity.getColor(R.color.motocom_accent_green))
-        assertEquals(Color.parseColor("#7EDB22"), fixture.activity.getColor(R.color.motocom_accent_green_alt))
-        assertEquals(Color.parseColor("#1F78D900"), fixture.activity.getColor(R.color.motocom_accent_green_soft))
-        assertEquals(Color.parseColor("#2678D900"), fixture.activity.getColor(R.color.motocom_accent_green_pressed))
-        assertEquals(Color.parseColor("#4CCB00"), fixture.activity.getColor(R.color.motocom_accent_green_dark))
-        assertEquals(Color.parseColor("#F3F4F6"), fixture.activity.getColor(R.color.motocom_surface_soft))
-        assertEquals(Color.parseColor("#9CA3AF"), fixture.activity.getColor(R.color.motocom_text_muted))
+        assertEquals(Color.parseColor("#F3F4EF"), fixture.activity.getColor(R.color.motocom_background))
+        assertEquals(Color.parseColor("#C3F36B"), fixture.activity.getColor(R.color.motocom_accent_green))
+        assertEquals(Color.parseColor("#C3F36B"), fixture.activity.getColor(R.color.motocom_accent_green_alt))
+        assertEquals(Color.parseColor("#EAF3DB"), fixture.activity.getColor(R.color.motocom_accent_green_soft))
+        assertEquals(Color.parseColor("#DFEDCB"), fixture.activity.getColor(R.color.motocom_accent_green_pressed))
+        assertEquals(Color.parseColor("#416722"), fixture.activity.getColor(R.color.motocom_accent_green_dark))
+        assertEquals(Color.parseColor("#ECEEE7"), fixture.activity.getColor(R.color.motocom_surface_soft))
+        assertEquals(Color.parseColor("#727B72"), fixture.activity.getColor(R.color.motocom_text_muted))
         assertEquals(
-            Color.parseColor("#4B5563"),
+            Color.parseColor("#53604F"),
             fixture.activity.getColor(R.color.motocom_text_muted_accessible)
         )
     }
@@ -1214,7 +1285,7 @@ class MainScreenRobolectricTest {
             )
             assertEquals(
                 "VOX：IDLE",
-                homeText("home_vox_pill")
+                homeText("home_vox_pill", useUnmergedTree = true)
             )
         }
     }
@@ -1240,7 +1311,7 @@ class MainScreenRobolectricTest {
         }
 
         val panelFixture = fixture()
-        clickHome("home_menu_button")
+
         measureAtWidth(panelFixture, widthDp = 360)
         assertVisibleActionsAreAccessible(panelFixture.screen.root)
     }
@@ -1269,8 +1340,8 @@ class MainScreenRobolectricTest {
         ).forEach { assertTrue(settingsExists(it)) }
 
         clickSettings("settings_back_button")
-        clickHome("home_menu_button")
-        fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        fixture.screen.root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
         val discoverHelp = discoverNode("discover_help_button")
         assertTrue("Discover help action should exist", discoverExists("discover_help_button"))
         assertTrue(discoverHelp.fetchSemanticsNode().config.contains(SemanticsProperties.ContentDescription))
@@ -1289,7 +1360,7 @@ class MainScreenRobolectricTest {
         )
 
         clickDiscover("discover_back_button")
-        assertFalse(homeContentDescription("home_vox_pill").contains("开发中"))
+        assertFalse(homeContentDescription("home_vox_card").contains("开发中"))
         assertTrue(homeContentDescription("home_vox_card").contains("VOX 当前状态"))
     }
 
@@ -1393,7 +1464,7 @@ class MainScreenRobolectricTest {
     fun homeVoxFactPillOpensTheRealSettingsPage() {
         val fixture = fixture()
 
-        clickHome("home_vox_pill")
+        clickHome("home_vox_card")
 
         assertNotNull(fixture.screen.root.findViewById<View>(R.id.settings_scroll))
         assertTrue(settingsExists("settings_vox_button"))
@@ -1422,7 +1493,7 @@ class MainScreenRobolectricTest {
             canStart = true
         )
 
-        assertEquals("VOX：OPEN", homeText("home_vox_pill"))
+        assertEquals("VOX：OPEN", homeText("home_vox_pill", useUnmergedTree = true))
         clickHome("home_mute_button")
         assertEquals(true, requestedMute)
 
@@ -1570,7 +1641,7 @@ class MainScreenRobolectricTest {
     @Test
     fun settingsCandidateSummaryRefreshesWhenPresenceSnapshotChanges() {
         val fixture = fixture()
-        clickHome("home_settings_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         val summaryTag = "settings_discovery_candidates"
 
         fixture.screen.setPresences(listOf(
@@ -1630,8 +1701,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { true })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         val runtime = RuntimeSessionId("runtime-a")
         val presence = selectablePresence()
@@ -1651,8 +1722,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { true })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         val runtime = RuntimeSessionId("runtime-a")
         val presence = selectablePresence()
@@ -1675,8 +1746,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { true })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         val runtime = RuntimeSessionId("runtime-service-clear")
         val presence = selectablePresence()
@@ -1718,8 +1789,8 @@ class MainScreenRobolectricTest {
         )
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
             IntercomState.Discovering(RuntimeSessionId("runtime-stale-card")),
@@ -1738,8 +1809,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture(onConnectPresence = { false })
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
         fixture.screen.setIntercomState(
             IntercomState.Discovering(RuntimeSessionId("runtime-dispatch-failure")),
             canStart = true
@@ -1787,8 +1858,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
             IntercomState.Discovering(RuntimeSessionId("runtime-a")),
@@ -1807,8 +1878,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
             IntercomState.Discovering(RuntimeSessionId("runtime-a")),
@@ -1831,8 +1902,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
         fixture.screen.setWifiUnavailable(true)
@@ -1856,8 +1927,8 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         val root = fixture.screen.root
         val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        clickHome("home_menu_button")
-        root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+        root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
 
         fixture.screen.setIntercomState(
             IntercomState.Discovering(RuntimeSessionId("runtime-wifi-refresh")),
@@ -2027,9 +2098,9 @@ class MainScreenRobolectricTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    private fun homeText(testTag: String): String {
+    private fun homeText(testTag: String, useUnmergedTree: Boolean = false): String {
         shadowOf(Looper.getMainLooper()).idle()
-        val config = homeNode(testTag).fetchSemanticsNode().config
+        val config = composeRule.onAllNodesWithTag(testTag, useUnmergedTree = useUnmergedTree).onLast().fetchSemanticsNode().config
         return if (config.contains(SemanticsProperties.Text)) {
             config[SemanticsProperties.Text].joinToString(separator = "") { it.text }
         } else {
@@ -2072,12 +2143,9 @@ class MainScreenRobolectricTest {
 
     private fun assertHomeActionsAreAccessible() {
         listOf(
-            "home_menu_button",
-            "home_settings_button",
             "home_primary_button",
             "home_mute_button",
             "home_audio_settings_button",
-            "home_vox_pill",
             "home_vox_card"
         ).forEach { tag ->
             if (homeExists(tag)) {
@@ -2146,16 +2214,16 @@ class MainScreenRobolectricTest {
         when (route) {
             MainRoute.HOME -> Unit
             MainRoute.DISCOVER -> {
-                clickHome("home_menu_button")
-                fixture.screen.root.findViewById<View>(R.id.nav_discover_button).performClick()
+
+                fixture.screen.root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
             }
             MainRoute.SETTINGS -> {
-                clickHome("home_menu_button")
-                fixture.screen.root.findViewById<View>(R.id.nav_settings_button).performClick()
+
+                fixture.screen.root.findViewById<View>(R.id.bottom_nav_settings_button).performClick()
             }
             MainRoute.LOGS -> {
-                clickHome("home_menu_button")
-                fixture.screen.root.findViewById<View>(R.id.nav_settings_button).performClick()
+
+                fixture.screen.root.findViewById<View>(R.id.bottom_nav_settings_button).performClick()
                 clickSettings("settings_logs_button")
             }
         }

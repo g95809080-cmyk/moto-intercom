@@ -31,11 +31,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -59,7 +58,8 @@ internal data class DiscoverScreenUiState(
     val supplementalText: String?,
     val emptyText: String,
     val radarRunning: Boolean,
-    val rescanEnabled: Boolean = false
+    val rescanEnabled: Boolean = false,
+    val animationsEnabled: Boolean = true
 )
 
 @Composable
@@ -110,8 +110,8 @@ internal fun MotoComDiscoverScreen(
         DiscoverGroup(
             tag = "discover_nearby_container",
             cards = presentation.cards.withIndex().filter {
-                !it.value.preferred && (!it.value.paired || it.value.offlinePaired)
-            }.sortedBy { if (it.value.offlinePaired) 0 else 1 },
+                !it.value.preferred && !it.value.paired && !it.value.offlinePaired
+            },
             orderedPresences = presentation.orderedPresences,
             onSelectPresence = onSelectPresence,
             onConnect = onConnect,
@@ -123,8 +123,7 @@ internal fun MotoComDiscoverScreen(
             orderedPresences = presentation.orderedPresences,
             onSelectPresence = onSelectPresence,
             onConnect = onConnect,
-            onManagePairing = onManagePairing,
-            renderCards = false
+            onManagePairing = onManagePairing
         )
 
         if (presentation.cards.isEmpty()) {
@@ -156,7 +155,7 @@ internal fun MotoComDiscoverScreen(
                 contentColor = colorResource(R.color.motocom_text_primary)
             ),
             shape = RoundedCornerShape(18.dp),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
         ) {
             Icon(painterResource(R.drawable.ic_refresh_24), null, Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
@@ -191,7 +190,7 @@ private fun DiscoverHeader(onBack: () -> Unit, onHelp: () -> Unit) {
                 .padding(horizontal = 8.dp)
                 .testTag("discover_title"),
             color = colorResource(R.color.motocom_text_primary),
-            fontSize = 20.sp,
+            fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
@@ -220,107 +219,40 @@ private fun DiscoverIconButton(tag: String, description: String, icon: Int, onCl
 }
 
 @Composable
-private fun DiscoverRadarCard(
-    state: DiscoverScreenUiState,
-    onStart: () -> Unit,
-    onWifiSettings: () -> Unit
-) {
-    val presentation = state.presentation
+private fun DiscoverRadarCard(state: DiscoverScreenUiState, onStart: () -> Unit, onWifiSettings: () -> Unit) {
     val accent = colorResource(R.color.motocom_accent_green)
-    val shape = RoundedCornerShape(18.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(3.dp, shape)
-            .clip(shape)
-            .background(colorResource(R.color.motocom_surface))
-            .padding(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val pulse by rememberInfiniteTransition(label = "radar").animateFloat(
-                initialValue = 0.72f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
-                label = "radarPulse"
-            )
-            Canvas(
-                Modifier
-                    .size(112.dp)
-                    .testTag("discover_radar_ripple")
-            ) {
+    val pulse = if (state.radarRunning && state.animationsEnabled) {
+        val transition = rememberInfiniteTransition(label = "radar")
+        transition.animateFloat(0.35f, 0.8f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "radarPulse").value
+    } else 0.25f
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+        .background(colorResource(R.color.motocom_console)).padding(20.dp)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(state.stateText, Modifier.testTag("discover_state_text"), color = Color.White,
+                    fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold)
+                state.supplementalText?.takeIf(String::isNotBlank)?.let {
+                    Text(it, Modifier.padding(top = 10.dp).testTag("discover_status_supplemental"),
+                        color = colorResource(R.color.motocom_on_console_secondary), fontSize = 12.sp, lineHeight = 18.sp)
+                }
+            }
+            Canvas(Modifier.size(108.dp).testTag("discover_radar_ripple")) {
                 val radius = size.minDimension / 2f
-                drawCircle(
-                    color = accent.copy(alpha = if (state.radarRunning) 0.15f * pulse else 0.07f),
-                    radius = radius,
-                    style = Stroke(2.dp.toPx())
-                )
-                drawCircle(
-                    color = accent.copy(alpha = 0.18f),
-                    radius = radius * 0.68f,
-                    style = Stroke(1.5.dp.toPx())
-                )
-                drawCircle(
-                    color = accent.copy(alpha = 0.16f),
-                    radius = radius * 0.36f,
-                    style = Stroke(1.5.dp.toPx())
-                )
-                drawLine(
-                    accent,
-                    center,
-                    center.copy(x = center.x + radius * 0.64f, y = center.y - radius * 0.72f),
-                    strokeWidth = 2.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-                drawCircle(accent, radius = 4.dp.toPx())
-            }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 14.dp)
-            ) {
-                Text(
-                    state.stateText.replace("MotoCom", "\nMotoCom").trimStart(),
-                    modifier = Modifier.testTag("discover_state_text"),
-                    color = colorResource(R.color.motocom_text_primary),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                state.supplementalText?.let {
-                    Text(
-                        it,
-                        modifier = Modifier.padding(top = 5.dp).testTag("discover_status_supplemental"),
-                        color = colorResource(R.color.motocom_text_secondary),
-                        fontSize = 13.sp
-                    )
+                listOf(1f, 0.75f, 0.5f, 0.25f).forEach { scale ->
+                    drawCircle(accent.copy(alpha = 0.4f), radius * scale, style = Stroke(0.8.dp.toPx()))
                 }
-                Row(
-                    modifier = Modifier.padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(accent)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        stringResource(R.string.discover_identity_short),
-                        color = colorResource(R.color.motocom_text_secondary),
-                        fontSize = 12.sp
-                    )
-                }
+                drawLine(accent.copy(alpha = 0.12f), Offset(0f, center.y), Offset(size.width, center.y))
+                drawLine(accent.copy(alpha = 0.12f), Offset(center.x, 0f), Offset(center.x, size.height))
+                drawArc(accent.copy(alpha = pulse * 0.35f), -65f, 38f, useCenter = true)
+                drawLine(accent, center, Offset(center.x + radius * 0.42f, center.y - radius * 0.90f),
+                    strokeWidth = 1.dp.toPx(), cap = StrokeCap.Round)
+                drawCircle(accent, 4.dp.toPx())
             }
         }
-        if (presentation.offlineStartVisible) {
-            DiscoverPrimaryButton(stringResource(R.string.discover_start), "discover_offline_start_button", onStart)
-        }
-        if (presentation.wifiSettingsVisible) {
-            DiscoverSecondaryButton(stringResource(R.string.wifi_settings_cta), "discover_wifi_settings_button", onWifiSettings)
-        }
+        if (state.presentation.offlineStartVisible) DiscoverPrimaryButton(
+            stringResource(R.string.discover_start), "discover_offline_start_button", onStart)
+        if (state.presentation.wifiSettingsVisible) DiscoverSecondaryButton(
+            stringResource(R.string.wifi_settings_cta), "discover_wifi_settings_button", onWifiSettings)
     }
 }
 
@@ -365,18 +297,19 @@ private fun DiscoverGroup(
     orderedPresences: List<RiderPresence>,
     onSelectPresence: (RiderPresence) -> Unit,
     onConnect: (RiderPresence) -> Unit,
-    onManagePairing: (RiderPresence) -> Unit,
-    renderCards: Boolean = true
+    onManagePairing: (RiderPresence) -> Unit
 ) {
     if (cards.isEmpty()) return
-    Spacer(
-        Modifier
-            .fillMaxWidth()
-            .height(4.dp)
-            .testTag("${tag}_label")
+    Text(
+        stringResource(when (tag) {
+            "discover_paired_container" -> R.string.discover_paired_title
+            "discover_offline_paired_container" -> R.string.discover_offline_paired_title
+            else -> R.string.discover_nearby_title
+        }),
+        Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 4.dp).testTag("${tag}_label"),
+        color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold
     )
-    if (renderCards) {
-        Column(Modifier.fillMaxWidth().testTag(tag)) {
+    Column(Modifier.fillMaxWidth().testTag(tag)) {
             cards.forEach { indexed ->
                 DiscoverPresenceCard(
                     indexed.value,
@@ -387,9 +320,6 @@ private fun DiscoverGroup(
                 )
             }
         }
-    } else {
-        Spacer(Modifier.height(0.dp).testTag(tag))
-    }
 }
 
 @Composable
@@ -411,8 +341,8 @@ private fun DiscoverPresenceCard(
         else -> stringResource(R.string.discover_status_online)
     }
     val statusColor = when {
-        card.preferred && presence.isSelectableForUi() -> colorResource(R.color.motocom_accent_green)
-        card.offlinePaired -> Color(0xFFFFA31A)
+        card.preferred && presence.isSelectableForUi() -> colorResource(R.color.motocom_accent_green_dark)
+        card.offlinePaired -> Color(0xFF855D16)
         !presence.isSelectableForUi() -> colorResource(R.color.motocom_text_muted_accessible)
         else -> colorResource(R.color.motocom_accent_green_dark)
     }
@@ -427,7 +357,7 @@ private fun DiscoverPresenceCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
-            .shadow(2.dp, shape)
+            .border(1.dp, colorResource(R.color.motocom_border), shape)
             .clip(shape)
             .background(colorResource(R.color.motocom_surface))
             .then(
@@ -449,23 +379,19 @@ private fun DiscoverPresenceCard(
                 .clickable { onSelectPresence(presence) },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Image(
-                painter = painterResource(R.drawable.rider_helmet_avatar),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .border(1.dp, colorResource(R.color.motocom_border), CircleShape)
-            )
-            Column(Modifier.padding(start = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).background(colorResource(R.color.motocom_surface_soft), CircleShape),
+                contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.ic_person_outline_24), null, Modifier.size(23.dp),
+                    tint = MaterialTheme.colorScheme.onSurface)
+            }
+            Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         card.title,
                         color = colorResource(R.color.motocom_text_primary),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.width(7.dp))
                     DiscoverStatusChip(status, statusColor)
                 }
                 Text(
@@ -485,18 +411,11 @@ private fun DiscoverPresenceCard(
                         tint = colorResource(R.color.motocom_text_muted_accessible)
                     )
                     Spacer(Modifier.width(4.dp))
-                    Text(
-                        "${card.transportText} ·",
-                        color = colorResource(R.color.motocom_text_secondary),
-                        fontSize = 12.sp
-                    )
-                    Spacer(Modifier.width(3.dp))
-                    Text(
-                        facts,
-                        modifier = Modifier.testTag("discover_facts_$cardId"),
-                        color = colorResource(R.color.motocom_text_secondary),
-                        fontSize = 12.sp
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(card.transportText, color = colorResource(R.color.motocom_text_secondary), fontSize = 12.sp)
+                        Text(facts, Modifier.testTag("discover_facts_$cardId"),
+                            color = colorResource(R.color.motocom_text_secondary), fontSize = 12.sp)
+                    }
                 }
             }
         }

@@ -7,7 +7,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,17 +32,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -81,12 +77,12 @@ internal data class HomeScreenUiState(
     val voxText: String,
     val discovering: Boolean,
     val connected: Boolean,
-    val menuVisible: Boolean = true,
     val muted: Boolean = false,
     val muteEnabled: Boolean = false,
     val voxEnabled: Boolean = true,
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
-    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE
+    val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
+    val animationsEnabled: Boolean = true
 )
 
 /** Compose equivalent of the former screen_home.xml hierarchy. */
@@ -94,8 +90,6 @@ internal data class HomeScreenUiState(
 internal fun MotoComHomeScreen(
     state: HomeScreenUiState,
     audioLevel: Float,
-    onMenu: () -> Unit,
-    onSettings: () -> Unit,
     onPrimaryAction: () -> Unit,
     onDiscover: () -> Unit,
     onPermissionGrant: () -> Unit,
@@ -128,13 +122,9 @@ internal fun MotoComHomeScreen(
                     bottom = 32.dp
                 )
         ) {
-            HomeHeader(
-                menuVisible = state.menuVisible,
-                onMenu = onMenu,
-                onSettings = onSettings
-            )
+            HomeHeader()
             Spacer(Modifier.height(gapLarge))
-            StatusCard(state = state, onVox = onVox)
+            StatusCard(state = state)
             Spacer(Modifier.height(gap))
             AudioCard(state = state, audioLevel = audioLevel)
             Spacer(Modifier.height(gap))
@@ -179,81 +169,13 @@ internal fun MotoComHomeScreen(
 }
 
 @Composable
-private fun HomeHeader(
-    menuVisible: Boolean,
-    onMenu: () -> Unit,
-    onSettings: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (menuVisible) {
-            CircleIconButton(
-                painter = painterResource(R.drawable.ic_menu_24),
-                description = stringResource(R.string.menu_button_description),
-                testTag = "home_menu_button",
-                onClick = onMenu,
-                surface = false
-            )
-        } else {
-            Spacer(Modifier.size(dimensionResource(R.dimen.motocom_icon_button_size)))
-        }
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = dimensionResource(R.dimen.motocom_gap)),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = stringResource(R.string.brand_name),
-                color = colorResource(R.color.motocom_text_primary),
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(colorResource(R.color.motocom_accent_green_soft))
-                    .padding(start = 8.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SignalMark()
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = stringResource(R.string.brand_tagline),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontSize = 13.sp
-                )
-            }
-        }
-        CircleIconButton(
-            painter = painterResource(R.drawable.ic_settings_24),
-            description = stringResource(R.string.settings_button_description),
-            testTag = "home_settings_button",
-            onClick = onSettings,
-            surface = false
-        )
-    }
-}
-
-@Composable
-private fun SignalMark() {
-    val color = colorResource(R.color.motocom_accent_green)
-    Canvas(Modifier.size(width = 18.dp, height = 16.dp)) {
-        val heights = floatArrayOf(0.42f, 0.74f, 1f, 0.62f, 0.38f)
-        val gap = size.width / (heights.size - 1)
-        heights.forEachIndexed { index, height ->
-            val x = index * gap
-            val center = size.height / 2f
-            drawLine(
-                color = color,
-                start = Offset(x, center - size.height * height / 2f),
-                end = Offset(x, center + size.height * height / 2f),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
-            )
+private fun HomeHeader() {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.brand_name), color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
+            Text(stringResource(R.string.brand_tagline), Modifier.padding(top = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -296,11 +218,8 @@ private fun CircleIconButton(
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Image(
-            painter = painter,
-            contentDescription = null,
-            modifier = Modifier.size(24.dp)
-        )
+        Icon(painter = painter, contentDescription = null, modifier = Modifier.size(23.dp),
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
     }
 }
 
@@ -337,246 +256,81 @@ private fun LabeledIconButton(
 }
 
 @Composable
-private fun StatusCard(state: HomeScreenUiState, onVox: () -> Unit) {
-    val statusColor = if (state.connected) {
-        colorResource(R.color.motocom_accent_green_dark)
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+private fun StatusCard(state: HomeScreenUiState) {
+    val accent = colorResource(R.color.motocom_accent_green)
+    val muted = colorResource(R.color.motocom_on_console_secondary)
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
-            .padding(dimensionResource(R.dimen.motocom_home_card_padding)),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
+            .background(colorResource(R.color.motocom_console)).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(dimensionResource(R.dimen.motocom_gap)))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (state.connected) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_check_circle_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = Color.Unspecified
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(
-                text = state.primaryText,
-                color = statusColor,
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.testTag("home_status_title")
-            )
-        }
-        if (state.detailText.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = state.detailText,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        if (!state.connected) state.supplementalText.orEmpty().let {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = it,
-                color = colorResource(R.color.motocom_text_muted_accessible),
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().testTag("home_status_supplemental")
-            )
-        }
-        Spacer(Modifier.height(dimensionResource(R.dimen.motocom_gap)))
-        if (state.connected) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                StatusWaveform(colorResource(R.color.motocom_accent_green_alt))
-                RiderAvatar(discovering = false, connected = true)
-                StatusWaveform(Color(0xFFFFA31A))
-            }
-        } else {
-            RiderAvatar(discovering = state.discovering, connected = false)
-        }
-        Text(
-            text = state.peerText,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().testTag("home_peer_name")
-        )
-        if (state.connected) state.supplementalText.orEmpty().let {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = it,
-                color = colorResource(R.color.motocom_text_muted_accessible),
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().testTag("home_status_supplemental")
-            )
-        }
-        Spacer(Modifier.height(dimensionResource(R.dimen.motocom_gap_large)))
-        FactRow(
-            first = stringResource(R.string.home_transport_plan, state.plannedTransportText),
-            second = stringResource(R.string.home_webrtc_state, state.webRtcText),
-            firstIcon = painterResource(R.drawable.ic_wifi_24),
-            secondIcon = painterResource(R.drawable.ic_globe_24)
-        )
-        Spacer(Modifier.height(dimensionResource(R.dimen.motocom_home_compact_gap)))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            FactPill(
-                text = stringResource(R.string.home_vox_pill, state.voxText),
-                modifier = Modifier
-                    .weight(1f)
-                    .defaultMinSize(minHeight = dimensionResource(R.dimen.motocom_control_min_height))
-                    .clickable(role = Role.Button, onClick = onVox),
-                leadingIcon = painterResource(R.drawable.ic_mic_24),
-                contentDescription = stringResource(R.string.vox_settings_description),
-                testTag = "home_vox_pill"
-            )
-            FactPill(
-                text = stringResource(R.string.home_bluetooth_state, state.bluetoothText),
-                modifier = Modifier.weight(1f),
-                leadingIcon = painterResource(R.drawable.ic_bluetooth_24)
-            )
-        }
-    }
-}
-
-@Composable
-private fun RiderAvatar(discovering: Boolean, connected: Boolean) {
-    val pulse = if (discovering) {
-        val transition = rememberInfiniteTransition(label = "rider-ripple")
-        transition.animateFloat(
-            initialValue = 0.45f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Restart),
-            label = "rider-ripple-progress"
-        ).value
-    } else {
-        0f
-    }
-    Box(
-        modifier = Modifier.size(dimensionResource(R.dimen.motocom_avatar_size)),
-        contentAlignment = Alignment.Center
-    ) {
-        if (discovering) {
-            Canvas(Modifier.fillMaxSize()) {
-                drawCircle(
-                    color = Color(0x3378D900),
-                    radius = size.minDimension * pulse / 2f,
-                    style = Stroke(width = 2.dp.toPx())
-                )
-            }
-        }
-        Image(
-            painter = painterResource(R.drawable.rider_helmet_avatar),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .border(
-                    width = if (connected) 3.dp else 0.dp,
-                    color = colorResource(R.color.motocom_accent_green),
-                    shape = CircleShape
-                )
-        )
-    }
-}
-
-@Composable
-private fun StatusWaveform(color: Color) {
-    Canvas(Modifier.size(width = 46.dp, height = 34.dp)) {
-        val center = size.height / 2f
-        val bars = floatArrayOf(0.28f, 0.52f, 0.86f, 0.45f, 0.7f, 0.36f, 0.58f)
-        val gap = size.width / (bars.size - 1)
-        bars.forEachIndexed { index, height ->
-            val x = index * gap
-            drawLine(
-                color = color,
-                start = Offset(x, center - size.height * height / 2f),
-                end = Offset(x, center + size.height * height / 2f),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-        }
-    }
-}
-
-@Composable
-private fun FactRow(
-    first: String,
-    second: String,
-    firstIcon: Painter? = null,
-    secondIcon: Painter? = null
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        FactPill(first, Modifier.weight(1f), leadingIcon = firstIcon)
-        FactPill(second, Modifier.weight(1f), leadingIcon = secondIcon)
-    }
-}
-
-@Composable
-private fun FactPill(
-    text: String,
-    modifier: Modifier = Modifier,
-    leadingIcon: Painter? = null,
-    contentDescription: String? = null,
-    testTag: String? = null
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
-            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
-            .then(
-                if (contentDescription != null) {
-                    Modifier.semantics { this.contentDescription = contentDescription }
-                } else {
-                    Modifier
-                }
-            )
-            .padding(dimensionResource(R.dimen.motocom_home_fact_padding)),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        leadingIcon?.let {
-            Image(painter = it, contentDescription = null, modifier = Modifier.size(17.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(if (state.connected) accent else muted, CircleShape))
             Spacer(Modifier.width(8.dp))
+            Text(state.primaryText, Modifier.weight(1f).testTag("home_status_title"),
+                color = Color.White, style = MaterialTheme.typography.bodyMedium)
         }
-        Text(
-            text = text,
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.bodyMedium
-        )
+        Text(state.peerText, Modifier.fillMaxWidth().padding(top = 20.dp).testTag("home_peer_name"),
+            color = Color.White, fontSize = 30.sp, lineHeight = 38.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp, textAlign = TextAlign.Center)
+        if (state.detailText.isNotBlank() && state.detailText != stringResource(R.string.brand_tagline)) Text(state.detailText, Modifier.padding(top = 5.dp),
+            color = muted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        state.supplementalText.orEmpty().let {
+            Text(it, Modifier.then(if (it.isBlank()) Modifier.height(0.dp) else Modifier.padding(top = 5.dp)).testTag("home_status_supplemental"),
+                color = if (state.connected) accent else muted,
+                style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        }
+        CommunicationDial(state.discovering && state.animationsEnabled, state.connected)
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            ConsoleFact(stringResource(R.string.home_transport_plan, state.plannedTransportText),
+                R.drawable.ic_wifi_24, Modifier.weight(1f))
+            ConsoleFact(stringResource(R.string.home_webrtc_state, state.webRtcText),
+                R.drawable.ic_globe_24, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ConsoleFact(text: String, icon: Int, modifier: Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(painterResource(icon), null, Modifier.size(17.dp), tint = colorResource(R.color.motocom_accent_green))
+        Spacer(Modifier.width(7.dp))
+        Text(text, color = colorResource(R.color.motocom_on_console_secondary),
+            fontSize = 11.sp, lineHeight = 16.sp)
+    }
+}
+
+@Composable
+private fun CommunicationDial(discovering: Boolean, connected: Boolean) {
+    val accent = colorResource(R.color.motocom_accent_green)
+    val pulse = if (discovering) {
+        val transition = rememberInfiniteTransition(label = "communication")
+        transition.animateFloat(0.35f, 0.8f,
+            infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "signal").value
+    } else if (connected) 0.7f else 0.3f
+    Box(Modifier.padding(vertical = 12.dp).size(130.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val radius = size.minDimension / 2f
+            drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = 0.08f), Color.Transparent)), radius)
+            listOf(1f, 0.8f, 0.59f).forEachIndexed { index, scale ->
+                drawCircle(accent.copy(alpha = pulse * (0.25f + index * 0.25f)), radius * scale,
+                    style = Stroke(if (index == 2) 1.5.dp.toPx() else 0.8.dp.toPx()))
+            }
+            if (connected || discovering) drawCircle(accent, 3.dp.toPx(),
+                Offset(center.x + radius * 0.56f, center.y - radius * 0.56f))
+        }
+        Icon(painterResource(R.drawable.ic_mic_24), null, Modifier.size(40.dp), tint = Color.White)
     }
 }
 
 @Composable
 private fun AudioCard(state: HomeScreenUiState, audioLevel: Float) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(20.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(2.dp, shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 16.dp, vertical = 11.dp),
@@ -604,15 +358,14 @@ private fun AudioCard(state: HomeScreenUiState, audioLevel: Float) {
                     .padding(top = 2.dp)
                     .testTag("home_audio_source")
             )
-        }
-        if (state.connected) {
-            Box(
-                Modifier
-                    .size(9.dp)
-                    .clip(CircleShape)
-                    .background(colorResource(R.color.motocom_accent_green))
+            Text(
+                text = stringResource(R.string.home_bluetooth_state, state.bluetoothText),
+                modifier = Modifier.padding(top = 3.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp
             )
         }
+
     }
 }
 
@@ -654,16 +407,8 @@ private fun MainControls(
                 isSelected = state.muted
             )
             Spacer(Modifier.width(dimensionResource(R.dimen.motocom_main_control_gap)))
-            val controlContainer = if (state.connected) {
-                MaterialTheme.colorScheme.surface
-            } else {
-                MaterialTheme.colorScheme.primary
-            }
-            val controlContent = if (state.connected) {
-                colorResource(R.color.motocom_accent_green_dark)
-            } else {
-                MaterialTheme.colorScheme.onPrimary
-            }
+            val controlContainer = colorResource(R.color.motocom_accent_green)
+            val controlContent = MaterialTheme.colorScheme.onSurface
             Button(
                 onClick = onPrimaryAction,
                 enabled = state.primaryActionEnabled,
@@ -737,90 +482,26 @@ private fun MainControls(
 
 @Composable
 private fun VoxCard(state: HomeScreenUiState, onClick: () -> Unit) {
-    val voxDescription = stringResource(
-        R.string.home_vox_card_description,
-        state.voxText,
-        state.voxSensitivity
-    )
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = dimensionResource(R.dimen.motocom_control_min_height))
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
-            .testTag("home_vox_card")
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = voxDescription }
-            .padding(dimensionResource(R.dimen.motocom_card_padding))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "VOX 状态",
+    val description = stringResource(R.string.home_vox_card_description, state.voxText, state.voxSensitivity)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+        .background(MaterialTheme.colorScheme.surface)
+        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
+        .testTag("home_vox_card").clickable(role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = description }.padding(16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.home_vox_pill, state.voxText),
+                Modifier.weight(1f).testTag("home_vox_pill"),
                 color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "灵敏度：${state.voxSensitivity}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp
-            )
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("灵敏度：${state.voxSensitivity}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
-        Spacer(Modifier.height(4.dp))
-        VoxTimeline(state.voxState)
-        Row(
-            modifier = Modifier.fillMaxWidth().testTag("home_vox_state_row"),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            VoxState(
-                stringResource(R.string.home_vox_listening_placeholder),
-                state.voxState == VoxRuntimeState.LISTENING,
-                Modifier.weight(1f)
-            )
-            VoxState(
-                stringResource(R.string.home_vox_open_placeholder),
-                state.voxState == VoxRuntimeState.OPEN,
-                Modifier.weight(1f)
-            )
-            VoxState(
-                stringResource(R.string.home_vox_hangover_placeholder),
-                state.voxState == VoxRuntimeState.HANGOVER,
-                Modifier.weight(1f)
-            )
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("home_vox_state_row"),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            VoxState("LISTENING", state.voxState == VoxRuntimeState.LISTENING, Modifier.weight(1f))
+            VoxState("OPEN", state.voxState == VoxRuntimeState.OPEN, Modifier.weight(1f))
+            VoxState("HANGOVER", state.voxState == VoxRuntimeState.HANGOVER, Modifier.weight(1f))
         }
-    }
-}
-
-@Composable
-private fun VoxTimeline(state: VoxRuntimeState) {
-    val track = colorResource(R.color.motocom_border)
-    val green = colorResource(R.color.motocom_accent_green)
-    val orange = Color(0xFFFFA31A)
-    Canvas(Modifier.fillMaxWidth().height(20.dp)) {
-        val y = size.height / 2f
-        val left = 8.dp.toPx()
-        val right = size.width - left
-        drawLine(track, Offset(left, y), Offset(right, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(
-            if (state == VoxRuntimeState.LISTENING) green else Color(0xFFCBD5E1),
-            radius = 6.dp.toPx(),
-            center = Offset(left + 42.dp.toPx(), y)
-        )
-        drawCircle(
-            if (state == VoxRuntimeState.OPEN) green else Color(0xFFCBD5E1),
-            radius = 6.dp.toPx(),
-            center = Offset(right * 0.55f, y)
-        )
-        drawCircle(
-            if (state == VoxRuntimeState.HANGOVER) orange else Color(0xFFCBD5E1),
-            radius = 6.dp.toPx(),
-            center = Offset(right - 42.dp.toPx(), y)
-        )
     }
 }
 
@@ -904,8 +585,6 @@ private fun MotoComHomeScreenPreview() {
                 voxState = VoxRuntimeState.IDLE
             ),
             audioLevel = 0f,
-            onMenu = {},
-            onSettings = {},
             onPrimaryAction = {},
             onDiscover = {},
             onPermissionGrant = {},

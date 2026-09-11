@@ -30,8 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
@@ -51,6 +49,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import kotlin.math.roundToInt
 
 internal data class SettingsScreenUiState(
@@ -85,7 +85,8 @@ internal fun MotoComSettingsScreen(
     onVoxEnabledChanged: (Boolean) -> Unit = {},
     onVoxSensitivityChanged: (Int) -> Unit = {},
     onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
-    onAutomaticReconnectChanged: (Boolean) -> Unit = {}
+    onAutomaticReconnectChanged: (Boolean) -> Unit = {},
+    onAudioSectionPositioned: (Int) -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -145,7 +146,7 @@ internal fun MotoComSettingsScreen(
                 SettingsIconButton(
                     tag = "settings_save_nickname_button",
                     description = stringResource(R.string.settings_save_nickname),
-                    icon = R.drawable.ic_chevron_right_24,
+                    icon = R.drawable.ic_check_24,
                     onClick = onSaveNickname
                 )
             }
@@ -177,9 +178,14 @@ internal fun MotoComSettingsScreen(
             SettingsVoxStateRow(state.voxState)
         }
 
-        SettingsSectionLabel(stringResource(R.string.section_audio_output))
+        SettingsSectionLabel(
+            stringResource(R.string.section_audio_output),
+            Modifier.testTag("settings_audio_section").onGloballyPositioned {
+                onAudioSectionPositioned(it.positionInRoot().y.roundToInt())
+            }
+        )
         SettingsPanel {
-            SettingsFact(state.audioSource, "settings_audio_source", hidden = true)
+            SettingsFact(state.audioSource, "settings_audio_source")
             SettingsAudioRouteRow(
                 text = stringResource(R.string.settings_audio_bluetooth),
                 tag = "settings_audio_route_button",
@@ -227,7 +233,7 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.settings_device_status))
         SettingsPanel {
-            SettingsFact(state.deviceStatus, "settings_device_status_summary", maxLines = 1)
+            SettingsFact(state.deviceStatus, "settings_device_status_summary")
             state.optionalPermissionNotice?.let {
                 Text(
                     it,
@@ -248,10 +254,7 @@ internal fun MotoComSettingsScreen(
         SettingsSectionLabel(stringResource(R.string.section_advanced_settings))
         SettingsPanel {
             val helpDescription = stringResource(R.string.help_description)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 SettingsAdvancedAction(
                     icon = R.drawable.ic_clipboard_24,
                     text = stringResource(R.string.settings_logs),
@@ -302,7 +305,7 @@ private fun SettingsHeader(onBack: () -> Unit) {
                 .padding(horizontal = 8.dp)
                 .testTag("settings_title"),
             color = colorResource(R.color.motocom_text_primary),
-            fontSize = 20.sp,
+            fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
@@ -326,26 +329,26 @@ private fun SettingsIconButton(tag: String, description: String, icon: Int, onCl
 }
 
 @Composable
-private fun SettingsSectionLabel(text: String) {
+private fun SettingsSectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        Modifier.fillMaxWidth().padding(start = 4.dp, top = 6.dp, bottom = 3.dp),
-        color = colorResource(R.color.motocom_text_muted_accessible),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold
+        modifier.fillMaxWidth().padding(start = 2.dp, top = 22.dp, bottom = 10.dp),
+        color = colorResource(R.color.motocom_text_primary),
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold
     )
 }
 
 @Composable
 private fun SettingsPanel(content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(20.dp)
     Column(
         Modifier
             .fillMaxWidth()
-            .shadow(2.dp, shape)
+            .border(1.dp, colorResource(R.color.motocom_border), shape)
             .clip(shape)
             .background(colorResource(R.color.motocom_surface))
-            .padding(horizontal = 14.dp, vertical = 0.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         content()
     }
@@ -355,14 +358,13 @@ private fun SettingsPanel(content: @Composable () -> Unit) {
 private fun SettingsFact(
     text: String,
     tag: String,
-    maxLines: Int = Int.MAX_VALUE,
-    hidden: Boolean = false
+    maxLines: Int = Int.MAX_VALUE
 ) {
     Text(
         text,
         Modifier
             .fillMaxWidth()
-            .then(if (hidden) Modifier.height(1.dp).alpha(0f) else Modifier.padding(vertical = 2.dp))
+            .padding(vertical = 5.dp)
             .testTag(tag),
         color = colorResource(R.color.motocom_text_secondary),
         fontSize = 13.sp,
@@ -378,7 +380,7 @@ private fun SettingsSecondaryButton(text: String, tag: String, onClick: () -> Un
         Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .defaultMinSize(minHeight = 44.dp)
+            .defaultMinSize(minHeight = 52.dp)
             .testTag(tag),
         colors = ButtonDefaults.buttonColors(
             containerColor = colorResource(R.color.motocom_surface_soft),
@@ -400,7 +402,7 @@ private fun SettingsAudioRouteRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 44.dp)
+            .defaultMinSize(minHeight = 52.dp)
             .clickable(role = Role.RadioButton, onClick = onClick)
             .semantics {
                 contentDescription = description
@@ -565,40 +567,18 @@ private fun RadioMark(selected: Boolean) {
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (selected) {
-            Icon(painterResource(R.drawable.ic_check_circle_24), null, Modifier.size(22.dp), tint = Color.Unspecified)
-        } else {
-            Box(Modifier.size(18.dp).clip(CircleShape).background(Color.Transparent).semantics { })
-        }
+        if (selected) Box(Modifier.size(10.dp).background(colorResource(R.color.motocom_accent_green_dark), CircleShape))
     }
 }
 
 @Composable
-private fun SettingsAdvancedAction(
-    icon: Int,
-    text: String,
-    tag: String,
-    description: String,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(76.dp)
-            .defaultMinSize(minHeight = 64.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description }
-            .testTag(tag),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(painterResource(icon), null, Modifier.size(22.dp), tint = colorResource(R.color.motocom_text_primary))
-        Text(
-            text,
-            Modifier.padding(top = 2.dp),
-            color = colorResource(R.color.motocom_text_secondary),
-            fontSize = 10.sp,
-            textAlign = TextAlign.Center
-        )
+private fun SettingsAdvancedAction(icon: Int, text: String, tag: String, description: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp)
+        .clickable(role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = description }.testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+        Icon(painterResource(icon), null, Modifier.size(21.dp), tint = colorResource(R.color.motocom_text_primary))
+        Text(text, Modifier.weight(1f).padding(start = 12.dp), color = colorResource(R.color.motocom_text_primary), fontSize = 14.sp)
+        Icon(painterResource(R.drawable.ic_chevron_right_24), null, Modifier.size(18.dp), tint = colorResource(R.color.motocom_text_secondary))
     }
 }
 

@@ -1,5 +1,9 @@
 package com.kuma.motointercom
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -28,7 +32,7 @@ class HomeScreenComposeTest {
     @Test
     fun baselineStateShowsFactsAndRoutesPrimaryAction() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val menuClicked = AtomicBoolean(false)
+        val primaryClicked = AtomicBoolean(false)
         val state = HomeScreenUiState(
             primaryText = "点击下方启动摩声",
             detailText = "一对一对讲 · 无需网络",
@@ -55,11 +59,10 @@ class HomeScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComHomeScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     audioLevel = 0f,
-                    onMenu = { menuClicked.set(true) },
-                    onSettings = {},
-                    onPrimaryAction = {},
+                    onPrimaryAction = { primaryClicked.set(true) },
                     onDiscover = {},
                     onPermissionGrant = {},
                     onPermissionSettings = {},
@@ -71,17 +74,16 @@ class HomeScreenComposeTest {
             }
         }
 
-        composeRule.onNodeWithText(state.primaryText).assertIsDisplayed()
+        composeRule.onNodeWithText(state.primaryText).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText(
             context.getString(R.string.home_transport_plan, state.plannedTransportText)
-        ).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription(
-            context.getString(R.string.menu_button_description)
-        ).assertIsDisplayed().performClick()
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("home_menu_button").assertDoesNotExist()
+        composeRule.onNodeWithTag("home_settings_button").assertDoesNotExist()
         composeRule.onNodeWithText(state.primaryActionLabel)
-            .assertHasClickAction()
+            .performScrollTo().assertHasClickAction().performClick()
 
-        composeRule.runOnIdle { assertTrue(menuClicked.get()) }
+        composeRule.runOnIdle { assertTrue(primaryClicked.get()) }
     }
 
     @Test
@@ -91,6 +93,7 @@ class HomeScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComHomeScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = HomeScreenUiState(
                         primaryText = "已连接",
                         detailText = "对讲可用",
@@ -119,8 +122,6 @@ class HomeScreenComposeTest {
                         voxState = VoxRuntimeState.OPEN
                     ),
                     audioLevel = 0.5f,
-                    onMenu = {},
-                    onSettings = {},
                     onPrimaryAction = {},
                     onDiscover = {},
                     onPermissionGrant = {},
