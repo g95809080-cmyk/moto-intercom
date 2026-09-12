@@ -1,0 +1,159 @@
+
+> Configure project :app
+WARNING: The option setting 'android.overridePathCheck=true' is experimental.
+The current default is 'false'.
+Add android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE to the gradle.properties file to suppress this warning.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugUnitTestManifest
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:processReleaseNavigationResources
+> Task :app:extractProguardFiles UP-TO-DATE
+> Task :app:extractDeepLinksRelease
+> Task :app:parseReleaseLocalResources
+> Task :app:javaPreCompileRelease
+> Task :app:processReleaseMainManifest
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:generateReleaseRFile
+> Task :app:mergeReleaseNativeLibs
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:processDebugManifestForPackage
+> Task :app:compileReleaseNavigationResources
+> Task :app:checkReleaseAarMetadata
+> Task :app:checkReleaseDuplicateClasses
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libjingle_peerconnection_so.so. Run with --info option to learn more.
+
+> Task :app:processDebugResources
+> Task :app:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:kspDebugUnitTestKotlin UP-TO-DATE
+> Task :app:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig
+> Task :app:kspReleaseKotlin
+> Task :app:mergeReleaseResources
+> Task :app:testDebugUnitTest
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:processReleaseManifest
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :app:processReleaseManifestForPackage
+> Task :app:compileReleaseKotlin
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:mergeReleaseArtProfile
+> Task :app:compressReleaseAssets
+> Task :app:mergeExtDexRelease
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:collectReleaseDependencies
+> Task :app:processReleaseResources
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:optimizeReleaseResources
+
+> Task :app:compileReleaseKotlin
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:59:47 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:60:57 'static field EXTRA_SCO_AUDIO_STATE: String' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:70:34 'static field SCO_AUDIO_STATE_CONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:78:34 'static field SCO_AUDIO_STATE_DISCONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:87:34 'static field SCO_AUDIO_STATE_ERROR: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:507:30 'var isSpeakerphoneOn: Boolean' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:509:38 'var isSpeakerphoneOn: Boolean' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:598:27 'val isBluetoothScoAvailableOffCall: Boolean' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:708:48 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:13:8 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:146:67 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:175:49 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:269:85 'val callState: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2503:14 'fun setPriority(p0: Int): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2503:39 'static field PRIORITY_HIGH: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2508:14 'fun addAction(p0: Int, p1: CharSequence!, p2: PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2509:14 'fun addAction(p0: Int, p1: CharSequence!, p2: PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainActivity.kt:268:41 'fun onBackPressed(): Unit' is deprecated. This method has been deprecated in favor of using the
+      {@link OnBackPressedDispatcher} via {@link #getOnBackPressedDispatcher()}.
+      The OnBackPressedDispatcher controls how back button events are dispatched
+      to one or more {@link OnBackPressedCallback} objects.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainActivity.kt:277:15 'fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)} passing
+      in a {@link RequestMultiplePermissions} object for the {@link ActivityResultContract} and
+      handling the result in the {@link ActivityResultCallback#onActivityResult(Object) callback}.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainActivity.kt:583:17 'fun startActivityForResult(intent: Intent, requestCode: Int): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)}
+      passing in a {@link StartActivityForResult} object for the {@link ActivityResultContract}.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:515:29 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:517:25 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:518:25 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:522:35 'static field SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:524:35 'var systemUiVisibility: Int' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt:10:7 'class NetworkInfo : Any, Parcelable' is deprecated. Deprecated in Java.
+w: file:///O:/app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt:158:37 'val isConnected: Boolean' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseJavaWithJavac NO-SOURCE
+> Task :app:generateReleaseLintReportModel
+> Task :app:dexBuilderRelease
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:processReleaseJavaRes
+> Task :app:mergeReleaseJavaResource
+> Task :app:mergeDexRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:lintAnalyzeRelease
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease SKIPPED
+> Task :app:lintVitalRelease SKIPPED
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+> Task :app:lintReportRelease
+Wrote HTML report to file:///O:/app/build/reports/lint-results-release.html
+Wrote SARIF report to file:///O:/app/build/reports/lint-results-release.sarif
+
+> Task :app:lintRelease
+
+BUILD SUCCESSFUL in 2m 44s
+81 actionable tasks: 58 executed, 23 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html
