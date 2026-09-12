@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.kuma.motointercom.OnboardingTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-09-12T02:54:29.386Z" hostname="DESKTOP-BGCFG9P" time="1.286">
+  <properties/>
+  <testcase name="realStartWaitsForServiceThenFinishesWithoutAnotherPhone" classname="com.kuma.motointercom.OnboardingTest" time="0.217"/>
+  <testcase name="channelWithoutAudioIsNotClaimedAsSuccessfulFirstExperience" classname="com.kuma.motointercom.OnboardingTest" time="0.145"/>
+  <testcase name="incomingDialogHidesGuideWithoutCompletingIt" classname="com.kuma.motointercom.OnboardingTest" time="0.152"/>
+  <testcase name="permissionGuideAnchorsToActualStartButtonAndRestoresSettingsAfterDenial" classname="com.kuma.motointercom.OnboardingTest" time="0.427"/>
+  <testcase name="smallLandscapeRevealsAnchorAgainAfterNativeScrollRestoration" classname="com.kuma.motointercom.OnboardingTest" time="0.105"/>
+  <testcase name="introDoesNotStartServiceAndSkipPersistsAcrossRecreation" classname="com.kuma.motointercom.OnboardingTest" time="0.179"/>
+  <testcase name="unfinishedProgressAndDeniedPermissionSurviveNewInstance" classname="com.kuma.motointercom.OnboardingTest" time="0.04"/>
+  <testcase name="tutorialFollowsRealPreconditionsAndYieldsToIncomingConfirmation" classname="com.kuma.motointercom.OnboardingTest" time="0.019"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

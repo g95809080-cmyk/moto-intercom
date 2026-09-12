@@ -47,7 +47,8 @@ internal class MainScreen(
     private val onRequestDiscoveryRefresh: () -> Unit = {},
     private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
     private val onForgetPairing: (String) -> Boolean = { false },
-    private val onSendFeedback: (String) -> Unit = {}
+    private val onSendFeedback: (String) -> Unit = {},
+    private val onboardingPreferences: OnboardingPreferences? = null
 ) {
     val root: View
 
@@ -61,6 +62,8 @@ internal class MainScreen(
     private val scrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val pendingRestoredScrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val logBuffer = BoundedLogBuffer(300)
+    private var onboarding: OnboardingGuide? = null
+    private val guideAnchors = EnumMap<GuideTarget, GuideAnchor>(GuideTarget::class.java)
     private val homeUiState = mutableStateOf(
         HomeScreenUiState(
             primaryText = "",
@@ -107,7 +110,7 @@ internal class MainScreen(
     private var currentScroll: ScrollView? = null
     private var productState: IntercomState = IntercomState.Offline
     private var canStartIntercom = false
-    private var permissionRequestAttempted = false
+    private var permissionRequestAttempted = onboardingPreferences?.permissionRequested ?: false
     private var supplementalStatus: String? = null
     private var permissionStatus: String? = null
     private var discoverCtaNeedsReselect = false
@@ -162,6 +165,24 @@ internal class MainScreen(
         bindNavigation()
         showPage(currentRoute)
         updateAdaptiveLayout()
+        onboardingPreferences?.let { preferences ->
+            onboarding = OnboardingGuide(
+                root = root as FrameLayout,
+                preferences = preferences,
+                anchor = { target ->
+                    if (target == GuideTarget.DISCOVER) {
+                        GuideAnchor(root.findViewById(
+                            if (bottomNavigation.visibility == View.VISIBLE) R.id.bottom_nav_discover_button
+                            else R.id.adaptive_nav_discover_button
+                        ))
+                    } else guideAnchors[if (target == GuideTarget.PERMISSION) GuideTarget.START else target]
+                },
+                scroll = { currentScroll },
+                onAction = ::performGuideAction,
+                onTourStarted = { showPage(MainRoute.HOME) }
+            )
+            refreshGuide()
+        }
     }
 
     fun saveState(outState: Bundle) {
@@ -194,6 +215,7 @@ internal class MainScreen(
     }
 
     fun handleBack(): Boolean {
+        if (!incomingConfirmationVisible && onboarding?.handleBack() == true) return true
         return when (val action = resolveBackNavigation(currentChrome())) {
             BackNavigation.CloseNavigation -> {
                 closeNavigation()
@@ -229,6 +251,7 @@ internal class MainScreen(
 
     fun setIncomingConfirmationVisible(visible: Boolean) {
         incomingConfirmationVisible = visible
+        refreshGuide()
     }
 
     fun setIntercomState(state: IntercomState, canStart: Boolean) {
@@ -313,6 +336,7 @@ internal class MainScreen(
 
     fun markPermissionRequestAttempted() {
         permissionRequestAttempted = true
+        onboardingPreferences?.permissionRequested = true
         renderCurrentPage()
     }
 
@@ -676,6 +700,7 @@ internal class MainScreen(
         currentRoute = route
         closeNavigation()
         pageContainer.removeAllViews()
+        guideAnchors.clear()
         val page = when (route) {
             MainRoute.HOME -> createHomePage()
             MainRoute.DISCOVER -> createDiscoverPage()
@@ -736,6 +761,28 @@ internal class MainScreen(
             MainRoute.SETTINGS -> renderSettings()
             MainRoute.LOGS -> Unit
         }
+        refreshGuide()
+    }
+
+    private fun refreshGuide() {
+        onboarding?.update(GuideFacts(productState, currentRoute, canStartIntercom,
+            permissionRequestAttempted, wifiUnavailable, incomingConfirmationVisible, audioReady))
+    }
+
+    private fun performGuideAction(target: GuideTarget) {
+        when (target) {
+            GuideTarget.PERMISSION -> onRequestCorePermissions()
+            GuideTarget.PERMISSION_SETTINGS -> onOpenPermissionSettings()
+            GuideTarget.WIFI -> onOpenWifiSettings()
+            GuideTarget.START -> if (productState is IntercomState.Offline && canStartIntercom && !wifiUnavailable) onToggleIntercom()
+            GuideTarget.DISCOVER -> if (productState is IntercomState.Discovering) showPage(MainRoute.DISCOVER)
+            GuideTarget.SCAN -> if (productState is IntercomState.Discovering && !wifiUnavailable && !discoverConnectAwaitingState) onRequestDiscoveryRefresh()
+        }
+        refreshGuide()
+    }
+
+    private fun recordGuideAnchor(host: View, target: GuideTarget, bounds: androidx.compose.ui.geometry.Rect) {
+        guideAnchors[target] = GuideAnchor(host, android.graphics.RectF(bounds.left, bounds.top, bounds.right, bounds.bottom))
     }
 
     private fun createHomePage(): ScrollView = ScrollView(activity).apply {
@@ -743,7 +790,7 @@ internal class MainScreen(
         clipToPadding = false
         isFillViewport = false
         addView(
-            ComposeView(activity).apply {
+            ComposeView(activity).apply homeHost@ {
                 id = R.id.home_content
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -764,7 +811,8 @@ internal class MainScreen(
                             onWifiSettings = onOpenWifiSettings,
                             onMute = onSetMuted,
                             onAudioSettings = { showPage(MainRoute.SETTINGS, focusAudio = true) },
-                            onVox = { showPage(MainRoute.SETTINGS) }
+                            onVox = { showPage(MainRoute.SETTINGS) },
+                            onGuideAnchor = { target, bounds -> recordGuideAnchor(this@homeHost, target, bounds) }
                         )
                     }
                 }
@@ -860,7 +908,7 @@ internal class MainScreen(
         clipToPadding = false
         isFillViewport = false
         addView(
-            ComposeView(activity).apply {
+            ComposeView(activity).apply discoverHost@ {
                 id = R.id.discover_content
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -880,6 +928,7 @@ internal class MainScreen(
                             onRescan = onRequestDiscoveryRefresh,
                             onSelectPresence = ::showPresenceDetails,
                             onConnect = ::connectFromDiscover,
+                            onGuideAnchor = { target, bounds -> recordGuideAnchor(this@discoverHost, target, bounds) },
                             onManagePairing = ::showPairingManagement
                         )
                     }
@@ -1214,6 +1263,11 @@ internal class MainScreen(
                 onSendFeedback(currentVersionName())
             }
             .setNegativeButton(R.string.help_close, null)
+            .setNeutralButton(R.string.guide_replay) { _, _ ->
+                dismissHelpDialog()
+                showPage(MainRoute.HOME)
+                onboarding?.replay()
+            }
             .create()
             .also { dialog ->
                 dialog.setOnDismissListener { helpDialog = null }

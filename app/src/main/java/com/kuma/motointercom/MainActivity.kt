@@ -190,7 +190,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     true
                 }
             },
-            onSendFeedback = ::sendFeedback
+            onSendFeedback = ::sendFeedback,
+            onboardingPreferences = OnboardingPreferences(this)
         )
         setContentView(screen.root)
         registerPlatformBackCallback()

@@ -1,0 +1,14 @@
+{
+  "base": "0a67901e0513e5797facf70265bbb64cca6a80cc",
+  "branch": "feat/first-run-onboarding",
+  "state": "HEAD plus uncommitted onboarding changes",
+  "suites": 70,
+  "tests": 566.0,
+  "failures": 0.0,
+  "errors": 0.0,
+  "skipped": 0.0,
+  "lintErrors": 0,
+  "lintWarnings": 70,
+  "apkSha256": "BF40D2BF5A38997B0A5755857E12B257E7FE826DB9391B4070723C6C864EEF3A",
+  "guideSha256": "DE8146366EB54FFF632B1C30AC33F1764C03EB3E29914750FBBD1C73DF9BF0DD"
+}

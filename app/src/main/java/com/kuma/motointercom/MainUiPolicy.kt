@@ -94,7 +94,8 @@ internal fun homePresentation(
     supplementalText: String? = null,
     lastStoppingPeerName: String? = null,
     discoverCtaNeedsReselect: Boolean = false,
-    permissionRequestAttempted: Boolean = false
+    permissionRequestAttempted: Boolean = false,
+    audioReady: Boolean = true
 ): HomePresentation {
     val primaryAction = primaryIntercomAction(state)
     val primaryEnabled = when (state) {
@@ -103,9 +104,10 @@ internal fun homePresentation(
         else -> true
     }
     val showDiscoverCta = state is IntercomState.Discovering
+    val waitingForAudio = state is IntercomState.Connected && !audioReady
     return HomePresentation(
-        primaryText = state.primaryText(),
-        detailText = state.detailText(),
+        primaryText = if (waitingForAudio) "正在等待音频就绪" else state.primaryText(),
+        detailText = if (waitingForAudio) "等待远端首帧与本地音频路由确认" else state.detailText(),
         primaryAction = primaryAction,
         primaryActionLabel = state.primaryActionLabel(),
         primaryActionEnabled = primaryEnabled,
@@ -132,13 +134,14 @@ internal fun homePresentation(
             ?.plannedTransports
             ?.joinToString(" + ", transform = Transport::displayName)
             ?: "待建立",
-        connectedTransportText = (state as? IntercomState.Connected)
-            ?.transport
-            ?.displayName()
-            ?: "未连接",
+        connectedTransportText = when {
+            waitingForAudio -> "已建立，待音频确认"
+            state is IntercomState.Connected -> state.transport.displayName()
+            else -> "未连接"
+        },
         webRtcText = when (state) {
             is IntercomState.Connecting -> "建立中"
-            is IntercomState.Connected -> "已连接"
+            is IntercomState.Connected -> if (waitingForAudio) "媒体已连接，待音频" else "已连接"
             else -> "未连接"
         },
         audioSourceText = audioSourceText,

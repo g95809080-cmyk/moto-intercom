@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="onboarding_overlay" type="id" />
+    <item name="onboarding_image" type="id" />
+    <item name="onboarding_intro_scroll" type="id" />
+    <item name="onboarding_begin" type="id" />
+    <item name="onboarding_skip" type="id" />
+    <item name="onboarding_action" type="id" />
+    <item name="onboarding_target" type="id" />
+</resources>

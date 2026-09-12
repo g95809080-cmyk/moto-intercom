@@ -98,7 +98,8 @@ internal fun MotoComHomeScreen(
     onMute: (Boolean) -> Unit,
     onAudioSettings: () -> Unit,
     onVox: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> }
 ) {
     val pageHorizontalPadding = dimensionResource(R.dimen.motocom_page_horizontal_padding)
     val pageVerticalPadding = dimensionResource(R.dimen.motocom_page_vertical_padding)
@@ -132,14 +133,16 @@ internal fun MotoComHomeScreen(
                 state = state,
                 onPrimaryAction = onPrimaryAction,
                 onMute = onMute,
-                onAudioSettings = onAudioSettings
+                onAudioSettings = onAudioSettings,
+                onGuideAnchor = onGuideAnchor
             )
             if (state.showPermissionGrantCta) {
                 Spacer(Modifier.height(gap))
                 SecondaryAction(
                     stringResource(R.string.home_permission_grant_cta),
                     onPermissionGrant,
-                    "home_permission_grant_cta"
+                    "home_permission_grant_cta",
+                    Modifier.guideAnchor(GuideTarget.PERMISSION, onGuideAnchor)
                 )
             }
             if (state.showPermissionSettingsCta) {
@@ -147,7 +150,8 @@ internal fun MotoComHomeScreen(
                 SecondaryAction(
                     stringResource(R.string.home_permission_settings_cta),
                     onPermissionSettings,
-                    "home_permission_settings_cta"
+                    "home_permission_settings_cta",
+                    Modifier.guideAnchor(GuideTarget.PERMISSION_SETTINGS, onGuideAnchor)
                 )
             }
             if (state.showWifiSettingsCta) {
@@ -155,7 +159,8 @@ internal fun MotoComHomeScreen(
                 SecondaryAction(
                     stringResource(R.string.wifi_settings_cta),
                     onWifiSettings,
-                    "home_wifi_settings_cta"
+                    "home_wifi_settings_cta",
+                    Modifier.guideAnchor(GuideTarget.WIFI, onGuideAnchor)
                 )
             }
             Spacer(Modifier.height(gap))
@@ -374,7 +379,8 @@ private fun MainControls(
     state: HomeScreenUiState,
     onPrimaryAction: () -> Unit,
     onMute: (Boolean) -> Unit,
-    onAudioSettings: () -> Unit
+    onAudioSettings: () -> Unit,
+    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit
 ) {
     val disabledDescription = state.disabledReason?.let {
         stringResource(
@@ -425,6 +431,7 @@ private fun MainControls(
                         }
                     )
                     .testTag("home_primary_button")
+                    .guideAnchor(GuideTarget.START, onGuideAnchor)
                     .semantics(mergeDescendants = true) {
                         if (!state.primaryActionEnabled) {
                             disabled()
@@ -534,9 +541,9 @@ private fun VoxState(text: String, active: Boolean, modifier: Modifier) {
 }
 
 @Composable
-private fun SecondaryAction(text: String, onClick: () -> Unit, testTag: String) {
+private fun SecondaryAction(text: String, onClick: () -> Unit, testTag: String, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = dimensionResource(R.dimen.motocom_control_min_height))
             .clip(RoundedCornerShape(24.dp))

@@ -73,7 +73,8 @@ internal fun MotoComDiscoverScreen(
     onSelectPresence: (RiderPresence) -> Unit,
     onConnect: (RiderPresence) -> Unit,
     onManagePairing: (RiderPresence) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> }
 ) {
     val presentation = state.presentation
     val rescanDescription = stringResource(
@@ -149,6 +150,7 @@ internal fun MotoComDiscoverScreen(
                 .padding(top = 14.dp)
                 .height(56.dp)
                 .testTag("discover_rescan_button")
+                .guideAnchor(GuideTarget.SCAN, onGuideAnchor)
                 .semantics { contentDescription = rescanDescription },
             colors = ButtonDefaults.buttonColors(
                 containerColor = colorResource(R.color.motocom_surface),
