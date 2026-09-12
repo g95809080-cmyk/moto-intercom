@@ -134,6 +134,7 @@ internal class WifiDirectTunnel(
     private var groupRemovalGeneration = 0
     private var lifecycleGeneration = 0
     private var serviceDiscoveryReady = false
+    private var startupDiscoveryPending = false
     private val startupReadiness = WifiDirectStartupReadiness(
         startupAttempt = initialTargetAttempt,
         clock = monotonicClock,
@@ -144,18 +145,7 @@ internal class WifiDirectTunnel(
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
-                    val enabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) ==
-                        WifiP2pManager.WIFI_P2P_STATE_ENABLED
-                    val shouldRestartSetup = setupRecoveryGate.updateP2pEnabled(enabled)
-                    if (!enabled) {
-                        resetDiscoveryCandidates()
-                        postError(IllegalStateException("Wi-Fi Direct 未开启"))
-                    } else if (shouldRestartSetup && running) {
-                        Log.d(TAG, "Wi-Fi Direct 已恢复，重新初始化服务发现")
-                        setupServiceDiscovery()
-                    }
-                }
+                WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> handleP2pStateChanged(intent)
 
                 WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> requestPeers()
 
@@ -194,6 +184,7 @@ internal class WifiDirectTunnel(
     fun start() {
         lifecycleGeneration++
         running = true
+        startupDiscoveryPending = true
         if (!hasRequiredPermissions(appContext)) {
             postError(SecurityException("缺少 Wi-Fi Direct 运行时权限"))
             return
@@ -201,7 +192,7 @@ internal class WifiDirectTunnel(
 
         initP2p()
         registerReceiver()
-        clearUntrustedGroupBeforeDiscovery()
+        startStartupDiscoveryIfReady()
     }
 
     @SuppressLint("MissingPermission")
@@ -696,13 +687,46 @@ internal class WifiDirectTunnel(
             if (running) {
                 setupRecoveryGate.cancel()
                 initP2p()
-                clearUntrustedGroupBeforeDiscovery()
+                if (setupRecoveryGate.isEnabled) {
+                    if (startupDiscoveryPending) {
+                        startStartupDiscoveryIfReady()
+                    } else {
+                        clearUntrustedGroupBeforeDiscovery()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startStartupDiscoveryIfReady() {
+        if (!running || !startupDiscoveryPending || !setupRecoveryGate.isEnabled) return
+        startupDiscoveryPending = false
+        clearUntrustedGroupBeforeDiscovery()
+    }
+
+    private fun handleP2pStateChanged(intent: Intent) {
+        val enabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) ==
+            WifiP2pManager.WIFI_P2P_STATE_ENABLED
+        val shouldRestartSetup = setupRecoveryGate.updateP2pEnabled(enabled)
+        if (!enabled) {
+            resetDiscoveryCandidates()
+            postError(IllegalStateException("Wi-Fi Direct 未开启"))
+        } else if (shouldRestartSetup && running) {
+            Log.d(TAG, "Wi-Fi Direct 已恢复，重新初始化服务发现")
+            if (startupDiscoveryPending) {
+                startStartupDiscoveryIfReady()
+            } else {
+                setupServiceDiscovery()
             }
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun clearUntrustedGroupBeforeDiscovery() {
+        if (!setupRecoveryGate.isEnabled) {
+            Log.d(TAG, "startup P2P setup waiting for Wi-Fi Direct enabled state")
+            return
+        }
         val m = manager ?: return
         val c = channel ?: return
         val taskContext = currentTargetContext()
@@ -763,7 +787,7 @@ internal class WifiDirectTunnel(
 
     @SuppressLint("MissingPermission")
     private fun setupServiceDiscovery() {
-        if (!running) return
+        if (!running || !setupRecoveryGate.isEnabled) return
         val setup = setupRecoveryGate.beginSetup() ?: return
         val m = manager ?: return
         val c = channel ?: return
@@ -798,8 +822,9 @@ internal class WifiDirectTunnel(
             m.clearLocalServices(c, setupAction(setup, "清理本机 P2P 服务失败", onSuccess = {
                 m.addLocalService(c, serviceInfo, setupAction(setup, "发布 MotoCom P2P 服务失败", onSuccess = {
                     Log.d(TAG, "local service publish success: $record")
-                    m.clearServiceRequests(c, setupAction(setup, "清理 P2P 服务请求失败", onSuccess = {
-                        m.addServiceRequest(c, request, setupAction(setup, "添加 MotoCom 服务请求失败", onSuccess = {
+                        m.clearServiceRequests(c, setupAction(setup, "清理 P2P 服务请求失败", onSuccess = {
+                            m.addServiceRequest(c, request, setupAction(setup, "添加 MotoCom 服务请求失败", onSuccess = {
+                            setupRecoveryGate.markSetupSucceeded(setup)
                             serviceDiscoveryReady = true
                             Log.d(TAG, "service request add success type=$SERVICE_TYPE")
                             if (startupReadiness.reportServiceDiscoveryReady(ingressAttempt)) {
@@ -957,13 +982,20 @@ internal class WifiDirectTunnel(
             addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val initialState = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             appContext.registerReceiver(receiver, filter)
         }
         receiverRegistered = true
+        if (
+            initialState?.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) ==
+                WifiP2pManager.WIFI_P2P_STATE_ENABLED &&
+                !setupRecoveryGate.isEnabled
+        ) {
+            handleP2pStateChanged(initialState)
+        }
     }
 
     private fun unregisterReceiver() {
@@ -1417,18 +1449,13 @@ internal class WifiDirectTunnel(
                                 delay
                             )
                         } else if (mayRediscover) {
-                            val settleDelay = boundedTaskDelay(taskContext, GROUP_REMOVAL_SETTLE_MS)
-                                ?: return
-                            Log.w(TAG, "removeGroup BUSY exhausted, rediscover anyway: reason=$reason")
+                            Log.w(TAG, "removeGroup BUSY exhausted, recovery pending: reason=$reason")
+                            setupRecoveryGate.cancel()
                             resetDiscoveryCandidates(taskContext)
                             state = State.DISCOVERING
-                            mainHandler.postDelayed(
-                                {
-                                    if (taskContext == null || isTargetedContextCurrent(taskContext)) {
-                                        setupServiceDiscovery()
-                                    }
-                                },
-                                settleDelay
+                            postDiscoveryStatus(
+                                BUSY_EXHAUSTED_STATUS,
+                                taskContext
                             )
                         } else {
                             finishGroupRemoval(taskContext, removalGeneration)
@@ -1878,6 +1905,13 @@ internal class WifiDirectTunnel(
                         setupServiceDiscovery()
                     }
                 }, delay)
+            } else if (setupRecoveryGate.isBusyRetryExhausted(setup)) {
+                Log.e(TAG, "setup BUSY retry exhausted; waiting for a new discovery cycle")
+                setupRecoveryGate.cancel()
+                resetTunnelOnly(taskContext)
+                resetDiscoveryCandidates(taskContext)
+                state = State.DISCOVERING
+                postDiscoveryStatus(BUSY_EXHAUSTED_STATUS, taskContext)
             }
         },
         isCurrent = { isSetupCurrent(setup) },
@@ -2177,6 +2211,7 @@ internal class WifiDirectTunnel(
         private const val PENDING_DISCOVERY_RETRY_DELAY_MS = 1_500L
         private const val PENDING_DISCOVERY_RETRY_COUNT = 4
         private const val BUSY_STATUS = "无线占用中，正在自动复位重试..."
+        private const val BUSY_EXHAUSTED_STATUS = "Wi-Fi Direct 暂时忙，请稍后重新扫描"
         private const val NO_MOTOCOM_PEER_STATUS = "发现附近 P2P 设备，但未发现 MotoCom 车友"
         private const val TAG = "MotoComP2P"
         private const val APP_ID = "MotoCom"
