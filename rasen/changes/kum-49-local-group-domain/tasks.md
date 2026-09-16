@@ -8,4 +8,7 @@
 ## 3. 验证与审查
 - [x] 3.1 定向测试、全量 JVM、Lint、Debug build
 - [x] 3.2 固定 SHA 架构审查并关闭 P0/P1
-- [ ] 3.3 小步提交、Draft PR 与 Linear 证据回填
+- [x] 3.3 小步提交、Draft PR 与 Linear 证据回填
+
+Draft PR: https://github.com/g95809080-cmyk/moto-intercom/pull/24
+Linear KUM-49: In Review. CI以PR检查为准；不归档或合并。
