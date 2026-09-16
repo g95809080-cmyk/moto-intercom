@@ -19,4 +19,3 @@ Non-Goals：不改变 SessionOrchestrator/Service/音频引擎，不增加 wire 
 ## Risks / Trade-offs
 
 未接生产路径 → 本次APK仍无多人入口。验证证据只是受信抽象 → 禁止以模型测试声称真实网络认证或听音已通过。等待记录/限制仅运行时保存 → 不恢复跨进程房间。
-
