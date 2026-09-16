@@ -1,0 +1,18 @@
+{
+  "suites": 77,
+  "tests": 601,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "onboarding_tests": 9,
+  "lint": {
+    "Error": 0,
+    "Fatal": 0,
+    "Warning": 75
+  },
+  "artifacts": {
+    "app\\build\\outputs\\apk\\debug\\app-debug.apk": "69f2502a933d60fe9b9ba95cba2499265b05e923d6f1cc32777b981a7e330135",
+    "app\\build\\outputs\\apk\\androidTest\\debug\\app-debug-androidTest.apk": "50b397e2f040d38be1e6e55fe91dc2eb5cbafdd7dff7fa8569c6596a5d502d25"
+  },
+  "source_manifest_sha256": "7800f4a9b6d778d84a3f54502a4f43261332936ec7b822c2cad86df84a04d0d9"
+}

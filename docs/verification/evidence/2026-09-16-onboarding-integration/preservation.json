@@ -1,0 +1,45 @@
+{
+  "backup": "C:\\Users\\kuma\\Documents\\摩托对讲机\\output\\onboarding-integration-backup-20260916-152356",
+  "stash": "00c77ef2cca9a6b95cab794592f61c95d78c1315",
+  "original_paths": 900,
+  "byte_identical_or_still_deleted": 893,
+  "changed_original_paths": [
+    {
+      "path": "README.md",
+      "before": "9cc43f460ffac725a435893792ee7b8ce00576818ec2756327e6f5c4dae65664",
+      "after": "8e01976c5393d10b299448fb92b9d9d0b20b29510f302fa2cd49e0bd80d94e23"
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "before": "498ea8fccfb8d1d0d7260950f54b23084c9090d547e71586d0ea193ab0063e93",
+      "after": "a5e9e476356c1243c4fefa38da7900b1e9bb3bc83330f44bcdaeec618d22b02d"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiscoverScreen.kt",
+      "before": "6865d96acea44caca9a208cee3e68822875cef1a290af1c5b798fb0f819c1c03",
+      "after": "91df1e79c108fcd16147544dbcef8c652040e021509ca16864b3d961c7ab47fa"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/HomeScreen.kt",
+      "before": "555c74769fa2b714525815ddae53606c9ea2a915a132fa82fe4c74222a85136d",
+      "after": "94a824fbb885b03498859093ebb971c8505df7c5df34a8a0d986168b2b75c85b"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainActivity.kt",
+      "before": "840adb48e91233336dc5956d65fd0dc325bb307b9f29e06cbdf0a3a91de6be3e",
+      "after": "6ba072fe8c0856f51efa2dc0d903ae04f6e9e524a7b4768e5b441e3b31440e09"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainScreen.kt",
+      "before": "880f0cd3594da8c58633e45ee9460afb87df81965dd4766655738bde7a6942b4",
+      "after": "db4f7057d883a2ca1fab7f7ef8824a8f6978549ad93faf590ff7201ed0974295"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "before": "a5a4ef0b3e429616f02f4c6b11a1e000afd2d187b43f893f42341ba345efd3ad",
+      "after": "950247660bbbc3a362f45fc7cabeb13d63624dfc3c26f73083fc29c4266dc594"
+    }
+  ],
+  "ios_paths": 35,
+  "unexpected_changes": []
+}

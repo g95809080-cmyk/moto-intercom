@@ -1,6 +1,8 @@
 package com.kuma.motointercom
 
+import android.Manifest
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.view.View
@@ -124,6 +126,45 @@ class OnboardingTest {
         assertEquals("打开系统权限设置", next.root.findViewById<Button>(R.id.onboarding_action).text.toString())
     }
 
+    @Test fun bluetoothDenialRequiresSettingsAndAllCoreGrantsBeforeGuidedStart() {
+        val api = Build.VERSION.SDK_INT
+        val granted = PermissionPolicy.corePermissions(api).toMutableSet().apply {
+            removeAll(PermissionPolicy.bluetoothPermissions(api).toSet())
+        }
+        var requests = 0
+        var settings = 0
+        var starts = 0
+        val screen = fixture(onStart = { starts++ }, onPermission = { requests++ },
+            onPermissionSettings = { settings++ }).second
+        screen.setIntercomState(IntercomState.Offline, PermissionPolicy.canStart(api, granted::contains))
+        screen.root.findViewById<View>(R.id.onboarding_begin).performClick()
+        settle(screen)
+        screen.root.findViewById<View>(R.id.onboarding_action).performClick()
+        assertEquals(1, requests)
+        assertEquals(0, starts)
+        screen.markPermissionRequestAttempted()
+        screen.setIntercomState(IntercomState.Offline, PermissionPolicy.canStart(api, granted::contains))
+        settle(screen)
+        assertEquals("打开系统权限设置", screen.root.findViewById<Button>(R.id.onboarding_action).text.toString())
+        screen.root.findViewById<View>(R.id.onboarding_action).performClick()
+        assertEquals(1, settings)
+
+        // Scan/connect alone are insufficient: cross-platform bootstrap also advertises.
+        granted += Manifest.permission.BLUETOOTH_SCAN
+        granted += Manifest.permission.BLUETOOTH_CONNECT
+        screen.setIntercomState(IntercomState.Offline, PermissionPolicy.canStart(api, granted::contains))
+        settle(screen)
+        assertEquals("打开系统权限设置", screen.root.findViewById<Button>(R.id.onboarding_action).text.toString())
+        assertEquals(0, starts)
+        granted += Manifest.permission.BLUETOOTH_ADVERTISE
+        screen.setIntercomState(IntercomState.Offline, PermissionPolicy.canStart(api, granted::contains))
+        settle(screen)
+        assertEquals("启动摩声", screen.root.findViewById<Button>(R.id.onboarding_action).text.toString())
+        screen.root.findViewById<View>(R.id.onboarding_action).performClick()
+        assertEquals(1, starts)
+        assertEquals(OnboardingPhase.TOUR, preferences.load())
+    }
+
     @Test fun incomingDialogHidesGuideWithoutCompletingIt() {
         val fixture = fixture()
         fixture.second.root.findViewById<View>(R.id.onboarding_begin).performClick()
@@ -174,11 +215,11 @@ class OnboardingTest {
         assertEquals(OnboardingPhase.COMPLETE, preferences.load())
     }
 
-    private fun fixture(saved: Bundle? = null, onStart: () -> Unit = {}, onScan: () -> Unit = {}, onPermission: () -> Unit = {}): Pair<org.robolectric.android.controller.ActivityController<ComponentActivity>, MainScreen> {
+    private fun fixture(saved: Bundle? = null, onStart: () -> Unit = {}, onScan: () -> Unit = {}, onPermission: () -> Unit = {}, onPermissionSettings: () -> Unit = {}): Pair<org.robolectric.android.controller.ActivityController<ComponentActivity>, MainScreen> {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup().visible()
         val activity = controller.get()
         val screen = MainScreen(activity, "", saved, onStart, { false }, { true }, onPermission,
-            {}, {}, {}, onRequestDiscoveryRefresh = onScan, onboardingPreferences = preferences)
+            {}, {}, onPermissionSettings, onRequestDiscoveryRefresh = onScan, onboardingPreferences = preferences)
         activity.setContentView(screen.root)
         return controller to screen
     }
