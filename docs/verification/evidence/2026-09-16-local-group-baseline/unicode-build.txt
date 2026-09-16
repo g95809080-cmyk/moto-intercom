@@ -1,0 +1,287 @@
+
+> Configure project :app
+WARNING: The option setting 'android.overridePathCheck=true' is experimental.
+The current default is 'false'.
+Add android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE to the gradle.properties file to suppress this warning.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:parseDebugLocalResources
+> Task :app:generateDebugRFile
+> Task :app:javaPreCompileDebug
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:compileDebugNavigationResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:mergeDebugResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:mergeDebugAssets
+> Task :app:mergeDebugUnitTestManifest
+> Task :app:processDebugUnitTestManifest
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:extractProguardFiles
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:compressDebugAssets
+> Task :app:generateDebugGlobalSynthetics
+> Task :app:checkDebugDuplicateClasses
+> Task :app:desugarDebugFileDependencies
+> Task :app:mergeLibDexDebug
+> Task :app:mergeDebugJniLibFolders
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:processDebugManifestForPackage
+> Task :app:mergeDebugNativeLibs
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libjingle_peerconnection_so.so. Run with --info option to learn more.
+
+> Task :app:processDebugResources
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:kspDebugKotlin
+> Task :app:mergeExtDexDebug
+
+> Task :app:compileDebugKotlin
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:24:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:32:16 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:33:16 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:37:51 'static field SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:59:47 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:60:57 'static field EXTRA_SCO_AUDIO_STATE: String' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:70:34 'static field SCO_AUDIO_STATE_CONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:78:34 'static field SCO_AUDIO_STATE_DISCONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:87:34 'static field SCO_AUDIO_STATE_ERROR: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:507:30 'var isSpeakerphoneOn: Boolean' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:509:38 'var isSpeakerphoneOn: Boolean' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:598:27 'val isBluetoothScoAvailableOffCall: Boolean' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:708:48 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:13:8 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:146:67 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:175:49 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:269:85 'val callState: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2503:14 'fun setPriority(p0: Int): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2503:39 'static field PRIORITY_HIGH: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2508:14 'fun addAction(p0: Int, p1: CharSequence!, p2: PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2509:14 'fun addAction(p0: Int, p1: CharSequence!, p2: PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainActivity.kt:268:41 'fun onBackPressed(): Unit' is deprecated. This method has been deprecated in favor of using the
+      {@link OnBackPressedDispatcher} via {@link #getOnBackPressedDispatcher()}.
+      The OnBackPressedDispatcher controls how back button events are dispatched
+      to one or more {@link OnBackPressedCallback} objects.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainActivity.kt:277:15 'fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)} passing
+      in a {@link RequestMultiplePermissions} object for the {@link ActivityResultContract} and
+      handling the result in the {@link ActivityResultCallback#onActivityResult(Object) callback}.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainActivity.kt:583:17 'fun startActivityForResult(intent: Intent, requestCode: Int): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)}
+      passing in a {@link StartActivityForResult} object for the {@link ActivityResultContract}.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainScreen.kt:515:29 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainScreen.kt:517:25 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainScreen.kt:518:25 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainScreen.kt:522:35 'static field SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/MainScreen.kt:524:35 'var systemUiVisibility: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt:10:7 'class NetworkInfo : Any, Parcelable' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt:158:37 'val isConnected: Boolean' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:generateDebugLintReportModel
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:generateDebugAndroidTestLintModel
+> Task :app:generateDebugUnitTestLintModel
+> Task :app:mergeDebugJavaResource
+> Task :app:dexBuilderDebug
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:lintAnalyzeDebugAndroidTest
+> Task :app:lintAnalyzeDebug
+> Task :app:lintAnalyzeDebugUnitTest
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt:364:33 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt:365:30 'static field EXTRA_SCO_AUDIO_STATE: String' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt:366:30 'static field SCO_AUDIO_STATE_CONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Users/kuma/Documents/摩托对讲机/MotoIntercomApp-local-group/app/src/test/java/com/kuma/motointercom/MainScreenRobolectricTest.kt:1227:44 'fun replaceSystemWindowInsets(p0: Int, p1: Int, p2: Int, p3: Int): WindowInsets' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest' (registered by plugin 'com.android.internal.application').
+> Test process encountered an unexpected problem.
+   > Could not execute test class 'com.kuma.motointercom.AdaptiveWindowTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AdaptiveWindowTest'.
+   > Could not execute test class 'com.kuma.motointercom.AndroidAudioPlatformRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AndroidAudioPlatformRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.AttemptDeadlineSchedulerTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AttemptDeadlineSchedulerTest'.
+   > Could not execute test class 'com.kuma.motointercom.AttemptResourceControllerTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AttemptResourceControllerTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioControlPreferencesRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioControlPreferencesRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioControlStateTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioControlStateTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioRouteControllerRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioRouteControllerRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioRoutePreferencesRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioRoutePreferencesRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioRouteStateTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioRouteStateTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioSessionControllerTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioSessionControllerTest'.
+   > Could not execute test class 'com.kuma.motointercom.AudioSpeakerFallbackRecoveryTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.AudioSpeakerFallbackRecoveryTest'.
+   > Could not execute test class 'com.kuma.motointercom.BoundedLogBufferTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.BoundedLogBufferTest'.
+   > Could not execute test class 'com.kuma.motointercom.CommunicationAudioCoordinatorTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.CommunicationAudioCoordinatorTest'.
+   > Could not execute test class 'com.kuma.motointercom.ConnectionAttemptCoordinatorOwnershipTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.ConnectionAttemptCoordinatorOwnershipTest'.
+   > Could not execute test class 'com.kuma.motointercom.ConnectionAttemptDomainTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.ConnectionAttemptDomainTest'.
+   > Could not execute test class 'com.kuma.motointercom.ConnectionCandidateContextTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.ConnectionCandidateContextTest'.
+   > Could not execute test class 'com.kuma.motointercom.ControlChannelCloseDeadlineSchedulerTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.ControlChannelCloseDeadlineSchedulerTest'.
+   > Could not execute test class 'com.kuma.motointercom.ControlSendCompletionTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.ControlSendCompletionTest'.
+   > Could not execute test class 'com.kuma.motointercom.DiscoverScreenComposeTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.DiscoverScreenComposeTest'.
+   > Could not execute test class 'com.kuma.motointercom.HomeScreenComposeTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.HomeScreenComposeTest'.
+   > Could not execute test class 'com.kuma.motointercom.IncomingConfirmationDeadlineSchedulerTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IncomingConfirmationDeadlineSchedulerTest'.
+   > Could not execute test class 'com.kuma.motointercom.IncomingConfirmationIntentTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IncomingConfirmationIntentTest'.
+   > Could not execute test class 'com.kuma.motointercom.IntercomManagerIdentityTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IntercomManagerIdentityTest'.
+   > Could not execute test class 'com.kuma.motointercom.IntercomRuntimeKeepAliveTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IntercomRuntimeKeepAliveTest'.
+   > Could not execute test class 'com.kuma.motointercom.IntercomServiceRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IntercomServiceRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.IntercomStateMachineTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IntercomStateMachineTest'.
+   > Could not execute test class 'com.kuma.motointercom.IntercomStatusTextTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.IntercomStatusTextTest'.
+   > Could not execute test class 'com.kuma.motointercom.Kum26LogicalNodeAcceptanceTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.Kum26LogicalNodeAcceptanceTest'.
+   > Could not execute test class 'com.kuma.motointercom.Kum34RecoveryResetTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.Kum34RecoveryResetTest'.
+   > Could not execute test class 'com.kuma.motointercom.Kum35ActiveDisconnectTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.Kum35ActiveDisconnectTest'.
+   > Could not execute test class 'com.kuma.motointercom.Kum36SprintFinalAcceptanceTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.Kum36SprintFinalAcceptanceTest'.
+   > Could not execute test class 'com.kuma.motointercom.LanAttemptLeaseTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.LanAttemptLeaseTest'.
+   > Could not execute test class 'com.kuma.motointercom.LanDiscoveryDeviceRegistryTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.LanDiscoveryDeviceRegistryTest'.
+   > Could not execute test class 'com.kuma.motointercom.LegacyIdentityHandshakeTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.LegacyIdentityHandshakeTest'.
+   > Could not execute test class 'com.kuma.motointercom.LocalIdentityStoreTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.LocalIdentityStoreTest'.
+   > Could not execute test class 'com.kuma.motointercom.LogsScreenComposeTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.LogsScreenComposeTest'.
+   > Could not execute test class 'com.kuma.motointercom.MainActivityRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.MainActivityRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.MainScreenRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.MainScreenRobolectricTest'.
+   > Could not execute test class 'com.kuma.motointercom.MainUiPolicyTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.MainUiPolicyTest'.
+   > Could not execute test class 'com.kuma.motointercom.OnboardingTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.OnboardingTest'.
+   > Could not execute test class 'com.kuma.motointercom.P2pServiceInstanceCodecTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.P2pServiceInstanceCodecTest'.
+   > Could not execute test class 'com.kuma.motointercom.PairingRepositoryTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.PairingRepositoryTest'.
+   > Could not execute test class 'com.kuma.motointercom.PendingCloseOwnerTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.PendingCloseOwnerTest'.
+   > Could not execute test class 'com.kuma.motointercom.PermissionPolicyTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.PermissionPolicyTest'.
+   > Could not execute test class 'com.kuma.motointercom.PreferredRiderAutoConnectPolicyTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.PreferredRiderAutoConnectPolicyTest'.
+   > Could not execute test class 'com.kuma.motointercom.PresenceAggregatorTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.PresenceAggregatorTest'.
+   > Could not execute test class 'com.kuma.motointercom.RecoveryCleanupCoordinatorTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.RecoveryCleanupCoordinatorTest'.
+   > Could not execute test class 'com.kuma.motointercom.RecoveryDiscoveryReuseTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.RecoveryDiscoveryReuseTest'.
+   > Could not execute test class 'com.kuma.motointercom.RecoveryTransportStartupOrderingTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.RecoveryTransportStartupOrderingTest'.
+   > Could not execute test class 'com.kuma.motointercom.RiderAudioEngineCleanupTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.RiderAudioEngineCleanupTest'.
+   > Could not execute test class 'com.kuma.motointercom.RuntimeAudioCallbackGateTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.RuntimeAudioCallbackGateTest'.
+   > Could not execute test class 'com.kuma.motointercom.SessionGenerationTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SessionGenerationTest'.
+   > Could not execute test class 'com.kuma.motointercom.SessionIdentifiersTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SessionIdentifiersTest'.
+   > Could not execute test class 'com.kuma.motointercom.SessionOrchestratorTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SessionOrchestratorTest'.
+   > Could not execute test class 'com.kuma.motointercom.SettingsScreenComposeTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SettingsScreenComposeTest'.
+   > Could not execute test class 'com.kuma.motointercom.SignalingControlCoordinatorTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SignalingControlCoordinatorTest'.
+   > Could not execute test class 'com.kuma.motointercom.SignalingProtocolTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SignalingProtocolTest'.
+   > Could not execute test class 'com.kuma.motointercom.SignalingProtocolV2Test'.
+      > Failed to execute test class: 'com.kuma.motointercom.SignalingProtocolV2Test'.
+   > Could not execute test class 'com.kuma.motointercom.SignalingSessionV2Test'.
+      > Failed to execute test class: 'com.kuma.motointercom.SignalingSessionV2Test'.
+   > Could not execute test class 'com.kuma.motointercom.SignalingV2TypesTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SignalingV2TypesTest'.
+   > Could not execute test class 'com.kuma.motointercom.SyntheticAudioSourceIsolationTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.SyntheticAudioSourceIsolationTest'.
+   > Could not execute test class 'com.kuma.motointercom.TransportRaceDomainTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.TransportRaceDomainTest'.
+   > Could not execute test class 'com.kuma.motointercom.VoxGateTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.VoxGateTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectCloseSequenceTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectCloseSequenceTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectGroupValidationGateTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectGroupValidationGateTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectPeerRegistryTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectPeerRegistryTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectPendingDiscoveryRecoveryTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectPendingDiscoveryRecoveryTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectSetupRecoveryGateTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectSetupRecoveryGateTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectSignalingSocketTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectSignalingSocketTest'.
+   > Could not execute test class 'com.kuma.motointercom.WifiDirectTunnelIdentityRobolectricTest'.
+      > Failed to execute test class: 'com.kuma.motointercom.WifiDirectTunnelIdentityRobolectricTest'.
+
+* Try:
+> Check common problems https://docs.gradle.org/9.5.0/userguide/java_testing.html#sec:java_testing_troubleshooting.
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 2m 18s
+55 actionable tasks: 55 executed
