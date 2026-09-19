@@ -8,5 +8,5 @@
 ## 3. Verification
 - [x] 3.1 Real crypto/bootstrap and loopback control tests
 - [x] 3.2 Writer, stale-channel, capacity, recovery and audio tests
-- [ ] 3.3 Full tests, lint, build and fixed-SHA source review
+- [x] 3.3 Full tests, lint, build and fixed-SHA source review (694 tests; lint 0 errors/77 warnings; ef4897d APPROVED)
 - [ ] 3.4 Draft PR, cloud CI and Linear evidence
