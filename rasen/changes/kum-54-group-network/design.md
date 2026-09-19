@@ -12,6 +12,10 @@ KUM-54，Base 5d1c427。承接已确认 PRD 和 KUM-53。用户暂无实体设�
 - Wi-Fi 房主先确认不存在其他 P2P group，再 createGroup，等 group info + connection info 都确认本机 GO 后输出私有网络描述。Wi-Fi P2P 官方 getNetworkName/getPassphrase 明确用于 legacy client 连接，所以不用可能匿名的 GO MAC。
 - API29+ 成员通过 WifiNetworkSpecifier SSID/WPA2 passphrase + requestNetwork 等系统确认；结果返回 Network，后续 socket 使用 network.bindSocket，禁止绑定整个进程。API23–28 使用 legacy WifiConfiguration，追踪本 adapter 新建 networkId，成功确认当前 SSID、获取对应 Wi-Fi Network 后才返回；退出仅移除自己的新增配置并恢复前网络，决不删除第三方网络。
 - 每个网络适配器 single-use，关闭先失效回调再释放自身 request/group；晚到 createGroup 成功须清理本次 group，不能影响后续 group owner。上层必须等 close completion 再创建下一网络 owner。建网截止 45 秒，close 最终回调有截止。双人适配器不修改。
+- 关闭结果严格区分 RELEASED 与 UNKNOWN。进程级唯一 GO 所有权协调器保留 UNKNOWN lease 并拒绝下一次 acquire；超时不释放 lease。create 请求尚无终态时，即使查询暂时没有 group 也不能认定释放。旧 create 回调只能在仍持有同一 lease 时触发清理；removeGroup 成功才释放，失败继续 UNKNOWN。重新查询恢复仅在 create 已终态且同一 lease 仍持有时允许；无法确认则提示用户切换 Wi-Fi 后显式重试，不能自动接管。后续 Service 模式互斥也须等待 RELEASED，不能只等回调发生。
+- Legacy 客户端退出只在当前 networkId 仍等于自己新增配置时恢复原网络；若用户已切网，不覆盖用户选择。移除仅限本次 addNetwork 返回 ID，启动前有同名配置则复用但不改写，退出不删除复用配置。
+- BLE exchange 指一个连接期限内的顺序请求/响应，公开描述、PAKE 各轮及加密网络描述共用20秒总期限。prepared write、非零 ATT offset、未知 characteristic、无响应写拒绝；消息内 offset 与 ATT offset 分开。完整响应被读完之前不接受新请求，迟到 reply 需匹配 connection token + request counter。
+- 平台前置检查：API31+ BLUETOOTH_SCAN/ADVERTISE/CONNECT；23–30 BLUETOOTH/ADMIN + FINE_LOCATION/位置开关；Wi-Fi API33+ NEARBY_WIFI_DEVICES、旧版 FINE_LOCATION/位置开关；另需 Wi-Fi/network state/change 普通权限。检查蓝牙开启、BLE scanner/advertiser 非空、isMultipleAdvertisementSupported；Wi-Fi 开启与 P2P manager 可用。失败显式反馈，无自动开系统开关。
 
 ## Risks / Trade-offs
 ATT MTU23 分片低吞吐，最坏握手性能须设备测量，超过20秒显式失败；不声称完成 RF 或四设备共存验证。Legacy Wi-Fi 系统切网和 Wi-Fi Direct 客户端隔离仍需设备验收。单元测试证明边界和生命周期策略，Android编译证明API可用，不代替硬件结果。
