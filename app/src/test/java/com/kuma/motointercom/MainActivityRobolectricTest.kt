@@ -22,6 +22,32 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MainActivityRobolectricTest {
+    @Test
+    fun skippedOnboardingPermissionResultStartsServiceOnlyAfterActivityResumes() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        // No real service binder in this test; verify only the foreground-start intent ordering.
+        shadowOf(app).setThrowInBindService(SecurityException("No test service binder"))
+        OnboardingPreferences(app).save(OnboardingPhase.COMPLETE)
+        val lifecycle = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = lifecycle.get()
+        (activity.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager).isWifiEnabled = true
+        shadowOf(activity.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager).setLocationEnabled(true)
+        shadowOf(activity.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager)
+            .setIgnoringBatteryOptimizations(activity.packageName, true)
+        MainActivity::class.java.getDeclaredMethod("startIntercom").apply { isAccessible = true }.invoke(activity)
+        val request = shadowOf(activity).lastRequestedPermission
+        assertEquals(StartupAccessController.PERMISSIONS, request.requestCode)
+        assertEquals(null, shadowOf(activity).nextStartedService)
+        lifecycle.pause()
+        shadowOf(app).grantPermissions(*request.requestedPermissions)
+        activity.onRequestPermissionsResult(request.requestCode, request.requestedPermissions,
+            IntArray(request.requestedPermissions.size) { android.content.pm.PackageManager.PERMISSION_GRANTED })
+        assertEquals(null, shadowOf(activity).nextStartedService)
+        lifecycle.resume()
+        assertNotNull(shadowOf(activity).nextStartedService)
+        lifecycle.pause().stop().destroy()
+    }
+
     private fun clickBottomNavigation(activity: MainActivity, id: Int) {
         screen(activity).root.findViewById<View>(id).performClick()
         shadowOf(Looper.getMainLooper()).idle()

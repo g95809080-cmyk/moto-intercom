@@ -23,6 +23,12 @@ import java.util.UUID
 
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
 internal class MainActivity : ComponentActivity(), IntercomService.Listener {
+    private val startupAccess by lazy {
+        StartupAccessController(this,
+            status = { screen.setPermissionStatus(it); screen.appendLog(it) },
+            refresh = { refreshCorePermissionPresentation(); refreshOptionalPermissionPresentation(); refreshBackgroundAccess() },
+            start = { startIntercomRuntime() })
+    }
     private lateinit var screen: MainScreen
     private var intercomService: IntercomService? = null
     private var bindingRegistered = false
@@ -82,6 +88,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        startupAccess.restore(savedInstanceState)
         preferredAudioControls = audioControlPreferences.load()
         preferredAudioRoute = audioRoutePreferences.load()
         automaticReconnectEnabled = prefs.getBoolean(KEY_AUTOMATIC_RECONNECT_ENABLED, true)
@@ -131,7 +138,13 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 if (service == null) {
                     showServiceUnavailable()
                 } else {
-                    service.requestDiscoveryRefresh()
+                    if (locationEnabled(this) && hasCorePermissions()) service.requestDiscoveryRefresh()
+                    else if (!hasCorePermissions()) openAppPermissionSettings()
+                    else {
+                        screen.setStatus(StartupAccessController.LOCATION_REQUIRED)
+                        runCatching { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
+                            .onFailure { openAppPermissionSettings() }
+                    }
                 }
             },
             onSaveRiderName = { name ->
@@ -191,6 +204,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 }
             },
             onSendFeedback = ::sendFeedback,
+            onBackgroundSettings = { startupAccess.requestBackground() },
             onboardingPreferences = OnboardingPreferences(this)
         )
         setContentView(screen.root)
@@ -202,6 +216,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(KEY_PROCESS_SESSION_TOKEN, PROCESS_SESSION_TOKEN)
+        startupAccess.save(outState)
         screen.saveState(outState)
         super.onSaveInstanceState(outState)
     }
@@ -230,6 +245,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onPostResume() {
         super.onPostResume()
+        startupAccess.onResume()
         // Focus restoration for an EditText can move its ScrollView after
         // onCreate's restore pass; apply the saved route position once more.
         screen.onWindowSizeChanged()
@@ -258,6 +274,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     override fun onDestroy() {
+        startupAccess.close()
         unregisterPlatformBackCallback()
         super.onDestroy()
     }
@@ -275,6 +292,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (startupAccess.onPermissionsResult(requestCode)) return
         when (requestCode) {
             REQUEST_CORE_PERMISSIONS -> {
                 refreshCorePermissionPresentation()
@@ -477,15 +495,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     private fun requestCorePermissions() {
         screen.markPermissionRequestAttempted()
-        val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
-        if (missing.isEmpty()) {
-            refreshCorePermissionPresentation()
-            refreshOptionalPermissionPresentation()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            screen.setIntercomState(intercomState, false)
-            screen.setPermissionStatus(PERMISSION_REQUESTING_STATUS)
-            requestPermissions(missing.toTypedArray(), REQUEST_CORE_PERMISSIONS)
-        }
+        startupAccess.begin()
     }
 
     private fun refreshOptionalPermissionPresentation() {
@@ -508,27 +518,24 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     private fun startIntercom(): Boolean {
-        val canStart = hasCorePermissions()
-        val wifiAvailable = if (canStart) {
-            @Suppress("DEPRECATION")
-            (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).isWifiEnabled
-        } else {
-            true
-        }
-        when (startPrecondition(canStart, wifiAvailable)) {
-            StartPrecondition.MISSING_CORE_PERMISSION -> {
-                screen.setPermissionStatus("启动对讲需要录音和电话状态权限")
-                requestCorePermissions()
-                return false
-            }
-            StartPrecondition.WIFI_UNAVAILABLE -> {
-                showWifiUnavailable()
-                openWifiSettings()
-                return false
-            }
-            StartPrecondition.READY -> screen.setWifiUnavailable(false)
-        }
+        startupAccess.begin()
+        return false // Only the actual service start consumes the debounce window.
+    }
 
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        startupAccess.onActivityResult(requestCode)
+    }
+
+    private fun refreshBackgroundAccess() {
+        screen.setBackgroundAccess(backgroundAllowed(this))
+    }
+
+    private fun startIntercomRuntime(): Boolean {
+        if (intercomState != IntercomState.Offline) return false
+        if (!hasCorePermissions() || !locationEnabled(this)) return false
+        lastToggleElapsed = SystemClock.elapsedRealtime()
         val riderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty()
         val intent = IntercomService.startIntent(
             context = this,
