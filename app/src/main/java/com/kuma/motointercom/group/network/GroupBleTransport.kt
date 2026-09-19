@@ -57,6 +57,7 @@ internal class GroupBleDiscovery(
     private val onError: (String) -> Unit
 ) : Closeable {
     private val handler = Handler(Looper.getMainLooper())
+    private val ingress = GroupBoundedCallbacks({ action -> handler.post { action() }; Unit }, ::fail)
     private val candidates = linkedMapOf<String, GroupBleCandidate>()
     private var scanner: BluetoothLeScanner? = null
     private var started = false
@@ -65,14 +66,14 @@ internal class GroupBleDiscovery(
         if (!closed) { val result = candidates.values.toList(); close(); onFinished(result) }
     }
     private val callback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult) { handler.post {
+        override fun onScanResult(callbackType: Int, result: ScanResult) { ingress.post {
             if (!closed) runCatching {
                 val address = result.device.address
                 if (address in candidates || candidates.size < 16)
                     candidates[address] = GroupBleCandidate(result.device, result.rssi)
             }.onFailure { fail() }
         } }
-        override fun onScanFailed(errorCode: Int) { handler.post { fail() } }
+        override fun onScanFailed(errorCode: Int) { ingress.post { fail() } }
     }
     fun start() {
         check(Looper.myLooper() == handler.looper && !started && !closed)
@@ -89,6 +90,7 @@ internal class GroupBleDiscovery(
         check(Looper.myLooper() == handler.looper)
         if (closed) return
         closed = true
+        ingress.close()
         handler.removeCallbacksAndMessages(null)
         runCatching { scanner?.stopScan(callback) }
         scanner = null; candidates.clear()
@@ -114,6 +116,7 @@ internal class GroupBleServer(
         lateinit var deadline: Runnable
     }
     private val handler = Handler(Looper.getMainLooper())
+    private val ingress = GroupBoundedCallbacks({ action -> handler.post { action() }; Unit }, ::fail)
     private val budget = GroupBleBudget(SystemClock::elapsedRealtime)
     private val peers = mutableMapOf<String, Peer>()
     private var server: BluetoothGattServer? = null
@@ -122,13 +125,13 @@ internal class GroupBleServer(
     private var closed = false
     private val startupTimeout = Runnable { fail() }
     private val advertiseCallback = object : AdvertiseCallback() {
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) { handler.post {
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) { ingress.post {
             if (!closed) { handler.removeCallbacks(startupTimeout); onReady() }
         } }
-        override fun onStartFailure(errorCode: Int) { handler.post { fail() } }
+        override fun onStartFailure(errorCode: Int) { ingress.post { fail() } }
     }
     private val callback = object : BluetoothGattServerCallback() {
-        override fun onServiceAdded(status: Int, service: BluetoothGattService) { handler.post {
+        override fun onServiceAdded(status: Int, service: BluetoothGattService) { ingress.post {
             if (closed) return@post
             if (status != BluetoothGatt.GATT_SUCCESS || service.uuid != GroupBleProtocol.SERVICE) return@post fail()
             runCatching {
@@ -138,7 +141,7 @@ internal class GroupBleServer(
                         .setIncludeDeviceName(false).build(), advertiseCallback)
             }.onFailure { fail() }
         } }
-        override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) { handler.post {
+        override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) { ingress.post {
             if (closed) return@post
             runCatching {
                 if (newState != BluetoothProfile.STATE_CONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
@@ -157,7 +160,7 @@ internal class GroupBleServer(
             offset: Int, value: ByteArray) {
             // Reject before retaining a platform-owned buffer in the handler queue.
             val copy = if (value.size <= GroupBleChunks.CHUNK_BYTES) value.copyOf() else byteArrayOf()
-            handler.post {
+            ingress.post {
                 if (closed) return@post
                 val peer = peers[device.address]
                 try {
@@ -170,7 +173,7 @@ internal class GroupBleServer(
                         val counter = ++peer.request
                         onRequest(peer.id, packet) { reply ->
                             val bounded = reply?.takeIf { it.size in 1..GroupBleChunks.MAX_MESSAGE }?.copyOf()
-                            handler.post {
+                            ingress.post {
                                 if (closed || peers[device.address] !== peer || peer.request != counter || !peer.processing) {
                                     bounded?.fill(0); return@post
                                 }
@@ -189,7 +192,7 @@ internal class GroupBleServer(
             }
         }
         override fun onCharacteristicReadRequest(device: BluetoothDevice, requestId: Int, offset: Int,
-            characteristic: BluetoothGattCharacteristic) { handler.post {
+            characteristic: BluetoothGattCharacteristic) { ingress.post {
             if (closed) return@post
             val peer = peers[device.address]
             try {
@@ -202,7 +205,7 @@ internal class GroupBleServer(
                 if (peer != null) drop(peer)
             }
         } }
-        override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) { handler.post {
+        override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) { ingress.post {
             if (!closed) {
                 runCatching { server?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null) }
                 peers[device.address]?.let { drop(it) }
@@ -229,13 +232,14 @@ internal class GroupBleServer(
         handler.removeCallbacks(peer.deadline)
         peer.assembler.close(); peer.outgoing.forEach { it.fill(0) }; peer.outgoing.clear()
         runCatching { server?.cancelConnection(peer.device) }
-        onPeerClosed(peer.id)
+        runCatching { onPeerClosed(peer.id) }
     }
     private fun fail() { if (!closed) { close(); onError("蓝牙房间通道不可用，请检查蓝牙和权限") } }
     override fun close() {
         check(Looper.myLooper() == handler.looper)
         if (closed) return
         closed = true
+        ingress.close()
         peers.values.toList().forEach { drop(it) }
         handler.removeCallbacksAndMessages(null)
         runCatching { advertiser?.stopAdvertising(advertiseCallback) }
@@ -253,6 +257,7 @@ internal class GroupBleClient(
     private val onError: (String) -> Unit
 ) : Closeable {
     private val handler = Handler(Looper.getMainLooper())
+    private val ingress = GroupBoundedCallbacks({ action -> handler.post { action() }; Unit }, ::fail)
     private var gatt: BluetoothGatt? = null
     private var characteristic: BluetoothGattCharacteristic? = null
     private var started = false
@@ -299,7 +304,7 @@ internal class GroupBleClient(
             }
         }
     }
-    private fun post(g: BluetoothGatt, action: () -> Unit) { handler.post {
+    private fun post(g: BluetoothGatt, action: () -> Unit) { ingress.post {
         if (!closed && gatt === g) {
             if (SystemClock.elapsedRealtime() >= expiresAt) fail()
             else runCatching(action).onFailure { fail() }
@@ -343,6 +348,7 @@ internal class GroupBleClient(
         check(Looper.myLooper() == handler.looper)
         if (closed) return
         closed = true; reply = null
+        ingress.close()
         handler.removeCallbacksAndMessages(null)
         assembler.close(); outgoing.forEach { it.fill(0) }; outgoing.clear()
         val old = gatt; gatt = null; characteristic = null

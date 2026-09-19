@@ -2,6 +2,33 @@ package com.kuma.motointercom.group.network
 
 import java.io.Closeable
 
+/** Caps callback work before posting to Android's unbounded Handler queue. Overflow is terminal. */
+internal class GroupBoundedCallbacks(
+    private val enqueue: (() -> Unit) -> Unit,
+    private val onOverflow: () -> Unit,
+    private val capacity: Int = 64
+) : Closeable {
+    private val lock = Any()
+    private var accepting = true
+    private var pending = 0
+    init { require(capacity > 0) }
+    fun post(action: () -> Unit) {
+        val mode = synchronized(lock) {
+            if (!accepting) 0
+            else if (pending >= capacity) { accepting = false; 2 }
+            else { pending++; 1 }
+        }
+        when (mode) {
+            1 -> enqueue {
+                val run = synchronized(lock) { pending--; accepting }
+                if (run) action()
+            }
+            2 -> enqueue(onOverflow)
+        }
+    }
+    override fun close() { synchronized(lock) { accepting = false } }
+}
+
 /** ATT offsets are always zero. These offsets belong only to our application message. */
 internal object GroupBleChunks {
     const val MAX_MESSAGE = 8192

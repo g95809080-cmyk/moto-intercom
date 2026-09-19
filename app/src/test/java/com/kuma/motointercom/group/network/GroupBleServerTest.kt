@@ -30,6 +30,7 @@ class GroupBleServerTest {
     private val requests = mutableListOf<ByteArray>()
     private val replies = mutableListOf<(ByteArray?) -> Unit>()
     private val closed = mutableListOf<UUID>()
+    private var throwOnClose = false
     private val mailbox = BluetoothGattCharacteristic(GroupBleProtocol.MAILBOX,
         BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
         BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE)
@@ -41,7 +42,10 @@ class GroupBleServerTest {
         adapter = context.getSystemService(BluetoothManager::class.java).adapter
         shadowOf(adapter).setEnabled(true)
         shadowOf(adapter).setIsMultipleAdvertisementSupported(true)
-        server = GroupBleServer(context, {}, { _, bytes, reply -> requests += bytes; replies += reply }, closed::add, {})
+        server = GroupBleServer(context, {}, { _, bytes, reply -> requests += bytes; replies += reply }, {
+            closed += it
+            if (throwOnClose) error("application callback")
+        }, {})
         server.start()
         native = ReflectionHelpers.getField(server, "server")
         callback = shadowOf(native).gattServerCallback
@@ -129,6 +133,25 @@ class GroupBleServerTest {
         assertTrue(requests.isEmpty())
         assertEquals(1, closed.size)
         server.close()
+    }
+    @Test fun throwingPeerCallbackCannotInterruptAllPeerAndPlatformCleanup() {
+        connect(adapter.getRemoteDevice("00:11:22:33:44:01"))
+        connect(adapter.getRemoteDevice("00:11:22:33:44:02"))
+        throwOnClose = true
+        server.close()
+        assertEquals(3, closed.size)
+        assertTrue(shadowOf(native).isClosed)
+        assertEquals(0, shadowOf(adapter.bluetoothLeAdvertiser).advertisementRequestCount)
+        server.close(); assertEquals(3, closed.size)
+    }
+    @Test fun unauthenticatedBurstCannotBuildUnboundedPendingDelivery() {
+        repeat(10_000) {
+            callback.onCharacteristicWriteRequest(device, it, mailbox, false, false, 0, byteArrayOf(1))
+        }
+        idle()
+        assertTrue(requests.isEmpty())
+        assertEquals(1, closed.size)
+        assertTrue(shadowOf(native).isClosed)
     }
 }
 

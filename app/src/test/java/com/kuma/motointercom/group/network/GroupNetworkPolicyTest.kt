@@ -4,6 +4,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupNetworkPolicyTest {
+    @Test fun burstQueueIsBoundedAndTerminalOverflowIsCoalesced() {
+        val queue = ArrayDeque<() -> Unit>()
+        var delivered = 0
+        var overflow = 0
+        val callbacks = GroupBoundedCallbacks({ queue.addLast(it) }, { overflow++ }, 4)
+        repeat(10_000) { callbacks.post { delivered++ } }
+        assertEquals(5, queue.size)
+        while (queue.isNotEmpty()) queue.removeFirst()()
+        assertEquals(0, delivered); assertEquals(1, overflow)
+        callbacks.post { delivered++ }; assertTrue(queue.isEmpty())
+    }
+    @Test fun normalCallbackCompletionReturnsCapacityAndCancellationDropsQueuedWork() {
+        val queue = ArrayDeque<() -> Unit>()
+        var count = 0
+        val callbacks = GroupBoundedCallbacks({ queue.addLast(it) }, { fail("overflow") }, 1)
+        repeat(10) { callbacks.post { count++ }; queue.removeFirst()() }
+        assertEquals(10, count)
+        callbacks.post { count++ }; callbacks.close(); queue.removeFirst()()
+        assertEquals(10, count)
+    }
     @Test fun minimumMtuTransportsFullAuthAndEncryptedMessagesWithoutAliasing() {
         for (size in listOf(1, 16, 17, 4096, 8192)) {
             val input = ByteArray(size) { it.toByte() }
