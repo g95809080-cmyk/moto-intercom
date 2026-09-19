@@ -47,7 +47,7 @@ Android API 36，`MotoIntercom_Graphics_API36`，本轮临时只读实例。已�
 
 ## 最终自动化
 
-固定源码 `df632144`：`testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline` 全部通过（2m14s）；91个测试套件、714项测试、零失败/错误/跳过。Lint 0 errors / 78 warnings。debug APK及instrumentation APK均生成。云端API36仪器检查运行后回填。
+固定源码 `df632144`：`testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline` 全部通过（2m14s）；91个测试套件、714项测试、零失败/错误/跳过。Lint 0 errors / 78 warnings。debug APK及instrumentation APK均生成。[云端CI 35455304587](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/35455304587) **SUCCESS**：JVM/Lint/两类APK与Android API36 instrumentation两个job均成功，检查提交为`1a11dbd3`（与已批准df632144源码相同，附验证文档）。
 
 再次核实远端main为 `880e3ed8b4423100114758232c3f75d93e25b270`，包含用户刚合并的修复；本实现链保留该祖先。
 
@@ -56,3 +56,9 @@ Android API 36，`MotoIntercom_Graphics_API36`，本轮临时只读实例。已�
 全部 **NOT RUN**，原因：用户暂时没有实体设备，要求先完成代码与自动化。
 
 包括三人三对听音、四人六对互听、无互联网无路由器、成员进退、60秒/满员恢复、房主失联、进程终止、静音与移除、蓝牙/后台/电话、两小时与四小时稳定性、旧版APK互通及分阶段建联耗时。模拟器与单元测试不能替代这些结果。
+
+## Git交付顺序与安装包
+
+依赖链：[#24 域模型](https://github.com/g95809080-cmyk/moto-intercom/pull/24) → [#26 协议](https://github.com/g95809080-cmyk/moto-intercom/pull/26) → [#27 媒体](https://github.com/g95809080-cmyk/moto-intercom/pull/27) → [#28 认证](https://github.com/g95809080-cmyk/moto-intercom/pull/28) → [#29 网络](https://github.com/g95809080-cmyk/moto-intercom/pull/29) → [#30 编排](https://github.com/g95809080-cmyk/moto-intercom/pull/30) → [#31 Android入口](https://github.com/g95809080-cmyk/moto-intercom/pull/31)。全部保留Draft，按顺序审查/集成；没有合并main或发布。
+
+本地debug APK：`app/build/outputs/apk/debug/app-debug.apk`（63,670,757 bytes）。SHA256 `FAA3E538011587A4930C0F28A87652E422EB919AF5E552B55A3EE30C9143D734`。源码为df632144；后续提交仅更新文档证据。该包用于开发验证，不是正式签名发布包。
