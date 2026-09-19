@@ -12,12 +12,15 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implements
+import org.robolectric.annotation.Implementation
+import org.robolectric.shadows.ShadowBluetoothGattServer
 import org.robolectric.util.ReflectionHelpers
 import java.time.Duration
 import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [33], shadows = [RespondingGattServer::class])
 class GroupBleServerTest {
     private lateinit var adapter: BluetoothAdapter
     private lateinit var server: GroupBleServer
@@ -31,6 +34,8 @@ class GroupBleServerTest {
         BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
         BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE)
     @Before fun setup() {
+        RespondingGattServer.accept = true
+        RespondingGattServer.sent.clear()
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
         adapter = context.getSystemService(BluetoothManager::class.java).adapter
@@ -97,5 +102,45 @@ class GroupBleServerTest {
         assertTrue(shadowOf(native).isClosed)
         assertEquals(1, requests.size)
         assertEquals(1, closed.size)
+    }
+    @Test fun responseFragmentsAndRequestCounterKeepLateDuplicateReplyOutOfNextRound() {
+        write()
+        val first = replies.single()
+        first(ByteArray(33) { it.toByte() }); idle()
+        val assembler = GroupBleAssembler()
+        repeat(3) { index ->
+            callback.onCharacteristicReadRequest(device, index, 0, mailbox); idle()
+            val decoded = assembler.accept(RespondingGattServer.sent.last())
+            if (index == 2) assertArrayEquals(ByteArray(33) { it.toByte() }, decoded)
+            else assertNull(decoded)
+        }
+        write(byteArrayOf(99))
+        first(byteArrayOf(100)); idle()
+        callback.onCharacteristicReadRequest(device, 8, 0, mailbox); idle()
+        assertTrue(RespondingGattServer.sent.last().isEmpty())
+        replies.last()(byteArrayOf(101)); idle()
+        callback.onCharacteristicReadRequest(device, 9, 0, mailbox); idle()
+        assertArrayEquals(byteArrayOf(101), GroupBleAssembler().accept(RespondingGattServer.sent.last()))
+        server.close()
+    }
+    @Test fun failedNativeAcknowledgementNeverDeliversRequest() {
+        RespondingGattServer.accept = false
+        write()
+        assertTrue(requests.isEmpty())
+        assertEquals(1, closed.size)
+        server.close()
+    }
+}
+
+/** Robolectric's default sendResponse delegates to an unregistered binder and returns false. */
+@Implements(BluetoothGattServer::class)
+class RespondingGattServer : ShadowBluetoothGattServer() {
+    @Implementation override fun sendResponse(device: BluetoothDevice, requestId: Int, status: Int, offset: Int, value: ByteArray?): Boolean {
+        if (value != null) sent += value.copyOf()
+        return accept
+    }
+    companion object {
+        var accept = true
+        val sent = mutableListOf<ByteArray>()
     }
 }
