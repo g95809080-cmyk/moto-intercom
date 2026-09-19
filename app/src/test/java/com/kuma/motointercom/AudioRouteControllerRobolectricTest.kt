@@ -33,6 +33,30 @@ class AudioRouteControllerRobolectricTest {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val shadowAudioManager = shadowOf(audioManager)
 
+    @Test fun consecutiveInvalidationsDeliverUnavailableBeforeFastReverification() {
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val earpiece = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(speaker, earpiece))
+        val states = mutableListOf<String>()
+        val controller = AudioRouteController(context,
+            onRouteInvalidated = { states += "unavailable" }, onRouteReady = { states += "verified" })
+        try {
+            controller.select(AudioRouteSelection.SPEAKER)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(controller.evidence().ready)
+            states.clear()
+            audioManager.setCommunicationDevice(earpiece)
+            assertFalse(controller.evidence().ready)
+            // A second invalidation and successful verification occur before main consumes the first.
+            controller.select(AudioRouteSelection.SPEAKER)
+            drainRouteExecutor()
+            assertTrue(states.isEmpty())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf("unavailable", "verified"), states)
+            assertTrue(controller.evidence().ready)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
     @Test fun replacedPhoneDeviceRevokesEvidenceBeforeStatsDelivery() {
         val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
         val earpiece = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
@@ -190,9 +214,18 @@ class AudioRouteControllerRobolectricTest {
             modernRouteFactory = { route }
         )
 
-        controller.select(AudioRouteSelection.BLUETOOTH)
-        controller.select(AudioRouteSelection.SPEAKER)
-        controller.select(AudioRouteSelection.BLUETOOTH)
+        // Hold the worker so this test deterministically covers superseded queued requests.
+        val executor = AudioRouteController::class.java.getDeclaredField("ROUTE_EXECUTOR")
+            .apply { isAccessible = true }.get(null) as ExecutorService
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        executor.execute { entered.countDown(); release.await(2, TimeUnit.SECONDS) }
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            controller.select(AudioRouteSelection.SPEAKER)
+            controller.select(AudioRouteSelection.BLUETOOTH)
+        } finally { release.countDown() }
         drainRouteExecutor()
         shadowOf(Looper.getMainLooper()).idle()
 

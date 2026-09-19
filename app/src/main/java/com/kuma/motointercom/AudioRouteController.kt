@@ -41,6 +41,7 @@ internal class AudioRouteController(
     private val evidenceLock = Any()
     private var evidenceRevision = 0L
     private var verifiedDevice: String? = null
+    private var invalidationPending = false
     private fun actualDevice(): String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         audioManager.communicationDevice?.let { "${it.id}:${it.type}" }
     } else {
@@ -56,21 +57,23 @@ internal class AudioRouteController(
         }
     }
     private fun invalidateEvidence() {
-        val invalidated = synchronized(evidenceLock) {
-            val wasReady = verifiedDevice != null
+        synchronized(evidenceLock) {
+            if (verifiedDevice != null) invalidationPending = true
             verifiedDevice = null; evidenceRevision++
-            if (wasReady) evidenceRevision else null
         }
-        if (invalidated != null) mainHandler.post {
-            if (!closed.get() && synchronized(evidenceLock) {
-                evidenceRevision == invalidated && verifiedDevice == null
-            }) onRouteInvalidated()
+        mainHandler.post(::deliverInvalidation)
+    }
+    private fun deliverInvalidation() {
+        val pending = synchronized(evidenceLock) {
+            invalidationPending.also { invalidationPending = false }
         }
+        if (pending && !closed.get()) onRouteInvalidated()
     }
     private fun publishVerifiedRoute(request: VersionedAudioRouteSelection) {
         val device = actualDevice() ?: return
         val revision = synchronized(evidenceLock) { evidenceRevision }
         postMainForRoute(request) {
+            deliverInvalidation()
             val accepted = synchronized(evidenceLock) {
                 if (revision != evidenceRevision || actualDevice() != device) false
                 else { verifiedDevice = device; true }
