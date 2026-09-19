@@ -195,9 +195,20 @@ internal class WifiDirectTunnel(
         startStartupDiscoveryIfReady()
     }
 
+    private fun discoveryAccessReady(): Boolean {
+        val message = when {
+            !hasRequiredPermissions(appContext) -> "缺少附近设备或位置权限，请返回首页授权"
+            !locationEnabled(appContext) -> StartupAccessController.LOCATION_REQUIRED
+            else -> return true
+        }
+        postDiscoveryStatus(message)
+        return false
+    }
+
     @SuppressLint("MissingPermission")
     fun discoverPeers() {
         if (!running || !setupRecoveryGate.isEnabled) return
+        if (!discoveryAccessReady()) return
         if (!serviceDiscoveryReady) {
             Log.d(TAG, "discoverServices skipped: service request not ready")
             return
@@ -788,6 +799,7 @@ internal class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     private fun setupServiceDiscovery() {
         if (!running || !setupRecoveryGate.isEnabled) return
+        if (!discoveryAccessReady()) return
         val setup = setupRecoveryGate.beginSetup() ?: return
         val m = manager ?: return
         val c = channel ?: return
@@ -1971,6 +1983,7 @@ internal class WifiDirectTunnel(
             override fun onFailure(reason: Int) {
                 if (!isCurrent()) return
                 onFailed()
+                if (!discoveryAccessReady()) return
                 val attempt = taskContext?.attempt
                 if (shouldReportSequentialFallback(reason == WifiP2pManager.BUSY, attempt)) {
                     onTargetedOverlapUnavailable(requireNotNull(attempt))

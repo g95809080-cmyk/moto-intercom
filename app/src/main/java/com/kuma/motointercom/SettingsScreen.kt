@@ -64,6 +64,7 @@ internal data class SettingsScreenUiState(
     val optionalPermissionNotice: String?,
     val showOptionalPermissionCta: Boolean,
     val version: String,
+    val backgroundAllowed: Boolean = false,
     val voxEnabled: Boolean = true,
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
     val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
@@ -86,7 +87,8 @@ internal fun MotoComSettingsScreen(
     onVoxSensitivityChanged: (Int) -> Unit = {},
     onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
     onAutomaticReconnectChanged: (Boolean) -> Unit = {},
-    onAudioSectionPositioned: (Int) -> Unit = {}
+    onAudioSectionPositioned: (Int) -> Unit = {},
+    onBackgroundSettings: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -249,6 +251,16 @@ internal fun MotoComSettingsScreen(
                     onOptionalPermission
                 )
             }
+        }
+
+        SettingsSectionLabel("后台运行")
+        SettingsPanel {
+            SettingsFact(
+                if (state.backgroundAllowed) "系统电池优化：已豁免" else "系统电池优化：未豁免",
+                "settings_background_status"
+            )
+            SettingsFact("为保持锁屏通话，建议允许后台运行。厂商应用省电和启动管理需在手机设置中确认。", "settings_background_hint")
+            SettingsSecondaryButton("设置后台运行", "settings_background_button", onBackgroundSettings)
         }
 
         SettingsSectionLabel(stringResource(R.string.section_advanced_settings))

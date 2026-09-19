@@ -48,6 +48,7 @@ internal class MainScreen(
     private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
     private val onForgetPairing: (String) -> Boolean = { false },
     private val onSendFeedback: (String) -> Unit = {},
+    private val onBackgroundSettings: () -> Unit = {},
     private val onboardingPreferences: OnboardingPreferences? = null
 ) {
     val root: View
@@ -103,6 +104,13 @@ internal class MainScreen(
     private val settingsUiState = mutableStateOf(
         SettingsScreenUiState("", "", "", "", "", "", "", null, false, "")
     )
+    private var backgroundAccessAllowed = false
+
+    fun setBackgroundAccess(allowed: Boolean) {
+        backgroundAccessAllowed = allowed
+        renderSettings()
+    }
+
     private val logsUiState = mutableStateOf(LogsScreenUiState("", "", false))
 
     private var currentRoute: MainRoute = restoreMainRoute(savedState?.getString(KEY_ROUTE))
@@ -1124,6 +1132,7 @@ internal class MainScreen(
                         },
                         onSaveNickname = { saveNickname() },
                         onOptionalPermission = onRequestOptionalPermissions,
+                        onBackgroundSettings = onBackgroundSettings,
                         onLogs = { showPage(MainRoute.LOGS) },
                         onAbout = ::showAboutDialog,
                         onHelp = ::showHelpDialog,
@@ -1201,6 +1210,7 @@ internal class MainScreen(
             deviceStatus = activity.getString(R.string.settings_device_status_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText, presentation.primaryText, presentation.connectedTransportText),
             optionalPermissionNotice = optionalPermission.noticeText,
             showOptionalPermissionCta = optionalPermission.showGrantCta,
+            backgroundAllowed = backgroundAccessAllowed,
             version = activity.getString(R.string.settings_version_summary, currentVersionName()),
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,

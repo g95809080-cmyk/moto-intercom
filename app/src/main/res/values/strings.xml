@@ -7,7 +7,7 @@
     <string name="guide_finish">我知道了，自己试试</string>
     <string name="guide_replay">重新查看引导</string>
     <string name="guide_permission_title">准备 · 点这里授权</string>
-    <string name="guide_permission_body">麦克风传递你的声音；附近设备或位置权限用于发现车友；电话状态用于来电时暂停对讲。按系统提示授权后回到这里。</string>
+    <string name="guide_permission_body">麦克风传递你的声音；附近设备或位置权限用于发现车友；电话状态用于来电时暂停对讲。按系统提示授权后，将继续检查 Wi-Fi、位置信息和后台运行设置，并启动摩声。</string>
     <string name="guide_permission_settings_body">还有必要权限未开启。点这里进入系统权限设置，开启 App 需要的权限后返回；也可以先跳过教学。</string>
     <string name="guide_wifi_title">准备 · 点这里打开 Wi-Fi</string>
     <string name="guide_wifi_body">离线对讲不需要互联网，但两台手机都要打开 Wi-Fi。打开后返回摩声继续。</string>
