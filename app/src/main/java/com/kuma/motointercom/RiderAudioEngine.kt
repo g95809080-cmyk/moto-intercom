@@ -165,9 +165,12 @@ internal class RiderAudioEngine(
         audioDeviceModule?.setMicrophoneMute(!enabled)
         audioDeviceModule?.setSpeakerMute(!enabled)
         rtcSessions.forEach {
-            val allow = enabled && !it.closed.get()
-            it.peerConnection?.setAudioRecording(allow)
-            it.peerConnection?.setAudioPlayout(allow)
+            // Some native ADM switches are shared: a closing peer must not undo a
+            // grant applied to healthy peers. Its queued disposal owns its cleanup.
+            if (!enabled || !it.closed.get()) {
+                it.peerConnection?.setAudioRecording(enabled)
+                it.peerConnection?.setAudioPlayout(enabled)
+            }
         }
     }
 
@@ -204,7 +207,9 @@ internal class RiderAudioEngine(
         try {
             requireEngineReady()
             createPeerConnection(session)
+            check(isActiveSession(session)) { "media authorization revoked during creation" }
             attachLocalAudioTrack(session)
+            check(isActiveSession(session)) { "media authorization revoked during attachment" }
             session.state = MediaSessionState.READY
         } catch (t: Throwable) {
             session.state = MediaSessionState.FAILED
