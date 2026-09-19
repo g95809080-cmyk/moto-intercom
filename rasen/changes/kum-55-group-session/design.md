@@ -38,4 +38,6 @@ PC connected + remote audio track仅表示媒体已连接，不能提交最终Co
 真实PAKE经过bootstrap请求响应完成双向确认；错码/错context/取消/移除后取凭据拒绝；不占席位。真实loopback TCP三客户端入队、第四客户端FULL、加密控制往返、关闭和重连generation/旧消息拒绝。单writer fake effects覆盖六pair逐步就绪、主持/普通退出、60秒边界、局部音频中断与mute保留、多候选选择。全量JVM/Lint/APK及固定SHA复审，硬件全部未执行。
 
 ## Risks / Trade-offs
+网络恢复使用独立 networkAttempt（区别于房间 operation 和 TCP controlAttempt）；HostReady、NetworkReady、NetworkLost、NetworkFailed 只作用于当前 networkAttempt。失联撤销旧代次；一次建网未完成时 Tick 不会再次发起。房主保留 room/code/intent，成员席位从首次失联计算60秒；客户端保留原队伍目标。RecoverHost 执行器必须先确认旧 GO 清理释放，UNKNOWN 期间只重试原 owner 清理。单条媒体或 socket effect 异常按 link/channel 定向处理，不终止健康成员。
+
 BLE+TCP双次PAKE换取明确通道绑定和简单重连，真机性能待测。System Wi-Fi确认耗时不计入已完成的BLE握手，但TCP自己的20秒硬期限不能延长。只读视图和新控制消息会触及既有群组wire/media签名，需要维持旧单元测试与双人默认行为。

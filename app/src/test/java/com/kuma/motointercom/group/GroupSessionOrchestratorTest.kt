@@ -75,11 +75,11 @@ class GroupSessionOrchestratorTest {
         assertEquals(before.participation.token, host.writer.snapshot.participation.token)
         now = 3_000; host.writer.dispatch(GroupSessionEvent.Tick)
         assertTrue(host.seen.last { it !is GroupSessionEffect.Publish } is GroupSessionEffect.RecoverHost)
-        host.writer.dispatch(GroupSessionEvent.Failed(before.operation, "cleanup pending"))
+        host.writer.dispatch(GroupSessionEvent.NetworkFailed(host.writer.snapshot.networkAttempt!!, "cleanup pending"))
         now = 6_000; host.writer.dispatch(GroupSessionEvent.NetworkLost(before.operation))
         host.writer.dispatch(GroupSessionEvent.Tick)
         assertEquals(60_000L, room().members.single { it.lease.deviceId == id(2) }.reservedUntilMs)
-        host.writer.dispatch(GroupSessionEvent.HostReady(before.operation))
+        host.writer.dispatch(GroupSessionEvent.HostReady(host.writer.snapshot.networkAttempt!!))
         assertEquals(GroupPhase.IN_ROOM, host.writer.snapshot.phase)
         assertEquals(before.view.key, room().key)
     }
@@ -89,7 +89,7 @@ class GroupSessionOrchestratorTest {
         val before = peer.writer.snapshot
         peer.writer.dispatch(GroupSessionEvent.NetworkLost(before.operation!!))
         now = 3_000; peer.writer.dispatch(GroupSessionEvent.Tick)
-        peer.writer.dispatch(GroupSessionEvent.Failed(before.operation, "network unavailable"))
+        peer.writer.dispatch(GroupSessionEvent.NetworkFailed(peer.writer.snapshot.networkAttempt!!, "network unavailable"))
         assertEquals(GroupPhase.RECONNECTING, peer.writer.snapshot.phase)
         assertEquals(before.participation.token, peer.writer.snapshot.participation.token)
         now = 6_000; peer.writer.dispatch(GroupSessionEvent.Tick)
@@ -107,6 +107,32 @@ class GroupSessionOrchestratorTest {
         now = 3_000; host.writer.dispatch(GroupSessionEvent.Tick)
         assertTrue(room().links.map { it.lease }.containsAll(healthy))
         assertTrue(host.seen.none { it is GroupSessionEffect.Stop })
+    }
+
+    @Test fun networkAttemptsRejectLateResultsAndDoNotOverlapDuringSlowCreation() {
+        host(); val peer = join(2)
+        listOf(host, peer).forEach { node ->
+            val old = node.writer.snapshot.networkAttempt!!
+            node.writer.dispatch(GroupSessionEvent.NetworkLost(old))
+            now += 3_000; node.writer.dispatch(GroupSessionEvent.Tick)
+            val attempt = node.writer.snapshot.networkAttempt!!
+            assertNotEquals(old, attempt)
+            val before = node.seen.count { it is GroupSessionEffect.RecoverHost || it is GroupSessionEffect.JoinNetwork }
+            repeat(5) { now += 10_000; node.writer.dispatch(GroupSessionEvent.Tick) }
+            assertEquals(before, node.seen.count { it is GroupSessionEffect.RecoverHost || it is GroupSessionEffect.JoinNetwork })
+            node.writer.dispatch(GroupSessionEvent.HostReady(old))
+            node.writer.dispatch(GroupSessionEvent.NetworkReady(old))
+            node.writer.dispatch(GroupSessionEvent.NetworkFailed(old, "late failure"))
+            node.writer.dispatch(GroupSessionEvent.NetworkLost(old))
+            assertEquals(attempt, node.writer.snapshot.networkAttempt)
+            assertNotEquals(GroupPhase.IN_ROOM, node.writer.snapshot.phase)
+            if (node.isHost) node.writer.dispatch(GroupSessionEvent.HostReady(attempt))
+            else node.writer.dispatch(GroupSessionEvent.NetworkReady(attempt))
+            val current = node.writer.snapshot.phase
+            node.writer.dispatch(GroupSessionEvent.NetworkLost(old))
+            assertEquals(current, node.writer.snapshot.phase)
+            assertEquals(attempt, node.writer.snapshot.networkAttempt)
+        }
     }
 
     @Test fun oneSocketSendFailureReservesOnlyThatMemberAndPreservesHealthyPair() {
