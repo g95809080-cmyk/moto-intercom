@@ -88,7 +88,8 @@ internal fun MotoComSettingsScreen(
     onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
     onAutomaticReconnectChanged: (Boolean) -> Unit = {},
     onAudioSectionPositioned: (Int) -> Unit = {},
-    onBackgroundSettings: () -> Unit = {}
+    onBackgroundSettings: () -> Unit = {},
+    onPhoneBackgroundSettings: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -256,11 +257,20 @@ internal fun MotoComSettingsScreen(
         SettingsSectionLabel("后台运行")
         SettingsPanel {
             SettingsFact(
-                if (state.backgroundAllowed) "系统电池优化：已豁免" else "系统电池优化：未豁免",
+                if (state.backgroundAllowed) "系统电池优化豁免：已加入白名单" else "系统电池优化豁免：未加入白名单",
                 "settings_background_status"
             )
-            SettingsFact("为保持锁屏通话，建议允许后台运行。厂商应用省电和启动管理需在手机设置中确认。", "settings_background_hint")
-            SettingsSecondaryButton("设置后台运行", "settings_background_button", onBackgroundSettings)
+            SettingsFact("此项仅反映 Android 系统电池优化白名单，不代表手机的后台运行设置。", "settings_background_hint")
+            SettingsSecondaryButton(
+                if (state.backgroundAllowed) "查看系统电池优化设置" else "申请系统电池优化豁免",
+                "settings_background_button", onBackgroundSettings
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        SettingsPanel {
+            SettingsFact("手机后台运行设置：需在系统设置中确认", "settings_phone_background_status")
+            SettingsFact("摩声无法自动确认手机的后台活动、自启动及“不限制”设置。若你已设置完成，无需因上方白名单状态重复设置。", "settings_phone_background_hint")
+            SettingsSecondaryButton("查看手机应用设置", "settings_phone_background_button", onPhoneBackgroundSettings)
         }
 
         SettingsSectionLabel(stringResource(R.string.section_advanced_settings))

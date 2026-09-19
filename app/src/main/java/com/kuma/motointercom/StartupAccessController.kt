@@ -136,9 +136,9 @@ internal class StartupAccessController(
     }
 
     fun requestBackground() {
-        showDialog("允许后台运行", "锁屏骑行时，建议允许摩声不受电池优化限制。\n\n小米可在应用省电设置中选择“不限制”；荣耀可在应用启动管理中允许后台活动。具体名称以手机设置为准。", "去设置", {
+        showDialog("系统电池优化豁免", "为保持锁屏通话，建议允许摩声加入 Android 系统电池优化白名单。\n\n这与手机的后台活动、自启动及“不限制”设置是不同的检查项。你已完成的手机设置不会因未加入白名单而失效。手机后台运行设置可在摩声设置页单独查看。", "去设置", {
             preferences.edit().putBoolean("background_prompted", true).apply()
-            val intent = if (backgroundAllowed(activity)) appSettingsIntent() else
+            val intent = if (backgroundAllowed(activity)) Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS) else
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${activity.packageName}"))
             launch(intent, BACKGROUND, Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }, {

@@ -1133,6 +1133,7 @@ internal class MainScreen(
                         onSaveNickname = { saveNickname() },
                         onOptionalPermission = onRequestOptionalPermissions,
                         onBackgroundSettings = onBackgroundSettings,
+                        onPhoneBackgroundSettings = onOpenPermissionSettings,
                         onLogs = { showPage(MainRoute.LOGS) },
                         onAbout = ::showAboutDialog,
                         onHelp = ::showHelpDialog,
