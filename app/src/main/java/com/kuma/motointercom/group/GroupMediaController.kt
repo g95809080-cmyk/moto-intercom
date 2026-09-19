@@ -13,7 +13,7 @@ internal data class GroupMediaLease(
     val peer: GroupMemberLease,
     val link: GroupLinkLease
 ) {
-    fun matches(room: GroupRoom, participation: GroupParticipation): Boolean {
+    fun matches(room: GroupRoomView, participation: GroupParticipation): Boolean {
         if (room.ended || room.key != intent.room || !participation.isCurrent(intent) ||
             local.deviceId == peer.deviceId) return false
         val admitted = room.members.filter { it.status == GroupMemberStatus.ADMITTED }.map { it.lease }
