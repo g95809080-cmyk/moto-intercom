@@ -1598,8 +1598,6 @@ class IntercomService : Service() {
         val managerToClose = intercomManager
         val lanToClose = lanDiscovery
         val wifiToClose = wifiTunnel
-        val ownershipToRelease = legacyOwnership
-        legacyOwnership = null
         val signalingToClose = drainSignalingSessions()
         intercomManager = null
         lanDiscovery = null
@@ -1733,6 +1731,8 @@ class IntercomService : Service() {
     }
 
     private fun stopIntercom() {
+        val ownershipToRelease = legacyOwnership
+        legacyOwnership = null
         val runtimeSessionId = activeRuntimeSessionId
         val keepAliveToRelease = runtimeKeepAlive
         runtimeKeepAlive = null
