@@ -135,6 +135,27 @@ class GroupSessionOrchestratorTest {
         }
     }
 
+    @Test fun lossDuringHostRecoveryRevokesAttemptWithoutExtendingReservedSeat() {
+        host(); join(2)
+        val original = host.writer.snapshot
+        host.writer.dispatch(GroupSessionEvent.NetworkLost(original.networkAttempt!!))
+        now = 3_000; host.writer.dispatch(GroupSessionEvent.Tick)
+        val second = host.writer.snapshot.networkAttempt!!
+        host.writer.dispatch(GroupSessionEvent.NetworkLost(second))
+        assertNull(host.writer.snapshot.networkAttempt)
+        now = 6_000; host.writer.dispatch(GroupSessionEvent.Tick)
+        val third = host.writer.snapshot.networkAttempt!!
+        assertNotEquals(second, third)
+        assertEquals(original.view!!.key, room().key)
+        assertEquals(original.code, host.writer.snapshot.code)
+        assertEquals(original.participation.token, host.writer.snapshot.participation.token)
+        assertEquals(60_000L, room().members.single { it.lease.deviceId == id(2) }.reservedUntilMs)
+        host.writer.dispatch(GroupSessionEvent.HostReady(second))
+        assertEquals(GroupPhase.RECONNECTING, host.writer.snapshot.phase)
+        host.writer.dispatch(GroupSessionEvent.HostReady(third))
+        assertEquals(GroupPhase.IN_ROOM, host.writer.snapshot.phase)
+    }
+
     @Test fun oneSocketSendFailureReservesOnlyThatMemberAndPreservesHealthyPair() {
         host(); val second = join(2); join(3)
         val healthy = room().links.single { it.lease.pair == GroupPair.of(id(1), id(3)) }.lease

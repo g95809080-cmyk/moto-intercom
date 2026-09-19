@@ -175,9 +175,10 @@ internal class GroupSessionOrchestrator(
         event?.let { queue.addLast(it) }
     }
     private fun reconnectHost() {
-        if (phase == GroupPhase.RECONNECTING) return
         networkReady = false
         networkAttempt = null; networkInFlight = false
+        nextRetry = nowMs() + 3_000
+        if (phase == GroupPhase.RECONNECTING) return
         pending.keys.toList().forEach { output += GroupSessionEffect.CloseChannel(it) }
         pending.clear()
         channels.values.toList().forEach {
