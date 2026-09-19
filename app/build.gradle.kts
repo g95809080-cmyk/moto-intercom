@@ -31,6 +31,11 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Robolectric's API 23/32/33/35 sandboxes exceed the default test JVM heap.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
 

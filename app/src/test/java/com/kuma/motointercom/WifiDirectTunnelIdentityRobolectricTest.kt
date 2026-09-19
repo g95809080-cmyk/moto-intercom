@@ -176,6 +176,24 @@ class WifiDirectTunnelIdentityRobolectricTest {
         assertFalse(recovery.isCurrent(beforeClose))
     }
 
+    @Test
+    fun permissionLostBeforeBusyCallbackStillCleansFailedAttemptWithoutRetry() {
+        val tunnel = tunnel()
+        setRunning(tunnel, true)
+        shadowOf(context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager)
+            .setLocationEnabled(false)
+        var cleaned = false
+        var busyRetries = 0
+        val listener = WifiDirectTunnel::class.java.declaredMethods
+            .single { it.name == "action" }.apply { isAccessible = true }
+            .invoke(tunnel, "connect failed", { cleaned = true }, {}, { busyRetries++ }, { true }, null)
+            as WifiP2pManager.ActionListener
+        listener.onFailure(WifiP2pManager.BUSY)
+        assertTrue(cleaned)
+        assertEquals(0, busyRetries)
+        tunnel.close()
+    }
+
     private fun tunnel(
         onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {}
     ) = WifiDirectTunnel(
