@@ -24,7 +24,11 @@ PAKE计算在有界worker执行，不占主Handler；至多4未完成交换，�
 
 群组编排作为SessionOrchestrator的独立群组模式组件（GroupSessionOrchestrator），只在一个指定dispatcher调用dispatch写状态；Service仅执行effects。旧双人SessionOrchestrator与群组writer将由后续Service模式门禁互斥启停，绝不同时拥有房间/音频。网络回调不能直接修改GroupRoom、Participation或UI。跨线程媒体current使用writer发布的不可变快照。
 
-主机派生每对ADMITTED成员的link generation，低deviceId发offer；客户端媒体effects只匹配当前local/peer/link/intent。成员信令先经KUM51主机入口检查，再由host转发；客户端验证原sender、recipient、lease、link及角色，不把host转发身份误当原sender身份。扩展必要的link confirmed/restart控制类型，同样校验lease与当前link；远程普通成员不能发End/Remove/Unblock。PC connected与remote audio track两个条件同时满足才提交ConfirmLink；不把ICE当全队语音就绪。
+主机派生每对ADMITTED成员的link generation，低deviceId发offer；客户端媒体effects只匹配当前local/peer/link/intent。成员信令先经KUM51主机入口检查，再由host转发；客户端验证原sender、recipient、lease、link及角色，不把host转发身份误当原sender身份。扩展必要的link confirmed/restart控制类型，同样校验lease与当前link；远程普通成员不能发End/Remove/Unblock。
+
+PC connected + remote audio track仅表示媒体已连接，不能提交最终ConfirmLink。GroupVoiceEvidence必须携带当前intent/local/peer/link，分别证明当前代际下有效RTP发送和接收（前后样本计数增长）、已实际开启的音频I/O和已确认路由；两端各自满足后才允许报告ConfirmLink。缺任何证据保持“语音待确认”，不妨碍健康链路先通信。KUM55实现证据入口和自动化，KUM56接入真实WebRTC stats及音频/路由证据生产者；未接入时绝不自动确认全队语音就绪。静音或VOX无声不触发掉线；确认在当前link内保持，I/O/路由中断撤销就绪，恢复后重新提供证据。人工互听仍是单独实机验收。
+
+所有名单广播先入发送队列，再发送引用该lease/link的信令；接收端遇到未知lease/link直接拒绝，不据此创建资格。安全channel计数和wire sequence均在同一个发送串行边界分配，frame顺序等于socket写出顺序。TCP看门狗覆盖20秒握手、10秒准入等待及慢写；首次入队使用独立attempt token，在尚无member lease时取消也能立即撤销旧认证回调。
 
 自静音/本地屏蔽属于Participation，不改变全体准入；局部来电只发布AudioUnavailable并停止本机音频，控制连接保留，其他健康pair继续。主机独处仍广播/保持room，但无媒体demand。正常离开撤销intent和全部effects；主机End结束所有成员。进程重新创建默认idle，不恢复自动入队/录音。房主消失不选举新host，客户端保留当前room目标低频重试，用户可退出。
 
