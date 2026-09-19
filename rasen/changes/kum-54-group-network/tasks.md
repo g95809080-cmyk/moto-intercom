@@ -5,5 +5,5 @@
 - [x] 2.2 Android BLE discovery, server and client
 - [x] 2.3 Owned host/client Wi-Fi adapters
 ## 3. Verification
-- [ ] 3.1 Full JVM, lint, APK and fixed-SHA architecture review
+- [x] 3.1 Full JVM (664), lint (0 errors), APK and fixed-SHA architecture review (fa799a0 APPROVED)
 - [ ] 3.2 Push Draft PR, CI and Linear evidence
