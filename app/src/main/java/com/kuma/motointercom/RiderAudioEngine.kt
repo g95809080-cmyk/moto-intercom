@@ -113,13 +113,14 @@ internal class RiderAudioEngine(
     private var gateState = voxGate.currentState()
     private var lastPublishedVoxSnapshot: Pair<VersionedAudioControls, VoxRuntimeState>? = null
     private var engineState = EngineState.INITIALIZING
-    @Volatile private var audioSuspended = mediaMode == RiderMediaMode.GROUP
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
     private val sessionLock = Any()
     private val activeSessions = mutableSetOf<MediaSession>()
     // RTC-thread resources may outlive registry removal until their queued cleanup runs.
     private val rtcSessions = mutableSetOf<MediaSession>()
+    private val audioIoGate = AudioIoGate(sessionLock, mediaMode == RiderMediaMode.SINGLE,
+        { action -> runRtc(allowClosed = true, block = action) }, ::applyAudioIo)
 
     init {
         runRtc { initializeRtc() }
@@ -152,29 +153,21 @@ internal class RiderAudioEngine(
     }
 
     override fun suspendAudio() {
-        audioSuspended = true
-        runRtc {
-            rtcSessions.forEach {
-                it.peerConnection?.setAudioRecording(false)
-                it.peerConnection?.setAudioPlayout(false)
-            }
-            audioDeviceModule?.setMicrophoneMute(true)
-            audioDeviceModule?.setSpeakerMute(true)
-        }
+        audioIoGate.request(false)
     }
 
     override fun resumeAudio() {
-        audioSuspended = false
-        runRtc {
-            if (engineState != EngineState.READY) return@runRtc
-            audioDeviceModule?.setMicrophoneMute(false)
-            audioDeviceModule?.setSpeakerMute(false)
-            rtcSessions.forEach {
-                if (isActiveSession(it)) {
-                    it.peerConnection?.setAudioRecording(true)
-                    it.peerConnection?.setAudioPlayout(true)
-                }
-            }
+        if (!closed.get()) audioIoGate.request(true)
+    }
+
+    private fun applyAudioIo(enabled: Boolean) {
+        if (enabled && engineState != EngineState.READY) return
+        audioDeviceModule?.setMicrophoneMute(!enabled)
+        audioDeviceModule?.setSpeakerMute(!enabled)
+        rtcSessions.forEach {
+            val allow = enabled && !it.closed.get()
+            it.peerConnection?.setAudioRecording(allow)
+            it.peerConnection?.setAudioPlayout(allow)
         }
     }
 
@@ -271,6 +264,7 @@ internal class RiderAudioEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        audioIoGate.close()
         val sessions = synchronized(sessionLock) {
             activeSessions.toList().also { activeSessions.clear() }
         }
@@ -301,9 +295,6 @@ internal class RiderAudioEngine(
         session.remoteTracks.clear()
         rtcSessions.remove(session)
         val last = rtcSessions.isEmpty()
-        // A replacement may already be queued after this cleanup and have a new route grant.
-        if (last && mediaMode == RiderMediaMode.GROUP &&
-            synchronized(sessionLock) { activeSessions.isEmpty() }) audioSuspended = true
         if (peer != null) runAllCleanupSteps(
             { if (last) peer.setAudioRecording(false) },
             { if (last) peer.setAudioPlayout(false) },
@@ -420,10 +411,12 @@ internal class RiderAudioEngine(
         session.peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
         rtcSessions.add(session)
-        session.peerConnection!!.setAudioRecording(!audioSuspended)
-        session.peerConnection!!.setAudioPlayout(!audioSuspended)
-        audioDeviceModule?.setMicrophoneMute(audioSuspended)
-        audioDeviceModule?.setSpeakerMute(audioSuspended)
+        audioIoGate.applyCurrent { enabled ->
+            session.peerConnection!!.setAudioRecording(enabled)
+            session.peerConnection!!.setAudioPlayout(enabled)
+            audioDeviceModule?.setMicrophoneMute(!enabled)
+            audioDeviceModule?.setSpeakerMute(!enabled)
+        }
     }
 
     private fun createLocalAudioTrack() = mediaStep("local audio track 创建") {
@@ -938,7 +931,11 @@ internal class RiderAudioEngine(
             if (!closed.compareAndSet(false, true)) return
             state = MediaSessionState.CLOSED
             val shouldDispose = synchronized(sessionLock) {
-                activeSessions.remove(this)
+                activeSessions.remove(this).also { removed ->
+                    if (removed && activeSessions.isEmpty() && mediaMode == RiderMediaMode.GROUP) {
+                        audioIoGate.request(false)
+                    }
+                }
             }
             if (shouldDispose) {
                 runRtc(allowClosed = true, onFailure = ::postEngineError) {
