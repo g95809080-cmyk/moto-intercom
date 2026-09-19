@@ -6,4 +6,4 @@
 - [x] 2.3 Owned host/client Wi-Fi adapters
 ## 3. Verification
 - [x] 3.1 Full JVM (664), lint (0 errors), APK and fixed-SHA architecture review (fa799a0 APPROVED)
-- [ ] 3.2 Push Draft PR, CI and Linear evidence
+- [x] 3.2 Push Draft PR #29, trigger CI 35449893332 and update Linear In Review (cloud result pending)
