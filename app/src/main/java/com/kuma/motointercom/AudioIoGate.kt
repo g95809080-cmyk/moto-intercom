@@ -26,6 +26,8 @@ internal class AudioIoGate(
     }
 
     fun applyCurrent(action: (Boolean) -> Unit) = synchronized(lock) { action(enabled && !closed) }
+    fun revision(): Long = synchronized(lock) { revision }
+    fun allows(expected: Long): Boolean = synchronized(lock) { !closed && enabled && revision == expected }
 
     fun close() = synchronized(lock) {
         if (closed) return

@@ -97,6 +97,8 @@ internal class GroupMediaController(
     fun answer(lease: GroupMediaLease, sdp: String) = withSession(lease) { it.createAnswer(sdp) }
     fun remoteAnswer(lease: GroupMediaLease, sdp: String) = withSession(lease) { it.setRemoteAnswer(sdp) }
     fun candidate(lease: GroupMediaLease, candidate: String) = withSession(lease) { it.addRemoteIceCandidate(candidate) }
+    fun evidence(lease: GroupMediaLease, callback: (com.kuma.motointercom.RiderMediaEvidence?) -> Unit) =
+        withSession(lease) { it.queryEvidence(callback) }
 
     fun updateAudioControls(controls: VersionedAudioControls) = synchronized(lock) {
         if (!closed) engine.updateAudioControls(controls)

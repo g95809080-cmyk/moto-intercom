@@ -29,6 +29,9 @@ import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.CancellationException
+import com.kuma.motointercom.group.*
+import com.kuma.motointercom.group.network.GroupGoOwnership
+import java.util.UUID
 
 private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
 
@@ -238,6 +241,74 @@ class IntercomService : Service() {
     )
 
     private var listener: Listener? = null
+    private var groupRuntime: GroupRuntime? = null
+    private var groupStarting: UUID? = null
+    private var legacyOwnership: Any? = null
+    private var groupState = GroupServiceState()
+    private val groupListeners = mutableSetOf<(GroupServiceState) -> Unit>()
+    private fun groupOwnsResources() = groupStarting != null || groupRuntime != null || GroupGoOwnership.process.hasOwner() || GroupRuntimeOwnership.hasOwner()
+    internal fun addGroupListener(listener: (GroupServiceState) -> Unit) { groupListeners += listener; listener(groupState) }
+    internal fun removeGroupListener(listener: (GroupServiceState) -> Unit) { groupListeners -= listener }
+    private fun publishGroup(state: GroupServiceState) {
+        groupState = state
+        groupListeners.toList().forEach { runCatching { it(state) } }
+        if (groupOwnsResources()) getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+    }
+    internal fun groupAction(event: GroupSessionEvent) {
+        if (event == GroupSessionEvent.Leave && groupStarting != null) {
+            groupStarting = null; publishGroup(GroupServiceState(message = "已取消")); stopForegroundCompat()
+        } else groupRuntime?.writer?.dispatch(event)
+    }
+    internal fun groupRoute(selection: AudioRouteSelection) {
+        groupRuntime?.route(selection); publishGroup(groupState.copy(route = selection))
+    }
+    internal fun groupVox(value: Boolean) {
+        groupRuntime?.vox(value); publishGroup(groupState.copy(vox = value))
+    }
+    private fun startGroup(code: GroupJoinCode?) {
+        if (running || LegacyRuntimeOwnership.hasOwner() || AudioPlatformOwnership.hasOwner() || wifiTunnelCloseOwner.hasPending || groupOwnsResources()) {
+            publishGroup(groupState.copy(message = "请先结束当前对讲，等待网络释放后重试")); return
+        }
+        if (!hasGroupPermissions()) { publishGroup(GroupServiceState(message = "请先授予麦克风和附近设备权限")); return }
+        val token = UUID.randomUUID(); groupStarting = token
+        groupState = GroupServiceState(message = "正在准备离线对讲", busy = true,
+            route = AudioRoutePreferences(this).load(), vox = AudioControlPreferences(this).load().voxEnabled)
+        startForeground(NOTIFICATION_ID, buildNotification()); publishGroup(groupState)
+        serviceScope.launch {
+            try {
+                val device = identityStore.getOrCreateDeviceId()
+                val nickname = identityStore.getNickname().ifBlank { "骑士" }
+                dispatchOnMain {
+                    if (groupStarting != token) return@dispatchOnMain
+                    lateinit var runtime: GroupRuntime
+                    runtime = GroupRuntime(this@IntercomService, GroupAuthEndpoint(device, UUID.randomUUID().toString()), nickname,
+                        groupState.route, AudioControlPreferences(this@IntercomService).load(),
+                        onSnapshot = { value ->
+                            if (groupRuntime === runtime) publishGroup(groupState.copy(snapshot = value, message = value.message,
+                                busy = value.phase != GroupPhase.IDLE))
+                        }, onAudioLabel = { label ->
+                            if (groupRuntime === runtime) publishGroup(groupState.copy(audioLabel = label))
+                        }, onReleased = {
+                            if (groupRuntime === runtime) {
+                                groupRuntime = null; publishGroup(groupState.copy(busy = false))
+                                stopForegroundCompat()
+                            }
+                        })
+                    groupRuntime = runtime; groupStarting = null
+                    try { runtime.start(code) } catch (_: Exception) {
+                        publishGroup(groupState.copy(message = "群组启动失败，请检查无线网络后重试"))
+                    }
+                }
+            } catch (_: Exception) {
+                dispatchOnMain {
+                    if (groupStarting == token) {
+                        groupStarting = null; publishGroup(GroupServiceState(message = "无法读取设备身份，请重试"))
+                        stopForegroundCompat()
+                    }
+                }
+            }
+        }
+    }
     private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
     private var wifiTunnel: WifiDirectTunnel? = null
@@ -310,7 +381,21 @@ class IntercomService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_START_GROUP -> {
+                val raw = intent.getStringExtra(EXTRA_GROUP_CODE)
+                if (raw != null && !raw.matches(Regex("[0-9]{6}"))) {
+                    publishGroup(groupState.copy(message = "请输入六位数字房间码"))
+                    if (!groupOwnsResources() && !running) stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+                startGroup(raw?.let(::GroupJoinCode))
+                if (!groupOwnsResources() && !running) stopSelf(startId)
+                return START_NOT_STICKY
+            }
             ACTION_START_INTERCOM -> {
+                if (groupOwnsResources()) { publishToast("四人对讲进行中，请先离开房间"); return START_NOT_STICKY }
+                if (!running && AudioPlatformOwnership.hasOwner()) { publishToast("音频正在释放，请稍后重试"); stopSelf(startId); return START_NOT_STICKY }
+                if (!running && LegacyRuntimeOwnership.hasOwner()) { publishToast("网络正在释放，请稍后重试"); stopSelf(startId); return START_NOT_STICKY }
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()
                 setPreferredAudioRoute(
                     audioRouteSelectionFromPersisted(
@@ -353,6 +438,7 @@ class IntercomService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_STOP_INTERCOM -> {
+                if (groupOwnsResources()) return START_NOT_STICKY
                 stopIntercom()
                 stopSelf()
                 return START_NOT_STICKY
@@ -370,6 +456,9 @@ class IntercomService : Service() {
     }
 
     override fun onDestroy() {
+        groupStarting = null
+        groupRuntime?.close()
+        groupListeners.clear()
         stopIntercom()
         orchestrator.close()
         serviceScope.cancel()
@@ -741,9 +830,12 @@ class IntercomService : Service() {
             return
         }
 
+        legacyOwnership = LegacyRuntimeOwnership.acquire() ?: run { publishStatus("网络正在释放，请稍后重试"); stopForegroundCompat(); return }
+
         runtimeKeepAlive = try {
             IntercomRuntimeKeepAlive.acquire(this)
         } catch (failure: Throwable) {
+            legacyOwnership?.let(LegacyRuntimeOwnership::release); legacyOwnership = null
             handleError(failure)
             stopForegroundCompat()
             stopSelf()
@@ -1506,6 +1598,8 @@ class IntercomService : Service() {
         val managerToClose = intercomManager
         val lanToClose = lanDiscovery
         val wifiToClose = wifiTunnel
+        val ownershipToRelease = legacyOwnership
+        legacyOwnership = null
         val signalingToClose = drainSignalingSessions()
         intercomManager = null
         lanDiscovery = null
@@ -1673,7 +1767,7 @@ class IntercomService : Service() {
             additionalResources = listOfNotNull(wifiToClose),
             onError = ::handleError
         ) {
-            keepAliveToRelease?.close()
+            try { keepAliveToRelease?.close() } finally { ownershipToRelease?.let(LegacyRuntimeOwnership::release) }
         }
         try {
             audioSessionController?.close()
@@ -2443,7 +2537,7 @@ class IntercomService : Service() {
 
     private fun buildNotification(): Notification {
         ensureNotificationChannel()
-        val notificationText = foregroundNotificationText(
+        val notificationText = if (groupOwnsResources()) groupState.message else foregroundNotificationText(
             orchestrator.state.value,
             lastStatus,
             audioInterruptionState
@@ -2452,7 +2546,7 @@ class IntercomService : Service() {
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, if (groupOwnsResources()) GroupActivity::class.java else MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -2466,7 +2560,7 @@ class IntercomService : Service() {
             .setContentTitle("摩声")
             .setContentText(notificationText)
             .setStyle(Notification.BigTextStyle().bigText(notificationText))
-            .setOngoing(running)
+            .setOngoing(running || groupOwnsResources())
             .setContentIntent(contentIntent)
             .build()
     }
@@ -2563,6 +2657,8 @@ class IntercomService : Service() {
     }
 
     companion object {
+        internal const val ACTION_START_GROUP = "com.kuma.motointercom.action.START_GROUP"
+        internal const val EXTRA_GROUP_CODE = "com.kuma.motointercom.extra.GROUP_CODE"
         private const val LOSER_CHANNEL_CLOSE_TIMEOUT_MS = 1_000L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"

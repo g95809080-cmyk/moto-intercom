@@ -205,6 +205,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             },
             onSendFeedback = ::sendFeedback,
             onBackgroundSettings = { startupAccess.requestBackground() },
+            onOpenGroup = { startActivity(Intent(this, GroupActivity::class.java)) },
             onboardingPreferences = OnboardingPreferences(this)
         )
         setContentView(screen.root)

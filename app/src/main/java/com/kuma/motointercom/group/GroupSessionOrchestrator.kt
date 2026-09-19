@@ -54,6 +54,7 @@ internal sealed interface GroupSessionEvent {
     class NetworkReady(val operation: UUID) : GroupSessionEvent
     class NetworkLost(val operation: UUID) : GroupSessionEvent
     class NetworkFailed(val attempt: UUID, val message: String) : GroupSessionEvent
+    class NetworkRefreshed(val attempt: UUID, val match: GroupBootstrapMatch) : GroupSessionEvent
     class Authenticated(val operation: UUID, val channel: UUID, val context: GroupAuthContext, val atMs: Long) : GroupSessionEvent
     class Control(val channel: UUID, val message: GroupControl) : GroupSessionEvent
     class Closed(val channel: UUID) : GroupSessionEvent
@@ -232,6 +233,10 @@ internal class GroupSessionOrchestrator(
                 if (hostRoom != null && phase == GroupPhase.CREATING) finish(event.message, false)
                 else if (hostRoom != null) { phase = GroupPhase.RECONNECTING; nextRetry = nowMs() + 3_000; message = event.message }
                 else reconnect(event.message)
+            }
+            is GroupSessionEvent.NetworkRefreshed -> if (event.attempt == networkAttempt && networkInFlight &&
+                event.match.descriptor.room == selected?.descriptor?.room && event.match.descriptor.host == selected?.descriptor?.host) {
+                selected = event.match
             }
             is GroupSessionEvent.Authenticated -> authenticated(event)
             is GroupSessionEvent.Control -> control(event.channel, event.message)

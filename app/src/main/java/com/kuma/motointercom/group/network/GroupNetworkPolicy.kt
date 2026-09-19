@@ -100,6 +100,7 @@ internal class GroupGoOwnership {
     private var pendingCreate = false
     @Synchronized fun acquire(): Lease? = if (owner == null) Lease().also { owner = it } else null
     @Synchronized fun owns(lease: Lease) = owner == lease
+    @Synchronized fun hasOwner() = owner != null
     @Synchronized fun creating(lease: Lease) { check(owns(lease)); pendingCreate = true }
     @Synchronized fun createFinished(lease: Lease): Boolean {
         if (!owns(lease)) return false
