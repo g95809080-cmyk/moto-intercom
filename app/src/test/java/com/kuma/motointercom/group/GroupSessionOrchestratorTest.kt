@@ -15,8 +15,10 @@ class GroupSessionOrchestratorTest {
         val seen = mutableListOf<GroupSessionEffect>()
         val writer = GroupSessionOrchestrator(endpoint, "骑士${endpoint.deviceId.takeLast(2)}", { now }, {}, ::effect)
         var channel: UUID? = null
+        var fail: (GroupSessionEffect) -> Boolean = { false }
         private fun effect(effect: GroupSessionEffect) {
             seen += effect
+            if (fail(effect)) throw IllegalStateException("injected failure")
             if (effect is GroupSessionEffect.Send) {
                 val key = this to effect.channel
                 val seq = (sequence[key] ?: 0) + 1
@@ -62,6 +64,61 @@ class GroupSessionOrchestratorTest {
         node.writer.dispatch(GroupSessionEvent.Authenticated(effect.attempt, channel, effect.context, now))
     }
     private fun room(): GroupRoom = host.writer.snapshot.view as GroupRoom
+
+    @Test fun hostNetworkRecoveryRetainsRoomCodeIntentAndOriginalReservationDeadline() {
+        host(); join(2)
+        val before = host.writer.snapshot
+        host.writer.dispatch(GroupSessionEvent.NetworkLost(before.operation!!))
+        assertEquals(GroupPhase.RECONNECTING, host.writer.snapshot.phase)
+        assertEquals(before.view!!.key, room().key)
+        assertEquals(before.code, host.writer.snapshot.code)
+        assertEquals(before.participation.token, host.writer.snapshot.participation.token)
+        now = 3_000; host.writer.dispatch(GroupSessionEvent.Tick)
+        assertTrue(host.seen.last { it !is GroupSessionEffect.Publish } is GroupSessionEffect.RecoverHost)
+        host.writer.dispatch(GroupSessionEvent.Failed(before.operation, "cleanup pending"))
+        now = 6_000; host.writer.dispatch(GroupSessionEvent.NetworkLost(before.operation))
+        host.writer.dispatch(GroupSessionEvent.Tick)
+        assertEquals(60_000L, room().members.single { it.lease.deviceId == id(2) }.reservedUntilMs)
+        host.writer.dispatch(GroupSessionEvent.HostReady(before.operation))
+        assertEquals(GroupPhase.IN_ROOM, host.writer.snapshot.phase)
+        assertEquals(before.view.key, room().key)
+    }
+
+    @Test fun failedClientNetworkRetryKeepsOriginalRoomIntentAndRetriesAgain() {
+        host(); val peer = join(2)
+        val before = peer.writer.snapshot
+        peer.writer.dispatch(GroupSessionEvent.NetworkLost(before.operation!!))
+        now = 3_000; peer.writer.dispatch(GroupSessionEvent.Tick)
+        peer.writer.dispatch(GroupSessionEvent.Failed(before.operation, "network unavailable"))
+        assertEquals(GroupPhase.RECONNECTING, peer.writer.snapshot.phase)
+        assertEquals(before.participation.token, peer.writer.snapshot.participation.token)
+        now = 6_000; peer.writer.dispatch(GroupSessionEvent.Tick)
+        assertEquals(3, peer.seen.filterIsInstance<GroupSessionEffect.JoinNetwork>().size)
+        assertEquals(before.code, peer.writer.snapshot.code)
+    }
+
+    @Test fun newPeerMediaFailureDoesNotEndRoomOrReplaceHealthyPairs() {
+        host(); join(2); join(3)
+        val healthy = room().links.map { it.lease }
+        host.fail = { it is GroupSessionEffect.OpenMedia && it.lease.peer.deviceId == id(4) }
+        join(4)
+        assertEquals(GroupPhase.IN_ROOM, host.writer.snapshot.phase)
+        assertEquals(4, room().occupiedSeats)
+        now = 3_000; host.writer.dispatch(GroupSessionEvent.Tick)
+        assertTrue(room().links.map { it.lease }.containsAll(healthy))
+        assertTrue(host.seen.none { it is GroupSessionEffect.Stop })
+    }
+
+    @Test fun oneSocketSendFailureReservesOnlyThatMemberAndPreservesHealthyPair() {
+        host(); val second = join(2); join(3)
+        val healthy = room().links.single { it.lease.pair == GroupPair.of(id(1), id(3)) }.lease
+        host.fail = { it is GroupSessionEffect.Send && it.channel == second.channel }
+        host.writer.dispatch(GroupSessionEvent.AudioAvailable(true))
+        assertEquals(GroupPhase.IN_ROOM, host.writer.snapshot.phase)
+        assertEquals(GroupMemberStatus.RESERVED, room().members.single { it.lease.deviceId == id(2) }.status)
+        assertTrue(room().links.any { it.lease == healthy })
+        assertTrue(host.seen.none { it is GroupSessionEffect.Stop })
+    }
 
     @Test fun fourMembersCreateSixPairsButConnectedTrackWithoutIoAndRouteNeverMeansReady() {
         val nodes = listOf(host(), join(2), join(3), join(4))

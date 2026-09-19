@@ -71,6 +71,7 @@ internal sealed interface GroupSessionEvent {
 
 internal sealed interface GroupSessionEffect {
     class StartHost(val operation: UUID, val descriptor: GroupDescriptor, val code: GroupJoinCode) : GroupSessionEffect
+    class RecoverHost(val operation: UUID, val descriptor: GroupDescriptor, val code: GroupJoinCode) : GroupSessionEffect
     class Search(val operation: UUID, val endpoint: GroupAuthEndpoint, val code: GroupJoinCode) : GroupSessionEffect
     class JoinNetwork(val operation: UUID, val match: GroupBootstrapMatch) : GroupSessionEffect
     class ConnectControl(val operation: UUID, val attempt: UUID, val context: GroupAuthContext, val code: GroupJoinCode, val match: GroupBootstrapMatch) : GroupSessionEffect
@@ -141,12 +142,44 @@ internal class GroupSessionOrchestrator(
                 for (effect in output.toList()) {
                     try { effects(effect) }
                     catch (_: Exception) {
-                        operation?.let { queue.addFirst(GroupSessionEvent.Failed(it, "房间运行失败，请重试")) }
-                        break
+                        effectFailed(effect)
                     }
                 }
             }
         } finally { dispatching = false }
+    }
+    private fun effectFailed(effect: GroupSessionEffect) {
+        val event = when (effect) {
+            is GroupSessionEffect.OpenMedia -> GroupSessionEvent.MediaFailed(effect.lease)
+            is GroupSessionEffect.MediaSignal -> GroupSessionEvent.MediaFailed(effect.lease)
+            is GroupSessionEffect.Send -> {
+                runCatching { effects(GroupSessionEffect.CloseChannel(effect.channel)) }
+                GroupSessionEvent.Closed(effect.channel)
+            }
+            is GroupSessionEffect.AdmitChannel -> {
+                runCatching { effects(GroupSessionEffect.CloseChannel(effect.channel)) }
+                GroupSessionEvent.Closed(effect.channel)
+            }
+            is GroupSessionEffect.CloseChannel -> GroupSessionEvent.Closed(effect.channel)
+            is GroupSessionEffect.ConnectControl -> GroupSessionEvent.ControlFailed(effect.attempt)
+            is GroupSessionEffect.CloseMedia, is GroupSessionEffect.Publish, is GroupSessionEffect.Stop -> null
+            else -> operation?.let { GroupSessionEvent.Failed(it, "连接失败，正在恢复") }
+        }
+        event?.let { queue.addLast(it) }
+    }
+    private fun reconnectHost() {
+        if (phase == GroupPhase.RECONNECTING) return
+        networkReady = false
+        pending.keys.toList().forEach { output += GroupSessionEffect.CloseChannel(it) }
+        pending.clear()
+        channels.values.toList().forEach {
+            reduce(GroupEvent.Lost(it.lease))
+            output += GroupSessionEffect.CloseChannel(it.id)
+        }
+        channels.clear()
+        evidenceSent.clear(); restartAt.clear()
+        phase = GroupPhase.RECONNECTING; nextRetry = nowMs() + 3_000
+        message = "离线网络已断开，正在恢复原房间"
     }
     private fun snapshot() = GroupSessionSnapshot(phase, operation, hostRoom ?: roster, local,
         participation, code, hostRoom != null, message, matches.toList(), names.toMap(), hostRoom?.removedDeviceIds.orEmpty())
@@ -173,20 +206,24 @@ internal class GroupSessionOrchestrator(
             }
             is GroupSessionEvent.Select -> if (phase == GroupPhase.SELECTING) matches.singleOrNull { it.descriptor.room == event.room }?.let(::select)
             is GroupSessionEvent.HostReady -> if (event.operation == operation && hostRoom != null) {
-                phase = GroupPhase.IN_ROOM; message = "房间已创建，等待成员加入"
+                networkReady = true; phase = GroupPhase.IN_ROOM; message = "房间已创建，等待成员加入"
             }
             is GroupSessionEvent.NetworkReady -> if (event.operation == operation && selected != null && phase != GroupPhase.IDLE) {
                 networkReady = true; connectControl()
             }
             is GroupSessionEvent.NetworkLost -> if (event.operation == operation) {
-                if (hostRoom != null) finish("离线网络已断开", false)
+                if (hostRoom != null) reconnectHost()
                 else { networkReady = false; reconnect("Wi-Fi 已断开，正在重连") }
             }
             is GroupSessionEvent.Authenticated -> authenticated(event)
             is GroupSessionEvent.Control -> control(event.channel, event.message)
             is GroupSessionEvent.Closed -> closed(event.channel)
             is GroupSessionEvent.ControlFailed -> if (event.attempt == controlAttempt && selected != null) reconnect("连接中断，正在重连原房间")
-            is GroupSessionEvent.Failed -> if (event.operation == operation) finish(event.message, false)
+            is GroupSessionEvent.Failed -> if (event.operation == operation) {
+                if (hostRoom != null && phase == GroupPhase.RECONNECTING) { nextRetry = nowMs() + 3_000; message = event.message }
+                else if (selected != null) { networkReady = false; reconnect(event.message) }
+                else finish(event.message, false)
+            }
             is GroupSessionEvent.AudioAvailable -> if (audioAvailable != event.available) {
                 audioAvailable = event.available
                 if (!event.available) evidenceSent.clear()
@@ -205,7 +242,7 @@ internal class GroupSessionOrchestrator(
             is GroupSessionEvent.Outgoing -> if (current(event.lease) && messageLink(event.message) == event.lease.link) {
                 sendMedia(event.lease, event.message)
             }
-            is GroupSessionEvent.MediaFailed -> if (current(event.lease)) restartAt.putIfAbsent(event.lease.link, nowMs() + 3_000)
+            is GroupSessionEvent.MediaFailed -> if (current(event.lease)) restartAt.getOrPut(event.lease.link) { nowMs() + 3_000 }
             is GroupSessionEvent.Mute -> participation.token?.let {
                 participation = participation.muteSelf(it, event.value); output += GroupSessionEffect.Mute(event.value)
             }
@@ -280,7 +317,7 @@ internal class GroupSessionOrchestrator(
                 is GroupMessage.LinkConfirmed -> if (hostRoom!!.members.single { it.lease == channel.lease }.audioAvailable) {
                     reduce(GroupEvent.ConfirmLink(channel.lease, payload.link)); publishRoom()
                 }
-                is GroupMessage.RestartLink -> restartAt.putIfAbsent(payload.link, nowMs() + 3_000)
+                is GroupMessage.RestartLink -> restartAt.getOrPut(payload.link) { nowMs() + 3_000 }
                 else -> receiveMedia(frame)
             }
         } else if (id == clientChannel) {
@@ -368,7 +405,9 @@ internal class GroupSessionOrchestrator(
         }
         if ((phase == GroupPhase.WAITING || phase == GroupPhase.RECONNECTING) && nowMs() >= nextRetry) {
             nextRetry = nowMs() + 15_000
-            if (networkReady) connectControl() else selected?.let {
+            if (hostRoom != null) {
+                output += GroupSessionEffect.RecoverHost(checkNotNull(operation), GroupDescriptor(hostRoom!!.key, endpoint, nickname), checkNotNull(code))
+            } else if (networkReady) connectControl() else selected?.let {
                 phase = GroupPhase.JOINING
                 output += GroupSessionEffect.JoinNetwork(checkNotNull(operation), it)
             }
