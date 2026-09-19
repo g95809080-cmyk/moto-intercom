@@ -37,6 +37,19 @@ class GroupServiceLifecycleTest {
             assertFalse(field(service, "running").getBoolean(service))
             assertNull(field(service, "audioSessionController").get(service))
             assertTrue(GroupRuntimeOwnership.hasOwner())
+            assertTrue(shadowOf(service).isStoppedBySelf)
+        } finally { owner.destroy(); GroupRuntimeOwnership.release(token) }
+    }
+    @Test fun foreignCleanupOwnerRejectsGroupStartAndStopsOnlyNewService() {
+        val token = GroupRuntimeOwnership.acquire()!!
+        val owner = Robolectric.buildService(IntercomService::class.java).create()
+        try {
+            val service = owner.get()
+            service.onStartCommand(Intent(service, IntercomService::class.java)
+                .setAction(IntercomService.ACTION_START_GROUP), 0, 9)
+            assertTrue(shadowOf(service).isStoppedBySelf)
+            assertNull(field(service, "groupRuntime").get(service))
+            assertTrue(GroupRuntimeOwnership.hasOwner())
         } finally { owner.destroy(); GroupRuntimeOwnership.release(token) }
     }
     @Test fun legacyRunningAndNativeDisposalBothBlockGroupStart() {

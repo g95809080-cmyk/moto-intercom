@@ -91,7 +91,7 @@ internal class GroupRuntime(
     }
     private fun releaseIfDone() {
         if (stopping && audioReleased && networkReleased && !released) {
-            released = true; keepAlive?.close(); keepAlive = null
+            released = true; runCatching { keepAlive?.close() }; keepAlive = null
             ownership?.let(GroupRuntimeOwnership::release); ownership = null
             onReleased()
         }

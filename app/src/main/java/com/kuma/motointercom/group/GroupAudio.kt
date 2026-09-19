@@ -45,6 +45,9 @@ internal class GroupAudio(
     private val route = try { AudioRouteController(context,
         onScoConnected = { onRouteLabel("蓝牙：$it") },
         onScoDisconnected = { unavailable(); coordinator.reapplyPreferredRoute() },
+        onRouteInvalidated = {
+            if (!closed && isCurrent()) { unavailable(); coordinator.reapplyPreferredRoute() }
+        },
         onSpeakerFallback = { onRouteLabel("手机扬声器") },
         onEarpieceActive = { onRouteLabel("手机听筒") },
         onExternalAudioActive = { onRouteLabel(it) },
@@ -116,10 +119,11 @@ internal class GroupAudio(
         routeSelection = value; unavailable(); coordinator.reapplyPreferredRoute()
     }
     override fun poll() {
+        val routeEvidence = route.evidence()
         val epoch = routeEpoch
         leases.values.toList().forEach { lease -> media.evidence(lease) { evidence ->
-            if (closed || !isCurrent() || !snapshot().allows(lease) || epoch != routeEpoch) return@evidence
-            val ready = routeReady && coordinator.currentState() == AudioInterruptionState.NORMAL
+            if (closed || !isCurrent() || !snapshot().allows(lease) || epoch != routeEpoch || routeEvidence != route.evidence()) return@evidence
+            val ready = routeEvidence.ready && routeReady && coordinator.currentState() == AudioInterruptionState.NORMAL
             if (evidence != null && (!evidence.audioIoEnabled || !ready)) {
                 previous.remove(lease)
                 dispatch(GroupSessionEvent.AudioAvailable(false)); return@evidence

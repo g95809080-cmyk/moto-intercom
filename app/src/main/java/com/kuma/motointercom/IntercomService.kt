@@ -246,13 +246,14 @@ class IntercomService : Service() {
     private var legacyOwnership: Any? = null
     private var groupState = GroupServiceState()
     private val groupListeners = mutableSetOf<(GroupServiceState) -> Unit>()
-    private fun groupOwnsResources() = groupStarting != null || groupRuntime != null || GroupGoOwnership.process.hasOwner() || GroupRuntimeOwnership.hasOwner()
+    private fun localGroupActive() = groupStarting != null || groupRuntime != null
+    private fun groupOwnsResources() = localGroupActive() || GroupGoOwnership.process.hasOwner() || GroupRuntimeOwnership.hasOwner()
     internal fun addGroupListener(listener: (GroupServiceState) -> Unit) { groupListeners += listener; listener(groupState) }
     internal fun removeGroupListener(listener: (GroupServiceState) -> Unit) { groupListeners -= listener }
     private fun publishGroup(state: GroupServiceState) {
         groupState = state
         groupListeners.toList().forEach { runCatching { it(state) } }
-        if (groupOwnsResources()) getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+        if (localGroupActive()) runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification()) }
     }
     internal fun groupAction(event: GroupSessionEvent) {
         if (event == GroupSessionEvent.Leave && groupStarting != null) {
@@ -273,7 +274,12 @@ class IntercomService : Service() {
         val token = UUID.randomUUID(); groupStarting = token
         groupState = GroupServiceState(message = "正在准备离线对讲", busy = true,
             route = AudioRoutePreferences(this).load(), vox = AudioControlPreferences(this).load().voxEnabled)
-        startForeground(NOTIFICATION_ID, buildNotification()); publishGroup(groupState)
+        try { startForeground(NOTIFICATION_ID, buildNotification()) } catch (_: Exception) {
+            groupStarting = null
+            publishGroup(GroupServiceState(message = "无法启动前台对讲，请返回页面重试"))
+            return
+        }
+        publishGroup(groupState)
         serviceScope.launch {
             try {
                 val device = identityStore.getOrCreateDeviceId()
@@ -385,15 +391,19 @@ class IntercomService : Service() {
                 val raw = intent.getStringExtra(EXTRA_GROUP_CODE)
                 if (raw != null && !raw.matches(Regex("[0-9]{6}"))) {
                     publishGroup(groupState.copy(message = "请输入六位数字房间码"))
-                    if (!groupOwnsResources() && !running) stopSelf(startId)
+                    if (!localGroupActive() && !running) stopSelf(startId)
                     return START_NOT_STICKY
                 }
                 startGroup(raw?.let(::GroupJoinCode))
-                if (!groupOwnsResources() && !running) stopSelf(startId)
+                if (!localGroupActive() && !running) stopSelf(startId)
                 return START_NOT_STICKY
             }
             ACTION_START_INTERCOM -> {
-                if (groupOwnsResources()) { publishToast("四人对讲进行中，请先离开房间"); return START_NOT_STICKY }
+                if (groupOwnsResources()) {
+                    publishToast("四人对讲进行中，请先离开房间")
+                    if (!localGroupActive() && !running) stopSelf(startId)
+                    return START_NOT_STICKY
+                }
                 if (!running && AudioPlatformOwnership.hasOwner()) { publishToast("音频正在释放，请稍后重试"); stopSelf(startId); return START_NOT_STICKY }
                 if (!running && LegacyRuntimeOwnership.hasOwner()) { publishToast("网络正在释放，请稍后重试"); stopSelf(startId); return START_NOT_STICKY }
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()

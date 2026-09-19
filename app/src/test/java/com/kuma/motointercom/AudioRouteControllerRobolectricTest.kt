@@ -33,6 +33,46 @@ class AudioRouteControllerRobolectricTest {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val shadowAudioManager = shadowOf(audioManager)
 
+    @Test fun replacedPhoneDeviceRevokesEvidenceBeforeStatsDelivery() {
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val earpiece = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(speaker, earpiece))
+        var invalidations = 0
+        val controller = AudioRouteController(context, onRouteInvalidated = { invalidations++ })
+        try {
+            controller.select(AudioRouteSelection.SPEAKER)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            val beforeQuery = controller.evidence()
+            assertTrue(beforeQuery.ready)
+            audioManager.setCommunicationDevice(earpiece)
+            val afterQuery = controller.evidence()
+            assertFalse(afterQuery.ready)
+            assertTrue(beforeQuery.revision != afterQuery.revision)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, invalidations)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun bluetoothLossWithRejectedRerouteCannotRetainVerifiedEvidence() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+        val bluetooth = audioDevice(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(bluetooth, speaker))
+        val controller = AudioRouteController(context, fallbackToSpeaker = false)
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(controller.evidence().ready)
+            audioManager.setCommunicationDevice(speaker)
+            shadowAudioManager.lockCommunicationDevice(true)
+            val route = field<ModernAudioRoute>(controller, "modernRoute")
+            field<AudioManager.OnCommunicationDeviceChangedListener>(route, "listener")
+                .onCommunicationDeviceChanged(speaker)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(controller.evidence().ready)
+        } finally { shadowAudioManager.lockCommunicationDevice(false); controller.close(); drainRouteExecutor() }
+    }
+
     @Test
     fun bluetoothRecoveryCancelsQueuedSpeakerFallbackBeforeItCanRetakeRoute() {
         val speakerFallbacks = mutableListOf<Boolean>()

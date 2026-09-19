@@ -15,7 +15,7 @@ internal class GroupLegacyBusyServer(private val endpoint: GroupAuthEndpoint,
     private val nickname: String, private val ports: List<Int> = listOf(8888, 8890)) : Closeable {
     private val closed = AtomicBoolean(false)
     private val servers = mutableListOf<ServerSocket>()
-    private val sockets = ConcurrentHashMap.newKeySet<Socket>()
+    private val sockets = java.util.Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
     private val permits = Semaphore(2)
     private val budget = com.kuma.motointercom.group.network.GroupBleBudget(::groupNowMs)
     private val workers = ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, SynchronousQueue(),
