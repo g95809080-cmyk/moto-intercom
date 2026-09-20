@@ -51,6 +51,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.2")
     implementation("androidx.room:room-runtime:2.7.2")
     implementation("com.google.code.gson:gson:2.10.1")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
     implementation("io.getstream:stream-webrtc-android:1.3.9")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     ksp("androidx.room:room-compiler:2.7.2")

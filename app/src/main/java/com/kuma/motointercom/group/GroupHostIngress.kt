@@ -38,9 +38,20 @@ internal class GroupHostIngress private constructor(
                 msg.link
             }
             is GroupMessage.Candidate -> msg.link
+            is GroupMessage.LinkConfirmed -> {
+                if (frame.recipient != localHost) return null
+                msg.link
+            }
+            is GroupMessage.RestartLink -> {
+                if (frame.recipient != localHost) return null
+                msg.link
+            }
         }
         if (link != null) {
-            val pair = GroupPair.of(peer.deviceId, frame.recipient.deviceId)
+            val report = frame.message is GroupMessage.LinkConfirmed || frame.message is GroupMessage.RestartLink
+            val pair = if (report) link.pair else GroupPair.of(peer.deviceId, frame.recipient.deviceId)
+            if (peer.deviceId !in listOf(pair.first, pair.second) ||
+                admitted.none { it.deviceId == pair.first } || admitted.none { it.deviceId == pair.second }) return null
             if (link.pair != pair || room.links.none { it.lease == link } ||
                 admitted.single { it.deviceId == pair.first }.incarnation != link.firstIncarnation ||
                 admitted.single { it.deviceId == pair.second }.incarnation != link.secondIncarnation) return null

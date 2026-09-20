@@ -1,0 +1,24 @@
+## Context
+KUM-52；承接KUM51，包含最新main880e3ed。唯一写入者主任务；旧双人默认接口保持。
+
+## Goals / Non-Goals
+完成共享WebRTC媒体代码及fake自动化；不建立真实网络或UI入口，不声称真机听音完成。
+
+## Decisions
+RiderAudioEngine增加显式SINGLE/GROUP模式，默认SINGLE上限1，GROUP上限GroupRoom.MAX_MEMBERS-1。只有新群组组装入口可以使用GROUP；既有AudioSessionController不变。engine拥有一份ADM/factory/source/local track/VOX/executor，MediaSession拥有PC/sender/remote track/remoteDescriptionSet/pendingCandidates（限256）及callback。session集合受锁保护，PC操作只在RTC executor；释放精确session资源，旧close不得清掉新session。engine关闭先撤销全部session，再逐个释放，最后平台释放，即使中间抛异常也继续。
+
+runSession和创建媒体前核实engine/runtime以及callbacks.isSessionCurrent；最终主线程callback再次核实。回调context由GroupMediaLease(room,intent,local+peer member lease,link lease)绑定；控制器校验current participation和当前成员/链路资格后才调用engine。单一产品writer只调用控制器execute，不由控制器改变GroupRoom。接口注入isLeaseCurrent，所有effects执行与资源转交再次检查，撤销意图后close只能释放自己的资源。
+
+新增GroupMediaController：仅管理已授权peer lease到RiderMediaSession映射，最多3；同peer替换必须先关闭旧lease；重复open返回既有session；旧lease.close不碰新资源。公共begin/end回调用于现有CommunicationAudioCoordinator首次0→1与最后1→0；部分open失败只关闭失败peer，不结束其他音频。onError移除该lease并释放，再转报错误；所有公开操作串行/锁保护，close幂等，异常清理聚合。
+
+自静音和VOX仍通过共享versioned controls，用户意图由GroupParticipation保存。RiderMediaSession增加默认setPlaybackMuted接口，真实实现只设置此session远端AudioTrack音量；控制器在open前保存该peer的localBlock，并在迟到remote track时用当前值。通话中断走engine.suspendAudio/resumeAudio，作用全部PC和ADM，不关闭session或网络，恢复不修改track音量/用户静音。最后session释放前显式禁用该PC的recording/playout，随后dispose；有其他session时不调用全局音频开关。只剩房主没有PC，不建立采集需求；实际AudioRecord生命周期列入真机验收。
+
+Group控制器close只结束自身peer/聚合音频需求，不销毁engine/platform，平台由Service运行时所有者最后关闭；因此群组结束不能残留session，但也不自行释放Service网络。新controller暂不接入Service，不能在未通过group认证时开麦。
+
+## Risks / Trade-offs
+
+GROUP引擎初始audioSuspended=true；第一条需求先调用coordinator.beginMediaSession，只有当前参与意图有效且焦点/路由已经验证时由coordinator.resumeAudio开启I/O。暂停期间新PC仍禁用recording/playout；最后GROUP session释放后恢复suspended=true。SINGLE默认值保持兼容。group控制器不提供绕过coordinator的恢复入口。音量采样分发到每个有效session回调，但不写产品状态；未来Service仅由单writer汇总。多remote track均先设置当前屏蔽音量再启用。
+当前WebRTC Java API编译验证；多PC原生ADM共享开关、远端混音和AudioRecord启动停止需真机D01/D02/D09。fake控制器测试证明资源所有权与callback失效，不证明原生声音。无设备按用户要求继续代码。
+
+## Validation
+fake engine的三peer与上限、关闭中间peer、旧close/SDP/candidate回调、最后释放与再加入、open抛异常和异步错误、多资源清理异常、block重连恢复、电话suspend/resume不释放peer；旧AudioSessionController及音频回归，全量JVM/Lint/Debug构建，固定SHA审查。
