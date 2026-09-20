@@ -69,6 +69,7 @@ internal sealed interface GroupSessionEvent {
     class Remove(val peerId: String) : GroupSessionEvent
     class Unblock(val peerId: String) : GroupSessionEvent
     data object Tick : GroupSessionEvent
+    data class SearchProgress(val operation: UUID, val index: Int, val total: Int) : GroupSessionEvent
     data object Leave : GroupSessionEvent
 }
 
@@ -143,7 +144,7 @@ internal class GroupSessionOrchestrator(
                 handle(queue.removeFirst())
                 syncMedia()
                 snapshot = snapshot()
-                output += GroupSessionEffect.Publish(snapshot)
+                output.add(0, GroupSessionEffect.Publish(snapshot))
                 for (effect in output.toList()) {
                     try { effects(effect) }
                     catch (_: Exception) {
@@ -208,6 +209,9 @@ internal class GroupSessionOrchestrator(
                 operation = UUID.randomUUID(); code = event.code; phase = GroupPhase.SEARCHING
                 message = "正在查找并验证附近房间"
                 output += GroupSessionEffect.Search(operation!!, endpoint, event.code)
+            }
+            is GroupSessionEvent.SearchProgress -> if (event.operation == operation && phase == GroupPhase.SEARCHING) {
+                message = "正在验证附近房间 ${event.index}/${event.total}"
             }
             is GroupSessionEvent.Found -> if (event.operation == operation && phase == GroupPhase.SEARCHING) {
                 matches = event.matches.distinctBy { it.descriptor.room }.take(16)
@@ -349,7 +353,7 @@ internal class GroupSessionOrchestrator(
                     }
                     if (!installRoster(control.roster)) { output += GroupSessionEffect.CloseChannel(id); return }
                     local = control.member; clientIngress = GroupClientIngress(checkNotNull(participation.token), control.member)
-                    phase = GroupPhase.IN_ROOM; message = "已加入房间，语音待确认"; controlAttempt = null
+                    phase = GroupPhase.IN_ROOM; message = "已加入房间"; controlAttempt = null
                     output += GroupSessionEffect.AdmitChannel(id)
                     sendToHost(GroupMessage.AudioAvailable(audioAvailable))
                 }
@@ -392,7 +396,7 @@ internal class GroupSessionOrchestrator(
         send(id, GroupControl.Welcome(lease, view))
         output += GroupSessionEffect.AdmitChannel(id)
         channels.values.filter { it.id != id }.forEach { send(it.id, GroupControl.Roster(view)) }
-        message = "成员已加入，语音待确认"
+        message = "成员已加入"
     }
     private fun installRoster(value: GroupRoster): Boolean {
         val match = selected ?: return false

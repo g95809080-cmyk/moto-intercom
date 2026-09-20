@@ -63,6 +63,23 @@ class GroupBleServerTest {
             callback.onCharacteristicWriteRequest(device, 1, mailbox, false, true, 0, it); idle()
         }
     }
+    @Test fun serverUsesNegotiatedMtuForCompleteReplyAndFreezesStartedExchange() {
+        callback.onMtuChanged(device, 247); idle()
+        val bytes = ByteArray(1000) { it.toByte() }
+        GroupBleChunks.split(bytes, 244).forEach {
+            callback.onCharacteristicWriteRequest(device, 1, mailbox, false, true, 0, it); idle()
+        }
+        assertArrayEquals(bytes, requests.single())
+        replies.single()(bytes); idle()
+        callback.onMtuChanged(device, 23); idle()
+        RespondingGattServer.sent.clear()
+        repeat(5) { callback.onCharacteristicReadRequest(device, it, 0, mailbox); idle() }
+        val assembler = GroupBleAssembler()
+        assertEquals(244, RespondingGattServer.sent.first().size)
+        RespondingGattServer.sent.dropLast(1).forEach { assertNull(assembler.accept(it)) }
+        assertArrayEquals(bytes, assembler.accept(RespondingGattServer.sent.last()))
+        server.close()
+    }
     @Test fun completeMessageDeliveredOnceAndConcurrentRequestClosesPeer() {
         write(ByteArray(80) { it.toByte() })
         assertEquals(1, requests.size)

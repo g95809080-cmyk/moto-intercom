@@ -85,6 +85,9 @@ class AudioRouteControllerRobolectricTest {
         val controller = AudioRouteController(context, fallbackToSpeaker = false)
         try {
             controller.select(AudioRouteSelection.BLUETOOTH)
+            // Selecting the device queues its listener behind the first executor barrier.
+            // Drain that callback before consuming its main-thread verification delivery.
+            drainRouteExecutor()
             drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
             assertTrue(controller.evidence().ready)
             audioManager.setCommunicationDevice(speaker)

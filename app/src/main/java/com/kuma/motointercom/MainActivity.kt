@@ -326,6 +326,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onAudioReadyChanged(ready: Boolean) {
+        runOnUiThread { if (serviceConnected) screen.setAudioReady(ready) }
+    }
+
     override fun onAudioSourceChanged(status: String, bluetooth: Boolean) {
         runOnUiThread {
             if (serviceConnected) screen.setAudioSource(status, bluetooth)
