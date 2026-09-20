@@ -22,6 +22,30 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MainActivityRobolectricTest {
+    @Test fun serviceReadinessCallbackUpdatesConnectedHomeAndIsIgnoredAfterDetach() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        shadowOf(app).setThrowInBindService(SecurityException("no binder"))
+        val lifecycle = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = lifecycle.get()
+        val connected = MainActivity::class.java.getDeclaredField("serviceConnected").apply { isAccessible = true }
+        try {
+            connected.setBoolean(activity, true)
+            val runtime = RuntimeSessionId("runtime-ui")
+            val attempt = ConnectionAttempt(ConnectionAttemptId("attempt-ui"), runtime,
+                TargetLock("peer", RuntimeSessionId("remote")), ConnectionTrigger.USER,
+                ChannelPlan.single(Transport.LAN), 1_000)
+            activity.onIntercomStateChanged(IntercomState.Connected(attempt, PeerIdentity("peer", "rider"), 1, Transport.LAN))
+            activity.onAudioReadyChanged(true)
+            val readiness = MainScreen::class.java.getDeclaredField("audioReady").apply { isAccessible = true }
+            assertTrue(readiness.getBoolean(screen(activity)))
+            activity.onAudioReadyChanged(false)
+            assertFalse(readiness.getBoolean(screen(activity)))
+            connected.setBoolean(activity, false)
+            activity.onAudioReadyChanged(true)
+            assertFalse(readiness.getBoolean(screen(activity)))
+        } finally { lifecycle.pause().stop().destroy() }
+    }
+
     @Test
     fun skippedOnboardingPermissionResultStartsServiceOnlyAfterActivityResumes() {
         val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
