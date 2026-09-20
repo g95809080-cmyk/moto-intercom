@@ -51,6 +51,7 @@ internal interface RiderMediaSession : Closeable {
     fun setRemoteAnswer(remoteSdpJson: String)
     fun addRemoteIceCandidate(candidateJson: String)
     fun setPlaybackMuted(muted: Boolean) = Unit
+    fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
 }
 
 internal enum class RiderMediaMode(val maxSessions: Int) {
@@ -91,10 +92,12 @@ internal class RiderAudioEngine(
         settings = AudioControlSettings()
     ),
     private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
-    private val mediaMode: RiderMediaMode = RiderMediaMode.SINGLE
+    private val mediaMode: RiderMediaMode = RiderMediaMode.SINGLE,
+    private val onDisposed: () -> Unit = {}
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
+    private val platformOwnership = AudioPlatformOwnership.acquire()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val rtc: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -119,6 +122,7 @@ internal class RiderAudioEngine(
     private val activeSessions = mutableSetOf<MediaSession>()
     // RTC-thread resources may outlive registry removal until their queued cleanup runs.
     private val rtcSessions = mutableSetOf<MediaSession>()
+    private val ioEvidence = RiderAudioIoEvidence()
     private val audioIoGate = AudioIoGate(sessionLock, mediaMode == RiderMediaMode.SINGLE,
         { action -> runRtc(allowClosed = true, block = action) }, ::applyAudioIo)
 
@@ -287,6 +291,8 @@ internal class RiderAudioEngine(
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
                 rtc.shutdown()
+                AudioPlatformOwnership.release(platformOwnership)
+                mainHandler.post { onDisposed() }
             }
         }
     }
@@ -375,6 +381,24 @@ internal class RiderAudioEngine(
         initWebRtcOnce(appContext)
 
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
+                override fun onWebRtcAudioRecordStart() { ioEvidence.recording(true) }
+                override fun onWebRtcAudioRecordStop() { ioEvidence.recording(false) }
+            })
+            .setAudioTrackStateCallback(object : JavaAudioDeviceModule.AudioTrackStateCallback {
+                override fun onWebRtcAudioTrackStart() { ioEvidence.playing(true) }
+                override fun onWebRtcAudioTrackStop() { ioEvidence.playing(false) }
+            })
+            .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
+                override fun onWebRtcAudioRecordInitError(error: String) { ioEvidence.recording(false) }
+                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode, error: String) { ioEvidence.recording(false) }
+                override fun onWebRtcAudioRecordError(error: String) { ioEvidence.recording(false) }
+            })
+            .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
+                override fun onWebRtcAudioTrackInitError(error: String) { ioEvidence.playing(false) }
+                override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode, error: String) { ioEvidence.playing(false) }
+                override fun onWebRtcAudioTrackError(error: String) { ioEvidence.playing(false) }
+            })
             .setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -386,6 +410,7 @@ internal class RiderAudioEngine(
             // 采集端 PCM 钩子：在 WebRTC 编码前做 VOX 门限判断。
             // 注意这里只做 RMS 计算和状态翻转，避免在音频线程里执行重活。
             .setSamplesReadyCallback(JavaAudioDeviceModule.SamplesReadyCallback { samples ->
+                ioEvidence.pcm(SystemClock.elapsedRealtime())
                 handleAudioSamplesForVox(samples)
             })
             // 优先启用设备硬件 AEC/NS；不支持时 WebRTC 会回退到软件处理。
@@ -680,6 +705,7 @@ internal class RiderAudioEngine(
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             runSession(session) {
+                session.connected = newState == PeerConnection.PeerConnectionState.CONNECTED
                 if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "PeerConnection state=$newState")
                 postSessionMain(session) {
@@ -915,6 +941,30 @@ internal class RiderAudioEngine(
         val pendingRemoteCandidates = mutableListOf<IceCandidate>()
         val remoteTracks = mutableSetOf<AudioTrack>()
         @Volatile var playbackIsMuted = callbacks.initialPlaybackMuted
+        var connected = false
+        private val statsPending = AtomicBoolean(false)
+
+        override fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) {
+            if (!statsPending.compareAndSet(false, true)) return
+            runSession(this) {
+                val peer = peerConnection
+                if (peer == null) { statsPending.set(false); return@runSession }
+                val gate = audioIoGate.revision()
+                val native = ioEvidence.revision()
+                peer.getStats { report ->
+                    runSession(this) {
+                        val counters = audioRtpCounters(report.statsMap.values.map { Triple(it.id, it.type, it.members) })
+                        val result = counters?.let { RiderMediaEvidence(it, connected, remoteTracks.isNotEmpty(),
+                            audioIoGate.allows(gate) && ioEvidence.ready(native, SystemClock.elapsedRealtime()), gate, native) }
+                        postSessionMain(this) {
+                            statsPending.set(false)
+                            callback(result?.copy(audioIoEnabled = result.audioIoEnabled && audioIoGate.allows(gate) &&
+                                ioEvidence.ready(native, SystemClock.elapsedRealtime())))
+                        }
+                    }
+                }
+            }
+        }
 
         override fun setPlaybackMuted(muted: Boolean) {
             playbackIsMuted = muted

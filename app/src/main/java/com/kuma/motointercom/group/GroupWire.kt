@@ -19,6 +19,8 @@ internal sealed interface GroupMessage {
     class Offer(val link: GroupLinkLease, val sdp: String) : GroupMessage
     class Answer(val link: GroupLinkLease, val sdp: String) : GroupMessage
     class Candidate(val link: GroupLinkLease, val mid: String, val line: Int, val candidate: String) : GroupMessage
+    class LinkConfirmed(val link: GroupLinkLease) : GroupMessage
+    class RestartLink(val link: GroupLinkLease) : GroupMessage
 }
 
 internal data class GroupFrame(
@@ -55,6 +57,8 @@ internal object GroupWire {
                 is GroupMessage.Offer -> 6
                 is GroupMessage.Answer -> 7
                 is GroupMessage.Candidate -> 8
+                is GroupMessage.LinkConfirmed -> 9
+                is GroupMessage.RestartLink -> 10
             })
             out.uuid(frame.room.instanceId)
             out.uuid(frame.room.hostRuntimeId)
@@ -76,6 +80,8 @@ internal object GroupWire {
                     out.writeInt(msg.line)
                     out.text(msg.candidate, 4096)
                 }
+                is GroupMessage.LinkConfirmed -> out.link(msg.link)
+                is GroupMessage.RestartLink -> out.link(msg.link)
             }
         }
         bytes.toByteArray().also { require(it.size in MIN_FRAME_BYTES..MAX_FRAME_BYTES) }
@@ -86,7 +92,7 @@ internal object GroupWire {
         val input = DataInputStream(ByteArrayInputStream(bytes))
         require(input.readInt() == MAGIC && input.readUnsignedShort() == VERSION)
         val type = input.readUnsignedByte()
-        require(type in 1..8)
+        require(type in 1..10)
         val room = GroupRoomKey(input.uuid(), input.uuid())
         val sender = input.member()
         val recipient = input.member()
@@ -100,8 +106,10 @@ internal object GroupWire {
             5 -> GroupMessage.AudioAvailable(input.readUnsignedByte().also { require(it <= 1) } == 1)
             6 -> GroupMessage.Offer(input.link(), input.text(MAX_SDP))
             7 -> GroupMessage.Answer(input.link(), input.text(MAX_SDP))
-            else -> GroupMessage.Candidate(input.link(), input.text(256, true),
+            8 -> GroupMessage.Candidate(input.link(), input.text(256, true),
                 input.readInt().also { require(it in 0..65535) }, input.text(4096))
+            9 -> GroupMessage.LinkConfirmed(input.link())
+            else -> GroupMessage.RestartLink(input.link())
         }
         require(input.available() == 0)
         GroupFrame(room, sender, recipient, sequence, message)

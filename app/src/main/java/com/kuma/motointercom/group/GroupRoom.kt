@@ -70,11 +70,11 @@ internal sealed interface GroupEvent {
 
 /** Immutable reducer. The single product writer must serialize events and commit each returned room. */
 internal class GroupRoom private constructor(
-    val key: GroupRoomKey,
+    override val key: GroupRoomKey,
     val joinCode: GroupJoinCode,
-    val hostId: String,
+    override val hostId: String,
     val rosterRevision: Long,
-    val ended: Boolean,
+    override val ended: Boolean,
     private val membersById: Map<String, GroupMember>,
     private val removed: Set<String>,
     private val linksByPair: Map<GroupPair, GroupLink>,
@@ -82,13 +82,14 @@ internal class GroupRoom private constructor(
     private val nextIncarnation: Long,
     private val nextLinkGeneration: Long,
     private val lastTimeMs: Long
-) {
+) : GroupRoomView {
     private data class RequestKey(val deviceId: String, val runtimeId: String, val requestId: String)
     private data class Receipt(val lease: GroupMemberLease, val expiresAtMs: Long)
 
-    val members: List<GroupMember> get() = membersById.values.toList()
+    override val members: List<GroupMember> get() = membersById.values.toList()
+    val removedDeviceIds: Set<String> get() = removed.toSet()
     val occupiedSeats: Int get() = members.count { it.status != GroupMemberStatus.WAITING }
-    val links: List<GroupLink> get() = linksByPair.values.map { it.copy(confirmedBy = it.confirmedBy.toSet()) }
+    override val links: List<GroupLink> get() = linksByPair.values.map { it.copy(confirmedBy = it.confirmedBy.toSet()) }
     val activePairs: Set<GroupPair> get() {
         val ids = members.filter { it.status == GroupMemberStatus.ADMITTED }.map { it.lease.deviceId }.sorted()
         return ids.flatMapIndexed { index, a -> ids.drop(index + 1).map { b -> GroupPair(a, b) } }.toSet()
