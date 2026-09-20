@@ -353,7 +353,7 @@ internal class GroupSessionOrchestrator(
                     }
                     if (!installRoster(control.roster)) { output += GroupSessionEffect.CloseChannel(id); return }
                     local = control.member; clientIngress = GroupClientIngress(checkNotNull(participation.token), control.member)
-                    phase = GroupPhase.IN_ROOM; message = "已加入房间，语音待确认"; controlAttempt = null
+                    phase = GroupPhase.IN_ROOM; message = "已加入房间"; controlAttempt = null
                     output += GroupSessionEffect.AdmitChannel(id)
                     sendToHost(GroupMessage.AudioAvailable(audioAvailable))
                 }
@@ -396,7 +396,7 @@ internal class GroupSessionOrchestrator(
         send(id, GroupControl.Welcome(lease, view))
         output += GroupSessionEffect.AdmitChannel(id)
         channels.values.filter { it.id != id }.forEach { send(it.id, GroupControl.Roster(view)) }
-        message = "成员已加入，语音待确认"
+        message = "成员已加入"
     }
     private fun installRoster(value: GroupRoster): Boolean {
         val match = selected ?: return false
