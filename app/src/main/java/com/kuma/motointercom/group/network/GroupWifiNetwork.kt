@@ -51,6 +51,8 @@ internal class GroupWifiHost(
     private var created = false
     private var ready = false
     private var removing = false
+    private var absenceProbe: Any? = null
+    private var absenceTimeout: Runnable? = null
     private var closeResult: ((GroupNetworkCloseResult) -> Unit)? = null
     private val timeout = Runnable { fail("创建离线网络超时") }
     private val closeTimeout = Runnable { reportClose(GroupNetworkCloseResult.UNKNOWN) }
@@ -135,7 +137,7 @@ internal class GroupWifiHost(
     fun retryCleanup() { check(Looper.myLooper() == handler.looper); if (closed) cleanup() }
     private fun cleanup() {
         if (!owns()) { finishReleased(); return }
-        if (createPending || removing) return
+        if (createPending || removing || absenceProbe != null) return
         if (!created) { finishReleased(); return }
         removing = true
         try {
@@ -146,13 +148,50 @@ internal class GroupWifiHost(
                 }
                 override fun onFailure(reason: Int) {
                     removing = false
-                    reportClose(GroupNetworkCloseResult.UNKNOWN)
+                    confirmAbsent()
                 }
             })
         } catch (_: Exception) { removing = false; reportClose(GroupNetworkCloseResult.UNKNOWN) }
     }
+    /** A failed remove may mean Android already removed the GO. Failure alone proves nothing. */
+    private fun confirmAbsent() {
+        if (!closed || !owns() || createPending || removing || absenceProbe != null) return
+        val currentChannel = channel ?: return reportClose(GroupNetworkCloseResult.UNKNOWN)
+        val token = Any()
+        absenceProbe = token
+        fun current() = absenceProbe === token && channel === currentChannel && owns() && !createPending && !removing
+        fun unknown() {
+            if (!current()) return
+            clearAbsenceProbe()
+            reportClose(GroupNetworkCloseResult.UNKNOWN)
+        }
+        absenceTimeout = Runnable { unknown() }.also { handler.postDelayed(it, 2_000) }
+        try {
+            manager!!.requestGroupInfo(currentChannel) { group ->
+                if (!current()) return@requestGroupInfo
+                if (group != null) { unknown(); return@requestGroupInfo }
+                try {
+                    manager!!.requestConnectionInfo(currentChannel) { info ->
+                        if (!current()) return@requestConnectionInfo
+                        if (info != null && !info.groupFormed) {
+                            clearAbsenceProbe()
+                            created = false
+                            android.util.Log.i("MotoComGroupWifi", "GO absence confirmed after remove failure")
+                            finishReleased()
+                        } else unknown()
+                    }
+                } catch (_: Exception) { unknown() }
+            }
+        } catch (_: Exception) { unknown() }
+    }
+    private fun clearAbsenceProbe() {
+        absenceProbe = null
+        absenceTimeout?.let(handler::removeCallbacks)
+        absenceTimeout = null
+    }
     private fun finishReleased() {
         if (lease != null && owns() && !ownership.releaseConfirmed(lease!!)) return
+        clearAbsenceProbe()
         handler.removeCallbacksAndMessages(null)
         if (Build.VERSION.SDK_INT >= 27) runCatching { channel?.close() }
         channel = null; manager = null

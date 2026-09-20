@@ -158,14 +158,31 @@ internal class GroupNetworkRuntime(
         client?.close(); client = null; server?.close(); server = null
     }
     /** This application-context owner survives UI/service detach until GO release is known. */
+    private var releasingHost: GroupWifiHost? = null
+    private val releaseWaiters = mutableListOf<() -> Unit>()
+    private var releaseRetry: Runnable? = null
     private fun releaseHost(done: () -> Unit) {
         val old = wifiHost ?: return done()
+        releaseWaiters += done
+        if (releasingHost != null) return
+        releasingHost = old
+        pollHostRelease(old)
+    }
+    private fun pollHostRelease(old: GroupWifiHost) {
+        if (releasingHost !== old) return
         old.retryCleanup()
         old.close { result ->
+            if (releasingHost !== old) return@close
             if (result == GroupNetworkCloseResult.RELEASED) {
+                releaseRetry?.let(main::removeCallbacks); releaseRetry = null
+                releasingHost = null
                 if (wifiHost === old) wifiHost = null
-                done()
-            } else main.postDelayed({ releaseHost(done) }, 1_000)
+                val waiters = releaseWaiters.toList(); releaseWaiters.clear()
+                waiters.forEach { runCatching { it() } }
+            } else if (releaseRetry == null) {
+                releaseRetry = Runnable { releaseRetry = null; pollHostRelease(old) }
+                    .also { main.postDelayed(it, 1_000) }
+            }
         }
     }
     override fun stop(flush: Boolean, done: () -> Unit) {
