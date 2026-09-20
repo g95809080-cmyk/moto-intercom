@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pGroup
+import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
@@ -31,6 +32,8 @@ class GroupWifiHostTest {
         context.getSystemService(WifiManager::class.java).isWifiEnabled = true
         ownership = GroupGoOwnership()
         DeferredP2p.create = null; DeferredP2p.remove = null; DeferredP2p.existing = null
+        DeferredP2p.connection = null; DeferredP2p.deferInfo = false; DeferredP2p.infoCallbacks.clear()
+        DeferredP2p.removeCalls = 0
     }
     private fun host() = GroupWifiHost(context, { _, _ -> fail("unexpected ready") }, errors::add, ownership)
     @Test fun closeDuringCreateDoesNotLetLateSuccessDeleteNewOwner() {
@@ -53,6 +56,7 @@ class GroupWifiHostTest {
         val host = host(); host.start(); shadowOf(Looper.getMainLooper()).idle()
         host.close { }
         DeferredP2p.create!!.onSuccess()
+        DeferredP2p.existing = WifiP2pGroup()
         DeferredP2p.remove!!.onFailure(WifiP2pManager.BUSY)
         assertNull(ownership.acquire())
         host.retryCleanup()
@@ -75,18 +79,66 @@ class GroupWifiHostTest {
         assertNull(DeferredP2p.remove)
         assertNotNull(ownership.acquire())
     }
+    @Test fun alreadyRemovedGroupReleasesAfterBothAbsenceResponses() {
+        val host = host(); host.start(); shadowOf(Looper.getMainLooper()).idle()
+        host.close { }
+        DeferredP2p.create!!.onSuccess()
+        DeferredP2p.connection = WifiP2pInfo().apply { groupFormed = false }
+        DeferredP2p.remove!!.onFailure(WifiP2pManager.ERROR)
+        assertFalse(ownership.hasOwner())
+        var result: GroupNetworkCloseResult? = null
+        host.close { result = it }
+        assertEquals(GroupNetworkCloseResult.RELEASED, result)
+        assertNotNull(ownership.acquire())
+    }
+    @Test fun absentGroupButFormedConnectionCannotRelease() {
+        val host = host(); host.start(); shadowOf(Looper.getMainLooper()).idle(); host.close { }
+        DeferredP2p.create!!.onSuccess()
+        DeferredP2p.connection = WifiP2pInfo().apply { groupFormed = true }
+        DeferredP2p.remove!!.onFailure(WifiP2pManager.ERROR)
+        assertTrue(ownership.hasOwner())
+        DeferredP2p.connection!!.groupFormed = false
+        host.retryCleanup(); DeferredP2p.remove!!.onFailure(WifiP2pManager.ERROR)
+        assertFalse(ownership.hasOwner())
+    }
+    @Test fun expiredAbsenceCallbackCannotReleaseCurrentOrSuccessorOwner() {
+        val host = host(); host.start(); shadowOf(Looper.getMainLooper()).idle(); host.close { }
+        DeferredP2p.create!!.onSuccess()
+        DeferredP2p.deferInfo = true
+        DeferredP2p.connection = WifiP2pInfo().apply { groupFormed = false }
+        DeferredP2p.remove!!.onFailure(WifiP2pManager.ERROR)
+        val stale = DeferredP2p.infoCallbacks.single()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        assertTrue(ownership.hasOwner())
+        host.retryCleanup()
+        assertEquals(1, DeferredP2p.removeCalls)
+        stale.onGroupInfoAvailable(null)
+        assertTrue(ownership.hasOwner())
+        DeferredP2p.infoCallbacks.last().onGroupInfoAvailable(null)
+        val successor = checkNotNull(ownership.acquire())
+        stale.onGroupInfoAvailable(null)
+        host.retryCleanup()
+        assertTrue(ownership.owns(successor))
+    }
 }
 
 @Implements(WifiP2pManager::class)
 class DeferredP2p : ShadowWifiP2pManager() {
     @Implementation override fun requestGroupInfo(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.GroupInfoListener) {
-        listener.onGroupInfoAvailable(existing)
+        if (deferInfo) infoCallbacks += listener else listener.onGroupInfoAvailable(existing)
+    }
+    @Implementation fun requestConnectionInfo(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ConnectionInfoListener) {
+        listener.onConnectionInfoAvailable(connection)
     }
     @Implementation override fun createGroup(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ActionListener) { create = listener }
-    @Implementation override fun removeGroup(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ActionListener) { remove = listener }
+    @Implementation override fun removeGroup(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ActionListener) { removeCalls++; remove = listener }
     companion object {
         var create: WifiP2pManager.ActionListener? = null
         var remove: WifiP2pManager.ActionListener? = null
+        var removeCalls = 0
         var existing: WifiP2pGroup? = null
+        var connection: WifiP2pInfo? = null
+        var deferInfo = false
+        val infoCallbacks = mutableListOf<WifiP2pManager.GroupInfoListener>()
     }
 }
