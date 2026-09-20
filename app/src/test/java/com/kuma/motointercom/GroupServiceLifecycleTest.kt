@@ -18,6 +18,60 @@ import java.util.UUID
 @Config(sdk = [35])
 class GroupServiceLifecycleTest {
     private fun field(service: IntercomService, name: String) = IntercomService::class.java.getDeclaredField(name).apply { isAccessible = true }
+    @Test fun bindingReplaysProductStateBeforeAudioReadiness() {
+        val owner = Robolectric.buildService(IntercomService::class.java).create()
+        val events = mutableListOf<String>()
+        try {
+            val service = owner.get()
+            field(service, "audioReady").setBoolean(service, true)
+            service.setListener(object : IntercomService.Listener {
+                override fun onStatusChanged(status: String, running: Boolean) = Unit
+                override fun onLog(message: String) = Unit
+                override fun onError(message: String) = Unit
+                override fun onIntercomStateChanged(state: IntercomState) { events += "state" }
+                override fun onAudioReadyChanged(ready: Boolean) { events += "ready:$ready" }
+            })
+            assertEquals(listOf("state", "ready:true"), events)
+        } finally { owner.destroy() }
+    }
+    @Test fun searchFailureAndCancelPublishTerminalThroughRealServiceBeforeSynchronousRelease() {
+        val owner = Robolectric.buildService(IntercomService::class.java).create()
+        val service = owner.get()
+        val observed = mutableListOf<GroupServiceState>()
+        service.addGroupListener(observed::add)
+        try {
+            repeat(2) { index ->
+                lateinit var runtime: GroupRuntime
+                val network = object : GroupNetworkEffects {
+                    override fun search(effect: GroupSessionEffect.Search) = Unit
+                    override fun host(attempt: UUID, descriptor: GroupDescriptor, code: GroupJoinCode) = Unit
+                    override fun join(effect: GroupSessionEffect.JoinNetwork) = Unit
+                    override fun connect(effect: GroupSessionEffect.ConnectControl) = Unit
+                    override fun send(effect: GroupSessionEffect.Send) = Unit
+                    override fun closeChannel(id: UUID) = Unit
+                    override fun admit(id: UUID) = Unit
+                    override fun stop(flush: Boolean, done: () -> Unit) = done()
+                }
+                runtime = GroupRuntime(service, GroupAuthEndpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
+                    "test", AudioRouteSelection.SPEAKER, AudioControlSettings(),
+                    { service.onGroupSnapshot(runtime, it) }, {}, { service.onGroupReleased(runtime) },
+                    networkFactory = { _, _ -> network }, acquireKeepAlive = { java.io.Closeable {} }, busyPorts = emptyList())
+                field(service, "groupRuntime").set(service, runtime)
+                runtime.start(GroupJoinCode("123456"))
+                val operation = runtime.snapshot.operation!!
+                assertTrue(observed.last().busy)
+                if (index == 0) runtime.writer.dispatch(GroupSessionEvent.Failed(operation, "timeout"))
+                else service.groupAction(GroupSessionEvent.Leave)
+                assertFalse(observed.last().busy)
+                assertEquals(GroupPhase.IDLE, observed.last().snapshot!!.phase)
+                assertNull(field(service, "groupRuntime").get(service))
+                assertFalse(GroupRuntimeOwnership.hasOwner())
+                val finalState = observed.last()
+                runtime.writer.dispatch(GroupSessionEvent.Found(operation, emptyList()))
+                assertEquals(finalState, observed.last())
+            }
+        } finally { owner.destroy() }
+    }
     @Test fun restartedServiceWithoutExplicitActionHasNoRoomOrMicrophoneIntent() {
         val owner = Robolectric.buildService(IntercomService::class.java).create()
         val service = owner.get()

@@ -69,6 +69,7 @@ internal sealed interface GroupSessionEvent {
     class Remove(val peerId: String) : GroupSessionEvent
     class Unblock(val peerId: String) : GroupSessionEvent
     data object Tick : GroupSessionEvent
+    data class SearchProgress(val operation: UUID, val index: Int, val total: Int) : GroupSessionEvent
     data object Leave : GroupSessionEvent
 }
 
@@ -143,7 +144,7 @@ internal class GroupSessionOrchestrator(
                 handle(queue.removeFirst())
                 syncMedia()
                 snapshot = snapshot()
-                output += GroupSessionEffect.Publish(snapshot)
+                output.add(0, GroupSessionEffect.Publish(snapshot))
                 for (effect in output.toList()) {
                     try { effects(effect) }
                     catch (_: Exception) {
@@ -208,6 +209,9 @@ internal class GroupSessionOrchestrator(
                 operation = UUID.randomUUID(); code = event.code; phase = GroupPhase.SEARCHING
                 message = "正在查找并验证附近房间"
                 output += GroupSessionEffect.Search(operation!!, endpoint, event.code)
+            }
+            is GroupSessionEvent.SearchProgress -> if (event.operation == operation && phase == GroupPhase.SEARCHING) {
+                message = "正在验证附近房间 ${event.index}/${event.total}"
             }
             is GroupSessionEvent.Found -> if (event.operation == operation && phase == GroupPhase.SEARCHING) {
                 matches = event.matches.distinctBy { it.descriptor.room }.take(16)

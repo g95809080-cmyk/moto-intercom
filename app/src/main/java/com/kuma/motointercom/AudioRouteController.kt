@@ -50,7 +50,7 @@ internal class AudioRouteController(
             audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.id }.sorted().joinToString(",")
     }
     /** Read both before and after an asynchronous stats query; checks the actual platform route. */
-    internal fun evidence(): AudioRouteEvidence {
+    override fun evidence(): AudioRouteEvidence {
         synchronized(evidenceLock) {
             if (verifiedDevice != null && verifiedDevice != actualDevice()) invalidateEvidence()
             return AudioRouteEvidence(evidenceRevision, !closed.get() && verifiedDevice != null)

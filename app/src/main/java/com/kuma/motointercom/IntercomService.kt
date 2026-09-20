@@ -139,6 +139,7 @@ class IntercomService : Service() {
     internal interface Listener {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
+        fun onAudioReadyChanged(ready: Boolean) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
         fun onAudioInterruptionChanged(state: AudioInterruptionState) = Unit
         fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) = Unit
@@ -289,17 +290,10 @@ class IntercomService : Service() {
                     lateinit var runtime: GroupRuntime
                     runtime = GroupRuntime(this@IntercomService, GroupAuthEndpoint(device, UUID.randomUUID().toString()), nickname,
                         groupState.route, AudioControlPreferences(this@IntercomService).load(),
-                        onSnapshot = { value ->
-                            if (groupRuntime === runtime) publishGroup(groupState.copy(snapshot = value, message = value.message,
-                                busy = value.phase != GroupPhase.IDLE))
-                        }, onAudioLabel = { label ->
+                        onSnapshot = { value -> onGroupSnapshot(runtime, value) },
+                        onAudioLabel = { label ->
                             if (groupRuntime === runtime) publishGroup(groupState.copy(audioLabel = label))
-                        }, onReleased = {
-                            if (groupRuntime === runtime) {
-                                groupRuntime = null; publishGroup(groupState.copy(busy = false))
-                                stopForegroundCompat()
-                            }
-                        })
+                        }, onReleased = { onGroupReleased(runtime) })
                     groupRuntime = runtime; groupStarting = null
                     try { runtime.start(code) } catch (_: Exception) {
                         publishGroup(groupState.copy(message = "群组启动失败，请检查无线网络后重试"))
@@ -313,6 +307,17 @@ class IntercomService : Service() {
                     }
                 }
             }
+        }
+    }
+    internal fun onGroupSnapshot(runtime: GroupRuntime, value: GroupSessionSnapshot) {
+        if (groupRuntime === runtime) publishGroup(groupState.copy(snapshot = value, message = value.message,
+            busy = value.phase != GroupPhase.IDLE))
+    }
+    internal fun onGroupReleased(runtime: GroupRuntime) {
+        if (groupRuntime === runtime) {
+            groupRuntime = null
+            publishGroup(groupState.copy(snapshot = runtime.snapshot, message = runtime.snapshot.message, busy = false))
+            stopForegroundCompat()
         }
     }
     private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
@@ -331,6 +336,10 @@ class IntercomService : Service() {
 
     private var bluetoothReady = false
     private var physicalLinkReady = false
+    private var audioReady = false
+    private fun publishAudioReady(value: Boolean) {
+        if (audioReady != value) { audioReady = value; listener?.onAudioReadyChanged(value) }
+    }
     private var mediaConnected = false
     private var audioControls = AudioControlSettings()
     private var audioControlRevision = 0L
@@ -479,6 +488,7 @@ class IntercomService : Service() {
         this.listener = listener
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
+        listener?.onAudioReadyChanged(audioReady)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
         listener?.onAudioInterruptionChanged(audioInterruptionState)
         listener?.onAudioRouteSelectionChanged(preferredAudioRoute)
@@ -724,6 +734,7 @@ class IntercomService : Service() {
     }
 
     private fun onAudioInterruptionChanged(state: AudioInterruptionState) {
+        if (state != AudioInterruptionState.NORMAL) publishAudioReady(false)
         audioInterruptionState = state
         listener?.onAudioInterruptionChanged(state)
         when (state) {
@@ -1346,6 +1357,7 @@ class IntercomService : Service() {
         activeMediaSession = null
         intercomManager = null
         mediaConnected = false
+        publishAudioReady(false)
         runCatching { manager?.close() }.onFailure(::handleError)
     }
 
@@ -1374,6 +1386,7 @@ class IntercomService : Service() {
             clearConnectionState = {
                 physicalLinkReady = false
                 mediaConnected = false
+        publishAudioReady(false)
                 remoteRiderName = null
                 listener?.onRemoteRiderIdentified("")
             },
@@ -1471,6 +1484,7 @@ class IntercomService : Service() {
 
         physicalLinkReady = true
         mediaConnected = false
+        publishAudioReady(false)
         remoteRiderName = effect.peer.nickname
         publishStatus(SIGNALING_CONNECTED_STATUS)
 
@@ -1484,6 +1498,7 @@ class IntercomService : Service() {
             onConnectionStateChanged = {
                 onConnectionStateChanged(token, candidate, it)
             },
+            onAudioReadyChanged = { ready -> postForMediaContext(token, candidate) { publishAudioReady(ready) } },
             onAudioLevelChanged = { onAudioLevelChanged(token, candidate, it) },
             onError = { error ->
                 postForMediaContext(token, candidate) { handleError(error) }
@@ -1542,6 +1557,7 @@ class IntercomService : Service() {
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.CLOSED -> {
                     mediaConnected = false
+        publishAudioReady(false)
                     publishStatus(SIGNAL_LOST_STATUS)
                 }
                 else -> updateStageStatus()
@@ -1634,6 +1650,7 @@ class IntercomService : Service() {
             clearConnectionState = {
                 physicalLinkReady = false
                 mediaConnected = false
+        publishAudioReady(false)
                 remoteRiderName = null
                 publishStatus(cleanupStatus)
             },
@@ -1791,6 +1808,7 @@ class IntercomService : Service() {
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false
+        publishAudioReady(false)
         audioInterruptionState = AudioInterruptionState.NORMAL
         remoteRiderName = null
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
@@ -2344,6 +2362,7 @@ class IntercomService : Service() {
         intercomManager = null
         physicalLinkReady = false
         mediaConnected = false
+        publishAudioReady(false)
         publishStatus(SIGNAL_LOST_STATUS)
 
         val delayMillis = effect.attempt.boundedTimeoutMillis(

@@ -19,6 +19,25 @@ class GroupBootstrapTest {
     private fun host() = GroupBootstrapHostSession(descriptor, code, {
         disclosed++; GroupNetworkDescriptor(GroupWifiCredentials("DIRECT-test", "super-secret"), "192.168.49.1", 8899)
     }, { allowed }, { time }, { current })
+    @Test fun realPakeSurvivesNegotiatedFragmentsWithRealisticAttRoundTripBudget() = runBlocking {
+        val server = host()
+        fun transport(bytes: ByteArray): ByteArray {
+            val assembler = com.kuma.motointercom.group.network.GroupBleAssembler()
+            var result: ByteArray? = null
+            com.kuma.motointercom.group.network.GroupBleChunks.split(bytes, 244).forEach {
+                time += 45 // bounded simulated ATT request/response latency
+                result = assembler.accept(it)
+            }
+            return requireNotNull(result)
+        }
+        val match = authenticateGroupCandidate(client, code, { time }, { current }) { bytes ->
+            transport(server.respond(transport(bytes)))
+        }
+        assertEquals(descriptor, match.descriptor)
+        assertTrue(time < GroupAuthentication.TIMEOUT_MS)
+        assertEquals(1, disclosed)
+        server.close()
+    }
     @Test fun realPakeOverFragmentSizedRequestResponseDisclosesOnlyAfterCompleteConfirmation() = runBlocking {
         val host = host()
         val packets = mutableListOf<ByteArray>()

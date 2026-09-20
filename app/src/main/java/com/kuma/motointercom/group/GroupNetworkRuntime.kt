@@ -43,7 +43,9 @@ internal class GroupNetworkRuntime(
     private fun post(action: () -> Unit) { main.post { action() } }
     override fun search(effect: GroupSessionEffect.Search) {
         search?.close()
-        search = GroupCandidateSearch(context, endpoint, effect.code, { _, _ -> }, {
+        search = GroupCandidateSearch(context, endpoint, effect.code, { index, total ->
+            if (!stopped) dispatch(GroupSessionEvent.SearchProgress(effect.operation, index, total))
+        }, {
             if (!stopped && snapshot().operation == effect.operation) dispatch(GroupSessionEvent.Found(effect.operation, it))
         }, {
             if (!stopped) dispatch(GroupSessionEvent.Failed(effect.operation, it))

@@ -111,6 +111,7 @@ internal class GroupBleServer(
         val expiresAt = SystemClock.elapsedRealtime() + GroupBleProtocol.TIMEOUT_MS
         val assembler = GroupBleAssembler()
         var request = 0L
+        var packetBytes = GroupBleChunks.DEFAULT_CHUNK_BYTES
         var processing = false
         val outgoing = ArrayDeque<ByteArray>()
         lateinit var deadline: Runnable
@@ -155,6 +156,13 @@ internal class GroupBleServer(
                 }
             }.onFailure { fail() }
         } }
+        override fun onMtuChanged(device: BluetoothDevice, mtu: Int) { ingress.post {
+            if (!closed) peers[device.address]?.let { peer ->
+                // Freeze the size once application exchange starts.
+                if (peer.request == 0L && !peer.processing && peer.outgoing.isEmpty())
+                    peer.packetBytes = GroupBleChunks.packetBytes(mtu)
+            }
+        } }
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int,
             characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean,
             offset: Int, value: ByteArray) {
@@ -178,7 +186,7 @@ internal class GroupBleServer(
                                     bounded?.fill(0); return@post
                                 }
                                 if (bounded == null || SystemClock.elapsedRealtime() >= peer.expiresAt) { bounded?.fill(0); drop(peer) } else {
-                                    peer.outgoing.addAll(GroupBleChunks.split(bounded))
+                                    peer.outgoing.addAll(GroupBleChunks.split(bounded, peer.packetBytes))
                                     bounded.fill(0)
                                     peer.processing = false
                                 }
@@ -263,6 +271,16 @@ internal class GroupBleClient(
     private var started = false
     private var closed = false
     private var ready = false
+    private var packetBytes = GroupBleChunks.DEFAULT_CHUNK_BYTES
+    private val mtuFallback = Runnable { if (!closed && !ready && characteristic != null) completeReady(23) }
+    private fun completeReady(mtu: Int) {
+        if (closed || ready) return
+        packetBytes = GroupBleChunks.packetBytes(mtu)
+        handler.removeCallbacks(mtuFallback)
+        ready = true
+        android.util.Log.i("MotoComGroupBle", "GATT ready payload=$packetBytes")
+        onReady()
+    }
     private var reply: ((ByteArray) -> Unit)? = null
     private var assembler = GroupBleAssembler()
     private val outgoing = ArrayDeque<ByteArray>()
@@ -271,12 +289,17 @@ internal class GroupBleClient(
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) { post(g) {
             check(status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED)
+            runCatching { g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) }
             check(g.discoverServices())
         } }
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { post(g) {
             check(status == BluetoothGatt.GATT_SUCCESS && !ready)
             characteristic = checkNotNull(g.getService(GroupBleProtocol.SERVICE)?.getCharacteristic(GroupBleProtocol.MAILBOX))
-            ready = true; onReady()
+            handler.postDelayed(mtuFallback, 2_000)
+            if (!g.requestMtu(247)) completeReady(23)
+        } }
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) { post(g) {
+            if (characteristic != null && !ready) completeReady(if (status == BluetoothGatt.GATT_SUCCESS) mtu else 23)
         } }
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { post(g) {
             check(status == BluetoothGatt.GATT_SUCCESS && c.uuid == GroupBleProtocol.MAILBOX && !reading && reply != null)
@@ -323,7 +346,7 @@ internal class GroupBleClient(
     fun exchange(message: ByteArray, onReply: (ByteArray) -> Unit) {
         check(Looper.myLooper() == handler.looper && !closed && ready && reply == null)
         if (SystemClock.elapsedRealtime() >= expiresAt) { fail(); return }
-        outgoing.addAll(GroupBleChunks.split(message))
+        outgoing.addAll(GroupBleChunks.split(message, packetBytes))
         reply = onReply
         writeNext()
     }

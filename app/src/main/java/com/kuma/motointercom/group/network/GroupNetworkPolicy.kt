@@ -32,11 +32,15 @@ internal class GroupBoundedCallbacks(
 /** ATT offsets are always zero. These offsets belong only to our application message. */
 internal object GroupBleChunks {
     const val MAX_MESSAGE = 8192
-    const val CHUNK_BYTES = 20
-    fun split(message: ByteArray): List<ByteArray> {
+    const val CHUNK_BYTES = 244
+    const val DEFAULT_CHUNK_BYTES = 20
+    fun packetBytes(mtu: Int) = if (mtu >= 23) minOf(mtu - 3, CHUNK_BYTES) else DEFAULT_CHUNK_BYTES
+    fun split(message: ByteArray, packetBytes: Int = DEFAULT_CHUNK_BYTES): List<ByteArray> {
         require(message.size in 1..MAX_MESSAGE)
-        return (message.indices step 16).map { offset ->
-            val length = minOf(16, message.size - offset)
+        require(packetBytes in DEFAULT_CHUNK_BYTES..CHUNK_BYTES)
+        val payload = packetBytes - 4
+        return (message.indices step payload).map { offset ->
+            val length = minOf(payload, message.size - offset)
             byteArrayOf((message.size ushr 8).toByte(), message.size.toByte(),
                 (offset ushr 8).toByte(), offset.toByte()) + message.copyOfRange(offset, offset + length)
         }
@@ -46,6 +50,7 @@ internal object GroupBleChunks {
 internal class GroupBleAssembler : Closeable {
     private var buffer: ByteArray? = null
     private var offset = 0
+    private var payloadBytes = 0
     private var closed = false
 
     fun accept(chunk: ByteArray): ByteArray? = try {
@@ -54,9 +59,14 @@ internal class GroupBleAssembler : Closeable {
         val total = ((chunk[0].toInt() and 255) shl 8) or (chunk[1].toInt() and 255)
         val position = ((chunk[2].toInt() and 255) shl 8) or (chunk[3].toInt() and 255)
         require(total in 1..GroupBleChunks.MAX_MESSAGE && position == offset)
-        if (buffer == null) buffer = ByteArray(total)
+        if (buffer == null) {
+            payloadBytes = chunk.size - 4
+            require(payloadBytes >= 16 || payloadBytes == total)
+            buffer = ByteArray(total)
+        }
+
         val target = checkNotNull(buffer)
-        require(target.size == total && chunk.size - 4 == minOf(16, total - offset))
+        require(target.size == total && chunk.size - 4 == minOf(payloadBytes, total - offset))
         chunk.copyInto(target, offset, 4)
         offset += chunk.size - 4
         if (offset == total) {

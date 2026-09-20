@@ -4,6 +4,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupNetworkPolicyTest {
+    @Test fun negotiatedMtuReassemblesAtBoundariesAndReducesAttRoundTrips() {
+        for (mtu in listOf(0, 22, 23, 64, 247, 517)) {
+            val packet = GroupBleChunks.packetBytes(mtu)
+            assertTrue(packet in 20..244)
+            for (size in listOf(1, 16, 17, 240, 241, 8192)) {
+                val bytes = ByteArray(size) { it.toByte() }
+                val chunks = GroupBleChunks.split(bytes, packet)
+                val assembler = GroupBleAssembler()
+                chunks.dropLast(1).forEach { assertNull(assembler.accept(it)) }
+                assertArrayEquals(bytes, assembler.accept(chunks.last()))
+                assertTrue(chunks.all { it.size <= packet })
+            }
+        }
+        assertEquals(35, GroupBleChunks.split(ByteArray(8192), 244).size)
+        assertEquals(512, GroupBleChunks.split(ByteArray(8192), 20).size)
+    }
     @Test fun burstQueueIsBoundedAndTerminalOverflowIsCoalesced() {
         val queue = ArrayDeque<() -> Unit>()
         var delivered = 0
