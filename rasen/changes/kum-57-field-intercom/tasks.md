@@ -1,0 +1,5 @@
+- [ ] 1. Fixed-SHA design review
+- [ ] 2. Readiness, terminal publication, BLE and search fixes
+- [ ] 3. Regression and full local gate
+- [ ] 4. Fixed-SHA source review, Draft PR and cloud CI
+- [ ] 5. Available-device checks and evidence delivery
