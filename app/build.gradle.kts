@@ -4,6 +4,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseVersion = java.util.Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}
+val semanticVersion = releaseVersion.getProperty("version")
+val approvedCommit = releaseVersion.getProperty("approvedCommit")
+require(semanticVersion.matches(Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)")))
+require(approvedCommit.matches(Regex("[0-9a-f]{40}")))
+val androidVersionCode = releaseVersion.getProperty("versionCode").toInt()
+require(androidVersionCode > 0)
+
 android {
     namespace = "com.kuma.motointercom"
     compileSdk = 37
@@ -12,8 +22,8 @@ android {
         applicationId = "com.kuma.motointercom"
         minSdk = 23
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = androidVersionCode
+        versionName = "$semanticVersion+${approvedCommit.take(7)}"
         testApplicationId = "com.kuma.motointercom.instrumentation"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

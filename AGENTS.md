@@ -1,5 +1,9 @@
 # MotoIntercom Project Governance
 
+## Release Versioning
+
+Follow `docs/releases/versioning.md` for every release. `version.properties` is the single source of truth for SemVer, Android versionCode, and the user-approved functional merge SHA. Never reuse a published versionCode or silently substitute the approved commit.
+
 ## Authority
 
 - Linear owns the roadmap, priorities, dependencies, Exit Criteria, and issue state.
