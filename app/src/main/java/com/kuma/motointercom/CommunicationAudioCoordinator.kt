@@ -399,6 +399,10 @@ internal class CommunicationAudioCoordinator(
         phoneCallState != PhoneCallState.IDLE
     }
 
+    internal fun reapplyPreferredRoute() {
+        if (synchronized(lock) { !closed.get() && mediaActive && phoneCallState == PhoneCallState.IDLE }) requestFocusAndRoute()
+    }
+
     /** Called by the route after the selected device has been verified. */
     fun onRouteReady() {
         synchronized(lock) {

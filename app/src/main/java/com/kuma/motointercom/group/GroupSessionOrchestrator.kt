@@ -54,6 +54,7 @@ internal sealed interface GroupSessionEvent {
     class NetworkReady(val operation: UUID) : GroupSessionEvent
     class NetworkLost(val operation: UUID) : GroupSessionEvent
     class NetworkFailed(val attempt: UUID, val message: String) : GroupSessionEvent
+    class NetworkRefreshed(val attempt: UUID, val match: GroupBootstrapMatch) : GroupSessionEvent
     class Authenticated(val operation: UUID, val channel: UUID, val context: GroupAuthContext, val atMs: Long) : GroupSessionEvent
     class Control(val channel: UUID, val message: GroupControl) : GroupSessionEvent
     class Closed(val channel: UUID) : GroupSessionEvent
@@ -68,6 +69,7 @@ internal sealed interface GroupSessionEvent {
     class Remove(val peerId: String) : GroupSessionEvent
     class Unblock(val peerId: String) : GroupSessionEvent
     data object Tick : GroupSessionEvent
+    data class SearchProgress(val operation: UUID, val index: Int, val total: Int) : GroupSessionEvent
     data object Leave : GroupSessionEvent
 }
 
@@ -142,7 +144,7 @@ internal class GroupSessionOrchestrator(
                 handle(queue.removeFirst())
                 syncMedia()
                 snapshot = snapshot()
-                output += GroupSessionEffect.Publish(snapshot)
+                output.add(0, GroupSessionEffect.Publish(snapshot))
                 for (effect in output.toList()) {
                     try { effects(effect) }
                     catch (_: Exception) {
@@ -208,6 +210,9 @@ internal class GroupSessionOrchestrator(
                 message = "正在查找并验证附近房间"
                 output += GroupSessionEffect.Search(operation!!, endpoint, event.code)
             }
+            is GroupSessionEvent.SearchProgress -> if (event.operation == operation && phase == GroupPhase.SEARCHING) {
+                message = "正在验证附近房间 ${event.index}/${event.total}"
+            }
             is GroupSessionEvent.Found -> if (event.operation == operation && phase == GroupPhase.SEARCHING) {
                 matches = event.matches.distinctBy { it.descriptor.room }.take(16)
                 if (matches.isEmpty()) finish("没有验证通过的房间，请检查口令后重试", false)
@@ -232,6 +237,10 @@ internal class GroupSessionOrchestrator(
                 if (hostRoom != null && phase == GroupPhase.CREATING) finish(event.message, false)
                 else if (hostRoom != null) { phase = GroupPhase.RECONNECTING; nextRetry = nowMs() + 3_000; message = event.message }
                 else reconnect(event.message)
+            }
+            is GroupSessionEvent.NetworkRefreshed -> if (event.attempt == networkAttempt && networkInFlight &&
+                event.match.descriptor.room == selected?.descriptor?.room && event.match.descriptor.host == selected?.descriptor?.host) {
+                selected = event.match
             }
             is GroupSessionEvent.Authenticated -> authenticated(event)
             is GroupSessionEvent.Control -> control(event.channel, event.message)
@@ -344,7 +353,7 @@ internal class GroupSessionOrchestrator(
                     }
                     if (!installRoster(control.roster)) { output += GroupSessionEffect.CloseChannel(id); return }
                     local = control.member; clientIngress = GroupClientIngress(checkNotNull(participation.token), control.member)
-                    phase = GroupPhase.IN_ROOM; message = "已加入房间，语音待确认"; controlAttempt = null
+                    phase = GroupPhase.IN_ROOM; message = "已加入房间"; controlAttempt = null
                     output += GroupSessionEffect.AdmitChannel(id)
                     sendToHost(GroupMessage.AudioAvailable(audioAvailable))
                 }
@@ -387,7 +396,7 @@ internal class GroupSessionOrchestrator(
         send(id, GroupControl.Welcome(lease, view))
         output += GroupSessionEffect.AdmitChannel(id)
         channels.values.filter { it.id != id }.forEach { send(it.id, GroupControl.Roster(view)) }
-        message = "成员已加入，语音待确认"
+        message = "成员已加入"
     }
     private fun installRoster(value: GroupRoster): Boolean {
         val match = selected ?: return false

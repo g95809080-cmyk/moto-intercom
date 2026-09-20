@@ -1,0 +1,5 @@
+- [x] 1. Capture device evidence and fixed-SHA design review
+- [x] 2. Implement confirmed-absence cleanup and regression tests
+- [x] 3. Verify available-device end/recreate; background trigger deferred by user
+- [x] 4. Full local gate and fixed-SHA source review
+- [x] 5. Draft PR, cloud CI, Linear and evidence delivery

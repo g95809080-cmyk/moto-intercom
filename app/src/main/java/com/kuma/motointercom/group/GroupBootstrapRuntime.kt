@@ -53,7 +53,9 @@ internal class GroupBootstrapHost(
                     val session = peer.session ?: GroupBootstrapHostSession(descriptor, code, network,
                         mayDiscloseTo, SystemClock::elapsedRealtime,
                         { !closed.get() && peer.valid.get() && isCurrent() }).also { peer.session = it }
+                    android.util.Log.i("MotoComGroupAuth", "host request bytes=${bytes.size}")
                     val response = session.respond(bytes)
+                    android.util.Log.i("MotoComGroupAuth", "host response bytes=${response.size}")
                     reply(response.takeIf { !closed.get() && peer.valid.get() && isCurrent() })
                 } catch (_: Exception) { peer.valid.set(false); reply(null) }
                 finally {
@@ -86,8 +88,12 @@ internal class GroupCandidateSearch(
     private val closed = AtomicBoolean(false)
     private val main = Handler(Looper.getMainLooper())
     private var client: GroupBleClient? = null // main-thread ownership
+    private val deadline = Runnable {
+        if (!closed.get()) { close(); onError("查找房间超时，请靠近房主并检查蓝牙后重试") }
+    }
     private val discovery = GroupBleDiscovery(context, { candidates ->
         scope.launch {
+            try {
             val matches = linkedMapOf<GroupRoomKey, GroupBootstrapMatch>()
             candidates.forEachIndexed { index, candidate ->
                 ensureActive()
@@ -107,7 +113,11 @@ internal class GroupCandidateSearch(
                         withContext(Dispatchers.Main) {
                             check(!closed.get())
                             pending = response
-                            connection.exchange(request) { response.complete(it) }
+                            android.util.Log.i("MotoComGroupAuth", "client request bytes=${request.size}")
+                            connection.exchange(request) {
+                                android.util.Log.i("MotoComGroupAuth", "client response bytes=${it.size}")
+                                response.complete(it)
+                            }
                         }
                         response.await()
                     }
@@ -123,13 +133,22 @@ internal class GroupCandidateSearch(
                     }
                 }
             }
-            withContext(Dispatchers.Main) { if (!closed.get()) onMatches(matches.values.toList()) }
+            withContext(Dispatchers.Main) {
+                if (!closed.get()) { main.removeCallbacks(deadline); onMatches(matches.values.toList()) }
+            }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    if (!closed.get()) { main.removeCallbacks(deadline); onError("房间查找失败，请重试") }
+                }
+            }
         }
-    }, { if (!closed.get()) onError(it) })
-    fun start() { check(!closed.get()); discovery.start() }
+    }, { if (!closed.get()) { main.removeCallbacks(deadline); onError(it) } })
+    fun start() { check(!closed.get()); main.postDelayed(deadline, 60_000); discovery.start() }
     override fun close() {
         check(Looper.myLooper() == main.looper)
         if (!closed.compareAndSet(false, true)) return
+        main.removeCallbacksAndMessages(null)
         scope.cancel(); discovery.close(); client?.close(); client = null
     }
 }
