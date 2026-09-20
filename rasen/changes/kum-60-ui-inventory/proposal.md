@@ -7,4 +7,4 @@
 - [x] 阅读页面、策略、状态机、权限、主题及尺寸源码
 - [x] 整理页面地图、状态表、交互和设计稿覆盖清单
 - [x] 检查相对链接和文档差异（36 个链接均有效）
-- [ ] 推送 GitHub 文档 PR
+- [x] 推送 GitHub 文档 PR #35：https://github.com/g95809080-cmyk/moto-intercom/pull/35
