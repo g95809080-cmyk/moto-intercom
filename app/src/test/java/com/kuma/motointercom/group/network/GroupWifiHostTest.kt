@@ -33,6 +33,7 @@ class GroupWifiHostTest {
         ownership = GroupGoOwnership()
         DeferredP2p.create = null; DeferredP2p.remove = null; DeferredP2p.existing = null
         DeferredP2p.connection = null; DeferredP2p.deferInfo = false; DeferredP2p.infoCallbacks.clear()
+        DeferredP2p.removeCalls = 0
     }
     private fun host() = GroupWifiHost(context, { _, _ -> fail("unexpected ready") }, errors::add, ownership)
     @Test fun closeDuringCreateDoesNotLetLateSuccessDeleteNewOwner() {
@@ -55,6 +56,7 @@ class GroupWifiHostTest {
         val host = host(); host.start(); shadowOf(Looper.getMainLooper()).idle()
         host.close { }
         DeferredP2p.create!!.onSuccess()
+        DeferredP2p.existing = WifiP2pGroup()
         DeferredP2p.remove!!.onFailure(WifiP2pManager.BUSY)
         assertNull(ownership.acquire())
         host.retryCleanup()
@@ -108,7 +110,8 @@ class GroupWifiHostTest {
         val stale = DeferredP2p.infoCallbacks.single()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
         assertTrue(ownership.hasOwner())
-        host.retryCleanup(); DeferredP2p.remove!!.onFailure(WifiP2pManager.ERROR)
+        host.retryCleanup()
+        assertEquals(1, DeferredP2p.removeCalls)
         stale.onGroupInfoAvailable(null)
         assertTrue(ownership.hasOwner())
         DeferredP2p.infoCallbacks.last().onGroupInfoAvailable(null)
@@ -128,10 +131,11 @@ class DeferredP2p : ShadowWifiP2pManager() {
         listener.onConnectionInfoAvailable(connection)
     }
     @Implementation override fun createGroup(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ActionListener) { create = listener }
-    @Implementation override fun removeGroup(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ActionListener) { remove = listener }
+    @Implementation override fun removeGroup(channel: WifiP2pManager.Channel?, listener: WifiP2pManager.ActionListener) { removeCalls++; remove = listener }
     companion object {
         var create: WifiP2pManager.ActionListener? = null
         var remove: WifiP2pManager.ActionListener? = null
+        var removeCalls = 0
         var existing: WifiP2pGroup? = null
         var connection: WifiP2pInfo? = null
         var deferInfo = false

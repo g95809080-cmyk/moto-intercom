@@ -44,9 +44,7 @@ class GroupNetworkReleaseTest {
         val retry = retryField.get(network)
         assertNotNull(retry)
         assertEquals(0, first); assertEquals(0, second)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
         DeferredP2p.connection = WifiP2pInfo().apply { groupFormed = false }
-        DeferredP2p.remove!!.onFailure(WifiP2pManager.ERROR)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
         assertEquals(1, first); assertEquals(1, second)
         assertNull(hostField.get(network)); assertNull(retryField.get(network))

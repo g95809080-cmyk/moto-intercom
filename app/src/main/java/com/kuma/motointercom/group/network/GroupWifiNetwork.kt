@@ -51,6 +51,7 @@ internal class GroupWifiHost(
     private var created = false
     private var ready = false
     private var removing = false
+    private var verifyAbsence = false
     private var absenceProbe: Any? = null
     private var absenceTimeout: Runnable? = null
     private var closeResult: ((GroupNetworkCloseResult) -> Unit)? = null
@@ -139,6 +140,7 @@ internal class GroupWifiHost(
         if (!owns()) { finishReleased(); return }
         if (createPending || removing || absenceProbe != null) return
         if (!created) { finishReleased(); return }
+        if (verifyAbsence) { confirmAbsent(); return }
         removing = true
         try {
             manager!!.removeGroup(channel, object : WifiP2pManager.ActionListener {
@@ -148,6 +150,7 @@ internal class GroupWifiHost(
                 }
                 override fun onFailure(reason: Int) {
                     removing = false
+                    verifyAbsence = true
                     confirmAbsent()
                 }
             })
@@ -169,7 +172,7 @@ internal class GroupWifiHost(
         try {
             manager!!.requestGroupInfo(currentChannel) { group ->
                 if (!current()) return@requestGroupInfo
-                if (group != null) { unknown(); return@requestGroupInfo }
+                if (group != null) { verifyAbsence = false; unknown(); return@requestGroupInfo }
                 try {
                     manager!!.requestConnectionInfo(currentChannel) { info ->
                         if (!current()) return@requestConnectionInfo
@@ -178,7 +181,10 @@ internal class GroupWifiHost(
                             created = false
                             android.util.Log.i("MotoComGroupWifi", "GO absence confirmed after remove failure")
                             finishReleased()
-                        } else unknown()
+                        } else {
+                            if (info?.groupFormed == true) verifyAbsence = false
+                            unknown()
+                        }
                     }
                 } catch (_: Exception) { unknown() }
             }
