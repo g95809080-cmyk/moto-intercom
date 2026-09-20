@@ -1,0 +1,103 @@
+
+> Configure project :app
+WARNING: The option setting 'android.overridePathCheck=true' is experimental.
+The current default is 'false'.
+Add android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE to the gradle.properties file to suppress this warning.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:mergeDebugUnitTestManifest UP-TO-DATE
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :app:kspDebugKotlin
+
+> Task :app:compileDebugKotlin
+w: file:///M:/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:24:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:32:16 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:33:16 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/debug/java/com/kuma/motointercom/DesignPreviewActivity.kt:37:51 'static field SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:59:47 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:60:57 'static field EXTRA_SCO_AUDIO_STATE: String' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:70:34 'static field SCO_AUDIO_STATE_CONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:78:34 'static field SCO_AUDIO_STATE_DISCONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:87:34 'static field SCO_AUDIO_STATE_ERROR: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:507:30 'var isSpeakerphoneOn: Boolean' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:509:38 'var isSpeakerphoneOn: Boolean' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:598:27 'val isBluetoothScoAvailableOffCall: Boolean' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt:708:48 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:13:8 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:146:67 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:175:49 'class PhoneStateListener : Any' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt:269:85 'val callState: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2503:14 'fun setPriority(p0: Int): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2503:39 'static field PRIORITY_HIGH: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2508:14 'fun addAction(p0: Int, p1: CharSequence!, p2: PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/IntercomService.kt:2509:14 'fun addAction(p0: Int, p1: CharSequence!, p2: PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainActivity.kt:268:41 'fun onBackPressed(): Unit' is deprecated. This method has been deprecated in favor of using the
+      {@link OnBackPressedDispatcher} via {@link #getOnBackPressedDispatcher()}.
+      The OnBackPressedDispatcher controls how back button events are dispatched
+      to one or more {@link OnBackPressedCallback} objects.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainActivity.kt:277:15 'fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)} passing
+      in a {@link RequestMultiplePermissions} object for the {@link ActivityResultContract} and
+      handling the result in the {@link ActivityResultCallback#onActivityResult(Object) callback}.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainActivity.kt:583:17 'fun startActivityForResult(intent: Intent, requestCode: Int): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)}
+      passing in a {@link StartActivityForResult} object for the {@link ActivityResultContract}.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:515:29 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:517:25 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:518:25 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:522:35 'static field SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/MainScreen.kt:524:35 'var systemUiVisibility: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt:10:7 'class NetworkInfo : Any, Parcelable' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt:158:37 'val isConnected: Boolean' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestKotlin
+w: file:///M:/app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt:364:33 'static field ACTION_SCO_AUDIO_STATE_UPDATED: String' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt:365:30 'static field EXTRA_SCO_AUDIO_STATE: String' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt:366:30 'static field SCO_AUDIO_STATE_CONNECTED: Int' is deprecated. Deprecated in Java.
+w: file:///M:/app/src/test/java/com/kuma/motointercom/MainScreenRobolectricTest.kt:1227:44 'fun replaceSystemWindowInsets(p0: Int, p1: Int, p2: Int, p3: Int): WindowInsets' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 1m 3s
+31 actionable tasks: 7 executed, 24 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

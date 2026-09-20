@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.kuma.motointercom.group.GroupRoomTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-09-16T08:45:51.264Z" hostname="DESKTOP-BGCFG9P" time="0.016">
+  <properties/>
+  <testcase name="competingFinalSeatIsSerializedWithoutEvictingExistingMembers" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.003"/>
+  <testcase name="saturatedReceiptCacheCannotResurrectDepartedOrUnblockedRequests" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.006"/>
+  <testcase name="roomIdentityIsIndependentOfCodeAndEndIsTerminal" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="codePreservesLeadingZerosAndDoesNotLeakInToString" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.001"/>
+  <testcase name="onlyHostCanRemoveUnblockAndEndAndUnblockDoesNotJoin" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="removedJoinReplayStaysRevokedAfterUnblock" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="clockCannotMoveBackwards" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.001"/>
+  <testcase name="explicitNewRuntimeReplacesReservedSeatAndInvalidatesOldCallbacks" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.001"/>
+  <testcase name="audioInterruptionPreservesMembershipAndRequiresFreshPairEvidence" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.001"/>
+  <testcase name="reservationBoundaryAndRepeatedLossDoNotExtendDeadline" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="reservedMemberKeepsSeatButReplacesControlConnection" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.001"/>
+  <testcase name="invalidEvidenceNeverAllocatesASeat" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="allSixPairsNeedBothEndpointsNotOnlyHostConnections" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="peerFailureDoesNotCloseOtherLinksAndOldEvidenceCannotConfirmReplacement" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="hostIsNotOrdinaryLeaveOrRecoveryAndEmptyRoomRetainsCode" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="releasedMemberWaitsWhenFullThenResumesWithNewIncarnation" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="unrelatedMemberChangesPreserveHealthyPair" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <testcase name="delayedRestartCannotInvalidateReplacementOrNewMember" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.001"/>
+  <testcase name="duplicateJoinIsIdempotentAndCannotResurrectAfterLeave" classname="com.kuma.motointercom.group.GroupRoomTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

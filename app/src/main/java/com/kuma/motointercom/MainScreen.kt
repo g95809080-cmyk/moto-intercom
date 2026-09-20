@@ -49,7 +49,8 @@ internal class MainScreen(
     private val onForgetPairing: (String) -> Boolean = { false },
     private val onSendFeedback: (String) -> Unit = {},
     private val onBackgroundSettings: () -> Unit = {},
-    private val onboardingPreferences: OnboardingPreferences? = null
+    private val onboardingPreferences: OnboardingPreferences? = null,
+    private val onOpenGroup: () -> Unit = {}
 ) {
     val root: View
 
@@ -820,6 +821,7 @@ internal class MainScreen(
                             onMute = onSetMuted,
                             onAudioSettings = { showPage(MainRoute.SETTINGS, focusAudio = true) },
                             onVox = { showPage(MainRoute.SETTINGS) },
+                            onOpenGroup = onOpenGroup,
                             onGuideAnchor = { target, bounds -> recordGuideAnchor(this@homeHost, target, bounds) }
                         )
                     }

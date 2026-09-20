@@ -33,6 +33,73 @@ class AudioRouteControllerRobolectricTest {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val shadowAudioManager = shadowOf(audioManager)
 
+    @Test fun consecutiveInvalidationsDeliverUnavailableBeforeFastReverification() {
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val earpiece = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(speaker, earpiece))
+        val states = mutableListOf<String>()
+        val controller = AudioRouteController(context,
+            onRouteInvalidated = { states += "unavailable" }, onRouteReady = { states += "verified" })
+        try {
+            controller.select(AudioRouteSelection.SPEAKER)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(controller.evidence().ready)
+            states.clear()
+            audioManager.setCommunicationDevice(earpiece)
+            assertFalse(controller.evidence().ready)
+            // A second invalidation and successful verification occur before main consumes the first.
+            controller.select(AudioRouteSelection.SPEAKER)
+            drainRouteExecutor()
+            assertTrue(states.isEmpty())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf("unavailable", "verified"), states)
+            assertTrue(controller.evidence().ready)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun replacedPhoneDeviceRevokesEvidenceBeforeStatsDelivery() {
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val earpiece = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(speaker, earpiece))
+        var invalidations = 0
+        val controller = AudioRouteController(context, onRouteInvalidated = { invalidations++ })
+        try {
+            controller.select(AudioRouteSelection.SPEAKER)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            val beforeQuery = controller.evidence()
+            assertTrue(beforeQuery.ready)
+            audioManager.setCommunicationDevice(earpiece)
+            val afterQuery = controller.evidence()
+            assertFalse(afterQuery.ready)
+            assertTrue(beforeQuery.revision != afterQuery.revision)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, invalidations)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun bluetoothLossWithRejectedRerouteCannotRetainVerifiedEvidence() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+        val bluetooth = audioDevice(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(bluetooth, speaker))
+        val controller = AudioRouteController(context, fallbackToSpeaker = false)
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            // Selecting the device queues its listener behind the first executor barrier.
+            // Drain that callback before consuming its main-thread verification delivery.
+            drainRouteExecutor()
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(controller.evidence().ready)
+            audioManager.setCommunicationDevice(speaker)
+            shadowAudioManager.lockCommunicationDevice(true)
+            val route = field<ModernAudioRoute>(controller, "modernRoute")
+            field<AudioManager.OnCommunicationDeviceChangedListener>(route, "listener")
+                .onCommunicationDeviceChanged(speaker)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(controller.evidence().ready)
+        } finally { shadowAudioManager.lockCommunicationDevice(false); controller.close(); drainRouteExecutor() }
+    }
+
     @Test
     fun bluetoothRecoveryCancelsQueuedSpeakerFallbackBeforeItCanRetakeRoute() {
         val speakerFallbacks = mutableListOf<Boolean>()
@@ -150,9 +217,18 @@ class AudioRouteControllerRobolectricTest {
             modernRouteFactory = { route }
         )
 
-        controller.select(AudioRouteSelection.BLUETOOTH)
-        controller.select(AudioRouteSelection.SPEAKER)
-        controller.select(AudioRouteSelection.BLUETOOTH)
+        // Hold the worker so this test deterministically covers superseded queued requests.
+        val executor = AudioRouteController::class.java.getDeclaredField("ROUTE_EXECUTOR")
+            .apply { isAccessible = true }.get(null) as ExecutorService
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        executor.execute { entered.countDown(); release.await(2, TimeUnit.SECONDS) }
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            controller.select(AudioRouteSelection.SPEAKER)
+            controller.select(AudioRouteSelection.BLUETOOTH)
+        } finally { release.countDown() }
         drainRouteExecutor()
         shadowOf(Looper.getMainLooper()).idle()
 

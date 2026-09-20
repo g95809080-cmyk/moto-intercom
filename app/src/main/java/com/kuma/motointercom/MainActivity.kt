@@ -205,6 +205,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             },
             onSendFeedback = ::sendFeedback,
             onBackgroundSettings = { startupAccess.requestBackground() },
+            onOpenGroup = { startActivity(Intent(this, GroupActivity::class.java)) },
             onboardingPreferences = OnboardingPreferences(this)
         )
         setContentView(screen.root)
@@ -323,6 +324,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         runOnUiThread {
             if (serviceConnected) setIntercomState(state)
         }
+    }
+
+    override fun onAudioReadyChanged(ready: Boolean) {
+        runOnUiThread { if (serviceConnected) screen.setAudioReady(ready) }
     }
 
     override fun onAudioSourceChanged(status: String, bluetooth: Boolean) {

@@ -1,0 +1,14 @@
+## 1. 绑定与设计
+- [x] 1.1 查询 Linear 并绑定 KUM-49、分支、依赖及 Exit Criteria
+- [x] 1.2 建立 proposal/spec/design 并关联有限范围架构批准
+## 2. 纯域模型
+- [x] 2.1 实现房间身份、准入、占位、权限和逐对就绪
+- [x] 2.2 实现可撤销本机参与意图及本地静音状态
+- [x] 2.3 添加边界、乱序及竞态顺序的确定性单测
+## 3. 验证与审查
+- [x] 3.1 定向测试、全量 JVM、Lint、Debug build
+- [x] 3.2 固定 SHA 架构审查并关闭 P0/P1
+- [x] 3.3 小步提交、Draft PR 与 Linear 证据回填
+
+Draft PR: https://github.com/g95809080-cmyk/moto-intercom/pull/24
+Linear KUM-49: In Review. CI以PR检查为准；不归档或合并。
