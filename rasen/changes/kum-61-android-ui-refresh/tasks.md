@@ -9,4 +9,7 @@
 ## 3. Verification
 - [x] 3.1 Meaningful regression tests and Android build/lint
 - [x] 3.2 Premium audit and available native visual checks
-- [ ] 3.3 Fixed SHA architecture review, Draft PR and issue evidence
+- [x] 3.3 Fixed SHA architecture review, Draft PR and issue evidence
+
+Draft PR: https://github.com/g95809080-cmyk/moto-intercom/pull/36
+Linear: KUM-61 (In Review). Source approval: f2eaf7b; subsequent commits contain evidence/docs only.
