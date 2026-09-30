@@ -1,0 +1,7 @@
+// Verification-only isolation: do not share Robolectric SQLite / coroutine state across test classes.
+allprojects {
+    tasks.withType(Test).configureEach {
+        forkEvery = 1
+        maxParallelForks = 1
+    }
+}

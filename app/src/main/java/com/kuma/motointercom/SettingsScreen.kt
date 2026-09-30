@@ -26,7 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,6 +91,7 @@ internal fun MotoComSettingsScreen(
     onBackgroundSettings: () -> Unit = {},
     onPhoneBackgroundSettings: () -> Unit = {}
 ) {
+    var diagnosticsExpanded by remember { mutableStateOf(false) }
     Column(
         modifier = modifier
             .widthIn(max = dimensionResource(R.dimen.motocom_content_max_width))
@@ -163,6 +164,10 @@ internal fun MotoComSettingsScreen(
             }
         }
 
+        SettingsSectionLabel("默认音频设置")
+        SettingsPanel {
+            SettingsFact("用于双人对讲和新房间；当前群组的音频请在房间内调整。", "settings_audio_scope")
+        }
         SettingsSectionLabel(stringResource(R.string.section_vox))
         SettingsPanel {
             SettingsSwitchRow(
@@ -225,13 +230,21 @@ internal fun MotoComSettingsScreen(
                 checked = state.automaticReconnectEnabled,
                 onCheckedChange = onAutomaticReconnectChanged
             )
-            SettingsFact(
-                stringResource(R.string.settings_transport_policy),
-                "settings_transport_policy"
-            )
-            SettingsFact(state.attemptFacts, "settings_attempt_facts")
-            SettingsFact(state.productState, "settings_product_state")
-            SettingsFact(state.discoveryCandidates, "settings_discovery_candidates")
+
+        }
+
+        SettingsSectionLabel("连接诊断")
+        SettingsPanel {
+            SettingsAdvancedAction(R.drawable.ic_info_24,
+                if (diagnosticsExpanded) "收起连接诊断" else "展开连接诊断",
+                "settings_diagnostics_toggle", if (diagnosticsExpanded) "连接诊断，已展开" else "连接诊断，已收起",
+                { diagnosticsExpanded = !diagnosticsExpanded })
+            if (diagnosticsExpanded) {
+                SettingsFact(stringResource(R.string.settings_transport_policy), "settings_transport_policy")
+                SettingsFact(state.attemptFacts, "settings_attempt_facts")
+                SettingsFact(state.productState, "settings_product_state")
+                SettingsFact(state.discoveryCandidates, "settings_discovery_candidates")
+            }
         }
 
         SettingsSectionLabel(stringResource(R.string.settings_device_status))

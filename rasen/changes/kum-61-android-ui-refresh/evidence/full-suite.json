@@ -1,0 +1,767 @@
+{
+  "sourceSha": "b4c496fa3869718f8703568e6ea34226360e1224",
+  "command": "gradlew.bat testDebugUnitTest lintDebug assembleDebug --max-workers=1 --init-script rasen/changes/kum-61-android-ui-refresh/evidence/isolated-tests.gradle --console=plain",
+  "workspace": "M: mapped to isolated implementation worktree",
+  "summary": {
+    "tests": 734,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "classes": [
+    {
+      "name": "com.kuma.motointercom.AdaptiveWindowTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.027"
+    },
+    {
+      "name": "com.kuma.motointercom.AndroidAudioPlatformRobolectricTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.657"
+    },
+    {
+      "name": "com.kuma.motointercom.AttemptDeadlineSchedulerTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.044"
+    },
+    {
+      "name": "com.kuma.motointercom.AttemptResourceControllerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.043"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioControlPreferencesRobolectricTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.663"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioControlStateTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioIoGateTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.024"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioRouteControllerRobolectricTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.542"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioRoutePreferencesRobolectricTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.439"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioRouteStateTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioSessionControllerTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.033"
+    },
+    {
+      "name": "com.kuma.motointercom.AudioSpeakerFallbackRecoveryTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "com.kuma.motointercom.BoundedLogBufferTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.029"
+    },
+    {
+      "name": "com.kuma.motointercom.CommunicationAudioCoordinatorTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.567"
+    },
+    {
+      "name": "com.kuma.motointercom.ConnectionAttemptCoordinatorOwnershipTest",
+      "tests": "21",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.073"
+    },
+    {
+      "name": "com.kuma.motointercom.ConnectionAttemptDomainTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.039"
+    },
+    {
+      "name": "com.kuma.motointercom.ConnectionCandidateContextTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.034"
+    },
+    {
+      "name": "com.kuma.motointercom.ControlChannelCloseDeadlineSchedulerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.037"
+    },
+    {
+      "name": "com.kuma.motointercom.ControlSendCompletionTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.016"
+    },
+    {
+      "name": "com.kuma.motointercom.DiscoverScreenComposeTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.557"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupAuthenticationTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.563"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupBootstrapTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.458"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupControlTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.048"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupHostIngressTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.043"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupLegacyBusyServerTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.065"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupMediaControllerTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.052"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupNetworkReleaseTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.139"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupParticipationTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.016"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupRoomTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.064"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupRuntimeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.308"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupSessionOrchestratorTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.131"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupSocketTransportTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.407"
+    },
+    {
+      "name": "com.kuma.motointercom.group.GroupWireTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.044"
+    },
+    {
+      "name": "com.kuma.motointercom.group.network.GroupBleClientMtuTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.094"
+    },
+    {
+      "name": "com.kuma.motointercom.group.network.GroupBleServerTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.38"
+    },
+    {
+      "name": "com.kuma.motointercom.group.network.GroupNetworkPolicyTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.046"
+    },
+    {
+      "name": "com.kuma.motointercom.group.network.GroupWifiClientTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.489"
+    },
+    {
+      "name": "com.kuma.motointercom.group.network.GroupWifiHostTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.361"
+    },
+    {
+      "name": "com.kuma.motointercom.GroupScreenComposeTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "6.603"
+    },
+    {
+      "name": "com.kuma.motointercom.GroupServiceLifecycleTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.141"
+    },
+    {
+      "name": "com.kuma.motointercom.HomeScreenComposeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "6.805"
+    },
+    {
+      "name": "com.kuma.motointercom.IncomingConfirmationDeadlineSchedulerTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.028"
+    },
+    {
+      "name": "com.kuma.motointercom.IncomingConfirmationIntentTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.468"
+    },
+    {
+      "name": "com.kuma.motointercom.IntercomManagerIdentityTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.024"
+    },
+    {
+      "name": "com.kuma.motointercom.IntercomRuntimeKeepAliveTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.303"
+    },
+    {
+      "name": "com.kuma.motointercom.IntercomServiceRobolectricTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.812"
+    },
+    {
+      "name": "com.kuma.motointercom.IntercomStateMachineTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.047"
+    },
+    {
+      "name": "com.kuma.motointercom.IntercomStatusTextTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.034"
+    },
+    {
+      "name": "com.kuma.motointercom.Kum26LogicalNodeAcceptanceTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.254"
+    },
+    {
+      "name": "com.kuma.motointercom.Kum34RecoveryResetTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.123"
+    },
+    {
+      "name": "com.kuma.motointercom.Kum35ActiveDisconnectTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.047"
+    },
+    {
+      "name": "com.kuma.motointercom.Kum36SprintFinalAcceptanceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.066"
+    },
+    {
+      "name": "com.kuma.motointercom.LanAttemptLeaseTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.026"
+    },
+    {
+      "name": "com.kuma.motointercom.LanDiscoveryDeviceRegistryTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.049"
+    },
+    {
+      "name": "com.kuma.motointercom.LegacyAudioReadinessTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.018"
+    },
+    {
+      "name": "com.kuma.motointercom.LegacyIdentityHandshakeTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.067"
+    },
+    {
+      "name": "com.kuma.motointercom.LocalIdentityStoreTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.188"
+    },
+    {
+      "name": "com.kuma.motointercom.LogsScreenComposeTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.339"
+    },
+    {
+      "name": "com.kuma.motointercom.MainActivityRobolectricTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "8.423"
+    },
+    {
+      "name": "com.kuma.motointercom.MainScreenRobolectricTest",
+      "tests": "81",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "17.146"
+    },
+    {
+      "name": "com.kuma.motointercom.MainUiPolicyTest",
+      "tests": "36",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.067"
+    },
+    {
+      "name": "com.kuma.motointercom.OnboardingTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "6.429"
+    },
+    {
+      "name": "com.kuma.motointercom.P2pServiceInstanceCodecTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.036"
+    },
+    {
+      "name": "com.kuma.motointercom.PairingRepositoryTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.568"
+    },
+    {
+      "name": "com.kuma.motointercom.PendingCloseOwnerTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.022"
+    },
+    {
+      "name": "com.kuma.motointercom.PermissionPolicyTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.028"
+    },
+    {
+      "name": "com.kuma.motointercom.PreferredRiderAutoConnectPolicyTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.034"
+    },
+    {
+      "name": "com.kuma.motointercom.PresenceAggregatorTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.053"
+    },
+    {
+      "name": "com.kuma.motointercom.RecoveryCleanupCoordinatorTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.076"
+    },
+    {
+      "name": "com.kuma.motointercom.RecoveryDiscoveryReuseTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.034"
+    },
+    {
+      "name": "com.kuma.motointercom.RecoveryTransportStartupOrderingTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.062"
+    },
+    {
+      "name": "com.kuma.motointercom.RiderAudioEngineCleanupTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.026"
+    },
+    {
+      "name": "com.kuma.motointercom.RiderMediaEvidenceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.027"
+    },
+    {
+      "name": "com.kuma.motointercom.RuntimeAudioCallbackGateTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.012"
+    },
+    {
+      "name": "com.kuma.motointercom.SessionGenerationTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.121"
+    },
+    {
+      "name": "com.kuma.motointercom.SessionIdentifiersTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.028"
+    },
+    {
+      "name": "com.kuma.motointercom.SessionOrchestratorTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.127"
+    },
+    {
+      "name": "com.kuma.motointercom.SettingsScreenComposeTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.299"
+    },
+    {
+      "name": "com.kuma.motointercom.SignalingControlCoordinatorTest",
+      "tests": "61",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.288"
+    },
+    {
+      "name": "com.kuma.motointercom.SignalingProtocolTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.051"
+    },
+    {
+      "name": "com.kuma.motointercom.SignalingProtocolV2Test",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.113"
+    },
+    {
+      "name": "com.kuma.motointercom.SignalingSessionV2Test",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.688"
+    },
+    {
+      "name": "com.kuma.motointercom.SignalingV2TypesTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.022"
+    },
+    {
+      "name": "com.kuma.motointercom.StartupAccessControllerTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "8.799"
+    },
+    {
+      "name": "com.kuma.motointercom.SyntheticAudioSourceIsolationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.043"
+    },
+    {
+      "name": "com.kuma.motointercom.TransportRaceDomainTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.05"
+    },
+    {
+      "name": "com.kuma.motointercom.VoxGateTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectCloseSequenceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.044"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectGroupValidationGateTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.058"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectPeerRegistryTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.075"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectPendingDiscoveryRecoveryTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.006"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectSetupRecoveryGateTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectSignalingSocketTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.144"
+    },
+    {
+      "name": "com.kuma.motointercom.WifiDirectTunnelIdentityRobolectricTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.511"
+    }
+  ],
+  "buildResult": "BUILD SUCCESSFUL in 4m 53s",
+  "notes": "Each test class has a fresh worker process. No tests skipped. Shared-process runs exposed asynchronous Robolectric SQLite teardown errors in unrelated following Compose tests."
+}

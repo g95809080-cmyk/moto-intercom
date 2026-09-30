@@ -24,5 +24,5 @@ internal fun primaryIntercomActionLabel(state: IntercomState): String =
         PrimaryIntercomAction.START -> "启动摩声"
         PrimaryIntercomAction.DISCONNECT_CURRENT -> "断开当前车友"
         PrimaryIntercomAction.STOP_RUNTIME -> "停止摩声"
-        PrimaryIntercomAction.NONE -> "停止中..."
+        PrimaryIntercomAction.NONE -> "停止中…"
     }

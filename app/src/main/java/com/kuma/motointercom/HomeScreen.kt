@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -82,7 +83,8 @@ internal data class HomeScreenUiState(
     val voxEnabled: Boolean = true,
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
     val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
-    val animationsEnabled: Boolean = true
+    val animationsEnabled: Boolean = true,
+    val groupState: com.kuma.motointercom.group.GroupServiceState = com.kuma.motointercom.group.GroupServiceState()
 )
 
 /** Compose equivalent of the former screen_home.xml hierarchy. */
@@ -125,53 +127,84 @@ internal fun MotoComHomeScreen(
                 )
         ) {
             HomeHeader()
-            Button(onClick = onOpenGroup, modifier = Modifier.fillMaxWidth().testTag("home_group")) { Text("四人离线对讲") }
-            Spacer(Modifier.height(gapLarge))
-            StatusCard(state = state)
             Spacer(Modifier.height(gap))
-            AudioCard(state = state, audioLevel = audioLevel)
-            Spacer(Modifier.height(gap))
-            MainControls(
-                state = state,
-                onPrimaryAction = onPrimaryAction,
-                onMute = onMute,
-                onAudioSettings = onAudioSettings,
-                onGuideAnchor = onGuideAnchor
-            )
-            if (state.showPermissionGrantCta) {
+            GroupModeCard(state.groupState, onOpenGroup)
+            if (!state.groupState.busy) {
+                Text("双人对讲", Modifier.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.labelLarge)
+                StatusCard(state = state)
                 Spacer(Modifier.height(gap))
-                SecondaryAction(
-                    stringResource(R.string.home_permission_grant_cta),
-                    onPermissionGrant,
-                    "home_permission_grant_cta",
-                    Modifier.guideAnchor(GuideTarget.PERMISSION, onGuideAnchor)
+                AudioCard(state = state, audioLevel = audioLevel)
+                Spacer(Modifier.height(gap))
+                MainControls(
+                    state = state,
+                    onPrimaryAction = onPrimaryAction,
+                    onMute = onMute,
+                    onAudioSettings = onAudioSettings,
+                    onGuideAnchor = onGuideAnchor
                 )
-            }
-            if (state.showPermissionSettingsCta) {
+                if (state.showPermissionGrantCta) {
+                    Spacer(Modifier.height(gap))
+                    SecondaryAction(
+                        stringResource(R.string.home_permission_grant_cta),
+                        onPermissionGrant,
+                        "home_permission_grant_cta",
+                        Modifier.guideAnchor(GuideTarget.PERMISSION, onGuideAnchor)
+                    )
+                }
+                if (state.showPermissionSettingsCta) {
+                    Spacer(Modifier.height(gap))
+                    SecondaryAction(
+                        stringResource(R.string.home_permission_settings_cta),
+                        onPermissionSettings,
+                        "home_permission_settings_cta",
+                        Modifier.guideAnchor(GuideTarget.PERMISSION_SETTINGS, onGuideAnchor)
+                    )
+                }
+                if (state.showWifiSettingsCta) {
+                    Spacer(Modifier.height(gap))
+                    SecondaryAction(
+                        stringResource(R.string.wifi_settings_cta),
+                        onWifiSettings,
+                        "home_wifi_settings_cta",
+                        Modifier.guideAnchor(GuideTarget.WIFI, onGuideAnchor)
+                    )
+                }
                 Spacer(Modifier.height(gap))
-                SecondaryAction(
-                    stringResource(R.string.home_permission_settings_cta),
-                    onPermissionSettings,
-                    "home_permission_settings_cta",
-                    Modifier.guideAnchor(GuideTarget.PERMISSION_SETTINGS, onGuideAnchor)
-                )
-            }
-            if (state.showWifiSettingsCta) {
-                Spacer(Modifier.height(gap))
-                SecondaryAction(
-                    stringResource(R.string.wifi_settings_cta),
-                    onWifiSettings,
-                    "home_wifi_settings_cta",
-                    Modifier.guideAnchor(GuideTarget.WIFI, onGuideAnchor)
-                )
-            }
-            Spacer(Modifier.height(gap))
-            VoxCard(state = state, onClick = onVox)
-            if (state.showDiscoverCta) {
-                Spacer(Modifier.height(gap))
-                SecondaryAction(state.discoverCtaLabel, onDiscover, "home_discover_cta")
+                VoxCard(state = state, onClick = onVox)
+                if (state.showDiscoverCta) {
+                    Spacer(Modifier.height(gap))
+                    SecondaryAction(state.discoverCtaLabel, onDiscover, "home_discover_cta")
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun GroupModeCard(state: com.kuma.motointercom.group.GroupServiceState, onOpen: () -> Unit) {
+    if (!state.busy) {
+        OutlinedButton(onClick = onOpen, modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).testTag("home_group")) {
+            Text("四人对讲 · 创建 / 加入房间")
+        }
+        return
+    }
+    val hasRoom = state.snapshot?.phase in listOf(com.kuma.motointercom.group.GroupPhase.IN_ROOM,
+        com.kuma.motointercom.group.GroupPhase.RECONNECTING, com.kuma.motointercom.group.GroupPhase.WAITING)
+    MotoComPanel {
+        Text(if (hasRoom) "当前 · 四人对讲" else "四人对讲 · 连接进度", style = MaterialTheme.typography.titleMedium)
+        Text(if (state.busy) state.message else "创建房间或输入房间码 · 含房主最多四人",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag("home_group_status"))
+        if (state.busy) {
+            val count = state.snapshot?.view?.members?.count { it.status != com.kuma.motointercom.group.GroupMemberStatus.WAITING }
+            count?.let { Text("房间成员 $it / 4", style = MaterialTheme.typography.bodySmall) }
+            Text(if (state.snapshot?.voiceReady == true) "全队语音已就绪" else "语音状态请在房间中查看",
+                style = MaterialTheme.typography.bodySmall)
+        }
+        Button(onClick = onOpen, modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).testTag("home_group")) {
+            Text(if (hasRoom) "返回当前房间" else "查看连接进度")
+        }
+        Text(if (hasRoom) "返回房间查看成员与本次音频设置" else "可以返回连接页面查看进度或取消", style = MaterialTheme.typography.bodySmall)
     }
 }
 

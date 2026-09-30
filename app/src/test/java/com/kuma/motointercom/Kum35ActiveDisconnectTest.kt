@@ -205,6 +205,6 @@ class Kum35ActiveDisconnectTest {
             PrimaryIntercomAction.NONE,
             primaryIntercomAction(IntercomState.Stopping(runtime))
         )
-        assertEquals("停止中...", primaryIntercomActionLabel(IntercomState.Stopping(runtime)))
+        assertEquals("停止中…", primaryIntercomActionLabel(IntercomState.Stopping(runtime)))
     }
 }

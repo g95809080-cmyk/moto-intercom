@@ -472,6 +472,51 @@ class MainActivityRobolectricTest {
     }
 
     @Test
+    fun groupObservationReplaysAndIgnoresOldCallbacksAfterDisconnectAndRebind() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val owner = Robolectric.buildService(IntercomService::class.java).create()
+        val service = owner.get()
+        fun publish(value: com.kuma.motointercom.group.GroupServiceState) {
+            IntercomService::class.java.getDeclaredMethod("publishGroup", com.kuma.motointercom.group.GroupServiceState::class.java)
+                .apply { isAccessible = true }.invoke(service, value)
+        }
+        val connection = MainActivity::class.java.getDeclaredField("serviceConnection").apply { isAccessible = true }.get(activity) as ServiceConnection
+        fun group() = (stateValue(screen(activity), "homeUiState") as HomeScreenUiState).groupState
+        fun observer() = MainActivity::class.java.getDeclaredField("groupListener").apply { isAccessible = true }.get(activity)
+            as (com.kuma.motointercom.group.GroupServiceState) -> Unit
+        try {
+            publish(com.kuma.motointercom.group.GroupServiceState(busy = true, message = "当前房间"))
+            setPrivateBoolean(activity, "bindingRegistered", true)
+            connection.onServiceConnected(ComponentName(activity, IntercomService::class.java), service.onBind(null))
+            assertTrue(group().busy)
+            assertEquals("当前房间", group().message)
+            val stale = observer()
+            connection.onServiceDisconnected(ComponentName(activity, IntercomService::class.java))
+            assertFalse(group().busy)
+            stale(com.kuma.motointercom.group.GroupServiceState(busy = true, message = "过期房间"))
+            assertFalse(group().busy)
+            connection.onServiceConnected(ComponentName(activity, IntercomService::class.java), service.onBind(null))
+            stale(com.kuma.motointercom.group.GroupServiceState(message = "过期房间"))
+            assertEquals("当前房间", group().message)
+            val last = observer()
+            // This fixture injected the binder directly; there is no platform binding to unbind.
+            setPrivateBoolean(activity, "bindingRegistered", false)
+            controller.stop()
+            last(com.kuma.motointercom.group.GroupServiceState(message = "停止后回调"))
+            assertEquals("当前房间", group().message)
+            val listeners = IntercomService::class.java.getDeclaredField("groupListeners").apply { isAccessible = true }.get(service) as Set<*>
+            assertTrue(listeners.isEmpty())
+        } finally {
+            controller.destroy()
+            val scope = IntercomService::class.java.getDeclaredField("serviceScope").apply { isAccessible = true }.get(service) as kotlinx.coroutines.CoroutineScope
+            val job = scope.coroutineContext[kotlinx.coroutines.Job]!!
+            owner.destroy()
+            kotlinx.coroutines.runBlocking { job.join() }
+        }
+    }
+
+    @Test
     fun serviceDisconnectClearsStaleAudioBluetoothAndPresenceFacts() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create()
         val activity = controller.get()

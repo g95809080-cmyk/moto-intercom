@@ -1,0 +1,70 @@
+{
+  "sourceSha": "f2eaf7bffc88a38e60c0a25edee4cf36916d1fae",
+  "scope": "Final system-bar change: seven directly relevant UI, policy and Activity/service lifecycle test classes",
+  "summary": {
+    "tests": 158,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "classes": [
+    {
+      "name": "com.kuma.motointercom.GroupScreenComposeTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "7.629"
+    },
+    {
+      "name": "com.kuma.motointercom.GroupServiceLifecycleTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.076"
+    },
+    {
+      "name": "com.kuma.motointercom.HomeScreenComposeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.882"
+    },
+    {
+      "name": "com.kuma.motointercom.MainActivityRobolectricTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "8.633"
+    },
+    {
+      "name": "com.kuma.motointercom.MainScreenRobolectricTest",
+      "tests": "81",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "16.508"
+    },
+    {
+      "name": "com.kuma.motointercom.MainUiPolicyTest",
+      "tests": "36",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.063"
+    },
+    {
+      "name": "com.kuma.motointercom.SettingsScreenComposeTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.422"
+    }
+  ],
+  "buildResult": "BUILD SUCCESSFUL in 4m 13s",
+  "apkSha256": "3cdb512d2a268d08147298cfbfd6828273d61d00dffe7c2e792a78df3c6d4cde"
+}

@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
@@ -11,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Assert.assertEquals
@@ -31,7 +33,7 @@ class SettingsScreenComposeTest {
         var nickname = ""
         var saved = false
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTestContent {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = nickname,
@@ -57,9 +59,11 @@ class SettingsScreenComposeTest {
         }
 
         composeRule.onNodeWithTag("settings_nickname_input").performTextInput("Road Captain")
-        composeRule.onNodeWithTag("settings_save_nickname_button").performClick()
+        composeRule.onNodeWithTag("settings_save_nickname_button").performScrollTo().performClick()
         assertEquals("Road Captain", nickname)
         assertEquals(true, saved)
+        composeRule.onNodeWithTag("settings_product_state").assertDoesNotExist()
+        composeRule.onNodeWithTag("settings_diagnostics_toggle").performSemanticsAction(SemanticsActions.OnClick) { it() }
         composeRule.onNodeWithTag("settings_product_state").assertTextContains("Offline")
         composeRule.onNodeWithText("自动选择 LAN / Wi-Fi Direct").fetchSemanticsNode()
     }
@@ -69,7 +73,7 @@ class SettingsScreenComposeTest {
         var enabled: Boolean? = null
         var sensitivity: Int? = null
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTestContent {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -99,7 +103,7 @@ class SettingsScreenComposeTest {
             }
         }
 
-        composeRule.onNodeWithTag("settings_vox_button").performClick()
+        composeRule.onNodeWithTag("settings_vox_button").performScrollTo().performClick()
         composeRule.onNodeWithTag("settings_vox_sensitivity_button")
             .performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
         composeRule.onNodeWithText("HANGOVER").assertTextContains("HANGOVER")
@@ -115,7 +119,7 @@ class SettingsScreenComposeTest {
         var selected: AudioRouteSelection? = null
         var helpCount = 0
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTestContent {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -158,7 +162,7 @@ class SettingsScreenComposeTest {
     fun automaticReconnectExposesPersistedSwitchStateAndRealCallback() {
         var requested: Boolean? = null
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTestContent {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -196,7 +200,7 @@ class SettingsScreenComposeTest {
     fun helpEntryRoutesARealHelpAction() {
         var helpRequests = 0
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTestContent {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -226,4 +230,11 @@ class SettingsScreenComposeTest {
 
         composeRule.runOnIdle { assertEquals(1, helpRequests) }
     }
+}
+
+@androidx.compose.runtime.Composable
+private fun ScrollableSettingsTestContent(content: @androidx.compose.runtime.Composable () -> Unit) {
+    androidx.compose.foundation.layout.Column(
+        androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())
+    ) { MotoComTheme(content) }
 }

@@ -56,6 +56,19 @@ class MainScreenRobolectricTest {
     val composeRule = createEmptyComposeRule()
 
     @Test
+    fun activeGroupUsesRoomReturnInsteadOfSingleRiderControlsAndClearsOnDisconnect() {
+        val fixture = fixture()
+        fixture.screen.setGroupState(com.kuma.motointercom.group.GroupServiceState(busy = true, message = "正在加入房间"))
+        composeRule.waitForIdle()
+        assertHomeText("home_group_status", "正在加入房间")
+        assertFalse(homeExists("home_primary_button"))
+        assertTrue(homeExists("home_group"))
+        fixture.screen.clearServiceOwnedFacts()
+        composeRule.waitForIdle()
+        assertTrue(homeExists("home_primary_button"))
+    }
+
+    @Test
     fun disablingSystemAnimationsPreservesConnectedAndDiscoveringState() {
         val animator = android.animation.ValueAnimator::class.java
         val setScale = animator.getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType)
@@ -2054,6 +2067,11 @@ class MainScreenRobolectricTest {
             .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
 
     private fun settingsText(testTag: String): String {
+        if (testTag in listOf("settings_product_state", "settings_attempt_facts", "settings_discovery_candidates") &&
+            settingsNode("settings_diagnostics_toggle").fetchSemanticsNode().config[SemanticsProperties.ContentDescription].any { it.contains("已收起") }) {
+            settingsNode("settings_diagnostics_toggle").performSemanticsAction(SemanticsActions.OnClick) { it() }
+            composeRule.waitForIdle()
+        }
         val config = settingsNode(testTag).fetchSemanticsNode().config
         return when {
             config.contains(SemanticsProperties.Text) ->
