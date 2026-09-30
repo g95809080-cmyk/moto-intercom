@@ -7,6 +7,6 @@
 - [x] 2.3 Group page and session controls
 - [x] 2.4 Settings disclosure and scope copy
 ## 3. Verification
-- [ ] 3.1 Meaningful regression tests and Android build/lint
-- [ ] 3.2 Premium audit and available native visual checks
+- [x] 3.1 Meaningful regression tests and Android build/lint
+- [x] 3.2 Premium audit and available native visual checks
 - [ ] 3.3 Fixed SHA architecture review, Draft PR and issue evidence
