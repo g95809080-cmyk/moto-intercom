@@ -8,6 +8,7 @@ import android.os.*
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -46,6 +47,10 @@ internal class GroupActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
         setContent { MotoComTheme {
             GroupScreen(state.value, ::requestStart, { service?.groupAction(it) },
                 { service?.groupRoute(it) }, { service?.groupVox(it) }, ::finish,
