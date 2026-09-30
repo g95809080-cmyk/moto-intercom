@@ -117,6 +117,13 @@ internal class MainScreen(
     private var currentRoute: MainRoute = restoreMainRoute(savedState?.getString(KEY_ROUTE))
     private var windowWidthClass: MainWindowWidthClass = MainWindowWidthClass.Compact
     private var currentScroll: ScrollView? = null
+    private var groupState = com.kuma.motointercom.group.GroupServiceState()
+
+    fun setGroupState(value: com.kuma.motointercom.group.GroupServiceState) {
+        groupState = value
+        if (currentRoute == MainRoute.HOME) renderHome()
+    }
+
     private var productState: IntercomState = IntercomState.Offline
     private var canStartIntercom = false
     private var permissionRequestAttempted = onboardingPreferences?.permissionRequested ?: false
@@ -379,6 +386,7 @@ internal class MainScreen(
     }
 
     fun clearServiceOwnedFacts() {
+        groupState = com.kuma.motointercom.group.GroupServiceState()
         cancelPendingPresenceExpiry()
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
@@ -879,7 +887,8 @@ internal class MainScreen(
                 productState !is IntercomState.Stopping,
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
-            voxState = audioControlSnapshot.voxState
+            voxState = audioControlSnapshot.voxState,
+            groupState = groupState
         )
     }
 

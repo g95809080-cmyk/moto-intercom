@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="guide_intro_title">两台手机，就能边骑边聊</string>
-    <string name="guide_intro_value">一对一离线对讲 · 无需互联网\n连好耳机，启动摩声，与附近车友直接说话。</string>
+    <string name="guide_intro_title">附近车友，离线一起聊</string>
+    <string name="guide_intro_value">双人或最多四人离线对讲 · 无需互联网\n连好耳机，选择双人对讲，或创建 / 加入房间。</string>
     <string name="guide_begin">带我开始</string>
     <string name="guide_skip">跳过引导</string>
     <string name="guide_finish">我知道了，自己试试</string>
@@ -20,7 +20,7 @@
     <string name="guide_image_description">摩声使用说明：一对一离线对讲，无需互联网，但要打开 Wi-Fi。第一步，双方打开 Wi-Fi 和蓝牙，授予必要权限；耳机先在系统中连接。第二步，双方点启动摩声，再查看附近车友。第三步，一方选择对方点击连接，另一方点击接受。第四步，看到语音通道已连接后直接说话，无需按住按钮。静音可暂停自己的麦克风，音频设置可选择耳机及调整 VOX 自动开麦，结束对讲可停止。找不到车友时确认双方已启动、Wi-Fi 已打开，再重新扫描；听不到声音时检查静音和音频输出。</string>
     <string name="app_name">摩声</string>
     <string name="brand_name">摩声 MotoCom</string>
-    <string name="brand_tagline">一对一对讲 · 无需网络</string>
+    <string name="brand_tagline">双人 / 四人离线对讲</string>
     <string name="nav_home">首页</string>
     <string name="nav_discover">发现车友</string>
     <string name="nav_settings">设置</string>
@@ -36,7 +36,7 @@
     <string name="settings_logs">日志诊断</string>
     <string name="settings_about">关于我们</string>
     <string name="about_title">关于摩声</string>
-    <string name="about_message">摩声 MotoCom\n版本 %1$s\n一对一离线骑行对讲\npower by kuma</string>
+    <string name="about_message">摩声 MotoCom\n版本 %1$s\n双人 / 最多四人离线骑行对讲\npower by kuma</string>
     <string name="about_close">关闭</string>
     <string name="incoming_confirmation_title">%1$s 请求连接</string>
     <string name="incoming_confirmation_message">%1$s 发来当前连接请求。是否接受本次对讲？</string>
@@ -94,7 +94,7 @@
     <string name="mute_unavailable_description">静音麦克风，启动对讲后可用</string>
     <string name="help_description">打开帮助与反馈</string>
     <string name="help_title">帮助与反馈</string>
-    <string name="help_message">快速使用：\n1. 两台手机打开 Wi-Fi，并授予麦克风和附近设备权限。\n2. 点击“开始对讲”，在“发现车友”中选择对方。\n3. 连接后可静音，并在设置中调整 VOX 和音频输出。\n4. 遇到问题可在“日志”页复制诊断信息，发送前请自行检查内容。\n\n发送反馈不会自动附带日志、录音或身份信息。</string>
+    <string name="help_message">双人对讲：\n1. 两台手机打开 Wi-Fi，并授予麦克风和附近设备权限。\n2. 点击“启动摩声”，在“发现车友”中选择对方。\n3. 连接后可静音，并在设置中调整 VOX 和音频输出。\n4. 遇到问题可在“日志”页复制诊断信息，发送前请自行检查内容。\n\n四人对讲：在首页选择“创建 / 加入房间”，由房主创建，其余车友输入六位房间码。返回主页不会离开房间；房主结束房间会让全队退出。房间内音频设置只影响本次房间。\n\n发送反馈不会自动附带日志、录音或身份信息。</string>
     <string name="help_send_feedback">发送反馈</string>
     <string name="help_close">关闭</string>
     <string name="feedback_chooser_title">选择反馈应用</string>

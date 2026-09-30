@@ -281,7 +281,7 @@ class MainUiPolicyTest {
         assertEquals("正在重置无线连接", presentations[7].primaryText)
         assertEquals("正在结束对讲", presentations[8].primaryText)
         assertEquals("启动摩声", presentations[0].primaryActionLabel)
-        assertEquals("结束对讲", presentations[1].primaryActionLabel)
+        assertEquals("停止摩声", presentations[1].primaryActionLabel)
         assertEquals("停止中…", presentations[8].primaryActionLabel)
         assertEquals(
             listOf(

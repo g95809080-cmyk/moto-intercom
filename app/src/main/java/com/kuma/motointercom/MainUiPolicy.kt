@@ -241,11 +241,7 @@ private fun IntercomState.detailText(): String = when (this) {
     is IntercomState.Stopping -> "正在释放连接和音频资源"
 }
 
-private fun IntercomState.primaryActionLabel(): String = when (this) {
-    is IntercomState.Stopping -> "停止中…"
-    IntercomState.Offline -> "启动摩声"
-    else -> "结束对讲"
-}
+private fun IntercomState.primaryActionLabel(): String = primaryIntercomActionLabel(this)
 
 private fun IntercomState.peerText(lastStoppingPeerName: String?): String = when (this) {
     IntercomState.Offline,

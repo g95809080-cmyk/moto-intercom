@@ -46,6 +46,27 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
     private var automaticReconnectEnabled = true
 
+    private var groupObservationGeneration = 0
+    private var groupListener: ((com.kuma.motointercom.group.GroupServiceState) -> Unit)? = null
+
+    private fun stopGroupObservation() {
+        groupObservationGeneration++
+        groupListener?.let { intercomService?.removeGroupListener(it) }
+        groupListener = null
+    }
+
+    private fun observeGroupState(service: IntercomService) {
+        stopGroupObservation()
+        val generation = groupObservationGeneration
+        val observer: (com.kuma.motointercom.group.GroupServiceState) -> Unit = { value ->
+            if (generation == groupObservationGeneration && bindingRegistered && serviceConnected && intercomService === service) {
+                screen.setGroupState(value)
+            }
+        }
+        groupListener = observer
+        service.addGroupListener(observer)
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             if (!bindingRegistered) {
@@ -54,8 +75,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             }
             Log.d(TAG, "service connected")
             val local = service as IntercomService.LocalBinder
+            stopGroupObservation()
             intercomService = local.service()
             serviceConnected = true
+            observeGroupState(local.service())
             intercomService?.setPreferredAudioRoute(preferredAudioRoute)
             intercomService?.setAutomaticReconnectEnabled(automaticReconnectEnabled)
             intercomService?.setVoxSettings(
@@ -77,6 +100,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 return
             }
             Log.d(TAG, "service disconnected")
+            stopGroupObservation()
             serviceConnected = false
             intercomService = null
             dismissIncomingConfirmation()
@@ -260,6 +284,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     override fun onStop() {
+        stopGroupObservation()
         intercomService?.setAppForeground(false)
         intercomService?.setListener(null)
         if (bindingRegistered) {

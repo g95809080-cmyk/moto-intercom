@@ -50,6 +50,9 @@ internal class DesignPreviewActivity : ComponentActivity() {
                     when (screen) {
                         SCREEN_DISCOVER -> ConnectedDiscoverPreview()
                         SCREEN_SETTINGS -> ConnectedSettingsPreview()
+                        "group" -> GroupScreen(com.kuma.motointercom.group.GroupServiceState(), {}, {}, {}, {}, {}, {}, {})
+                        "group-room" -> GroupScreen(previewGroupState(), {}, {}, {}, {}, {}, {}, {})
+                        "group-home" -> ConnectedHomePreview(groupState = previewGroupState())
                         else -> ConnectedHomePreview()
                     }
                 }
@@ -65,14 +68,15 @@ internal class DesignPreviewActivity : ComponentActivity() {
 }
 
 @androidx.compose.runtime.Composable
-private fun ConnectedHomePreview() {
+private fun ConnectedHomePreview(groupState: com.kuma.motointercom.group.GroupServiceState = com.kuma.motointercom.group.GroupServiceState()) {
     MotoComHomeScreen(
         state = HomeScreenUiState(
+            groupState = groupState,
             primaryText = "语音通道已连接",
             detailText = "",
             supplementalText = "对方在线",
             peerText = "张一山",
-            primaryActionLabel = "结束对讲",
+            primaryActionLabel = "断开当前车友",
             primaryActionEnabled = true,
             disabledReason = null,
             showPermissionGrantCta = false,
@@ -213,4 +217,12 @@ private fun ConnectedSettingsPreview() {
         onAbout = {},
         onHelp = {}
     )
+}
+
+/** Debug-only state fixture, never starts network or media. */
+private fun previewGroupState(): com.kuma.motointercom.group.GroupServiceState {
+    val endpoint = com.kuma.motointercom.group.GroupAuthEndpoint(java.util.UUID.randomUUID().toString(), java.util.UUID.randomUUID().toString())
+    val writer = com.kuma.motointercom.group.GroupSessionOrchestrator(endpoint, "远山 · 房主", { 0L }, {}, {})
+    writer.dispatch(com.kuma.motointercom.group.GroupSessionEvent.Create)
+    return com.kuma.motointercom.group.GroupServiceState(writer.snapshot, message = "房间已创建，等待车友加入", busy = true)
 }

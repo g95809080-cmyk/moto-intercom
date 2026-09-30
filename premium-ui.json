@@ -1,0 +1,26 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": [
+    "app/src/main/java"
+  ],
+  "locale": "zh-CN",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": [
+    "Form"
+  ],
+  "requiredCommands": [
+    "unit",
+    "lint",
+    "build",
+    "premium"
+  ],
+  "commands": {
+    "unit": ".\\gradlew.bat testDebugUnitTest",
+    "lint": ".\\gradlew.bat lintDebug",
+    "build": ".\\gradlew.bat assembleDebug",
+    "premium": "python C:/Users/kuma/.codex/plugins/cache/openai-curated-remote/frontend-design-premium/1.4.0/skills/frontend-design-premium/scripts/audit_project.py . --mode strict"
+  },
+  "evidence": {
+    "failurePaths": "app/src/test/java/com/kuma/motointercom/GroupScreenComposeTest.kt"
+  }
+}
