@@ -188,8 +188,10 @@ private fun GroupModeCard(state: com.kuma.motointercom.group.GroupServiceState, 
         }
         return
     }
+    val hasRoom = state.snapshot?.phase in listOf(com.kuma.motointercom.group.GroupPhase.IN_ROOM,
+        com.kuma.motointercom.group.GroupPhase.RECONNECTING, com.kuma.motointercom.group.GroupPhase.WAITING)
     MotoComPanel {
-        Text(if (state.busy) "当前 · 四人对讲" else "四人离线对讲", style = MaterialTheme.typography.titleMedium)
+        Text(if (hasRoom) "当前 · 四人对讲" else "四人对讲 · 连接进度", style = MaterialTheme.typography.titleMedium)
         Text(if (state.busy) state.message else "创建房间或输入房间码 · 含房主最多四人",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.testTag("home_group_status"))
@@ -200,9 +202,9 @@ private fun GroupModeCard(state: com.kuma.motointercom.group.GroupServiceState, 
                 style = MaterialTheme.typography.bodySmall)
         }
         Button(onClick = onOpen, modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).testTag("home_group")) {
-            Text(if (state.busy) "返回当前房间" else "创建 / 加入房间")
+            Text(if (hasRoom) "返回当前房间" else "查看连接进度")
         }
-        if (state.busy) Text("返回房间查看成员与本次音频设置", style = MaterialTheme.typography.bodySmall)
+        Text(if (hasRoom) "返回房间查看成员与本次音频设置" else "可以返回连接页面查看进度或取消", style = MaterialTheme.typography.bodySmall)
     }
 }
 

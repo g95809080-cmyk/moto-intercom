@@ -175,4 +175,3 @@ iOS 当前使用 NavigationStack 中的一个 List，集中展示状态、设备
 - [群组运行时入口](../../app/src/main/java/com/kuma/motointercom/IntercomService.kt)
 - [iOS 根页面](../../ios/Sources/MotoComIOS/UI/MotoComApp.swift)
 - [群组实施决策](../../rasen/changes/kum-56-group-app/design.md)
-

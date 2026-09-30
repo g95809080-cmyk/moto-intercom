@@ -507,7 +507,13 @@ class MainActivityRobolectricTest {
             assertEquals("当前房间", group().message)
             val listeners = IntercomService::class.java.getDeclaredField("groupListeners").apply { isAccessible = true }.get(service) as Set<*>
             assertTrue(listeners.isEmpty())
-        } finally { controller.destroy(); owner.destroy() }
+        } finally {
+            controller.destroy()
+            val scope = IntercomService::class.java.getDeclaredField("serviceScope").apply { isAccessible = true }.get(service) as kotlinx.coroutines.CoroutineScope
+            val job = scope.coroutineContext[kotlinx.coroutines.Job]!!
+            owner.destroy()
+            kotlinx.coroutines.runBlocking { job.join() }
+        }
     }
 
     @Test

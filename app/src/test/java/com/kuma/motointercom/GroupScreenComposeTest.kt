@@ -79,6 +79,30 @@ class GroupScreenComposeTest {
         compose.onNodeWithText("结束房间").performClick()
         compose.runOnIdle { assertEquals(1, leaves) }
     }
+    @Test fun newRoomDoesNotInheritPreviousEndConfirmation() {
+        val endpoint = GroupAuthEndpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString())
+        val writer = GroupSessionOrchestrator(endpoint, "房主", { 0 }, {}, {})
+        writer.dispatch(GroupSessionEvent.Create)
+        val state = androidx.compose.runtime.mutableStateOf(GroupServiceState(writer.snapshot, busy = true))
+        compose.setContent { MotoComTheme { GroupScreen(state.value, {}, {}, {}, {}, {}, {}, {}) } }
+        compose.onNodeWithTag("group_leave").performScrollTo().performClick()
+        compose.onNodeWithText("结束全队对讲？").assertIsDisplayed()
+        val fresh = GroupSessionOrchestrator(endpoint, "房主", { 0 }, {}, {})
+        fresh.dispatch(GroupSessionEvent.Create)
+        compose.runOnIdle { state.value = GroupServiceState(fresh.snapshot, busy = true) }
+        compose.onNodeWithText("结束全队对讲？").assertDoesNotExist()
+    }
+
+    @Test fun searchingDoesNotPresentEnteredCodeAsAnInvitation() {
+        val endpoint = GroupAuthEndpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString())
+        val writer = GroupSessionOrchestrator(endpoint, "车友", { 0 }, {}, {})
+        writer.dispatch(GroupSessionEvent.Join(GroupJoinCode("123456")))
+        compose.setContent { MotoComTheme { GroupScreen(GroupServiceState(writer.snapshot, busy = true), {}, {}, {}, {}, {}, {}, {}) } }
+        compose.onNodeWithText("邀请车友").assertDoesNotExist()
+        compose.onNodeWithText("复制房间码").assertDoesNotExist()
+        compose.onNodeWithText("取消连接").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun unreadyPairsIdentifyBothMembers() {
         val endpoint = GroupAuthEndpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString())
         val writer = GroupSessionOrchestrator(endpoint, "阿甲", { 0 }, {}, {})

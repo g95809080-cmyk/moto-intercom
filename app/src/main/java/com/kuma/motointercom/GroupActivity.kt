@@ -107,8 +107,8 @@ internal fun GroupScreen(
 ) {
     var code by remember { mutableStateOf("") }
     var revealCode by remember { mutableStateOf(false) }
-    var confirmEnd by remember { mutableStateOf(false) }
-    var removeMember by remember { mutableStateOf<String?>(null) }
+    var confirmEnd by remember(state.snapshot?.operation) { mutableStateOf(false) }
+    var removeMember by remember(state.snapshot?.operation) { mutableStateOf<String?>(null) }
     val snapshot = state.snapshot
     val room = snapshot?.view
     LaunchedEffect(snapshot?.phase) {
@@ -128,7 +128,7 @@ internal fun GroupScreen(
                     Text(if (startPending) "正在等待权限确认" else state.message,
                         Modifier.testTag("group_status").semantics { liveRegion = LiveRegionMode.Polite },
                         style = MaterialTheme.typography.titleMedium)
-                    if (state.busy) Text("返回主页后，对讲继续。退出请使用下方的离开操作。",
+                    if (state.busy) Text("返回主页不会退出房间或取消连接。退出请使用下方操作。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (!state.busy && (snapshot == null || snapshot.phase == GroupPhase.IDLE)) {
@@ -162,7 +162,7 @@ internal fun GroupScreen(
                             }
                         }
                     }
-                    snapshot?.code?.let { joinCode ->
+                    snapshot?.code?.takeIf { snapshot.phase == GroupPhase.IN_ROOM || snapshot.phase == GroupPhase.RECONNECTING }?.let { joinCode ->
                         MotoComPanel {
                             Text("邀请车友", style = MaterialTheme.typography.titleMedium)
                             Text(joinCode.digits, style = MaterialTheme.typography.headlineSmall)
@@ -229,7 +229,7 @@ internal fun GroupScreen(
                     }
                     MotoComPanel {
                         Text("房间退出", style = MaterialTheme.typography.titleMedium)
-                        Text(if (snapshot?.host == true) "房主结束后，全队退出，房间码失效。" else "只离开当前房间，不会结束其他成员的对讲。",
+                        Text(if (snapshot?.host == true) "房主结束后，全队退出，房间码失效。" else if (room != null) "只离开当前房间，不会结束其他成员的对讲。" else "取消本次连接，不会影响其他房间。",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         OutlinedButton(onClick = { if (snapshot?.host == true) confirmEnd = true else onAction(GroupSessionEvent.Leave) },
                             Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("group_leave"),

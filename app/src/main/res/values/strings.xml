@@ -17,7 +17,7 @@
     <string name="guide_discover_body">摩声已启动。进入“发现车友”，找到要一起对讲的那个人。</string>
     <string name="guide_scan_title">3 / 3 · 点这里重新扫描</string>
     <string name="guide_scan_body">双方启动后，找到对方点“连接”，对方点“接受”。\n\n显示“语音通道已连接”后直接说话；首页可静音和调整耳机。\n\n没有车友也可先完成引导。</string>
-    <string name="guide_image_description">摩声使用说明：一对一离线对讲，无需互联网，但要打开 Wi-Fi。第一步，双方打开 Wi-Fi 和蓝牙，授予必要权限；耳机先在系统中连接。第二步，双方点启动摩声，再查看附近车友。第三步，一方选择对方点击连接，另一方点击接受。第四步，看到语音通道已连接后直接说话，无需按住按钮。静音可暂停自己的麦克风，音频设置可选择耳机及调整 VOX 自动开麦，结束对讲可停止。找不到车友时确认双方已启动、Wi-Fi 已打开，再重新扫描；听不到声音时检查静音和音频输出。</string>
+    <string name="guide_image_description">摩声使用说明：支持双人或最多四人离线对讲，无需互联网，但要打开 Wi-Fi。以下介绍双人连接；四人对讲请从首页创建或加入房间。第一步，双方打开 Wi-Fi 和蓝牙，授予必要权限；耳机先在系统中连接。第二步，双方点启动摩声，再查看附近车友。第三步，一方选择对方点击连接，另一方点击接受。第四步，看到语音通道已连接后直接说话，无需按住按钮。静音可暂停自己的麦克风，音频设置可选择耳机及调整 VOX 自动开麦，“断开当前车友”结束当前连接，“停止摩声”结束搜索。找不到车友时确认双方已启动、Wi-Fi 已打开，再重新扫描；听不到声音时检查静音和音频输出。</string>
     <string name="app_name">摩声</string>
     <string name="brand_name">摩声 MotoCom</string>
     <string name="brand_tagline">双人 / 四人离线对讲</string>
@@ -117,7 +117,7 @@
     <string name="section_audio_output">音频输出</string>
     <string name="section_vox">VOX 自动开麦</string>
     <string name="discover_identity_notice">发现信息仅用于选择目标；真正连接仍需当前通道身份检查。</string>
-    <string name="discover_one_to_one_note">MotoCom 当前是一对一离线对讲；发现列表只用于选择本次目标。</string>
+    <string name="discover_one_to_one_note">此页用于双人对讲，选择本次目标；四人对讲请从首页创建或加入房间。</string>
     <string name="discover_empty_no_presence">暂未发现附近车友</string>
     <string name="discover_paired_title">已配对 / 优先车友</string>
     <string name="discover_nearby_title">附近车友</string>

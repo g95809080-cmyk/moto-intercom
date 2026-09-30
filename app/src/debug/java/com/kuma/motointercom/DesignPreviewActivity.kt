@@ -224,5 +224,6 @@ private fun previewGroupState(): com.kuma.motointercom.group.GroupServiceState {
     val endpoint = com.kuma.motointercom.group.GroupAuthEndpoint(java.util.UUID.randomUUID().toString(), java.util.UUID.randomUUID().toString())
     val writer = com.kuma.motointercom.group.GroupSessionOrchestrator(endpoint, "远山 · 房主", { 0L }, {}, {})
     writer.dispatch(com.kuma.motointercom.group.GroupSessionEvent.Create)
+    writer.dispatch(com.kuma.motointercom.group.GroupSessionEvent.HostReady(writer.snapshot.networkAttempt!!))
     return com.kuma.motointercom.group.GroupServiceState(writer.snapshot, message = "房间已创建，等待车友加入", busy = true)
 }
