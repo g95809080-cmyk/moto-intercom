@@ -96,7 +96,7 @@ class GroupScreenComposeTest {
     @Test fun searchingDoesNotPresentEnteredCodeAsAnInvitation() {
         val endpoint = GroupAuthEndpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString())
         val writer = GroupSessionOrchestrator(endpoint, "车友", { 0 }, {}, {})
-        writer.dispatch(GroupSessionEvent.Join(GroupJoinCode("123456")))
+        writer.dispatch(GroupSessionEvent.Search(GroupJoinCode("123456")))
         compose.setContent { MotoComTheme { GroupScreen(GroupServiceState(writer.snapshot, busy = true), {}, {}, {}, {}, {}, {}, {}) } }
         compose.onNodeWithText("邀请车友").assertDoesNotExist()
         compose.onNodeWithText("复制房间码").assertDoesNotExist()
