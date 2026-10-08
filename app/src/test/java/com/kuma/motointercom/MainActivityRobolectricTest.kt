@@ -20,7 +20,7 @@ import org.robolectric.shadows.ShadowAlertDialog
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], application = android.app.Application::class)
 class MainActivityRobolectricTest {
     @Test fun serviceReadinessCallbackUpdatesConnectedHomeAndIsIgnoredAfterDetach() {
         val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()

@@ -36,5 +36,6 @@ class LogsScreenComposeTest {
         assertTrue(logText.contains("first"))
         composeRule.onNodeWithTag("logs_copy_button").assertHasClickAction()
         composeRule.onNodeWithTag("logs_close_button").assertHasClickAction()
+        composeRule.onNodeWithTag("logs_export_button").assertHasClickAction()
     }
 }
