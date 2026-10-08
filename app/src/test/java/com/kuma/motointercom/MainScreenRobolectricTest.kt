@@ -2204,7 +2204,8 @@ class MainScreenRobolectricTest {
             onSendFeedback = onSendFeedback,
             onRequestDiscoveryRefresh = onRequestDiscoveryRefresh,
             onSetPairingPreferred = onSetPairingPreferred,
-            onForgetPairing = onForgetPairing
+            onForgetPairing = onForgetPairing,
+            diagnostics = null
         )
         activity.setContentView(screen.root)
         return Fixture(activity, screen)

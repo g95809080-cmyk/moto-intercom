@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import java.util.EnumMap
+import java.lang.ref.WeakReference
 
 internal class MainScreen(
     private val activity: Activity,
@@ -50,7 +51,8 @@ internal class MainScreen(
     private val onSendFeedback: (String) -> Unit = {},
     private val onBackgroundSettings: () -> Unit = {},
     private val onboardingPreferences: OnboardingPreferences? = null,
-    private val onOpenGroup: () -> Unit = {}
+    private val onOpenGroup: () -> Unit = {},
+    private val diagnostics: DiagnosticLogAccess? = DiagnosticLog.forContext(activity)
 ) {
     val root: View
 
@@ -64,6 +66,19 @@ internal class MainScreen(
     private val scrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val pendingRestoredScrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val logBuffer = BoundedLogBuffer(300)
+    private var diagnosticsActive = true
+    private var diagnosticsClosed = false
+    private var diagnosticsGeneration = 0L
+    private var historyReadPending = false
+    private var exportPreparing = false
+    private var diagnosticError: String? = null
+    private val logRefresh = object : Runnable {
+        override fun run() {
+            if (!diagnosticsActive || diagnosticsClosed || currentRoute != MainRoute.LOGS) return
+            refreshPersistedLogs()
+            root.postDelayed(this, 2_000)
+        }
+    }
     private var onboarding: OnboardingGuide? = null
     private val guideAnchors = EnumMap<GuideTarget, GuideAnchor>(GuideTarget::class.java)
     private val homeUiState = mutableStateOf(
@@ -312,21 +327,21 @@ internal class MainScreen(
         updateExpandedDetailPane()
     }
 
-    fun setIntercomError(message: String) {
+    fun setIntercomError(message: String, persistLog: Boolean = true) {
         cancelPendingPresenceExpiry()
         discoverConnectAwaitingState = false
         pendingPresenceSelection = null
         permissionStatus = null
         supplementalStatus = message
         discoverCtaNeedsReselect = productState != IntercomState.Offline
-        appendLog("错误：$message")
+        appendLog("错误：$message", persist = persistLog)
         renderCurrentPage()
     }
 
-    fun setStatus(message: String, appendLog: Boolean = true) {
+    fun setStatus(message: String, appendLog: Boolean = true, persistLog: Boolean = true) {
         permissionStatus = null
         supplementalStatus = message
-        if (appendLog) appendLog(message)
+        if (appendLog) appendLog(message, persist = persistLog)
         renderCurrentPage()
     }
 
@@ -492,8 +507,9 @@ internal class MainScreen(
         homeAudioLevel.floatValue = level.coerceIn(0f, 1f)
     }
 
-    fun appendLog(message: String) {
-        logBuffer.append(message)
+    fun appendLog(message: String, persist: Boolean = true) {
+        if (persist) diagnostics?.record("I", "MotoComUI", message)
+        logBuffer.append(PersistentLogStore.clean(message))
         if (shouldRenderLogAppend(currentRoute)) {
             val logText = pageContainer.findViewById<TextView?>(R.id.logs_text)
             val followBottom = logText?.let { it.isAtBottom() || logBottomFollowPending }
@@ -707,6 +723,10 @@ internal class MainScreen(
         stopAnimations()
         logBottomFollowPending = false
         currentRoute = route
+        root.removeCallbacks(logRefresh)
+        diagnosticsGeneration++
+        historyReadPending = false
+        exportPreparing = false
         closeNavigation()
         pageContainer.removeAllViews()
         guideAnchors.clear()
@@ -746,6 +766,8 @@ internal class MainScreen(
         bindCurrentPage()
         if (currentRoute == MainRoute.LOGS) {
             renderLogs()
+            refreshPersistedLogs()
+            if (diagnostics != null && diagnosticsActive) root.postDelayed(logRefresh, 2_000)
         } else {
             renderCurrentPage()
         }
@@ -1172,6 +1194,7 @@ internal class MainScreen(
                         state = logsUiState.value,
                         onBack = { showPage(MainRoute.SETTINGS) },
                         onCopy = ::copyLogs,
+                        onExport = ::exportLogs,
                         onClose = { showPage(MainRoute.SETTINGS) }
                     )
                 }
@@ -1255,8 +1278,76 @@ internal class MainScreen(
         logsUiState.value = LogsScreenUiState(
             scopeText = LOGS_SCOPE_TEXT,
             logText = copyableLogText(snapshot).ifBlank { activity.getString(R.string.logs_empty) },
-            copyEnabled = snapshot.isNotEmpty()
+            copyEnabled = snapshot.isNotEmpty(),
+            exportEnabled = diagnostics != null && snapshot.isNotEmpty(),
+            exporting = exportPreparing,
+            errorText = diagnosticError
         )
+    }
+
+    fun resumeDiagnostics() {
+        diagnosticsActive = true
+        if (currentRoute == MainRoute.LOGS && diagnostics != null) {
+            refreshPersistedLogs()
+            root.removeCallbacks(logRefresh)
+            root.postDelayed(logRefresh, 2_000)
+        }
+    }
+
+    fun pauseDiagnostics() {
+        diagnosticsActive = false
+        diagnosticsGeneration++
+        historyReadPending = false
+        exportPreparing = false
+        root.removeCallbacks(logRefresh)
+    }
+
+    fun closeDiagnostics() { pauseDiagnostics(); diagnosticsClosed = true }
+
+    private fun refreshPersistedLogs() {
+        val source = diagnostics ?: return
+        if (historyReadPending || !diagnosticsActive || diagnosticsClosed || currentRoute != MainRoute.LOGS) return
+        historyReadPending = true
+        val generation = diagnosticsGeneration
+        val weakScreen = WeakReference(this)
+        source.recent { result ->
+            weakScreen.get()?.root?.post {
+                val screen = weakScreen.get() ?: return@post
+                if (!screen.acceptDiagnosticResult(generation)) return@post
+                screen.historyReadPending = false
+                result.fold(
+                    onSuccess = { screen.logBuffer.replace(it); screen.diagnosticError = null },
+                    onFailure = { screen.diagnosticError = screen.activity.getString(R.string.logs_read_failed) }
+                )
+                screen.renderLogs()
+            }
+        }
+    }
+
+    private fun acceptDiagnosticResult(generation: Long): Boolean =
+        !diagnosticsClosed && diagnosticsActive && currentRoute == MainRoute.LOGS && generation == diagnosticsGeneration
+
+    private fun exportLogs() {
+        val source = diagnostics ?: return
+        if (exportPreparing || !diagnosticsActive || diagnosticsClosed) return
+        exportPreparing = true
+        diagnosticError = null
+        renderLogs()
+        val generation = diagnosticsGeneration
+        val weakScreen = WeakReference(this)
+        source.export { result ->
+            weakScreen.get()?.root?.post {
+                val screen = weakScreen.get() ?: return@post
+                if (!screen.acceptDiagnosticResult(generation)) return@post
+                screen.exportPreparing = false
+                val launched = result.mapCatching { screen.activity.startActivity(diagnosticExportChooser(screen.activity, it)) }
+                if (launched.isFailure) {
+                    screen.diagnosticError = screen.activity.getString(R.string.logs_export_failed)
+                    Toast.makeText(screen.activity, screen.diagnosticError, Toast.LENGTH_SHORT).show()
+                }
+                screen.renderLogs()
+            }
+        }
     }
 
     private fun copyLogs() {
