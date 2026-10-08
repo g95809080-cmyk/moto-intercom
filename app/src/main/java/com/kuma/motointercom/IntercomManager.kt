@@ -2,7 +2,7 @@
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import com.google.gson.JsonParser
 import org.webrtc.PeerConnection
 import java.io.Closeable

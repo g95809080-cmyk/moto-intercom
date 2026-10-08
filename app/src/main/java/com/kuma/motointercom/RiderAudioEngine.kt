@@ -8,7 +8,7 @@ import android.media.AudioFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack

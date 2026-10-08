@@ -13,7 +13,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import androidx.annotation.RequiresApi
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean

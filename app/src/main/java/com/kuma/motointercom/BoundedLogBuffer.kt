@@ -13,4 +13,9 @@ internal class BoundedLogBuffer(private val limit: Int = 300) {
     }
 
     fun snapshot(): List<String> = lines.toList()
+
+    fun replace(snapshot: List<String>) {
+        lines.clear()
+        snapshot.takeLast(limit).forEach(::append)
+    }
 }
