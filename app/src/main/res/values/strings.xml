@@ -78,8 +78,13 @@
     <string name="discover_identity_short">具备稳定 MotoCom 发现信息</string>
     <string name="discover_connected_fact">当前通道身份已核对</string>
     <string name="discover_no_available_transport">暂无可用通道</string>
-    <string name="logs_copy_all">复制全部</string>
-    <string name="logs_empty">本次界面会话还没有日志</string>
+    <string name="logs_copy_all">复制当前显示日志</string>
+    <string name="logs_empty">近 7 天还没有日志</string>
+    <string name="logs_export_all">导出近 7 天日志</string>
+    <string name="logs_export_preparing">正在准备日志…</string>
+    <string name="logs_export_chooser">导出摩声诊断日志</string>
+    <string name="logs_read_failed">暂时无法读取本机日志，请稍后重试</string>
+    <string name="logs_export_failed">日志导出失败，请稍后重试</string>
     <string name="logs_content_description">日志内容，可上下滚动</string>
     <string name="menu_button_description">打开导航</string>
     <string name="back_button_description">返回首页</string>

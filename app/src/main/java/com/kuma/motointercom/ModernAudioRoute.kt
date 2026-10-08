@@ -3,7 +3,7 @@ package com.kuma.motointercom
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import androidx.annotation.RequiresApi
 import java.io.Closeable
 import java.util.concurrent.Executor

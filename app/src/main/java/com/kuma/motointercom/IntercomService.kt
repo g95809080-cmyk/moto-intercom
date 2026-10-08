@@ -568,6 +568,7 @@ class IntercomService : Service() {
         }
         audioControls = next
         audioControlRevision = nextVersioned.revision
+        DiagnosticLog.i("IntercomService", "Audio controls revision=$audioControlRevision muted=${next.muted} vox=${next.voxEnabled} sensitivity=${next.voxSensitivity}")
         when {
             !running -> {
                 voxRuntimeState = if (next.voxEnabled) {
@@ -625,6 +626,7 @@ class IntercomService : Service() {
     }
 
     private fun onAudioInterruptionChanged(state: AudioInterruptionState) {
+        DiagnosticLog.i("IntercomService", "Audio interruption=$state")
         audioInterruptionState = state
         listener?.onAudioInterruptionChanged(state)
         when (state) {
@@ -2361,6 +2363,7 @@ class IntercomService : Service() {
     }
 
     private fun publishStatus(status: String) {
+        DiagnosticLog.i("IntercomService", "running=$running status=$status")
         dispatchOnMain {
             lastStatus = status
             listener?.onStatusChanged(status, running)
@@ -2369,6 +2372,7 @@ class IntercomService : Service() {
     }
 
     private fun publishAudioSource(status: String, bluetooth: Boolean) {
+        DiagnosticLog.i("IntercomService", "audio source bluetooth=$bluetooth status=$status")
         dispatchOnMain {
             audioSourceStatus = status
             audioSourceBluetooth = bluetooth
@@ -2377,6 +2381,7 @@ class IntercomService : Service() {
     }
 
     private fun publishLog(message: String) {
+        DiagnosticLog.i("IntercomService", message)
         dispatchOnMain { listener?.onLog(message) }
     }
 
@@ -2385,6 +2390,7 @@ class IntercomService : Service() {
     }
 
     private fun handleError(t: Throwable) {
+        DiagnosticLog.e("IntercomService", "Service effect failed", t)
         val message = t.message ?: t.javaClass.simpleName
         dispatchOnMain { listener?.onError(message) }
     }

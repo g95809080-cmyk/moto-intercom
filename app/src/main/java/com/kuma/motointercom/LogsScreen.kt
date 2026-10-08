@@ -25,7 +25,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.shape.RoundedCornerShape
 
-internal data class LogsScreenUiState(val scopeText: String, val logText: String, val copyEnabled: Boolean)
+internal data class LogsScreenUiState(
+    val scopeText: String,
+    val logText: String,
+    val copyEnabled: Boolean,
+    val exportEnabled: Boolean = false,
+    val exporting: Boolean = false,
+    val errorText: String? = null
+)
 
 @Composable
 internal fun MotoComLogsScreen(
@@ -33,7 +40,8 @@ internal fun MotoComLogsScreen(
     onBack: () -> Unit,
     onCopy: () -> Unit,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onExport: () -> Unit = {}
 ) {
     Column(
         modifier = modifier.widthIn(max = dimensionResource(R.dimen.motocom_content_max_width)).fillMaxWidth().padding(horizontal = dimensionResource(R.dimen.motocom_page_horizontal_padding), vertical = dimensionResource(R.dimen.motocom_page_vertical_padding)).padding(bottom = 32.dp)
@@ -47,7 +55,9 @@ internal fun MotoComLogsScreen(
                 Modifier.fillMaxWidth().padding(top = dimensionResource(R.dimen.motocom_gap)).height(dimensionResource(R.dimen.motocom_logs_viewport_height)).background(colorResource(R.color.motocom_console), RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))).verticalScroll(rememberScrollState()).padding(12.dp).testTag("logs_text"),
                 color = colorResource(R.color.motocom_on_console_secondary), fontSize = 13.sp, lineHeight = 21.sp, fontFamily = FontFamily.Monospace
             )
-            LogsButton(stringResource(R.string.logs_copy_all), "logs_copy_button", onCopy, enabled = state.copyEnabled, primary = true)
+            state.errorText?.let { Text(it, Modifier.padding(top = 8.dp).testTag("logs_error_text"), color = colorResource(R.color.motocom_text_secondary)) }
+            LogsButton(stringResource(if (state.exporting) R.string.logs_export_preparing else R.string.logs_export_all), "logs_export_button", onExport, enabled = state.exportEnabled && !state.exporting, primary = true)
+            LogsButton(stringResource(R.string.logs_copy_all), "logs_copy_button", onCopy, enabled = state.copyEnabled)
             LogsButton(stringResource(R.string.logs_close), "logs_close_button", onClose)
         }
     }
@@ -56,4 +66,4 @@ internal fun MotoComLogsScreen(
 @Composable private fun LogsButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean = true, primary: Boolean = false) = Button(onClick, Modifier.fillMaxWidth().padding(top = dimensionResource(R.dimen.motocom_gap)).testTag(tag), enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = if (primary) colorResource(R.color.motocom_accent_green) else colorResource(R.color.motocom_surface_soft), contentColor = colorResource(R.color.motocom_text_primary)), shape = RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))) { Text(text, fontWeight = if (primary) FontWeight.Bold else FontWeight.Normal) }
 
 @Preview(showBackground = true, widthDp = 360)
-@Composable private fun LogsScreenPreview() { MotoComTheme { MotoComLogsScreen(LogsScreenUiState("本次界面会话日志", "暂无日志", false), {}, {}, {}) } }
+@Composable private fun LogsScreenPreview() { MotoComTheme { MotoComLogsScreen(LogsScreenUiState(LOGS_SCOPE_TEXT, "暂无日志", false), {}, {}, {}) } }

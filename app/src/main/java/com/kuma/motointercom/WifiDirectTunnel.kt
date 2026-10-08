@@ -21,7 +21,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Parcelable
 import android.os.SystemClock
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import java.io.Closeable
 import java.io.IOException
 import java.net.Inet4Address
