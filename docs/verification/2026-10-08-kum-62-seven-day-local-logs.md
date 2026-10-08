@@ -6,8 +6,8 @@
 
 - Linear：[KUM-62](https://linear.app/kuma999/issue/KUM-62/日志诊断本机保留近-7-天日志并支持导出)。
 - Base SHA：`0f5e7b778ee0b945725c9506055d6137a7faf546`。
-- 已验证的源码 SHA：`b3d1250fb8851e73fb6daf9c2ee3dcb596a255e6`。
-- 分支：`feat/kum-62-seven-day-local-logs`；后续提交仅补充本验证记录、任务状态与报告排版。
+- 已验证的应用源码 SHA：`b3d1250fb8851e73fb6daf9c2ee3dcb596a255e6`。
+- 分支：`feat/kum-62-seven-day-local-logs`；后续提交补充证据与报告排版，并修正容量测试的跨平台边界取值，应用源码不变。
 - Android 版本号、正式签名和产品状态决策未更改。
 
 Application 启动即初始化后台日志 worker。Service 无界面监听时的日志、错误和音频来源，以及现有音频路由、VOX、焦点、连接与恢复诊断写入应用私有目录。页面展示最近 300 条，导出全部未过期记录。记录含原始版本/API/运行实例；导出头补充设备、导出时间与策略。
@@ -53,3 +53,13 @@ UI 实际检查：覆盖安装后打开“设置 → 日志诊断”，可读取
 Non-blocking：导出缓存的 `listFiles()==null` 当前仍按空列表处理，可在后续完善该异常边界；不阻断当前自动化与 Draft PR 门禁。
 
 Next gate allowed：独立 Draft PR、远端 CI 与证据收尾。主分支合并和发布保留为用户决定。
+
+## 交付与远端 CI
+
+[Draft PR #37](https://github.com/g95809080-cmyk/moto-intercom/pull/37) 已创建并关联 KUM-62，事项保持 In Review。`5670fdd` 的只读固定 SHA 审查同样 APPROVED，P0=0/P1=0。
+
+[初轮远端 CI](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37716897647) 的 API 36 完整仪器测试 22/22 通过。JVM 750 项中仅容量测试失败：400 B 恰好等于 Linux 的两份导出总量，Windows 换行多出的字节使本机断言通过。测试预算改为 380 B，使第二份单独可容纳、两份合计明确超额；继续验证先前共享文件保留，没有更改生产容量规则。
+
+容量取值修正后，本机完整 JVM/Lint/双 APK 门禁再次通过，750 项全通过；随后补充“单份新导出可容纳”的断言，`DiagnosticLogSessionTest` 5 项与 Lint 针对性检查通过。
+
+后续远端结果以 PR 的最新固定 Head 检查为准，不用本机通过替代远端失败。合并及发布前应确认最新检查通过。

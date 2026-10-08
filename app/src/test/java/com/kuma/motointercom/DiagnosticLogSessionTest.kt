@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import java.io.File
 import java.io.IOException
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -87,11 +88,16 @@ class DiagnosticLogSessionTest {
 
     @Test fun exportBudgetFailureKeepsPreviouslySharedFiles() {
         val exports = temp.newFolder()
-        DiagnosticLogSession(PersistentLogStore(temp.newFolder(), "test"), exports, { "metadata" }, clock = { now }, exportBudgetBytes = 400).use { log ->
+        val store = PersistentLogStore(temp.newFolder(), "test")
+        // The second file fits alone, but both files exceed this budget on LF and CRLF hosts.
+        DiagnosticLogSession(store, exports, { "metadata" }, clock = { now }, exportBudgetBytes = 380).use { log ->
             log.record("I", "test", "one")
             val first = await(log::export).getOrThrow()
             log.record("I", "test", "two-${"x".repeat(250)}")
             assertTrue(await(log::export).isFailure)
+            val singleExport = ByteArrayOutputStream()
+            store.export(now, singleExport, "metadata")
+            assertTrue("One new export must fit; existing exports consume the remaining budget", singleExport.size() <= 380)
             assertTrue(first.exists())
             assertEquals(listOf(first), exports.listFiles()!!.toList())
         }

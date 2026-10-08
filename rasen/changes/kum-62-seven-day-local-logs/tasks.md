@@ -3,4 +3,6 @@
 - [x] 实施后台持久化、168 小时清理、近期显示与完整导出
 - [x] 必要回归、完整 JVM、Lint、debug 构建
 - [x] 固定 SHA 源码审查及发现整改
-- [ ] 独立 Draft PR、CI 与验证记录；汇总六项排查报告
+- [x] 独立 Draft PR、触发 CI 与提交验证记录；汇总六项排查报告
+
+交付为 Draft PR #37。最新 Head 的远端 CI 状态以 GitHub 检查为准；Linear 保持 In Review，不自动合并、发布或关闭事项。
