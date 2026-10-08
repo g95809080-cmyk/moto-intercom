@@ -16,7 +16,8 @@ internal fun diagnosticExportChooser(context: Context, uri: Uri): Intent {
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_STREAM, uri)
-        clipData = ClipData.newUri(context.contentResolver, "MotoCom diagnostics", uri)
+        // The MIME type is already explicit; avoid resolving the provider on the UI thread.
+        clipData = ClipData.newRawUri("MotoCom diagnostics", uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     return Intent.createChooser(send, context.getString(R.string.logs_export_chooser))

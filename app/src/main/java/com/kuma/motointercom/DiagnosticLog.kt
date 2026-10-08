@@ -33,7 +33,7 @@ internal object DiagnosticLog {
                     "Device: ${Build.MANUFACTURER} ${Build.MODEL}; Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n" +
                     "Retention: rolling 168 hours; 256 MiB history budget; unexpired history is preserved.\n" +
                     "Preview: last 300 records. VOX periodic DEBUG samples: once every 5 seconds; transitions are retained.\n" +
-                    "Queue/storage omissions, if any, are recorded. Export files are available for 24 hours."
+                    "Queue/storage omissions, if any, are recorded. Exports are kept for at least 24 hours; expired files are cleaned on the next export."
             },
             reportError = { error ->
                 val now = SystemClock.elapsedRealtime()

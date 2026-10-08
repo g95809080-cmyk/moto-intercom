@@ -1,9 +1,11 @@
 package com.kuma.motointercom
 
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -38,6 +40,28 @@ class DiagnosticLogSessionTest {
             val lines = await(log::recent).getOrThrow()
             assertTrue(lines.any { it.endsWith("recovered") })
             assertTrue(lines.any { it.contains("records omitted") })
+        }
+    }
+
+    @Test fun maintenanceFailuresCompleteReadAndExportCallbacksThenRecoverSameWorker() {
+        val dir = temp.newFolder()
+        PersistentLogStore(dir, "test").append(now, "I", "test", "existing-history")
+        val unavailable = AtomicBoolean(true)
+        val store = PersistentLogStore(dir, "test", readSegmentText = { file ->
+            if (unavailable.get()) throw IOException("segment temporarily unavailable")
+            file.readText(Charsets.UTF_8)
+        })
+        DiagnosticLogSession(store, temp.newFolder(), { "metadata" }, clock = { now }).use { log ->
+            assertTrue(await(log::recent).isFailure)
+            assertTrue(await(log::export).isFailure)
+            unavailable.set(false)
+            log.record("I", "test", "after-recovery")
+            val lines = await(log::recent).getOrThrow()
+            assertTrue(lines.any { it.endsWith("existing-history") })
+            assertTrue(lines.any { it.endsWith("after-recovery") })
+            val exported = await(log::export).getOrThrow().readText()
+            assertTrue(exported.contains("existing-history"))
+            assertTrue(exported.contains("after-recovery"))
         }
     }
 

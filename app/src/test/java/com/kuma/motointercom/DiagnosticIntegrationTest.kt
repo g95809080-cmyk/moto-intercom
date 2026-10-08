@@ -44,10 +44,26 @@ class DiagnosticIntegrationTest {
         val service = Robolectric.buildService(IntercomService::class.java).get()
         val publish = IntercomService::class.java.getDeclaredMethod("publishLog", String::class.java).apply { isAccessible = true }
         publish.invoke(service, "background recovery attempt")
+        IntercomService::class.java.getDeclaredMethod("publishAudioSource", String::class.java, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
+            .invoke(service, "helmet microphone", true)
+        IntercomService::class.java.getDeclaredMethod("handleError", Throwable::class.java).apply { isAccessible = true }
+            .invoke(service, java.io.IOException("connection failed without screen"))
         DiagnosticLog.w("AudioRouteController", "Bluetooth verify failed")
         val lines = await(DiagnosticLog.forContext(app)!!::recent)
         assertTrue(lines.any { it.contains("IntercomService") && it.endsWith("background recovery attempt") })
         assertTrue(lines.any { it.contains("AudioRouteController") && it.endsWith("Bluetooth verify failed") })
+        assertTrue(lines.any { it.contains("audio source bluetooth=true status=helmet microphone") })
+        assertTrue(lines.any { it.contains("Service effect failed") && it.contains("connection failed without screen") })
+    }
+
+    @Test
+    @Config(application = MotoComApplication::class)
+    fun applicationStartupInitializesLoggingBeforeAnyActivity() {
+        assertTrue(app is MotoComApplication)
+        val access = DiagnosticLog.forContext(app)
+        assertNotNull(access)
+        DiagnosticLog.i("ApplicationStartupTest", "ready before activity")
+        assertTrue(await(access!!::recent).any { it.endsWith("ready before activity") })
     }
 
     @Test fun periodicVoxSamplesAreRateLimitedButTransitionsAreRetained() {

@@ -14,7 +14,8 @@ internal class PersistentLogStore(
     private val directory: File,
     private val origin: String,
     private val segmentBytes: Long = 1024L * 1024,
-    private val budgetBytes: Long = 256L * 1024 * 1024
+    private val budgetBytes: Long = 256L * 1024 * 1024,
+    private val readSegmentText: (File) -> String = { it.readText(Charsets.UTF_8) }
 ) {
     private var initialized = false
     private var nextSegment = 0L
@@ -93,28 +94,36 @@ internal class PersistentLogStore(
             if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create diagnostics directory")
             recoverRewrites()
             nextSegment = (segments().lastOrNull()?.name?.removePrefix("diagnostic-")?.removeSuffix(".log")?.toLongOrNull() ?: -1) + 1
-            initialized = true
             maintainFiles(now)
-        } else if (now < maintainedAt || now - maintainedAt >= MAINTENANCE_MS) {
+            // A failed first maintenance must retry recovery and capacity accounting.
+            initialized = true
+        } else if (maintainedAt == Long.MIN_VALUE || now < maintainedAt || now - maintainedAt >= MAINTENANCE_MS) {
             maintainFiles(now)
         }
     }
 
     private fun maintainFiles(now: Long) {
-        for (file in segments()) {
-            val original = file.readText(Charsets.UTF_8)
-            val retained = completeLines(original).filter { (decode(it)?.first ?: Long.MIN_VALUE) >= now - RETENTION_MS }
-            val text = if (retained.isEmpty()) "" else retained.joinToString("\n", postfix = "\n")
-            when {
-                text.isEmpty() -> delete(file)
-                text != original -> rewrite(file, text)
+        try {
+            for (file in segments()) {
+                val original = readSegmentText(file)
+                val retained = completeLines(original).filter { (decode(it)?.first ?: Long.MIN_VALUE) >= now - RETENTION_MS }
+                val text = if (retained.isEmpty()) "" else retained.joinToString("\n", postfix = "\n")
+                when {
+                    text.isEmpty() -> delete(file)
+                    text != original -> rewrite(file, text)
+                }
             }
+            readGap()?.takeIf { it.last < now - RETENTION_MS }?.let { delete(gapFile()) }
+            val files = segments()
+            storedBytes = files.sumOf(File::length)
+            active = files.lastOrNull()
+            maintainedAt = now
+        } catch (error: IOException) {
+            // Recovery also applies to a live store after a partial cleanup/rewrite.
+            initialized = false
+            maintainedAt = Long.MIN_VALUE
+            throw error
         }
-        readGap()?.takeIf { it.last < now - RETENTION_MS }?.let { delete(gapFile()) }
-        val files = segments()
-        storedBytes = files.sumOf(File::length)
-        active = files.lastOrNull()
-        maintainedAt = now
     }
 
     private fun writeRecord(record: ByteArray) {
@@ -148,30 +157,37 @@ internal class PersistentLogStore(
         return if (text.isBlank()) null else time to text
     }
 
-    private fun completeLines(file: File): List<String> = completeLines(file.readText(Charsets.UTF_8))
+    private fun completeLines(file: File): List<String> = completeLines(readSegmentText(file))
     private fun completeLines(text: String): List<String> {
         // A process can die between writing the payload and its terminating newline.
         val complete = if (text.endsWith('\n')) text else text.substringBeforeLast('\n', "")
         return complete.lineSequence().filter(String::isNotEmpty).toList()
     }
 
-    private fun segments(): List<File> = directory.listFiles().orEmpty()
+    private fun directoryFiles(): Array<File> = directory.listFiles() ?: throw IOException("Cannot read diagnostics directory")
+
+    private fun segments(): List<File> = directoryFiles()
         .filter { it.isFile && SEGMENT_NAME.matches(it.name) }.sortedBy(File::getName)
 
     private fun rewrite(file: File, text: String) {
         val temp = File(directory, "${file.name}.tmp")
         val backup = File(directory, "${file.name}.bak")
-        FileOutputStream(temp).use { stream -> stream.write(text.toByteArray(Charsets.UTF_8)); stream.fd.sync() }
-        if (file.exists() && !file.renameTo(backup)) throw IOException("Cannot back up diagnostic segment")
-        if (!temp.renameTo(file)) {
-            if (backup.exists()) backup.renameTo(file)
-            throw IOException("Cannot replace diagnostic segment")
+        try {
+            FileOutputStream(temp).use { stream -> stream.write(text.toByteArray(Charsets.UTF_8)); stream.fd.sync() }
+            if (file.exists() && !file.renameTo(backup)) throw IOException("Cannot back up diagnostic segment")
+            if (!temp.renameTo(file)) {
+                if (backup.exists()) backup.renameTo(file)
+                throw IOException("Cannot replace diagnostic segment")
+            }
+            delete(backup)
+        } catch (error: IOException) {
+            initialized = false
+            throw error
         }
-        delete(backup)
     }
 
     private fun recoverRewrites() {
-        for (file in directory.listFiles().orEmpty()) {
+        for (file in directoryFiles()) {
             val originalName = file.name.removeSuffix(".bak").removeSuffix(".tmp")
             if (!SEGMENT_NAME.matches(originalName) && originalName != "overflow.state") continue
             val original = File(directory, originalName)

@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.UUID
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,7 +26,10 @@ class DiagnosticDeviceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         DiagnosticLog.initialize(context)
         val log = DiagnosticLog.forContext(context)!!
-        log.record("I", "DiagnosticDeviceTest", "before-first-export")
+        val run = UUID.randomUUID().toString()
+        val beforeMarker = "before-first-export-$run"
+        val afterMarker = "after-first-export-$run"
+        log.record("I", "DiagnosticDeviceTest", beforeMarker)
         val first = await(log::export)
         val chooser = diagnosticExportChooser(context, first)
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
@@ -36,13 +40,13 @@ class DiagnosticDeviceTest {
         assertEquals(0, send.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         assertEquals(uri, send.clipData!!.getItemAt(0).uri)
         val before = context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
-        log.record("I", "DiagnosticDeviceTest", "after-first-export")
+        log.record("I", "DiagnosticDeviceTest", afterMarker)
         val second = await(log::export)
         assertNotEquals(first, second)
         val after = context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
         assertEquals(before, after)
-        assertTrue(after.contains("before-first-export"))
-        assertFalse(after.contains("after-first-export"))
+        assertTrue(after.contains(beforeMarker))
+        assertFalse(after.contains(afterMarker))
         val privateFile = java.io.File(context.filesDir, "diagnostics").listFiles()!!.first { it.extension == "log" }
         try {
             FileProvider.getUriForFile(context, "${context.packageName}.diagnostic-files", privateFile)

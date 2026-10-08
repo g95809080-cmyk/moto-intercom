@@ -2,6 +2,7 @@ package com.kuma.motointercom
 
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
@@ -79,6 +80,51 @@ class PersistentLogStoreTest {
         assertTrue(dir.listFiles()!!.filter { it.extension == "log" }.all { it.length() <= 512 })
         assertTrue(rebuilt.append(now + PersistentLogStore.RETENTION_MS + 1000, "I", "test", "resumed"))
         assertTrue(rebuilt.recent(now + PersistentLogStore.RETENTION_MS + 1000).single().endsWith("resumed"))
+    }
+
+    @Test fun firstMaintenanceReadFailureRetriesSameInstanceAndHonorsExistingBudget() {
+        val dir = temp.newFolder()
+        val seed = PersistentLogStore(dir, "test", segmentBytes = 512, budgetBytes = 1024)
+        repeat(2) { seed.append(now, "I", "test", "old-$it-${"x".repeat(100)}") }
+        dir.listFiles()!!.first().appendText("$now\tpartial-tail")
+        var failRead = true
+        val log = PersistentLogStore(dir, "test", segmentBytes = 512, budgetBytes = 1024, readSegmentText = { file ->
+            if (failRead) { failRead = false; throw IOException("temporary segment read failure") }
+            file.readText(Charsets.UTF_8)
+        })
+        assertThrows(IOException::class.java) { log.recent(now) }
+        repeat(20) { log.append(now + it, "I", "test", "new-$it-${"y".repeat(100)}") }
+        val lines = log.recent(now + 20)
+        assertTrue(lines.any { it.contains("old-0-") })
+        assertTrue(lines.any { it.contains("old-1-") })
+        assertFalse(lines.any { it.contains("partial-tail") })
+        assertTrue(lines.any { it.contains("records omitted") })
+        assertTrue(dir.listFiles()!!.filter { it.extension == "log" }.sumOf(File::length) <= 1024)
+    }
+
+    @Test fun interruptedOnlineMaintenanceRestoresJournalWithoutReconstructingStore() {
+        val dir = temp.newFolder()
+        store(dir).append(now, "I", "test", "before-failure")
+        var interruptRead = false
+        val log = PersistentLogStore(dir, "test", readSegmentText = { file ->
+            if (interruptRead) {
+                interruptRead = false
+                assertTrue(file.renameTo(File(dir, "${file.name}.bak")))
+                File(dir, "${file.name}.tmp").writeText("unfinished replacement")
+                throw IOException("interrupted maintenance")
+            }
+            file.readText(Charsets.UTF_8)
+        })
+        assertEquals(1, log.recent(now).size)
+        interruptRead = true
+        val later = now + PersistentLogStore.MAINTENANCE_MS
+        assertThrows(IOException::class.java) { log.recent(later) }
+        log.append(later + 1, "I", "test", "after-failure")
+        val lines = log.recent(later + 1)
+        assertEquals(2, lines.size)
+        assertTrue(lines.first().endsWith("before-failure"))
+        assertTrue(lines.last().endsWith("after-failure"))
+        assertFalse(dir.listFiles()!!.any { it.name.endsWith(".bak") || it.name.endsWith(".tmp") })
     }
 
     @Test fun previewIsBoundedButExportContainsAllRetainedRecordsInOrder() {
