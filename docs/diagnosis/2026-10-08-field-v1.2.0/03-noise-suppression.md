@@ -57,4 +57,3 @@ v1.2 的版本当时写在 Gradle L15–16，尚无 `version.properties`。[旧�
 真机验证应先固定 APK、手机、头盔型号、固件和麦克风位置，双向分别记录“安静讲话、纯风声、风声中讲话”。确认录音输入确实为头盔，再比较硬件与软件 NS；VOX 开关另做一组测试，并在接收端保存听音样本。
 
 应采集完整时间戳日志、`AudioRecordingConfigurations`、`dumpsys audio`、`dumpsys media.audio_policy`、`dumpsys media.audio_flinger`，重点关联同一 session 的实际输入、NS/AEC 创建及开启结果、VOX 状态。原生诊断日志若可用，再记录软件 NS 是否被关闭及 APM 最终配置。**目前最缺的是故障骑行当时的设备信息、完整日志和接收端声音样本；尚不能判断属于未启用、路由异常，还是已启用但风噪抑制不足。**
-

@@ -50,4 +50,3 @@ v1.2 的调用链是：**P2P DNS-SD / LAN NSD、UDP 发现 → Presence → 锁�
 应采集故障前约 60 秒、后约 120 秒的双端日志：APK/versionCode、手机型号/API，runtimeSessionId、attemptId、channelId、TargetLock，候选来源/IP/端口/新鲜度，剩余预算，HELLO/确认/SDP/ICE 阶段，完整异常及 cause，P2P 操作返回码、generation、关闭步骤和最终 group 状态；并配套 `dumpsys package/wifip2p/connectivity`。目前错误转发只保留异常 message，缺少这些关联信息。[错误出口:2387](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/IntercomService.kt#L2387)
 
 尚缺本次失败的错误原文、双端版本身份、网络状态、是否已配对及是否紧接停止重开。现有发布验证也明确不代表双真机射频或骑行实测。本次仅作只读定位，没有修改文件、分支、应用数据或外部事项，也没有运行构建或安装应用。
-

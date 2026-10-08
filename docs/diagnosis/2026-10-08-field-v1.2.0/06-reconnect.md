@@ -51,4 +51,3 @@
 双端应保存 APK 身份、机型/系统、开关与优先车友状态，以及带时间戳的状态迁移、断线来源、`runtimeSessionId`、`attemptId`、完整目标锁、传输计划、截止时间、失败计数、清理完成时间和 HELLO 拒绝原因；同时采集 `MotoComP2P`、WebRTC、系统 Wi-Fi P2P 与进程退出日志。
 
 **目前缺少本次 v1.2 骑行的双端日志、准确失联时长和对端进程状态。** 主目录现存日志主要来自 6—7 月，不能绑定此次故障。旧版后台解绑后，`publishLog()` 也无法写入页面日志，回到前台看不到记录不足以证明没有尝试恢复。现有时序测试使用虚拟时钟和注入通道；7 月历史验收记录过一次恢复通过，但 v1.2 发布未执行真实射频骑行验收。本次完成只读定位与报告，未运行构建或自动修复。[日志入口：Service 2379–2380](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/IntercomService.kt#L2379-L2380)、[时序测试：71–117](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/androidTest/java/com/kuma/motointercom/RecoveryTimingInstrumentationTest.kt#L71-L117)、[v1.2 验证范围](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/docs/releases/v1.2.0.md#L37)
-

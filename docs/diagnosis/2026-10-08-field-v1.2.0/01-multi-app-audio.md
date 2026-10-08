@@ -10,13 +10,13 @@
 
 **代码证据确认的关键问题如下。**
 
-1. **蓝牙对讲选择的是通信通道，没有实现第三方媒体混音。**  
+1. **蓝牙对讲选择的是通信通道，没有实现第三方媒体混音。**
    API 31+ 设置 `MODE_IN_COMMUNICATION`，选择 SCO 或 BLE Headset，且优先 SCO；旧系统直接启动 SCO。A2DP 在代码中只参与设备名称读取。AOSP Android 9、13 均存在 SCO 请求导致 A2DP 输出暂停的路径，因此可能出现“播放器进度继续，头盔里没有声音”。具体手机是否暂停、改路由或支持混音，仍需实测。[v1.2 路由:372](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt#L372)、[通信设备选择:49](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/ModernAudioRoute.kt#L49)、[旧 SCO:604](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt#L604)、[AOSP 音频策略](https://android.googlesource.com/platform/frameworks/av/+/android-13.0.0_r1/services/audiopolicy/managerdefault/AudioPolicyManager.cpp#6512)。
 
-2. **永久焦点丢失被忽略，通信模式没有随媒体结束释放。**  
+2. **永久焦点丢失被忽略，通信模式没有随媒体结束释放。**
    `onAudioFocusChanged()` 没有 `AUDIOFOCUS_LOSS` 分支；其他应用取得长期焦点后，对讲仍可保持 `NORMAL`、WebRTC I/O 和通信路由。单测甚至明确要求这一行为。另一方面，媒体结束调用 `suspendForInterruption(restoreMode=false)`，只清除设备/SCO，没有撤销通信模式请求；恢复初始模式发生在整个音频运行时关闭时。这可能影响断开后仍在线的音乐与导航。[焦点处理:437](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt#L437)、[固化该行为的测试:192](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/test/java/com/kuma/motointercom/CommunicationAudioCoordinatorTest.kt#L192)、[媒体结束:372](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt#L372)、[路由释放:150](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt#L150)。
 
-3. **临时焦点丢失后的自动恢复存在断点。**  
+3. **临时焦点丢失后的自动恢复存在断点。**
    收到 `LOSS_TRANSIENT` 后，`suspendForFocus()` 主动 `abandon()`，随后只等待 `GAIN`，没有安排恢复。释放请求会退出系统焦点栈，正常自动回授链路因此被切断。现有测试手动补发 `GAIN`，没有验证真实焦点栈。这更容易导致导航/其他应用中断后对讲不恢复，与“其他应用无声”需分别验证。[暂停路径:469](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt#L469)、[手动恢复测试:143](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/test/java/com/kuma/motointercom/CommunicationAudioCoordinatorTest.kt#L143)、[Android 焦点规则](https://developer.android.com/media/optimize/audio-focus#responding-to-an-audio-focus-change)。
 
 焦点与 WebRTC 初始化已有正确的基础配置：申请 `GAIN_TRANSIENT_MAY_DUCK`，焦点请求和 Java ADM 都使用 `VOICE_COMMUNICATION / SPEECH`。调用链为 `IntercomManager.start → openMediaSession → beginMediaSession → 申请焦点 → 激活通信路由 → onRouteReady → resumeAudio`。静音和 VOX 关闭只调整本地发送轨道音量，**不会释放焦点或 SCO**。[焦点属性:77](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt#L77)、[会话入口:38](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/IntercomManager.kt#L38)、[WebRTC 属性:352](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt#L352)、[VOX 应用:502](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt#L502)。
@@ -48,4 +48,3 @@ PRD 要求音乐尽量继续、导航可用，并要求电话隔离与自动恢�
 各阶段应采集持续 `logcat`，以及 `dumpsys audio`、`media.audio_policy`、`media.audio_flinger`、`media_session`、`bluetooth_manager`；电话测试补充 `telephony.registry`。重点保留焦点拥有者/变化、模式拥有者、SCO/A2DP 状态、实际输出设备、播放器状态与音量、WebRTC 原生录放启停，并标记操作时间。
 
 尚缺的关键证据是：故障手机和系统版本、头盔型号及 profile、高德/网易云版本、实际 APK 身份、无声时播放器状态，以及本次骑行的系统音频快照。现有保存记录不足以把上述静态路径升级为这次骑行的确定根因。
-

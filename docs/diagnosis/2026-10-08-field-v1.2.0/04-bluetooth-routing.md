@@ -62,4 +62,3 @@ main 的新增恢复连接见 [AudioSessionController.kt:183–192](https://gith
 目前仍缺**当次 v1.2 故障日志、对端手机 SDK、耳机通信 profile 状态，以及直接重选蓝牙的对照结果**。v1.2 发布记录明确未执行实际蓝牙耳机验收，已有自动化通过不能补足这些证据。[验证边界:39](https://github.com/g95809080-cmyk/moto-intercom/blob/d479ec1dec5c4c197785d69b88d0872a366946cb/docs/verification/2026-09-12-release.md#L39)。
 
 本会话未修改文件、分支或应用数据，未运行构建、安装或重启。
-
