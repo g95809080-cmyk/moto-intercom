@@ -274,18 +274,26 @@ class AudioRouteControllerRobolectricTest {
             modernRouteFactory = { route }
         )
 
-        controller.select(AudioRouteSelection.BLUETOOTH)
-        controller.select(AudioRouteSelection.SPEAKER)
-        controller.select(AudioRouteSelection.BLUETOOTH)
-        drainRouteExecutor()
-        shadowOf(Looper.getMainLooper()).idle()
+        val executor = AudioRouteController::class.java.getDeclaredField("ROUTE_EXECUTOR")
+            .apply { isAccessible = true }.get(null) as ExecutorService
+        val blocked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        executor.execute { blocked.countDown(); release.await(5, TimeUnit.SECONDS) }
+        try {
+            assertTrue(blocked.await(2, TimeUnit.SECONDS))
+            // Queue all revisions before the worker reads them; do not assume relative thread speed.
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            controller.select(AudioRouteSelection.SPEAKER)
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            release.countDown()
+            drainRouteExecutor()
+            shadowOf(Looper.getMainLooper()).idle()
 
-        assertTrue(route.requests.isNotEmpty())
-        assertTrue(route.requests.all { it == AudioRouteSelection.BLUETOOTH })
-        assertEquals(listOf("test Bluetooth"), connected)
-        assertEquals(emptyList<AudioRouteSelection>(), phoneRoutes)
-        controller.close()
-        drainRouteExecutor()
+            assertTrue(route.requests.isNotEmpty())
+            assertTrue(route.requests.all { it == AudioRouteSelection.BLUETOOTH })
+            assertEquals(listOf("test Bluetooth"), connected)
+            assertEquals(emptyList<AudioRouteSelection>(), phoneRoutes)
+        } finally { release.countDown(); controller.close(); drainRouteExecutor() }
     }
 
     @Test
