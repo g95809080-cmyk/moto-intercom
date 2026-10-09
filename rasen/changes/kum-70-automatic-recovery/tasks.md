@@ -3,4 +3,4 @@
 - [x] 3. Service一次性授权、取消入口和当前adapter producer接线
 - [x] 4. Wi-Fi实际新Socket/HELLO与旧ready隔离
 - [x] 5. 相称回归、完整门禁与固定SHA只读架构审查
-- [ ] 6. Draft PR/CI与用户deferred实机边界记录
+- [x] 6. 独立 Draft PR #45 与远端CI全部job成功；实机听音按用户要求deferred，非实机验收通过

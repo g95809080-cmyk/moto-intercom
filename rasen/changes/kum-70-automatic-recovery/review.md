@@ -15,3 +15,10 @@ Base SHA `579b6415496bfd8ca8700618106e16257ee9ae0a`；源码/测试 Head SHA `99
 完整本地门禁：92 suites / 710 JVM tests，failure/error/skipped=0；Lint 0 errors / 70 既有 warnings；Debug 与 AndroidTest APK 构建成功2m40s。新增回归包含原 Service effect collector、实际 NSD/TXT 注册回调、真实 UDP/TCP Socket、HELLO、reader EOF/writer failure、factory 阻塞、Room await 前撤权、跨 producer 换代、Lost、精确 Reset/probe 及旧 adapter 刷新。SDK CONNECTED 通知为测试注入；Activity 的合成 receipt 仅用于单元排序，未作为真实发现证明。
 
 同源码 SHA API36 原生 runner：`OK (27 tests)` /10.143s。其中 SharedNetworkNsdTest 与 SyntheticAudioNetworkTest 因缺少 `role=server|client` 双机参数按 assumption 跳过；不构成双机、P2P 射频或蓝牙验收。远端 CI 在 Draft PR 后运行并单独记录。没有改版本、合并、发布或部署。
+
+
+## 远端 CI 最终记录
+
+[CI](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37924933236) 已完成success，全部2个job成功。审查源码 `99fc2bc3877a5d52d69d18f36b41c6bdc15102cb`；实际CI head `0616b8f81bf5d013cc720a42b0f8407233fc086c`。实际CI head与审查源码仅Rasen审查元数据不同，已用Git逐路径核对，无产品、工具、构建或工作流差异。精确响应、job结果及差异路径见ci.json。
+
+Draft PR #45和Linear保持InReview；实机蓝牙、多应用听音、双手机按用户要求deferred，iOS排除。未合并、改版本、发布或部署。
