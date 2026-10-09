@@ -110,9 +110,9 @@ internal class AudioSessionController(
         }
         if (shouldClose) {
             try {
-                session.close()
-            } finally {
                 audioCoordinator?.endMediaSession()
+            } finally {
+                session.close()
             }
         }
     }
@@ -161,11 +161,12 @@ internal class AudioSessionController(
             initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
             onEarpieceActive: () -> Unit = {},
             onExternalAudioActive: (String) -> Unit = {},
-            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {}
+            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {},
+            onPlatformError: (Throwable) -> Unit = onError
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,
-                onEngineError = onError,
+                onEngineError = onPlatformError,
                 isRuntimeCurrent = isRuntimeCurrent,
                 initialAudioControls = initialAudioControls,
                 onVoxStateChanged = onVoxStateChanged

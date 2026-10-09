@@ -399,9 +399,9 @@ internal class CommunicationAudioCoordinator(
             awaitingFocusGain = false
             resumePromptPending = false
             cancelRetry()
+            engine.suspendAudio()
             audioFocus.abandon()
             route.suspendForInterruption(restoreMode = phoneCallState == PhoneCallState.IDLE)
-            engine.suspendAudio()
             publish(
                 if (phoneCallState == PhoneCallState.IDLE) {
                     AudioInterruptionState.NORMAL
@@ -493,9 +493,9 @@ internal class CommunicationAudioCoordinator(
             awaitingRoute = false
             awaitingFocusGain = false
             resumePromptPending = true
+            engine.suspendAudio()
             audioFocus.abandon()
             route.suspendForInterruption(restoreMode = false)
-            engine.suspendAudio()
             publish(phoneStateToInterruption(callState))
         }
     }
@@ -507,10 +507,10 @@ internal class CommunicationAudioCoordinator(
             awaitingRoute = false
             awaitingFocusGain = !permanent
             resumePromptPending = true
+            engine.suspendAudio()
             // Transient loss stays on the focus stack so Android can grant it back.
             if (permanent) audioFocus.abandon()
             route.suspendForInterruption(restoreMode = true)
-            engine.suspendAudio()
             publish(AudioInterruptionState.FOCUS_LOST)
         }
     }
@@ -598,11 +598,11 @@ internal class CommunicationAudioCoordinator(
             awaitingFocusGain = false
             resumePromptPending = false
         }
+        engine.suspendAudio()
         phoneState.close()
         audioFocus.close()
         audioPrompt.close()
         route.suspendForInterruption(restoreMode = phoneCallState == PhoneCallState.IDLE)
-        engine.suspendAudio()
     }
 
     companion object {

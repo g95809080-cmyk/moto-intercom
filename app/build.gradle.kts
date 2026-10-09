@@ -37,6 +37,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    buildTypes {
+        getByName("release") {
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
 }
 
 ksp {
