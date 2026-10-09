@@ -46,7 +46,7 @@ internal class NativeAudioRelease(private val label: String) {
         assertFalse("$label retained its exact token; remaining=${describeOwners()}", hasOwner())
         producers.forEach { thread ->
             thread.join(2_000)
-            assertFalse("$label producer ${thread.name}/${thread.id} is still running", thread.isAlive)
+            assertFalse("$label producer ${thread.name}/${Integer.toHexString(System.identityHashCode(thread))} is still running", thread.isAlive)
         }
         listOf("audioDeviceModule", "factory", "audioSource", "localAudioTrack").forEach {
             assertNull("$label retained $it", field(engine, it))
@@ -64,7 +64,7 @@ internal class NativeAudioRelease(private val label: String) {
             }
             releases.forEach { attempt(it::observeProducers) }
             attempt(closeAdapters)
-            releases.forEach { attempt(it.engine::close) }
+            releases.forEach { attempt { it.engine.close() } }
             releases.forEach { attempt(it::awaitReleased) }
             failure?.let { throw it }
         }

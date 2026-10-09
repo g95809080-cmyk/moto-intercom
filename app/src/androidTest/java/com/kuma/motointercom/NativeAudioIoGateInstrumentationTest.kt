@@ -106,6 +106,7 @@ class NativeAudioIoGateInstrumentationTest {
             module.setMicrophoneMute(false)
             releaseReplacement.countDown()
             awaitHealthyEvidence(offerer)
+            engineRelease.observeProducers(); peerRelease.observeProducers()
             engine.suspendAudio(); engine.resumeAudio()
             awaitHealthyEvidence(offerer)
             assertNull("Old read damaged replacement media", failures.poll())
@@ -235,6 +236,7 @@ class NativeAudioIoGateInstrumentationTest {
             assertTrue("Decoded nonzero PCM never reached Android output", output.snapshot()!!.nonzeroWrittenBytes > 0)
             repeat(2) {
                 val previous = output.snapshot()!!
+                engineRelease.observeProducers(); peerRelease.observeProducers()
                 engine.suspendAudio(); assertNull(output.snapshot()); engine.resumeAudio()
                 awaitHealthyEvidence(offerer)
                 assertNotSame(previous.thread, output.snapshot()!!.thread)

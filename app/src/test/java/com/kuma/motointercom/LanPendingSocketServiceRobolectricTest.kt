@@ -63,6 +63,7 @@ class LanPendingSocketServiceRobolectricTest {
                     a.adapter.close()
                     assertFalse(interleave.get())
                     assertTrue(a.session().isClosed)
+                    assertTrue(a.lease().socket.isClosed)
                     assertTrue(listener.isClosed)
                     assertTrue(registry.isEmpty())
                     assertTrue(executor.isShutdown)
