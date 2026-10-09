@@ -24,6 +24,7 @@ internal class NativeAudioProducerOwner {
     @Synchronized fun current(thread: Thread, action: () -> Unit) {
         if (enabled && producer === thread) action()
     }
+    @Synchronized fun isCurrent(thread: Thread) = enabled && producer === thread
 
     @Synchronized fun stop(thread: Thread, action: () -> Unit) {
         if (!enabled || producer !== thread) return

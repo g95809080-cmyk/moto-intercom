@@ -515,6 +515,66 @@ class MainActivityRobolectricTest {
         controller.destroy()
     }
 
+    @Test
+    fun serviceAudioReadinessIsReplayedAndRevokedOnInterruptionAndUnbind() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        val serviceController = Robolectric.buildService(IntercomService::class.java).create()
+        val service = serviceController.get()
+        val connection = MainActivity::class.java.getDeclaredField("serviceConnection").apply {
+            isAccessible = true
+        }.get(activity) as ServiceConnection
+        val publish = IntercomService::class.java.getDeclaredMethod("publishAudioReady", Boolean::class.javaPrimitiveType).apply {
+            isAccessible = true
+        }
+        val ready = MainScreen::class.java.getDeclaredField("audioReady").apply { isAccessible = true }
+        val attempt = ConnectionAttemptFixture.create(MonotonicClock { MonotonicTimestamp(0) })
+        val connected = IntercomState.Connected(attempt,
+            PeerIdentity(attempt.targetDeviceId, "Rider", runtimeSessionId = attempt.targetLock.expectedRemoteSessionId),
+            0, Transport.LAN)
+        try {
+            publish.invoke(service, true)
+            setPrivateBoolean(activity, "bindingRegistered", true)
+            connection.onServiceConnected(ComponentName(activity, IntercomService::class.java), service.onBind(Intent()))
+            // Offline snapshots must never display readiness even when the service has a stale true value.
+            shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(ready.getBoolean(screen(activity)))
+            val orchestrator = IntercomService::class.java.getDeclaredField("orchestrator").run {
+                isAccessible = true; get(service) as SessionOrchestrator
+            }
+            @Suppress("UNCHECKED_CAST")
+            val state = SessionOrchestrator::class.java.getDeclaredField("mutableState").run {
+                isAccessible = true; get(orchestrator) as kotlinx.coroutines.flow.MutableStateFlow<IntercomState>
+            }
+            state.value = connected
+            val productState = MainScreen::class.java.getDeclaredField("productState").apply { isAccessible = true }
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(1)
+            while (productState.get(screen(activity)) != connected && System.nanoTime() < deadline) {
+                shadowOf(Looper.getMainLooper()).idle()
+                Thread.sleep(5)
+            }
+            assertEquals(connected, productState.get(screen(activity)))
+            publish.invoke(service, false)
+            publish.invoke(service, true)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(ready.getBoolean(screen(activity)))
+            IntercomService::class.java.getDeclaredMethod("onAudioInterruptionChanged", AudioInterruptionState::class.java)
+                .apply { isAccessible = true }.invoke(service, AudioInterruptionState.PHONE_RINGING)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(ready.getBoolean(screen(activity)))
+            IntercomService::class.java.getDeclaredMethod("onAudioInterruptionChanged", AudioInterruptionState::class.java)
+                .apply { isAccessible = true }.invoke(service, AudioInterruptionState.NORMAL)
+            publish.invoke(service, true)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(ready.getBoolean(screen(activity)))
+            connection.onServiceDisconnected(ComponentName(activity, IntercomService::class.java))
+            assertFalse(ready.getBoolean(screen(activity)))
+            activity.onAudioReadyChanged(true)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(ready.getBoolean(screen(activity)))
+        } finally { controller.destroy(); serviceController.destroy() }
+    }
+
     private fun showIncomingConfirmation(
         activity: MainActivity,
         prompt: IncomingConfirmationPrompt

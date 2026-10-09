@@ -4,6 +4,7 @@ import android.content.Context
 import java.io.Closeable
 
 internal interface RiderAudioRoute : Closeable {
+    fun evidence(): AudioRouteEvidence = AudioRouteEvidence(0, false)
     fun select(selection: AudioRouteSelection)
     fun suspendForInterruption(restoreMode: Boolean = false) = Unit
     fun closeRoute(restoreInitialState: Boolean) = close()
@@ -23,6 +24,12 @@ internal class AudioSessionController(
     private var activeSession: RiderMediaSession? = null
     private var preferredAudioRoute = initialAudioRoute
 
+    internal fun routeEvidence(): AudioRouteEvidence = route.evidence().let {
+        if (synchronized(lock) { closed || activeSession == null } ||
+            audioCoordinator?.currentState()?.let { state -> state != AudioInterruptionState.NORMAL } == true)
+            it.copy(ready = false) else it
+    }
+
     fun updateAudioControls(controls: VersionedAudioControls) {
         synchronized(lock) {
             check(!closed) { "audio session controller is closed" }
@@ -36,7 +43,10 @@ internal class AudioSessionController(
             preferredAudioRoute = selection
             if (activeSession != null || audioCoordinator == null) {
                 val canApply = audioCoordinator?.canApplyPreferredRoute() ?: true
-                if (canApply) route.select(selection)
+                if (canApply) {
+                    if (audioCoordinator == null) route.select(selection)
+                    else audioCoordinator.reapplyPreferredRoute(force = true)
+                }
             }
         }
     }
@@ -182,7 +192,8 @@ internal class AudioSessionController(
                     onEarpieceActive = onEarpieceActive,
                     onExternalAudioActive = onExternalAudioActive,
                     onError = onError,
-                    onRouteReady = { coordinator?.onRouteReady() }
+                    onRouteReady = { coordinator?.onRouteReady() },
+                    onRouteInvalidated = { coordinator?.reapplyPreferredRoute() }
                 )
                 coordinator = CommunicationAudioCoordinator(
                     engine = engine,

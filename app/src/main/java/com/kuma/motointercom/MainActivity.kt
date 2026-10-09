@@ -75,6 +75,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             intercomService = null
             dismissIncomingConfirmation()
             screen.clearServiceOwnedFacts()
+            screen.setAudioReady(false)
             setIntercomState(IntercomState.Offline)
             screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         }
@@ -254,6 +255,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         bindingRegistered = false
         serviceConnected = false
         intercomService = null
+        screen.setAudioReady(false)
         dismissIncomingConfirmation()
         screen.stopAnimations()
         super.onStop()
@@ -308,6 +310,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         runOnUiThread {
             if (serviceConnected) setIntercomState(state)
         }
+    }
+
+    override fun onAudioReadyChanged(ready: Boolean) {
+        runOnUiThread { if (serviceConnected) screen.setAudioReady(ready) }
     }
 
     override fun onAudioSourceChanged(status: String, bluetooth: Boolean) {

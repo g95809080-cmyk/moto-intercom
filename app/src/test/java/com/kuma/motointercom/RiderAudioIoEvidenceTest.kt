@@ -12,11 +12,13 @@ class RiderAudioIoEvidenceTest {
         evidence.pcm(100)
         assertFalse(evidence.ready(evidence.revision(), 100))
         evidence.playing(true)
+        assertFalse(evidence.ready(evidence.revision(), 100))
+        evidence.rendered(100)
         assertTrue(evidence.ready(evidence.revision(), 100))
     }
     @Test fun stopRestartAndStalePcmInvalidateEarlierNativeProof() {
         val evidence = RiderAudioIoEvidence()
-        evidence.recording(true); evidence.playing(true); evidence.pcm(100)
+        evidence.recording(true); evidence.playing(true); evidence.pcm(100); evidence.rendered(100)
         val old = evidence.revision()
         assertFalse(evidence.ready(old, 2_101))
         evidence.recording(false); evidence.recording(true)

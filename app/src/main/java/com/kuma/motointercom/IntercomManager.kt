@@ -18,6 +18,7 @@ internal class IntercomManager(
     private val webRtcRole: WebRtcRole,
     private val onIntercomDisconnected: (IOException) -> Unit,
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
+    private val onAudioReadyChanged: (Boolean) -> Unit = {},
     private val onAudioLevelChanged: (Float) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
     private val isSessionCurrent: () -> Boolean
@@ -29,6 +30,25 @@ internal class IntercomManager(
     private val disconnectedNotified = AtomicBoolean(false)
 
     private var mediaSession: RiderMediaSession? = null
+    private val readiness = LegacyAudioReadiness()
+    private var publishedReady = false
+    private val evidenceTick = object : Runnable {
+        override fun run() {
+            if (closed.get() || !isSessionCurrent()) return
+            val session = mediaSession ?: return
+            val route = audioSessionController.routeEvidence()
+            if (!route.ready) publishReady(readiness.reset())
+            session.queryEvidence { evidence ->
+                if (!closed.get() && isSessionCurrent() && mediaSession === session) {
+                    publishReady(readiness.update(evidence, route, audioSessionController.routeEvidence()))
+                }
+            }
+            mainHandler.postDelayed(this, 1_000)
+        }
+    }
+    private fun publishReady(value: Boolean) {
+        if (publishedReady != value) { publishedReady = value; onAudioReadyChanged(value) }
+    }
 
     fun start() {
         if (closed.get()) return
@@ -39,7 +59,10 @@ internal class IntercomManager(
                 RiderMediaSessionCallbacks(
                     onLocalSdpGenerated = ::sendLocalSdp,
                     onLocalIceCandidateGenerated = ::sendLocalIceCandidate,
-                    onConnectionStateChanged = onConnectionStateChanged,
+                    onConnectionStateChanged = { state ->
+                        if (state != PeerConnection.PeerConnectionState.CONNECTED) publishReady(readiness.reset())
+                        onConnectionStateChanged(state)
+                    },
                     onAudioLevelChanged = onAudioLevelChanged,
                     onError = ::onMediaFailure,
                     isSessionCurrent = { !closed.get() && isSessionCurrent() }
@@ -53,6 +76,7 @@ internal class IntercomManager(
             return
         }
 
+        mainHandler.post(evidenceTick)
         if (webRtcRole == WebRtcRole.OFFERER) {
             mediaSession?.createOffer()
         }
@@ -80,6 +104,8 @@ internal class IntercomManager(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        mainHandler.removeCallbacks(evidenceTick)
+        publishReady(readiness.reset())
 
         try {
             mediaSession?.let(audioSessionController::closeMediaSession)

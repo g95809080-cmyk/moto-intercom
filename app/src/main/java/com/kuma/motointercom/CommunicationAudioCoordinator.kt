@@ -422,6 +422,13 @@ internal class CommunicationAudioCoordinator(
         phoneCallState != PhoneCallState.IDLE
     }
 
+    /** A route event cannot reacquire focus or revive a phone/focus interruption. */
+    internal fun reapplyPreferredRoute(force: Boolean = false) = synchronized(lock) {
+        if (closed.get() || !canApplyPreferredRoute() || awaitingFocusGain || (!force && awaitingRoute)) return
+        publish(AudioInterruptionState.RESUMING)
+        activateAuthorizedRoute()
+    }
+
     /** Called by the route after the selected device has been verified. */
     fun onRouteReady() {
         synchronized(lock) {
