@@ -1,5 +1,5 @@
 - [x] 1. 固定 Android 输入、确认实际 callback/queue/writer 归属和关闭竞态
 - [x] 2. 最小生产修复及真实 Socket/JPAKE/AEAD 时序回归，旧源红、修复绿（17项定向加8项Service/2项Home均通过）
-- [ ] 3. 完整 Android JVM、Lint、APK、API36 原生验证
-- [ ] 4. 固定 SHA 架构/OCR 复审和逐路径覆盖
-- [ ] 5. 独立 Draft PR、CI、Linear 与最终证据
+- [x] 3. 完整 Android JVM、Lint、APK、API36 原生验证（886 JVM；native30pass/2skip；Lint0errors）
+- [x] 4. 固定 SHA 架构/OCR 复审和逐路径覆盖（1f636f7正式APPROVED，10路径完整归账）
+- [x] 5. 独立 Draft PR #50、固定1f636f7远端CI三job成功、Linear InReview 与最终证据
