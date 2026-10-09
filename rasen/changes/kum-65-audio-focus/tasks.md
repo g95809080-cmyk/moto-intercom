@@ -1,0 +1,5 @@
+- [x] 1. 依据官方 OCR Kotlin/Android 正确性与资源规则核对稳定路径
+- [x] 2. 修复 transient/permanent/delayed 焦点与媒体结束通信模式
+- [x] 3. 运行焦点与音频会话定向回归
+- [x] 4. 固定 SHA 独立架构审查及完整本地自动化门禁（review.md）
+- [ ] 5. Draft PR/CI 与真实头盔共存验收边界记录
