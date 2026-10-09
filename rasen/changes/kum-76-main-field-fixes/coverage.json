@@ -1,0 +1,2266 @@
+{
+  "scope": "KUM-76 fixed Android source delta",
+  "base_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+  "head_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+  "first_review_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+  "selection_engine": "alibaba/open-code-review 1.12.13 delegate preview/rule",
+  "counts": {
+    "total_files": 114,
+    "default_reviewable_files": 70,
+    "default_excluded_files": 44,
+    "reviewed_files": 114,
+    "skipped_files": 0,
+    "coverage_rate": 100,
+    "manual_default_exclusion_overrides": 44
+  },
+  "coverage_definition": "100% means every changed path has an actual complete diff/context, complete source, or explicit verified prior full-source record. It does not claim every unchanged file was reread or hardware acceptance.",
+  "verdict": "APPROVED for fixed source scopes; remote validation separate",
+  "P0": [],
+  "P1": [],
+  "limits": [
+    "iOS excluded by user instruction; no iOS source delta",
+    "KUM-77/78 are independently open baseline findings, outside this integration delta",
+    "Native tests at fixed source: 30 passes + 2 dual-device role assumptions skipped; no physical Bluetooth or riding acceptance"
+  ],
+  "files": [
+    {
+      "path": ".github/workflows/android-ci.yml",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        1
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "427d54cc78d9f4aa793fd83f8aa856b9554f675a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "427d54cc78d9f4aa793fd83f8aa856b9554f675a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "e9e773497e34f295730a41e2368556a326be6566",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "e9e773497e34f295730a41e2368556a326be6566",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/DiagnosticDeviceTest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "2628da45d268f9184f1a19a85aae2260a69807f5",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeAudioFailureInstrumentationTest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "f1e9c1ffb30f1ac077840f0dc72ee1ba9549284a",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeAudioIoGateInstrumentationTest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "b7c7a35d2efbe4e722686533e11cee82c2a35078",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeAudioRelease.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "22a46fbd35ff2c1ef23844d12c972bb78f83d7af",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeGroupAudioAdapterTest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "58a101cd7cd5e54f0372a3dd580aa7e361ec4f68",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeGroupAudioInstrumentationTest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "d119435f408dd03d6b3b13c79124658aca0e4f8a",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/RiderAudioEngineHotSessionTest.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "7da725f6a7e6e4532ec80c5a47b6a495f59afd64",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/VoxTransmitInstrumentationTest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "48357bd2b25a5990e49d3f3c6dbfb0ba089e662f",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        3
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "a8b48c6df15c9465452a07a1d1d5685523f90b95",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioIoGate.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "22a625e0719241d9544c1a5023def191a14f45f0",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioRouteController.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "8ffc8e663620de830fba5d24407337205cab377e",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioSessionController.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "0adc3d6cf61cf51fc3b844a15c2a801a566cf070",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AutomaticRecoveryPolicy.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "a1b24be125e05cdb4c1b8207053b76ce0bc8724a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/BoundedLogBuffer.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "e655bf5cf69f584ddfd39cfce38a514888898bde",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "e655bf5cf69f584ddfd39cfce38a514888898bde",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "b99631850c8ec7fabf92e1711a2ebcf405e76d1e",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DecodedAudioPlayout.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "1334045d9c405a26403e002b6d257730da9a60ae",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiagnosticExport.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "73a0a52408c3d7b29cac54b668bf2985e77c65a2",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "73a0a52408c3d7b29cac54b668bf2985e77c65a2",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiagnosticLog.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "cb2eade41a524f04cf3b88c4195e4eedcad39921",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "cb2eade41a524f04cf3b88c4195e4eedcad39921",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiagnosticLogSession.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "71fd183fa6b60c5940c198a8eb44c34806dd9dce",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "71fd183fa6b60c5940c198a8eb44c34806dd9dce",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiscoveryPresenceAdmission.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "88b06cf27cd7cce157905636be48533b19a34f80",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/FreshDiscoveryObservation.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "44a4cc7f549ee9a7704beae15817cd806b68a6ff",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomManager.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "a6138766331c056bcbfb1f962a77a26c8a24b64c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "cfa42622aaf9a8f41de4be001ca1c091f79b1637",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomStateMachine.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "bd6c15afc8b4008812940289f0b0a5c39ffe1361",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read.",
+          "reason": "Approved KUM-69/70/full original records reused after each exact stable71 blob equality check"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LanDiscoveryCoordinator.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "4b1762f6632aba8182660c9b0fcabc43cc1e1485",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LegacyAudioReadiness.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "736ec3c8e895ae638eba6ca7c9ab978a076c4777",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LegacyRuntimeOwnership.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "ec4ea977f6d5d31fedd6c0380a6e332d8302387c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LogsScreen.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "62e9f6fc1bde2f2a1c645c333fa967cc1dc973e5",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "62e9f6fc1bde2f2a1c645c333fa967cc1dc973e5",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainActivity.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "fd9beea5594f0c6a177e272eda8c3672e8963f99",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "fd9beea5594f0c6a177e272eda8c3672e8963f99",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainScreen.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_with_actual_consumer_context",
+          "source_blob": "7c4d27df2428bd9263cc5790c6741d9c531920ba",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reason": "Complete main/stable71 delta and specified actual UI/lifecycle/permission/handoff contexts; not full unchanged UI claim"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "7c4d27df2428bd9263cc5790c6741d9c531920ba",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainUiPolicy.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_with_actual_consumer_context",
+          "source_blob": "ab4bf867da590c4e33de486d09385e0f7560402b",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reason": "Complete main/stable71 delta and specified actual UI/lifecycle/permission/handoff contexts; not full unchanged UI claim"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "ab4bf867da590c4e33de486d09385e0f7560402b",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/ModernAudioRoute.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "c3945bff3f6a747b5add7e5c6a9a14cfe6a7238c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MotoComApplication.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "2dc7a624c2784f8043d1e349b7a2a1bc2dda3245",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "2dc7a624c2784f8043d1e349b7a2a1bc2dda3245",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/NativeAudioProducerOwner.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "85e9fb3bbb4455d3728bab577837fc8bbf553d4f",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/NativeCaptureDiagnostics.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "406797da6d7a09f8f738b7de17bee19efbd1b2fb",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PcmTransmitGate.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "80d1a9014883f0443516081b88e330f1558a4374",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PendingSocketLease.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "2ff2c380a523922580fff9068f24bebe04f55dc9",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PersistentLogStore.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "bd63401f2d98d5b28d6b8ac4f1f814e007928b17",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "bd63401f2d98d5b28d6b8ac4f1f814e007928b17",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceAggregator.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "1d4d52dc3418575fbb4334298735893d37d66b77",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read.",
+          "reason": "Approved KUM-69/70/full original records reused after each exact stable71 blob equality check"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceConnectAdmission.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "f2280d43e50e68e276d3d3c93acd6ea12c451235",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceConnectRequest.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "984b9836eabf619180045f3cf1bfba643d1bd9b1",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "984b9836eabf619180045f3cf1bfba643d1bd9b1",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RecoveryCleanupCoordinator.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "a53e8a6576b39b8c53d5cd17f5069812e688f83b",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "83e2c9efc92f894956f6599c02aac4f5100529c5",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderAudioIoEvidence.kt",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "5282948dc5075e99326f1395da2d01088c7f98db",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderMediaEvidence.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "75ef74dfdf80ca9a98b5bfb83d0bf0db2fb3869c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SessionOrchestrator.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "382996d87a24eaf3970b6321f3e594946fbf1172",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingControlCoordinator.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "943400e2ac5606d335c7a494617f75b2028ddabe",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read.",
+          "reason": "Approved KUM-69/70/full original records reused after each exact stable71 blob equality check"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingProtocolV2.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "8ac1bae0f908e9d37e80ba9e63cbc4c2fd744995",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read.",
+          "reason": "Approved KUM-69/70/full original records reused after each exact stable71 blob equality check"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingSessionV2.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "6ea3e4d00af9f15b8242d2144daa19b67c388f33",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read.",
+          "reason": "Approved KUM-69/70/full original records reused after each exact stable71 blob equality check"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/VoxGate.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "78b1d80f80790343469430af20a765b7f596b884",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectSignalingSocket.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "e09954ebdb94ee0a4c7142257ee11ab63eb67428",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_with_actual_consumer_context",
+          "source_blob": "3f7ca4a197713cc62cdaced384ac8e88c0f49592",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reason": "Complete main/stable71 delta and specified actual UI/lifecycle/permission/handoff contexts; not full unchanged UI claim"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupAudio.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "c415b220dc1dea48df2830133118cba340674f30",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupBootstrapRuntime.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "aea4c74af878b6cc451a15743652231f4801d455",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupLegacyBusyServer.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "d33aad6e98d206bdaf61994ca0d9327b68c62f0c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupMediaController.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "a6c7ef4e4f958c00ce5110e88a136976371bbefe",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupRoom.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "84ffd7936d3c9ab5c30b87e671600f0944631d13",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/network/GroupBleTransport.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_baseline_source_plus_complete_diff",
+          "source_blob": "7b921e90ad379420be9e32e1b15ac1ef9ed666ea",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "ba4550d7410b2a4b070cad80213d1724381ffd29"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/network/GroupNetworkPolicy.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "a1a38514195d1e271965adc56fbe32c9a9c5043c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/network/GroupWifiNetwork.kt",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_baseline_source_plus_complete_diff",
+          "source_blob": "9333def341fe0fb011d67ed8d219aba257057edc",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "ba4550d7410b2a4b070cad80213d1724381ffd29"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        3
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_baseline_source_plus_complete_diff",
+          "source_blob": "7280baec78fdbd24537b224c389031dc0ecb63ba",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/main/res/xml/diagnostic_file_paths.xml",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        3
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "e5f6b0643cf624e9ba69a34ea0284aaf7b17b9c2",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "build.gradle.kts",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "37497455006d263f85a6174baed0403579313bb7",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "37497455006d263f85a6174baed0403579313bb7",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "buildSrc/build.gradle.kts",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        2
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "a8ef16ff511d9ab187af7ac839632ace953c2f85",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "a8ef16ff511d9ab187af7ac839632ace953c2f85",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "buildSrc/src/main/java/com/kuma/buildlogic/WebRtcCaptureCallbackPatch.java",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        4
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "230f9b90f821cf1c5c597207d8ed2582bb8bd0d1",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "230f9b90f821cf1c5c597207d8ed2582bb8bd0d1",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "rasen/changes/kum-76-main-field-fixes/.openspec.yaml",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        5
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "81264324b0500978f52f70d701b236a09cb1d808",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "scripts/emulator/inject-network-fault.ps1",
+      "status": "modified",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        3
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "ac8b6c657a70cc1710eae54fb0cd9a1a06d38582",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "scripts/emulator/test-inject-network-fault.ps1",
+      "status": "added",
+      "default_selected": true,
+      "review_status": "reviewed",
+      "rule_groups": [
+        3
+      ],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "4861a8707b762311ccb8133fa2b274b7eb054e78",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/proguard-rules.pro",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "unsupported_ext",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "e5afc1a99d57abd7f07effc5edcc719bcd596b7f",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "e5afc1a99d57abd7f07effc5edcc719bcd596b7f",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AndroidAudioPlatformRobolectricTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "b46e978bd9e50232dd7f79d449a7cbcd034bd4fd",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AudioIoGateTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "732817b0a9d55f88c2c949b2a0bce792a2d2a110",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "c3caea940c4ccc94de160c035533e561ea69e90a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AutomaticRecoveryPolicyTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "101866f280db7d1c1d265b73c1f362604901d23c",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/CommunicationAudioCoordinatorTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "8fa46333276ab4b87c75b743d2bc647b2f1db428",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DecodedAudioPlayoutTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "d0b820236e52f43cad6e91daf3ee78b38fa1a964",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DiagnosticIntegrationTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "79b7ca94590d653dddcdd46e73c8ce9b5b553d26",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "79b7ca94590d653dddcdd46e73c8ce9b5b553d26",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DiagnosticLogSessionTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "21c297a8dced4127a9d5238c55f71152eb80cb3a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "21c297a8dced4127a9d5238c55f71152eb80cb3a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DiscoveryPresenceAdmissionTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "2fbbbefdba98765e66c46390442b7efc2c3a0745",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/FreshDiscoveryObservationTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "cc68d5de2d60e4e3d7e4c3b62d065b8fdaa1e1bf",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/FreshDiscoveryProducerRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_and_actual_fixture_context",
+          "source_blob": "e0f7635993cc2cc9106175d9d11692d12193eef6",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "reason": "Entire delta and named actual Service/Main/HELLO fixture consumer contexts; approved original regressions reused where equal"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IncomingConfirmationServiceRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_and_actual_fixture_context",
+          "source_blob": "0f68150152efb4001083daaf674c1eed0630b399",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "reason": "Entire delta and named actual Service/Main/HELLO fixture consumer contexts; approved original regressions reused where equal"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IntercomManagerReadinessTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "d9ded2ee8728e7e0db05c7ab6defca80b2d700f2",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IntercomServiceRobolectricTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_and_actual_fixture_context",
+          "source_blob": "c30c20547195fe6a183c326ee8323ab1358b1022",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "reason": "Entire delta and named actual Service/Main/HELLO fixture consumer contexts; approved original regressions reused where equal"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/LanPendingSocketServiceRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "3d9503d4553c5232843626ce232bc1bea329f86d",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head_source",
+          "source_blob": "3d9503d4553c5232843626ce232bc1bea329f86d",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/LegacyRuntimeOwnershipServiceRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "9b1919430a320f6d63e7f0dd1a1edfbdd73345fa",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/LogsScreenComposeTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "298556ab97241984cec2b665cab2fc0d9bd29b21",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "298556ab97241984cec2b665cab2fc0d9bd29b21",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainActivityRobolectricTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_and_actual_fixture_context",
+          "source_blob": "40c4d9a897bf6b353c179ab208334d42e91a38ae",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "reason": "Entire delta and named actual Service/Main/HELLO fixture consumer contexts; approved original regressions reused where equal"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "40c4d9a897bf6b353c179ab208334d42e91a38ae",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainScreenRobolectricTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "complete_diff_and_actual_fixture_context",
+          "source_blob": "98d3e2b89830604999fc0362b8d8d02a14412a11",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "reason": "Entire delta and named actual Service/Main/HELLO fixture consumer contexts; approved original regressions reused where equal"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "98d3e2b89830604999fc0362b8d8d02a14412a11",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainUiPolicyTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "e8971fbf635423e27234527d47c5526ab156071b",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "e8971fbf635423e27234527d47c5526ab156071b",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/NativeAudioProducerOwnerTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "b7503507520360769880a4a3f900bd8b1d876e4e",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PcmTransmitGateTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "f8f9499653bed4c7e231c1dc2c31538f6d293109",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PendingSocketLeaseTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "349a5debd6da98ee34f0a59e144716c5b723f95f",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PersistentLogStoreTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "5ca0188c7e613e7e26de86804f8afabbb0d26b1a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "5ca0188c7e613e7e26de86804f8afabbb0d26b1a",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PresenceConnectLineageRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "f1859376fa2e2e962886c3b2ab100edeebcfe8f1",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read."
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PresenceConnectServiceAdmissionRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "346a78dc685e019f939032ac1604420f11530cc2",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read."
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/RecoveryCleanupCoordinatorTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "db1d01d185a1998cf5965ba5832ab11a5e52105e",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/RiderAudioIoEvidenceTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "b2b3c387a80c3542153d1ad63568b26402dc5183",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/RiderMediaEvidenceTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "48adbefa9495276dc09f642ceaeae727c4dacaf3",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/SignalingControlCoordinatorTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "dfbc71d1efb6d015712136edca4c001c965b2b76",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read."
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/SignalingSessionV2Test.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "1210a795011186d528536f66b87eb57bf8c7ac20",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read."
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/VoxGateTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "05eeff4d3b527777dc16fd0226e39820419d5040",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectPendingAdmissionRobolectricTest.kt",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "prior_full_review_exact_blob_reuse",
+          "source_blob": "d12e6af8ea3f2ed1c4aa70258638f66f7cc525e3",
+          "reviewed_sha": null,
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+          "read_basis": "Approved KUM-69/70/original full-source records; fixed stable71/head exact blob verified. Reference is not claimed as a new full read."
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectSignalingSocketTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "ecc6f7356d31afa1dd94267187cd37629e2bc028",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectTunnelIdentityRobolectricTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head",
+          "source_blob": "8f43a91785748287df9dbf1b132bd4ecc9d7255d",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/GroupLegacyBusyServerTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_baseline_source_plus_complete_diff",
+          "source_blob": "0509427ed7c567b8ad3bca7cacc9ca35bb869f8f",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "ba4550d7410b2a4b070cad80213d1724381ffd29"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/GroupRoomTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "5ab85945ecbcffd80b0d2404e2fb4cf9de66f086",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/GroupSessionOrchestratorTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_app_support_audit",
+          "depth": "full_head_source_and_complete_diff",
+          "source_blob": "8417a818eac59e66bdfa3932a343d46281c537d0",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "complete_diff_and_actual_call_context",
+          "source_blob": "8417a818eac59e66bdfa3932a343d46281c537d0",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/network/GroupNetworkPolicyTest.kt",
+      "status": "modified",
+      "default_selected": false,
+      "default_exclusion_reason": "default_path",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_baseline_source_plus_complete_diff",
+          "source_blob": "382cfb4ac07d4aa78ef565379f91cc494e4cf829",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "reuse_reference": "ba4550d7410b2a4b070cad80213d1724381ffd29"
+        }
+      ]
+    },
+    {
+      "path": "rasen/changes/kum-76-main-field-fixes/design.md",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "unsupported_ext",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "7574b195d305ab0001f601f3c738ec7ca0c2f516",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "rasen/changes/kum-76-main-field-fixes/proposal.md",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "unsupported_ext",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "dfeedcfeff90ee7ed8af8ff482b9467e5af42403",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "rasen/changes/kum-76-main-field-fixes/specs/android-main-integration/spec.md",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "unsupported_ext",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "logging_architecture_review",
+          "depth": "full_fixed_head_source_and_complete_diff",
+          "source_blob": "e6265fd05b971d91f8b52cdf13e74df750f8603e",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        },
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head_source",
+          "source_blob": "e6265fd05b971d91f8b52cdf13e74df750f8603e",
+          "reviewed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    },
+    {
+      "path": "rasen/changes/kum-76-main-field-fixes/tasks.md",
+      "status": "added",
+      "default_selected": false,
+      "default_exclusion_reason": "unsupported_ext",
+      "review_status": "reviewed",
+      "rule_groups": [],
+      "reading_records": [
+        {
+          "reviewer": "ocr_main_platform_audit",
+          "depth": "full_fixed_head",
+          "source_blob": "1f0232e39ba0ccd7ad03334af644abf9a103d733",
+          "reviewed_sha": "bb79b8872739971a2008ad7e33ef5fdd8b0674b7",
+          "verified_applicable_head": "5b9b6a7d853446280403f20a1b0fed39f370308a"
+        }
+      ]
+    }
+  ]
+}
