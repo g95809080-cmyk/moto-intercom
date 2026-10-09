@@ -1,0 +1,93 @@
+{
+  "base": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+  "source_head": "ba4550d7410b2a4b070cad80213d1724381ffd29",
+  "decision": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "official_selected": 3,
+  "official_reviewed": 3,
+  "total_files": 9,
+  "reviewed_files": 9,
+  "skipped_files": 0,
+  "coverage_rate": 1,
+  "coverage_scope": "Fixed issue range with full changed source/tests/contracts; not whole-project coverage",
+  "reviewers": [
+    "/root/ocr_main_platform_audit"
+  ],
+  "verification": {
+    "jvm": "94 suites/731 tests/0 failure,error,skip",
+    "targeted": "14 pass/1m4s",
+    "hardware": "User deferred",
+    "native": "Same source API36 OK21/2.546s:19 pass,2 missing-role assumptions,0 fail",
+    "remote_ci": "Pending Draft PR",
+    "original_red": "same14 with synchronization removed:3 new tests fail; exact bytes restored in finally",
+    "lint": "0 errors/80 existing warnings",
+    "build": "Debug and AndroidTest APKs successful2m57s"
+  },
+  "files": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupLegacyBusyServer.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/network/GroupNetworkPolicy.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "rasen/changes/kum-72-group-budget-concurrency/.openspec.yaml",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/GroupLegacyBusyServerTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/network/GroupNetworkPolicyTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "rasen/changes/kum-72-group-budget-concurrency/design.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "rasen/changes/kum-72-group-budget-concurrency/proposal.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "rasen/changes/kum-72-group-budget-concurrency/specs/group-budget/spec.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    },
+    {
+      "path": "rasen/changes/kum-72-group-budget-concurrency/tasks.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/test/contract and all fixed diff",
+      "reason": "Actual budget monitor, clock/order, production caller and shared two-listener Socket path; actual reading does not claim unchanged whole-project audit"
+    }
+  ]
+}
