@@ -1,6 +1,6 @@
-- [ ] 1. 统一当前owner异常断线的开关判断与身份回归
-- [ ] 2. 原车友未来恢复意图、exact reset及真实fresh观测边界
-- [ ] 3. Service一次性授权、取消入口和当前adapter producer接线
-- [ ] 4. Wi-Fi实际新Socket/HELLO与旧ready隔离
-- [ ] 5. 相称回归、完整门禁与固定SHA只读架构审查
+- [x] 1. 统一当前owner异常断线的开关判断与身份回归
+- [x] 2. 原车友未来恢复意图、exact reset及真实fresh观测边界
+- [x] 3. Service一次性授权、取消入口和当前adapter producer接线
+- [x] 4. Wi-Fi实际新Socket/HELLO与旧ready隔离
+- [x] 5. 相称回归、完整门禁与固定SHA只读架构审查
 - [ ] 6. Draft PR/CI与用户deferred实机边界记录
