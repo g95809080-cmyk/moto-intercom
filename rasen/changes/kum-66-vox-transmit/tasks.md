@@ -1,0 +1,5 @@
+- [x] 1. 官方规则与 native sender/capture 路径确认
+- [x] 2. 修复实际发送门控、噪声下灵敏度和滑动校准
+- [x] 3. 定向门控回归与原生双 PeerConnection 验证
+- [x] 4. 固定 SHA 独立架构审查及完整本地门禁
+- [ ] 5. Draft PR/CI 与真实说话/风噪边界记录

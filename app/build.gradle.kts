@@ -43,6 +43,17 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// stream-webrtc-android 1.3.9 exposes this setter but never connects it to the recorder.
+androidComponents.onVariants { variant ->
+    variant.instrumentation.transformClassesWith(
+        com.kuma.buildlogic.WebRtcCaptureCallbackPatch::class.java,
+        com.android.build.api.instrumentation.InstrumentationScope.ALL
+    ) {}
+    variant.instrumentation.setAsmFramesComputationMode(
+        com.android.build.api.instrumentation.FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS
+    )
+}
+
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     maxHeapSize = "2g"
 }
@@ -62,7 +73,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.2")
     implementation("androidx.room:room-runtime:2.7.2")
     implementation("com.google.code.gson:gson:2.10.1")
-    implementation("io.getstream:stream-webrtc-android:1.3.9")
+    implementation("io.getstream:stream-webrtc-android:1.3.9") {
+        version { strictly("1.3.9") }
+    }
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     ksp("androidx.room:room-compiler:2.7.2")
     testImplementation("androidx.room:room-testing:2.7.2")

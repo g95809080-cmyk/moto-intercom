@@ -31,8 +31,6 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.log10
-import kotlin.math.sqrt
 
 internal data class RiderMediaSessionCallbacks(
     val onLocalSdpGenerated: (sdpJson: String) -> Unit,
@@ -99,6 +97,7 @@ internal class RiderAudioEngine(
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
+    private val captureFailed = AtomicBoolean(false)
     private val audioControlLock = Any()
     private var versionedAudioControls = initialAudioControls.normalized()
     private var audioControls = versionedAudioControls.settings
@@ -130,7 +129,7 @@ internal class RiderAudioEngine(
                 audioControls.voxEnabled != normalized.settings.voxEnabled ||
                 audioControls.voxSensitivity != normalized.settings.voxSensitivity
             ) {
-                voxGate = VoxGate(
+                voxGate.updateSettings(
                     enabled = normalized.settings.voxEnabled,
                     sensitivity = normalized.settings.voxSensitivity
                 )
@@ -141,7 +140,6 @@ internal class RiderAudioEngine(
             true
         }
         if (!accepted) return
-        applyCurrentTrackVolume()
         publishCurrentVoxState()
     }
 
@@ -358,11 +356,17 @@ internal class RiderAudioEngine(
             )
             // 低延迟优先；耳机/头盔链路里这比高保真更重要。
             .setUseLowLatency(true)
-            // 采集端 PCM 钩子：在 WebRTC 编码前做 VOX 门限判断。
-            // 注意这里只做 RMS 计算和状态翻转，避免在音频线程里执行重活。
-            .setSamplesReadyCallback(JavaAudioDeviceModule.SamplesReadyCallback { samples ->
-                handleAudioSamplesForVox(samples)
-            })
+            // The build patch wires the SDK's unused public callback before native encoding.
+            // Keep native tracks active: this pinned native build stops capture when all tracks mute.
+            .setAudioRecordDataCallback { format, _, _, buffer ->
+                try {
+                    if (captureFailed.get()) PcmTransmitGate.silence(buffer)
+                    else handleCapturedPcm(format, buffer)
+                } catch (error: Throwable) {
+                    PcmTransmitGate.silence(buffer)
+                    if (captureFailed.compareAndSet(false, true)) postEngineError(error)
+                }
+            }
             // 优先启用设备硬件 AEC/NS；不支持时 WebRTC 会回退到软件处理。
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
@@ -417,14 +421,13 @@ internal class RiderAudioEngine(
         }
         localAudioTrack = factoryOrThrow().createAudioTrack(AUDIO_TRACK_ID, audioSource).apply {
             setEnabled(true)
-            setVolume(initialApplication.trackVolume)
         }
         publishCurrentVoxState()
         Log.i(
             TAG,
             "VOX 初始化 enabled=${audioControls.voxEnabled} " +
                 "sensitivity=${audioControls.voxSensitivity} " +
-                "trackEnabled=true volume=${initialApplication.trackVolume}"
+                "transmitEnabled=${initialApplication.trackVolume > 0.0}"
         )
 
     }
@@ -437,12 +440,25 @@ internal class RiderAudioEngine(
         setOpusBitrate(localAudioSender)
     }
 
-    private fun handleAudioSamplesForVox(samples: JavaAudioDeviceModule.AudioSamples) {
-        val energy = calculateApproxDb(samples) ?: return
+    private fun handleCapturedPcm(format: Int, buffer: java.nio.ByteBuffer) {
+        if (closed.get() || audioSuspended || format != AudioFormat.ENCODING_PCM_16BIT) {
+            PcmTransmitGate.silence(buffer)
+            return
+        }
+        val energy = PcmTransmitGate.approximateLevel(buffer)
         val now = SystemClock.elapsedRealtime()
         val result = synchronized(audioControlLock) {
+            if (closed.get() || audioSuspended) {
+                PcmTransmitGate.silence(buffer)
+                return
+            }
             val decision = voxGate.update(energy, now)
             gateState = decision.state
+            // Controls and the actual frame mutation share a lock, so an acknowledged mute
+            // cannot leak a subsequent frame through a stale queued RTC task.
+            if (closed.get() || audioSuspended || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
+                PcmTransmitGate.silence(buffer)
+            }
             VoxSampleResult(
                 decision = decision,
                 controls = versionedAudioControls,
@@ -452,7 +468,6 @@ internal class RiderAudioEngine(
         }
         val decision = result.decision
         if (decision.stateChanged) {
-            applyCurrentTrackVolume()
             Log.i(
                 TAG,
                 String.format(
@@ -499,17 +514,6 @@ internal class RiderAudioEngine(
             trackVolume = trackVolumeForCurrentState(audioControls, gateState)
         )
 
-    private fun applyCurrentTrackVolume() {
-        runRtc {
-            val volume = synchronized(audioControlLock) {
-                currentAudioControlApplicationLocked().trackVolume
-            }
-            if (engineState == EngineState.READY) {
-                localAudioTrack?.setVolume(volume)
-            }
-        }
-    }
-
     private fun publishCurrentVoxState() {
         synchronized(audioControlLock) {
             val application = currentAudioControlApplicationLocked()
@@ -532,33 +536,6 @@ internal class RiderAudioEngine(
         val level = (db / PCM_DBFS_TO_APPROX_SPL_OFFSET).toFloat().coerceIn(0f, 1f)
         val session = synchronized(sessionLock) { activeSession } ?: return
         postSessionMain(session) { session.callbacks.onAudioLevelChanged(level) }
-    }
-
-    private fun calculateApproxDb(samples: JavaAudioDeviceModule.AudioSamples): Double? {
-        if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return null
-
-        val data = samples.data
-        if (data.size < 2) return null
-
-        var sumSquares = 0.0
-        var count = 0
-        var index = 0
-        while (index + 1 < data.size) {
-            val low = data[index].toInt() and 0xFF
-            val high = data[index + 1].toInt()
-            val sample = (high shl 8) or low
-            sumSquares += sample.toDouble() * sample.toDouble()
-            count++
-            index += 2
-        }
-        if (count == 0) return null
-
-        val rms = sqrt(sumSquares / count)
-        if (rms <= 0.0) return 0.0
-
-        // 手机麦克风没有统一 SPL 校准值；这是 dBFS + 固定偏移的工程能量值，不是真实 dB SPL。
-        return (20.0 * log10(rms / Short.MAX_VALUE.toDouble()) + PCM_DBFS_TO_APPROX_SPL_OFFSET)
-            .coerceAtLeast(0.0)
     }
 
     private fun localSdpObserver(session: MediaSession): SdpObserver = object : SdpObserver {
@@ -745,7 +722,7 @@ internal class RiderAudioEngine(
             it.maxBitrateBps = OPUS_BITRATE_BPS
             it.minBitrateBps = OPUS_BITRATE_BPS
         }
-        sender.setParameters(parameters)
+        check(sender.setParameters(parameters)) { "Cannot configure Opus bitrate" }
     }
 
     private fun forceOpus32k(sdp: String): String {
