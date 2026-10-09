@@ -1,0 +1,196 @@
+{
+  "base_sha": "b596feac30f9079d89d01e6f723de7f015011006",
+  "head_sha": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+  "tool": "alibaba/open-code-review 1.12.13 delegate preview/rule",
+  "total_files": 10,
+  "ocr_selected_files": 5,
+  "extended_files": 5,
+  "reviewed_files": 10,
+  "skipped_files": 0,
+  "coverage_rate": 1,
+  "verdict": "APPROVED",
+  "P0": 0,
+  "P1": 0,
+  "paths": [
+    {
+      "path": ".github/workflows/android-ci.yml",
+      "status": "modified",
+      "insertions": 7,
+      "deletions": 0,
+      "ocr_selected": true,
+      "head_blob": "10ec15ac7c9bc6b9194a37756ca74eb2ddc6d5c1",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "rasen/changes/kum-78-acceptance-evidence/.openspec.yaml",
+      "status": "added",
+      "insertions": 2,
+      "deletions": 0,
+      "ocr_selected": true,
+      "head_blob": "81264324b0500978f52f70d701b236a09cb1d808",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "rasen/changes/kum-78-acceptance-evidence/design.md",
+      "status": "added",
+      "insertions": 9,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "ocr_selected": false,
+      "manual_review": true,
+      "head_blob": "bbab37b9ecd9fe4e2dfc783b6a50299dd0f03b42",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "rasen/changes/kum-78-acceptance-evidence/proposal.md",
+      "status": "added",
+      "insertions": 13,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "ocr_selected": false,
+      "manual_review": true,
+      "head_blob": "a9dbb3537fc5fca10c86fa4d706ce1aebc4709a1",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "rasen/changes/kum-78-acceptance-evidence/specs/acceptance-evidence/spec.md",
+      "status": "added",
+      "insertions": 26,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "ocr_selected": false,
+      "manual_review": true,
+      "head_blob": "a83fe9192b27bf724c21eac5e9ad3e7d1e087d17",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "rasen/changes/kum-78-acceptance-evidence/tasks.md",
+      "status": "added",
+      "insertions": 4,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "ocr_selected": false,
+      "manual_review": true,
+      "head_blob": "21c5935afd39f4845b5eefb1ae4f227646564dec",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "tools/kum26_peer_test.py",
+      "status": "modified",
+      "insertions": 74,
+      "deletions": 0,
+      "exclude_reason": "default_path",
+      "ocr_selected": false,
+      "manual_review": true,
+      "head_blob": "1cf2defddf5b36c75456c21ee04911045d4ff81f",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "tools/kum26_peer.py",
+      "status": "modified",
+      "insertions": 4,
+      "deletions": 1,
+      "ocr_selected": true,
+      "head_blob": "8e3c60947a4f176c022c44cf0ad5295186cbccce",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "tools/kum26_two_device_evidence_test.ps1",
+      "status": "added",
+      "insertions": 396,
+      "deletions": 0,
+      "ocr_selected": true,
+      "head_blob": "d137e4cec8961337010961818adcd5d45d9f9b5f",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    },
+    {
+      "path": "tools/kum26_two_device_evidence.ps1",
+      "status": "modified",
+      "insertions": 319,
+      "deletions": 153,
+      "ocr_selected": true,
+      "head_blob": "e52beacf4b5d38d2537d68a8085252208d93726b",
+      "depth": "full_source_and_complete_diff",
+      "readers": [
+        "/root/logging_architecture_review",
+        "/root/ocr_app_support_audit",
+        "/root/ocr_main_platform_audit"
+      ],
+      "reviewed": true
+    }
+  ],
+  "additional_context": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LocalIdentityStore.kt",
+      "depth": "full_source",
+      "purpose": "device_id producer"
+    },
+    {
+      "path": "app/schemas/com.kuma.motointercom.PairingDatabase/1.json",
+      "depth": "full_source",
+      "purpose": "actual ten-column Room schema"
+    },
+    {
+      "path": "AndroidX datastore-preferences-proto 1.1.7 local primary jar",
+      "depth": "related bytecode constants/map encoding only",
+      "purpose": "independent wire-format confirmation"
+    }
+  ],
+  "source_app_tree": "4ee9ced9fdc65439a9a91f02d886bff517668757",
+  "physical_acceptance": "not_run_user_deferred",
+  "ios": "user_excluded"
+}
