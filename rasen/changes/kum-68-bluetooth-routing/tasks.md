@@ -3,4 +3,4 @@
 - [x] 3. 贯通native/RTP/route证据与UI，并验证暂停/关闭归属
 - [x] 4. 必要回归、完整门禁、固定SHA独立架构审查
 - [x] 5. Draft PR #43、全量原生测试及迟到callback/read原生崩溃修复
-- [ ] 6. 等待最新远端CI；双实机普通蓝牙与听感验收按用户要求deferred
+- [x] 6. 独立 Draft PR #43 与远端CI全部job成功；实机听音按用户要求deferred，非实机验收通过

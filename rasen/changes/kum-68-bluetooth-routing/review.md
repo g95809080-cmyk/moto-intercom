@@ -13,3 +13,10 @@ Base SHA `6578f67499a3c1286cef60234575600138091b30`；源码/测试 Head SHA `25
 SDK始终不实际播放，但仍可能初始化不播放的内部输出对象；NullAudioPoller保持解码与APM反向处理。路由受理/激活证据与实际录放音/RTP就绪分别核验；蓝牙提示不再提前声称音频就绪。native库、JNI ABI、版本和产品状态归属不变。
 
 用户明确“没有条件复现，先搁置验证”。真实耳机听感、多应用SCO/A2DP共存及风噪/回声验收为deferred，不能由原生模拟器或配置证据判定通过。没有合并、发布或部署。
+
+
+## 远端 CI 最终记录
+
+[CI](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37898285291) 已完成success，全部2个job成功。审查源码 `25f6a9d760704e357065b6fb183da63c343d6cf8`；实际CI head `25f6a9d760704e357065b6fb183da63c343d6cf8`。实际CI head与审查源码完全相同。精确响应、job结果及差异路径见ci.json。
+
+Draft PR #43和Linear保持InReview；实机蓝牙、多应用听音、双手机按用户要求deferred，iOS排除。未合并、改版本、发布或部署。
