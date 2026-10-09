@@ -134,93 +134,84 @@ public enum BootstrapPolicy {
     }
 }
 
-public actor NetworkBootstrapCoordinator {
+@MainActor
+public final class NetworkBootstrapCoordinator {
     public private(set) var decision: BootstrapDecision?
     public private(set) var currentHotspot: HotspotCredentials?
     public private(set) var state: SessionPhase = .idle
+    private var generation: UInt64 = 0
+    private var applyTask: Task<Void, Error>?
+    private var applyID: UUID?
+    private let join: @MainActor (HotspotCredentials) async throws -> Void
 
-    public init() {}
-
-    public func selectPath(
-        local: RuntimeCapabilities,
-        remote: RuntimeCapabilities,
-        context: BootstrapContext
-    ) throws -> BootstrapDecision {
+    public init(join: (@MainActor (HotspotCredentials) async throws -> Void)? = nil) {
+        self.join = join ?? Self.applyHotspot
+    }
+    public func selectPath(local: RuntimeCapabilities, remote: RuntimeCapabilities, context: BootstrapContext) throws -> BootstrapDecision {
+        generation += 1
         state = .bootstrapNegotiating
         let selected = try BootstrapPolicy.choose(local: local, remote: remote, context: context)
         decision = selected
         state = selected.requiresUserAction ? .manualActionRequired : .networkPreparing
         return selected
     }
-
     public func acceptAndroidHotspot(_ hotspot: HotspotCredentials) async throws {
+        if let expiresAt = hotspot.expiresAt, expiresAt <= Date() { throw MotoComError.invalidField("hotspot credentials expired") }
         if decision == nil {
-            decision = BootstrapDecision(
-                path: .androidLocalOnlyHotspot,
-                localRole: .joiner,
-                requiresUserAction: false,
-                reason: "收到 Android Local-only Hotspot 凭据"
-            )
+            decision = BootstrapDecision(path: .androidLocalOnlyHotspot, localRole: .joiner, requiresUserAction: false, reason: "收到 Android Local-only Hotspot 凭据")
         }
-        guard decision?.path == .androidLocalOnlyHotspot else {
-            throw MotoComError.invalidField("unexpected hotspot credentials")
+        guard decision?.path == .androidLocalOnlyHotspot else { throw MotoComError.invalidField("unexpected hotspot credentials") }
+        generation += 1
+        let operation = generation
+        let prior = applyTask
+        // NEHotspotConfiguration.apply cannot be cancelled. B waits for A's
+        // actual native completion; Task cancellation is not a system undo.
+        if let prior { _ = try? await prior.value }
+        guard generation == operation else { throw CancellationError() }
+        if let expiresAt = hotspot.expiresAt, expiresAt <= Date() { throw MotoComError.invalidField("hotspot credentials expired") }
+        currentHotspot = hotspot; state = .networkPreparing
+        let id = UUID(); let join = self.join
+        let task = Task { @MainActor in try await join(hotspot) }
+        applyID = id; applyTask = task
+        do {
+            try await task.value
+            guard generation == operation else { throw CancellationError() }
+            currentHotspot = nil; state = .networkReady
+            if applyID == id { applyTask = nil; applyID = nil }
+        } catch {
+            if applyID == id { applyTask = nil; applyID = nil }
+            guard generation == operation else { throw CancellationError() }
+            currentHotspot = nil; state = .failed
+            throw error
         }
-        if let expiresAt = hotspot.expiresAt, expiresAt <= Date() {
-            throw MotoComError.invalidField("hotspot credentials expired")
-        }
-        currentHotspot = hotspot
+    }
+    public func markManualActionCompleted() { generation += 1; state = .networkReady }
+    public func markFailed() { generation += 1; currentHotspot = nil; state = .failed }
+    public func close() {
+        generation += 1; decision = nil; currentHotspot = nil; state = .offline
+        // Keep the in-flight apply barrier until its actual completion.
+    }
+    private static func applyHotspot(_ hotspot: HotspotCredentials) async throws {
         #if canImport(NetworkExtension)
         let configuration: NEHotspotConfiguration
         if hotspot.password.isEmpty || hotspot.security.uppercased() == "OPEN" {
             configuration = NEHotspotConfiguration(ssid: hotspot.ssid)
         } else {
-            configuration = NEHotspotConfiguration(
-                ssid: hotspot.ssid,
-                passphrase: hotspot.password,
-                isWEP: hotspot.security.uppercased() == "WEP"
-            )
+            configuration = NEHotspotConfiguration(ssid: hotspot.ssid, passphrase: hotspot.password, isWEP: hotspot.security.uppercased() == "WEP")
         }
         configuration.joinOnce = true
-        do {
-            try await withCheckedThrowingContinuation { continuation in
-                NEHotspotConfigurationManager.shared.apply(configuration) { error in
-                    if let error {
-                        let nsError = error as NSError
-                        if nsError.domain == NEHotspotConfigurationErrorDomain,
-                           nsError.code == NEHotspotConfigurationError.alreadyAssociated.rawValue {
-                            continuation.resume()
-                        } else {
-                            continuation.resume(throwing: error)
-                        }
-                    } else {
-                        continuation.resume()
-                    }
-                }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            NEHotspotConfigurationManager.shared.apply(configuration) { error in
+                if let error {
+                    let value = error as NSError
+                    if value.domain == NEHotspotConfigurationErrorDomain,
+                       value.code == NEHotspotConfigurationError.alreadyAssociated.rawValue { continuation.resume() }
+                    else { continuation.resume(throwing: error) }
+                } else { continuation.resume() }
             }
-            currentHotspot = nil
-            state = .networkReady
-        } catch {
-            currentHotspot = nil
-            state = .failed
-            throw MotoComError.unavailable("iOS could not join the Android temporary Wi-Fi: \(error.localizedDescription)")
         }
         #else
-        state = .manualActionRequired
         throw MotoComError.manualActionRequired("请在系统 Wi-Fi 设置中加入 \(hotspot.ssid)")
         #endif
-    }
-
-    public func markManualActionCompleted() {
-        state = .networkReady
-    }
-
-    public func markFailed() {
-        currentHotspot = nil
-        state = .failed
-    }
-
-    public func close() {
-        currentHotspot = nil
-        state = .offline
     }
 }

@@ -58,8 +58,7 @@ public struct MotoComRootView: View {
                 Section("操作") {
                     Button("开始发现附近设备", systemImage: "dot.radiowaves.left.and.right") {
                         Task {
-                            guard await session.requestMicrophonePermission() else { return }
-                            session.startDiscovery()
+                            await session.startDiscoveryWithPermission()
                         }
                     }
                     .disabled(session.identity == nil)

@@ -1,257 +1,216 @@
 import Foundation
 
-// The package intentionally does not pin an unreviewed WebRTC binary. Add the
-// approved iOS WebRTC module to the Xcode App target; this adapter is compiled
-// only when that module is present.
+#if MOTOCOM_REQUIRE_NATIVE_WEBRTC && !canImport(WebRTC)
+#error("Native WebRTC validation requires the actual WebRTC module")
+#endif
+
 #if canImport(WebRTC)
 import WebRTC
 
+/// Every native producer captures a Run and an actual PC. Mutable SDK state
+/// and callback registration belong to queue; callbacks never read a new Run.
 public final class GoogleWebRTCEngine: NSObject, WebRTCEngine {
-    public var onStateChanged: ((WebRTCMediaState) -> Void)?
-    public var onLocalOffer: ((String) -> Void)?
-    public var onLocalAnswer: ((String) -> Void)?
-    public var onLocalCandidate: ((String) -> Void)?
-    public var onRemoteAudioTrack: (() -> Void)?
-    public var onRemoteAudioFrame: (() -> Void)?
-
+    private let queue = DispatchQueue(label: "com.motocom.webrtc")
+    private let queueKey = DispatchSpecificKey<Bool>()
     private let factory: RTCPeerConnectionFactory
-    private var peerConnection: RTCPeerConnection?
-    private var localAudioTrack: RTCAudioTrack?
-    private let remoteCandidateLock = NSLock()
-    private var remoteDescriptionSet = false
-    private var pendingRemoteCandidates = [RTCIceCandidate]()
+    private var callbacks = Callbacks()
+    private var current: Run?
 
+    private struct Callbacks {
+        var state: ((WebRTCMediaState) -> Void)?
+        var offer: ((String) -> Void)?
+        var answer: ((String) -> Void)?
+        var candidate: ((String) -> Void)?
+        var track: (() -> Void)?
+        var frame: (() -> Void)?
+    }
+    private final class Run {
+        let id = UUID()
+        let callbacks: Callbacks
+        var connection: RTCPeerConnection?
+        var delegate: PeerDelegate?
+        var track: RTCAudioTrack?
+        var remoteDescriptionSet = false
+        var candidates = [RTCIceCandidate]()
+        init(_ callbacks: Callbacks) { self.callbacks = callbacks }
+    }
+    public var onStateChanged: ((WebRTCMediaState) -> Void)? {
+        get { owned { callbacks.state } } set { owned { callbacks.state = newValue } }
+    }
+    public var onLocalOffer: ((String) -> Void)? {
+        get { owned { callbacks.offer } } set { owned { callbacks.offer = newValue } }
+    }
+    public var onLocalAnswer: ((String) -> Void)? {
+        get { owned { callbacks.answer } } set { owned { callbacks.answer = newValue } }
+    }
+    public var onLocalCandidate: ((String) -> Void)? {
+        get { owned { callbacks.candidate } } set { owned { callbacks.candidate = newValue } }
+    }
+    public var onRemoteAudioTrack: (() -> Void)? {
+        get { owned { callbacks.track } } set { owned { callbacks.track = newValue } }
+    }
+    public var onRemoteAudioFrame: (() -> Void)? {
+        get { owned { callbacks.frame } } set { owned { callbacks.frame = newValue } }
+    }
     public override init() {
         factory = RTCPeerConnectionFactory()
         super.init()
+        queue.setSpecific(key: queueKey, value: true)
     }
-
+    private func owned<T>(_ action: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return try action() }
+        return try queue.sync(execute: action)
+    }
+    private func requireRun() throws -> Run {
+        guard let run = current, run.connection != nil else { throw MotoComError.unavailable("WebRTC is not started") }
+        return run
+    }
+    private func ingress(_ run: Run, _ pc: RTCPeerConnection, _ action: @escaping (Run) -> Void) {
+        queue.async { [weak self] in
+            guard let self, self.current === run, run.connection === pc else { return }
+            action(run)
+        }
+    }
     public func start(configuration: WebRTCSessionConfiguration, offerer: Bool) throws {
-        guard configuration.audioCodec.lowercased() == "opus" else {
-            throw MotoComError.invalidField("audioCodec must be opus")
-        }
-        guard configuration.hostOnlyICE, configuration.iceServers.isEmpty else {
-            throw MotoComError.invalidField("iOS v1 requires host-only ICE without STUN/TURN")
-        }
-
-        let rtcConfiguration = RTCConfiguration()
-        rtcConfiguration.iceServers = []
-        rtcConfiguration.iceTransportPolicy = .all
-        rtcConfiguration.sdpSemantics = .unifiedPlan
-        let constraints = RTCMediaConstraints(
-            mandatoryConstraints: ["OfferToReceiveAudio": "true"],
-            optionalConstraints: nil
-        )
-        guard let connection = factory.peerConnection(
-            with: rtcConfiguration,
-            constraints: constraints,
-            delegate: self
-        ) else {
-            throw MotoComError.unavailable("failed to create RTCPeerConnection")
-        }
-        peerConnection = connection
-        remoteCandidateLock.lock()
-        remoteDescriptionSet = false
-        pendingRemoteCandidates.removeAll()
-        remoteCandidateLock.unlock()
-
-        let source = factory.audioSource(with: RTCMediaConstraints(
-            mandatoryConstraints: nil,
-            optionalConstraints: nil
-        ))
-        let track = factory.audioTrack(withTrackId: "motocom-audio", source: source)
-        localAudioTrack = track
-        connection.add(track, streamIds: ["motocom-stream"])
-        onStateChanged?(.negotiating)
-
-        if offerer {
-            connection.offer(for: constraints) { [weak self] description, error in
-                if let error { self?.fail(error); return }
-            guard let self, let description else {
-                self?.fail(MotoComError.unavailable("WebRTC offer is empty"))
-                return
+        try owned {
+            guard configuration.audioCodec.lowercased() == "opus",
+                  configuration.hostOnlyICE, configuration.iceServers.isEmpty else {
+                throw MotoComError.invalidField("iOS requires opus and host-only ICE")
             }
-            let localDescription = RTCSessionDescription(
-                type: .offer,
-                sdp: WebRTCSignalingCodec.forceOpus32k(description.sdp)
-            )
-            connection.setLocalDescription(localDescription) { [weak self] error in
-                if let error { self?.fail(error); return }
-                guard let self else { return }
+            closeCurrent()
+            let run = Run(callbacks)
+            let relay = PeerDelegate(owner: self, run: run)
+            run.delegate = relay
+            let config = RTCConfiguration()
+            config.iceServers = []; config.iceTransportPolicy = .all; config.sdpSemantics = .unifiedPlan
+            let constraints = RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true"], optionalConstraints: nil)
+            guard let pc = factory.peerConnection(with: config, constraints: constraints, delegate: relay) else {
+                throw MotoComError.unavailable("failed to create RTCPeerConnection")
+            }
+            run.connection = pc; current = run
+            let source = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
+            let track = factory.audioTrack(with: source, trackId: "motocom-audio")
+            run.track = track
+            pc.add(track, streamIds: ["motocom-stream"])
+            run.callbacks.state?(.negotiating)
+            if offerer {
+                pc.offer(for: constraints) { [weak self] description, error in
+                    self?.ingress(run, pc) { [weak self] run in
+                        guard let self else { return }
+                        self.setLocal(description, error: error, type: .offer, run: run, pc: pc)
+                    }
+                }
+            }
+        }
+    }
+    private func setLocal(_ description: RTCSessionDescription?, error: Error?, type: RTCSdpType, run: Run, pc: RTCPeerConnection) {
+        guard error == nil, let description else { run.callbacks.state?(.failed); return }
+        let local = RTCSessionDescription(type: type, sdp: WebRTCSignalingCodec.forceOpus32k(description.sdp))
+        pc.setLocalDescription(local) { [weak self] error in
+            self?.ingress(run, pc) { run in
+                guard error == nil else { run.callbacks.state?(.failed); return }
                 do {
-                    let payload = try WebRTCSignalingCodec.encodeSessionDescription(
-                        type: "offer",
-                        sdp: localDescription.sdp
-                    )
-                        self.onLocalOffer?(payload)
-                    } catch {
-                        self.fail(error)
-                    }
-                }
+                    let payload = try WebRTCSignalingCodec.encodeSessionDescription(type: type == .offer ? "offer" : "answer", sdp: local.sdp)
+                    if type == .offer { run.callbacks.offer?(payload) } else { run.callbacks.answer?(payload) }
+                } catch { run.callbacks.state?(.failed) }
             }
         }
     }
-
     public func setRemoteOffer(_ sdpJSON: String) throws {
-        guard let connection = peerConnection else { throw MotoComError.unavailable("WebRTC session is not started") }
-        let sdp = try WebRTCSignalingCodec.decodeSessionDescription(sdpJSON, expectedType: "offer")
-        let description = RTCSessionDescription(type: .offer, sdp: sdp)
-        connection.setRemoteDescription(description) { [weak self] error in
-            if let error { self?.fail(error); return }
-            self?.flushRemoteCandidates(on: connection)
-            let constraints = RTCMediaConstraints(
-                mandatoryConstraints: ["OfferToReceiveAudio": "true"],
-                optionalConstraints: nil
-            )
-            connection.answer(for: constraints) { [weak self] answer, error in
-                if let error { self?.fail(error); return }
-                guard let self, let answer else {
-                    self?.fail(MotoComError.unavailable("WebRTC answer is empty"))
-                    return
-                }
-                let localDescription = RTCSessionDescription(
-                    type: .answer,
-                    sdp: WebRTCSignalingCodec.forceOpus32k(answer.sdp)
-                )
-                connection.setLocalDescription(localDescription) { [weak self] error in
-                    if let error { self?.fail(error); return }
-                    guard let self else { return }
-                    do {
-                        let payload = try WebRTCSignalingCodec.encodeSessionDescription(
-                            type: "answer",
-                            sdp: localDescription.sdp
-                        )
-                        self.onLocalAnswer?(payload)
-                    } catch {
-                        self.fail(error)
+        try owned {
+            let run = try requireRun(); let pc = run.connection!
+            let sdp = try WebRTCSignalingCodec.decodeSessionDescription(sdpJSON, expectedType: "offer")
+            pc.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp)) { [weak self] error in
+                self?.ingress(run, pc) { [weak self] run in
+                    guard let self, error == nil else { run.callbacks.state?(.failed); return }
+                    self.flush(run, pc)
+                    pc.answer(for: RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true"], optionalConstraints: nil)) { [weak self] answer, error in
+                        self?.ingress(run, pc) { [weak self] run in self?.setLocal(answer, error: error, type: .answer, run: run, pc: pc) }
                     }
                 }
             }
         }
     }
-
     public func setRemoteAnswer(_ sdpJSON: String) throws {
-        guard let connection = peerConnection else { throw MotoComError.unavailable("WebRTC session is not started") }
-        let sdp = try WebRTCSignalingCodec.decodeSessionDescription(sdpJSON, expectedType: "answer")
-        connection.setRemoteDescription(
-            RTCSessionDescription(type: .answer, sdp: sdp)
-        ) { [weak self] error in
-            if let error {
-                self?.fail(error)
-            } else {
-                self?.flushRemoteCandidates(on: connection)
+        try owned {
+            let run = try requireRun(); let pc = run.connection!
+            let sdp = try WebRTCSignalingCodec.decodeSessionDescription(sdpJSON, expectedType: "answer")
+            pc.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { [weak self] error in
+                self?.ingress(run, pc) { [weak self] run in
+                    guard let self, error == nil else { run.callbacks.state?(.failed); return }
+                    self.flush(run, pc)
+                }
             }
         }
     }
-
     public func addRemoteCandidate(_ candidateJSON: String) throws {
-        guard let connection = peerConnection else { throw MotoComError.unavailable("WebRTC session is not started") }
-        let candidate = try WebRTCSignalingCodec.decodeCandidate(candidateJSON)
-        let iceCandidate = RTCIceCandidate(
-            sdp: candidate.candidate,
-            sdpMLineIndex: candidate.sdpMLineIndex,
-            sdpMid: candidate.sdpMid
-        )
-        remoteCandidateLock.lock()
-        guard remoteDescriptionSet else {
-            pendingRemoteCandidates.append(iceCandidate)
-            remoteCandidateLock.unlock()
-            return
+        try owned {
+            let run = try requireRun(); let pc = run.connection!
+            let candidate = try WebRTCSignalingCodec.decodeCandidate(candidateJSON)
+            let ice = RTCIceCandidate(sdp: candidate.candidate, sdpMLineIndex: candidate.sdpMLineIndex, sdpMid: candidate.sdpMid)
+            if run.remoteDescriptionSet { pc.add(ice) }
+            else {
+                guard run.candidates.count < 64 else { throw MotoComError.invalidFrame("too many remote candidates") }
+                run.candidates.append(ice)
+            }
         }
-        remoteCandidateLock.unlock()
-        connection.add(iceCandidate)
     }
-
-    public func setAudioEnabled(_ enabled: Bool) {
-        localAudioTrack?.isEnabled = enabled
+    private func flush(_ run: Run, _ pc: RTCPeerConnection) {
+        run.remoteDescriptionSet = true
+        let pending = run.candidates; run.candidates.removeAll()
+        pending.forEach { pc.add($0) }
     }
-
-    public func close() {
-        peerConnection?.close()
-        peerConnection = nil
-        localAudioTrack = nil
-        remoteCandidateLock.lock()
-        remoteDescriptionSet = false
-        pendingRemoteCandidates.removeAll()
-        remoteCandidateLock.unlock()
-        onStateChanged?(.closed)
+    public func setAudioEnabled(_ enabled: Bool) { owned { current?.track?.isEnabled = enabled } }
+    private func closeCurrent() {
+        let old = current; current = nil
+        old?.candidates.removeAll(); old?.connection?.close(); old?.track = nil
+        old?.callbacks.state?(.closed)
     }
+    public func close() { owned { closeCurrent() } }
 
-    // A production audio sink must call this only after the first decoded
-    // remote audio buffer is observed. RTCAudioTrack arrival alone is not
-    // sufficient for MotoCom's AUDIO_READY contract.
-    public func markRemoteAudioFrameDecoded() {
-        onRemoteAudioFrame?()
-    }
-
-    private func fail(_ error: Error) {
-        onStateChanged?(.failed)
-        _ = error
-    }
-
-    private func flushRemoteCandidates(on connection: RTCPeerConnection) {
-        remoteCandidateLock.lock()
-        remoteDescriptionSet = true
-        let pending = pendingRemoteCandidates
-        pendingRemoteCandidates.removeAll()
-        remoteCandidateLock.unlock()
-        pending.forEach { connection.add($0) }
-    }
-}
-
-extension GoogleWebRTCEngine: RTCPeerConnectionDelegate {
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
-
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
-        if !stream.audioTracks.isEmpty { onRemoteAudioTrack?() }
-    }
-
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
-
-    public func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
-
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
-        switch newState {
-        case .connected, .completed:
-            onStateChanged?(.connected)
-        case .failed:
-            onStateChanged?(.failed)
-        case .closed:
-            onStateChanged?(.closed)
-        default:
-            onStateChanged?(.negotiating)
+    /// The real decoded-audio sink obtains this observer while attached to its
+    /// actual PC. A saved A observer can never grant B's AUDIO_READY.
+    public func remoteAudioFrameObserver(for pc: RTCPeerConnection) -> (() -> Void)? {
+        owned {
+            guard let run = current, run.connection === pc else { return nil }
+            return { [weak self] in self?.ingress(run, pc) { $0.callbacks.frame?() } }
         }
     }
 
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
-
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        do {
-            let string = try WebRTCSignalingCodec.encodeCandidate(
-                sdpMid: candidate.sdpMid,
-                sdpMLineIndex: candidate.sdpMLineIndex,
-                candidate: candidate.sdp
-            )
-            onLocalCandidate?(string)
-        } catch {
-            fail(error)
+    private final class PeerDelegate: NSObject, RTCPeerConnectionDelegate {
+        weak var owner: GoogleWebRTCEngine?
+        weak var run: Run?
+        init(owner: GoogleWebRTCEngine, run: Run) { self.owner = owner; self.run = run }
+        private func deliver(_ pc: RTCPeerConnection, _ action: @escaping (Run) -> Void) {
+            guard let run else { return }; owner?.ingress(run, pc, action)
         }
-    }
-
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
-
-    public func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
-
-    // Unified Plan reports a remote track through the receiver callback instead
-    // of the legacy media-stream callback. Keep both paths so the adapter works
-    // with SDKs that expose either delegate surface.
-    public func peerConnection(
-        _ peerConnection: RTCPeerConnection,
-        didAdd rtpReceiver: RTCRtpReceiver,
-        streams mediaStreams: [RTCMediaStream]
-    ) {
-        if rtpReceiver.track is RTCAudioTrack {
-            onRemoteAudioTrack?()
+        func peerConnection(_ pc: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
+        func peerConnection(_ pc: RTCPeerConnection, didAdd stream: RTCMediaStream) {
+            if !stream.audioTracks.isEmpty { deliver(pc) { $0.callbacks.track?() } }
+        }
+        func peerConnection(_ pc: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+        func peerConnectionShouldNegotiate(_ pc: RTCPeerConnection) {}
+        func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
+            deliver(pc) { run in
+                switch newState {
+                case .connected, .completed: run.callbacks.state?(.connected)
+                case .failed, .disconnected: run.callbacks.state?(.failed)
+                case .closed: run.callbacks.state?(.closed)
+                default: run.callbacks.state?(.negotiating)
+                }
+            }
+        }
+        func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+        func peerConnection(_ pc: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
+            deliver(pc) { run in
+                do { run.callbacks.candidate?(try WebRTCSignalingCodec.encodeCandidate(sdpMid: candidate.sdpMid, sdpMLineIndex: candidate.sdpMLineIndex, candidate: candidate.sdp)) }
+                catch { run.callbacks.state?(.failed) }
+            }
+        }
+        func peerConnection(_ pc: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
+        func peerConnection(_ pc: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+        func peerConnection(_ pc: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {
+            if rtpReceiver.track is RTCAudioTrack { deliver(pc) { $0.callbacks.track?() } }
         }
     }
 }

@@ -1,0 +1,7 @@
+# 设计
+
+MainActor唯一产品状态写者；命令/attempt/媒体均捕获不可变归属，停止先撤权后清理。所有await成功、错误和finally复核原命令。入站控制通道先验证HELLO，再按完整目标及原deadline接纳；第三设备不可覆盖owner，合法glare保持wire key排序。
+
+ControlChannel单队列处理真实framing、terminal-once及编号事件；TCP/HELLO绝对期限、确认与媒体有限期限。终结立即清理会话，最终信令最多等待250ms。WebRTC native回调捕获实际PC及每次start的callback快照，wrapper还复核run。音频就绪同步提交Connected事实，存储返回不拥有连接状态。网络registry在owner queue注册pending、ready与移交，stop撤销整个旧epoch。
+
+BLE typed source/delivery receipt与KUM-74共享；不能由旧无来源callback补当前run伪造授权。异步hotspot必须在await前正式移交成独立operation，然后按命令/目标归属校验结果。

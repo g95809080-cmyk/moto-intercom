@@ -1,0 +1,5 @@
+- [ ] 1. Control IO、terminal、deadline与回归
+- [ ] 2. Session命令/attempt/media、所有await、Connected与回归
+- [ ] 3. Native WebRTC producer与网络registry归属及回归
+- [ ] 4. BLE typed消费合同、真实SDK CI编译和macOS完整验证
+- [ ] 5. 固定SHA架构/OCR门禁、覆盖、独立Draft PR与CI

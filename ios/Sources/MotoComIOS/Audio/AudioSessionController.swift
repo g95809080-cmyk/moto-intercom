@@ -13,6 +13,14 @@ public enum AudioRoute: String, Equatable, Sendable {
 }
 
 @MainActor
+public protocol AudioSessionDriving: AnyObject {
+    func requestMicrophonePermission() async -> Bool
+    func activate() throws
+    func deactivate()
+    var currentRoute: AudioRoute { get }
+}
+
+@MainActor
 public final class AudioSessionController: NSObject, ObservableObject {
     @Published public private(set) var route: AudioRoute = .unavailable
     @Published public private(set) var isActive = false
@@ -26,9 +34,12 @@ public final class AudioSessionController: NSObject, ObservableObject {
     private let audioSession = AVAudioSession.sharedInstance()
     #endif
     private var observers = [NSObjectProtocol]()
+    private let driver: AudioSessionDriving?
 
-    public override init() {
+    public init(driver: AudioSessionDriving? = nil) {
+        self.driver = driver
         super.init()
+        if driver != nil { return }
         #if canImport(AVFAudio)
         let center = NotificationCenter.default
         observers.append(center.addObserver(
@@ -68,6 +79,9 @@ public final class AudioSessionController: NSObject, ObservableObject {
     }
 
     public func activate() throws {
+        if let driver {
+            try driver.activate(); isActive = true; refreshRoute(); return
+        }
         #if canImport(AVFAudio)
         guard audioSession.recordPermission == .granted else {
             throw MotoComError.permissionDenied("Microphone permission is required for intercom audio")
@@ -85,6 +99,7 @@ public final class AudioSessionController: NSObject, ObservableObject {
     }
 
     public func requestMicrophonePermission() async -> Bool {
+        if let driver { return await driver.requestMicrophonePermission() }
         #if canImport(AVFAudio)
         switch audioSession.recordPermission {
         case .granted:
@@ -106,6 +121,7 @@ public final class AudioSessionController: NSObject, ObservableObject {
     }
 
     public func deactivate() {
+        driver?.deactivate()
         #if canImport(AVFAudio)
         try? audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
         #endif
@@ -130,6 +146,12 @@ public final class AudioSessionController: NSObject, ObservableObject {
     public var isAudioReady: Bool { readiness.isReady }
 
     public func refreshRoute() {
+        if let driver {
+            route = driver.currentRoute
+            readiness.localRouteReady = isActive && route != .unavailable && !isInterrupted
+            onRouteChanged?(route)
+            return
+        }
         #if canImport(AVFAudio)
         if isActive { restorePreferredRoute() }
         let current = audioSession.currentRoute

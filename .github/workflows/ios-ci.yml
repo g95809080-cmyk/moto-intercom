@@ -23,9 +23,15 @@ concurrency:
 
 jobs:
   package-simulator-tests:
-    name: Build and test iOS package on Simulator
+    name: iOS Simulator (native WebRTC=${{ matrix.native }})
     runs-on: macos-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        native: ['0', '1']
+    env:
+      MOTOCOM_NATIVE_WEBRTC_CI: ${{ matrix.native }}
 
     steps:
       - name: Checkout source
@@ -64,6 +70,11 @@ jobs:
         working-directory: ios
         run: |
           set -euo pipefail
+          xcodebuild -showBuildSettings \
+            -scheme "${{ steps.package.outputs.scheme }}" \
+            -destination "id=${{ steps.simulator.outputs.device_id }}" \
+            CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/motocom-swift-settings.txt"
+          grep -E 'SWIFT_VERSION|SWIFT_STRICT_CONCURRENCY|SWIFT_DEFAULT_ACTOR_ISOLATION|SWIFT_UPCOMING_FEATURE|SWIFT_ACTIVE_COMPILATION_CONDITIONS|OTHER_SWIFT_FLAGS' "$RUNNER_TEMP/motocom-swift-settings.txt" || true
           xcodebuild \
             -scheme "${{ steps.package.outputs.scheme }}" \
             -destination "id=${{ steps.simulator.outputs.device_id }}" \
@@ -76,7 +87,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: motocom-ios-xcresult-${{ github.run_number }}
-          path: ${{ runner.temp }}/motocom-ios-tests.xcresult
+          name: motocom-ios-xcresult-native${{ matrix.native }}-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/motocom-ios-tests.xcresult
+            ${{ runner.temp }}/motocom-swift-settings.txt
           if-no-files-found: warn
           retention-days: 14

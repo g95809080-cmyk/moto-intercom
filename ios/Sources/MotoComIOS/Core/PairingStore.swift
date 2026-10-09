@@ -1,6 +1,11 @@
 import Foundation
 
-public actor PairingStore {
+public protocol PairingStoring: AnyObject {
+    func all() async -> [PairingRecord]
+    func saveConnectedPeer(_ record: PairingRecord, audioReady: Bool, transport: String) async throws
+}
+
+public actor PairingStore: PairingStoring {
     private let storage: UserDefaults
     private let storageKey: String
     private var records: [String: PairingRecord]

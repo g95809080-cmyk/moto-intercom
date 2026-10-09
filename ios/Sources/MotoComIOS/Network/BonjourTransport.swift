@@ -108,130 +108,27 @@ public struct BonjourServiceAdvertisement: Sendable, Equatable {
     }
 }
 
-public final class BonjourTransport: @unchecked Sendable {
+public final class BonjourTransport: IOSControlTransport, @unchecked Sendable {
     public static let serviceType = "_motocom._tcp."
     public static let tcpPort: UInt16 = 8890
-
-    private let queue = DispatchQueue(label: "com.motocom.bonjour")
-    private var listener: NWListener?
-    private var browser: NWBrowser?
-    private var connections = [ObjectIdentifier: NWConnection]()
-
-    public var onPeerFound: ((NWEndpoint, BonjourServiceAdvertisement?) -> Void)?
-    public var onConnection: ((NWConnection) -> Void)?
-    public var onError: ((Error) -> Void)?
-
+    private let core = NetworkTransportCore(label: "com.motocom.bonjour")
+    public var onPeerFound: ((NWEndpoint, BonjourServiceAdvertisement?) -> Void)? {
+        get { core.owned { core.peerHandler } } set { core.owned { core.peerHandler = newValue } }
+    }
+    public var onConnection: ((NWConnection) -> Void)? {
+        get { core.owned { core.connectionHandler } } set { core.owned { core.connectionHandler = newValue } }
+    }
+    public var onError: ((Error) -> Void)? {
+        get { core.owned { core.errorHandler } } set { core.owned { core.errorHandler = newValue } }
+    }
     public init() {}
-
     public func start(advertisement: BonjourServiceAdvertisement) throws {
-        stop()
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = true
-        guard let port = NWEndpoint.Port(rawValue: Self.tcpPort) else {
-            throw MotoComError.invalidField("tcpPort")
-        }
-        let listener = try NWListener(using: parameters, on: port)
-        listener.service = NWListener.Service(
-            name: "motocom-\(advertisement.deviceID.prefix(8))",
-            type: Self.serviceType,
-            domain: nil,
-            txtRecord: advertisement.txtRecord()
-        )
-        listener.newConnectionHandler = { [weak self] connection in
-            self?.accept(connection)
-        }
-        listener.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state { self?.onError?(error) }
-        }
-        listener.start(queue: queue)
-        self.listener = listener
+        try core.startListener(serviceName: "motocom-\(advertisement.deviceID.prefix(8))", txtRecord: advertisement.txtRecord())
     }
-
-    public func startBrowsing() {
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = false
-        let browser = NWBrowser(
-            for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil),
-            using: parameters
-        )
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
-            for result in results {
-                let advertisement: BonjourServiceAdvertisement?
-                if case .bonjour(let record) = result.metadata {
-                    advertisement = try? BonjourServiceAdvertisement(txtRecord: record)
-                } else {
-                    advertisement = nil
-                }
-                self?.onPeerFound?(result.endpoint, advertisement)
-            }
-        }
-        browser.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state { self?.onError?(error) }
-        }
-        browser.start(queue: queue)
-        self.browser = browser
+    public func startBrowsing() { core.startBrowsing(includePeerToPeer: false) }
+    public func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool = true, completion: @escaping (Result<NWConnection, Error>) -> Void) {
+        core.connect(to: endpoint, includePeerToPeer: includePeerToPeer, completion: completion)
     }
-
-    public func connect(
-        to endpoint: NWEndpoint,
-        includePeerToPeer: Bool = true,
-        completion: @escaping (Result<NWConnection, Error>) -> Void
-    ) {
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = includePeerToPeer
-        let connection = NWConnection(to: endpoint, using: parameters)
-        let completionLock = NSLock()
-        var completed = false
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                completionLock.lock()
-                guard !completed else {
-                    completionLock.unlock()
-                    return
-                }
-                completed = true
-                completionLock.unlock()
-                self?.connections[ObjectIdentifier(connection)] = connection
-                completion(.success(connection))
-            case .failed(let error):
-                completionLock.lock()
-                guard !completed else {
-                    completionLock.unlock()
-                    return
-                }
-                completed = true
-                completionLock.unlock()
-                completion(.failure(error))
-            default:
-                break
-            }
-        }
-        connection.start(queue: queue)
-    }
-
-    public func stop() {
-        listener?.cancel()
-        browser?.cancel()
-        listener = nil
-        browser = nil
-        connections.values.forEach { $0.cancel() }
-        connections.removeAll()
-    }
-
-    private func accept(_ connection: NWConnection) {
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                self?.connections[ObjectIdentifier(connection)] = connection
-                self?.onConnection?(connection)
-            case .failed:
-                self?.connections.removeValue(forKey: ObjectIdentifier(connection))
-            default:
-                break
-            }
-        }
-        connection.start(queue: queue)
-    }
+    public func stop() { core.stop() }
 }
 #endif

@@ -300,9 +300,11 @@ public final class WebRTCSessionCoordinator {
     public var onLocalAnswer: (@MainActor (String) -> Void)?
     public var onLocalCandidate: (@MainActor (String) -> Void)?
     public var onAudioReadinessChanged: (@MainActor () -> Void)?
+    public var onTerminated: (@MainActor () -> Void)?
 
     private let engine: WebRTCEngine
     private let audio: AudioSessionController
+    private var runID: UUID?
 
     public init(
         engine: WebRTCEngine = UnavailableWebRTCEngine(),
@@ -312,42 +314,61 @@ public final class WebRTCSessionCoordinator {
         self.engine = engine
         self.audio = audio
         self.configuration = configuration
+    }
+
+    private func bindCallbacks(run: UUID) {
         engine.onStateChanged = { [weak self] state in
             Task { @MainActor [weak self] in
-                self?.state = state
-                self?.onAudioReadinessChanged?()
+                guard let self, self.runID == run else { return }
+                self.state = state
+                if state == .failed || state == .closed { self.onTerminated?() }
+                else { self.onAudioReadinessChanged?() }
             }
         }
         engine.onRemoteAudioTrack = { [weak self] in
             Task { @MainActor [weak self] in
-                self?.audio.markRemoteTrackPresent()
-                self?.onAudioReadinessChanged?()
+                guard let self, self.runID == run else { return }
+                self.audio.markRemoteTrackPresent()
+                self.onAudioReadinessChanged?()
             }
         }
         engine.onRemoteAudioFrame = { [weak self] in
             Task { @MainActor [weak self] in
-                self?.audio.markRemoteFirstFrameReceived()
-                self?.onAudioReadinessChanged?()
+                guard let self, self.runID == run else { return }
+                self.audio.markRemoteFirstFrameReceived()
+                self.onAudioReadinessChanged?()
             }
         }
         engine.onLocalOffer = { [weak self] offer in
-            Task { @MainActor [weak self] in self?.onLocalOffer?(offer) }
+            Task { @MainActor [weak self] in
+                guard let self, self.runID == run else { return }; self.onLocalOffer?(offer)
+            }
         }
         engine.onLocalAnswer = { [weak self] answer in
-            Task { @MainActor [weak self] in self?.onLocalAnswer?(answer) }
+            Task { @MainActor [weak self] in
+                guard let self, self.runID == run else { return }; self.onLocalAnswer?(answer)
+            }
         }
         engine.onLocalCandidate = { [weak self] candidate in
-            Task { @MainActor [weak self] in self?.onLocalCandidate?(candidate) }
+            Task { @MainActor [weak self] in
+                guard let self, self.runID == run else { return }; self.onLocalCandidate?(candidate)
+            }
         }
     }
 
     public func start(offerer: Bool) throws {
+        close()
+        let run = UUID()
+        runID = run
+        bindCallbacks(run: run)
         audio.clearRemoteAudio()
         try audio.activate()
         state = .negotiating
         do {
             try engine.start(configuration: configuration, offerer: offerer)
         } catch {
+            runID = nil
+            engine.close()
             audio.deactivate()
             state = .failed
             throw error
@@ -355,18 +376,22 @@ public final class WebRTCSessionCoordinator {
     }
 
     public func setRemoteOffer(_ sdpJSON: String) throws {
+        guard runID != nil else { throw MotoComError.unavailable("media is closed") }
         try engine.setRemoteOffer(sdpJSON)
     }
 
     public func setRemoteAnswer(_ sdpJSON: String) throws {
+        guard runID != nil else { throw MotoComError.unavailable("media is closed") }
         try engine.setRemoteAnswer(sdpJSON)
     }
 
     public func addRemoteCandidate(_ candidateJSON: String) throws {
+        guard runID != nil else { throw MotoComError.unavailable("media is closed") }
         try engine.addRemoteCandidate(candidateJSON)
     }
 
     public func handleAudioInterruption(_ interrupted: Bool) {
+        guard runID != nil else { return }
         engine.setAudioEnabled(!interrupted)
         if !interrupted { try? audio.activate() }
     }
@@ -376,6 +401,7 @@ public final class WebRTCSessionCoordinator {
     }
 
     public func close() {
+        runID = nil
         engine.close()
         audio.clearRemoteAudio()
         audio.deactivate()

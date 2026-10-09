@@ -1,8 +1,5 @@
 import Foundation
 
-#if canImport(Network)
-import Network
-
 public enum SignalingSessionPhase: String, Sendable {
     case idle
     case awaitingRequesterHello
@@ -36,6 +33,9 @@ public final class SignalingSessionController {
     public var onReadyToRequest: (@MainActor () -> Void)?
     public var onHello: (@MainActor (String, String, String, Set<String>) -> Void)?
     public var onError: (@MainActor (Error) -> Void)?
+    public var onTerminated: (@MainActor (Error?) -> Void)?
+    public var onClaimHello: (@MainActor (SignalingSessionController) -> Bool)?
+    public private(set) var isTerminated = false
 
     private let channel: NWControlChannel
     private let localIdentity: StableIdentity
@@ -43,9 +43,18 @@ public final class SignalingSessionController {
     public private(set) var attemptID: String?
     private var machine = SignalingPhaseMachine(initialRequestRole: nil)
     private var localCapabilities = Set<String>()
-    private var confirmationTimeoutTask: Task<Void, Never>?
+    private let scheduler: SessionDeadlineScheduling
+    private let helloDeadline: TimeInterval
+    private var helloTimeout: SessionDeadlineToken?
+    private var confirmationTimeout: SessionDeadlineToken?
+    private var confirmationDeadline: TimeInterval?
+    private var helloVerified = false
+    private var nextEvent: UInt64 = 1
+    private var queuedEvents = [UInt64: ControlChannelEvent]()
     private var pendingLocalCandidates = [Data]()
     private let expectedRemoteSessionID: String?
+    public var expectedRuntimeID: String? { expectedRemoteSessionID }
+    public var absoluteHelloDeadline: TimeInterval { helloDeadline }
 
     public init(
         channel: NWControlChannel,
@@ -53,7 +62,9 @@ public final class SignalingSessionController {
         remoteDeviceID: String? = nil,
         attemptID: String? = nil,
         expectedRemoteSessionID: String? = nil,
-        autoStart: Bool = true
+        autoStart: Bool = true,
+        scheduler: SessionDeadlineScheduling? = nil,
+        helloDeadline: TimeInterval? = nil
     ) throws {
         if let remoteDeviceID {
             try UUIDValidator.requireCanonical(remoteDeviceID, field: "remoteDeviceId")
@@ -69,28 +80,30 @@ public final class SignalingSessionController {
         self.remoteDeviceID = remoteDeviceID
         self.attemptID = attemptID
         self.expectedRemoteSessionID = expectedRemoteSessionID
-        channel.onEnvelope = { [weak self] envelope in
+        let resolvedScheduler = scheduler ?? SessionDeadlineScheduler()
+        self.scheduler = resolvedScheduler
+        self.helloDeadline = helloDeadline ?? resolvedScheduler.now + 10
+        channel.onEvent = { [weak self] sequence, event in
             Task { @MainActor [weak self] in
-                self?.receive(envelope)
+                self?.receiveEvent(sequence, event)
             }
         }
-        channel.onClosed = { [weak self] error in
-            Task { @MainActor [weak self] in
-                self?.confirmationTimeoutTask?.cancel()
-                self?.phase = .closed
-                if let error { self?.onError?(error) }
-            }
+        helloTimeout = resolvedScheduler.schedule(at: self.helloDeadline) { [weak self] in
+            guard let self, !self.helloVerified else { return }
+            self.fail(MotoComError.unavailable("TCP/HELLO deadline exceeded"))
         }
         if autoStart { channel.start() }
     }
 
     public func start() {
+        guard !isTerminated else { return }
         channel.start()
     }
 
     public func startAsRequester(capabilities: Set<String>) {
+        guard !isTerminated else { return }
         guard remoteDeviceID != nil, attemptID != nil else {
-            onError?(MotoComError.invalidField("requester requires remoteDeviceId and attemptId"))
+            fail(MotoComError.invalidField("requester requires remoteDeviceId and attemptId"))
             return
         }
         localCapabilities = capabilities
@@ -104,27 +117,26 @@ public final class SignalingSessionController {
     }
 
     public func startAsResponder(capabilities: Set<String>) {
+        guard !isTerminated else { return }
         localCapabilities = capabilities
         machine = SignalingPhaseMachine(initialRequestRole: nil)
         syncPhase()
     }
 
     public func sendConnectRequest(trigger: RequestTrigger = .user) {
-        send(.connectRequest(trigger: trigger, preferredTransportHint: .lan))
+        if send(.connectRequest(trigger: trigger, preferredTransportHint: .lan)) { scheduleConfirmationTimeout() }
     }
 
-    public func accept() {
-        confirmationTimeoutTask?.cancel()
-        send(.connectAccept(nickname: localIdentity.nickname, deviceName: localIdentity.deviceName))
+    @discardableResult
+    public func accept() -> Bool {
+        guard !isTerminated, machine.phase == .awaitingLocalDecision,
+              confirmationDeadline.map({ scheduler.now < $0 }) ?? true else { return false }
+        confirmationTimeout?.cancel(); confirmationTimeout = nil
+        return send(.connectAccept(nickname: localIdentity.nickname, deviceName: localIdentity.deviceName))
     }
 
     public func reject() {
-        confirmationTimeoutTask?.cancel()
-        pendingLocalCandidates.removeAll()
-        send(.connectReject(reason: .userRejected, retryable: false))
-        channel.close()
-        machine.close()
-        syncPhase()
+        terminate(nil, finalMessage: .connectReject(reason: .userRejected, retryable: false))
     }
 
     public func sendOffer(_ sdpJSON: String) {
@@ -138,7 +150,11 @@ public final class SignalingSessionController {
     }
 
     public func sendCandidate(_ candidateJSON: Data) {
+        guard !isTerminated else { return }
         if machine.phase == .accepted {
+            guard pendingLocalCandidates.count < 64 else {
+                fail(MotoComError.invalidFrame("too many pending candidates")); return
+            }
             pendingLocalCandidates.append(candidateJSON)
             return
         }
@@ -146,24 +162,46 @@ public final class SignalingSessionController {
     }
 
     public func close(reason: String = "USER_CANCELED") {
-        confirmationTimeoutTask?.cancel()
-        pendingLocalCandidates.removeAll()
-        if machine.phase != .closed { send(.disconnect(reason: reason)) }
-        channel.close()
-        machine.close()
-        syncPhase()
+        terminate(nil, finalMessage: .disconnect(reason: reason))
     }
 
-    public func markMediaConnected() {
+    @discardableResult
+    public func markMediaConnected() -> Bool {
+        guard !isTerminated else { return false }
+        if machine.phase == .connected { return true }
         do {
             try machine.markConnected()
             syncPhase()
+            return true
         } catch {
-            onError?(error)
+            fail(error)
+            return false
+        }
+    }
+
+    private func receiveEvent(_ sequence: UInt64, _ event: ControlChannelEvent) {
+        guard !isTerminated, sequence >= nextEvent else { return }
+        queuedEvents[sequence] = event
+        while !isTerminated, let pending = queuedEvents.removeValue(forKey: nextEvent) {
+            nextEvent += 1
+            switch pending {
+            case .envelopes(let envelopes):
+                for envelope in envelopes where !isTerminated { receive(envelope) }
+            case .closed(let error): terminate(error)
+            }
         }
     }
 
     private func receive(_ envelope: SignalingEnvelope) {
+        guard !isTerminated else { return }
+        if !helloVerified, scheduler.now >= helloDeadline {
+            fail(MotoComError.unavailable("TCP/HELLO deadline exceeded")); return
+        }
+        if let deadline = confirmationDeadline,
+           (machine.phase == .awaitingRemoteDecision || machine.phase == .awaitingLocalDecision),
+           scheduler.now >= deadline {
+            fail(MotoComError.unavailable("confirmation deadline exceeded")); return
+        }
         guard envelope.targetDeviceID == localIdentity.deviceID else {
             fail(MotoComError.invalidField("signaling target/attempt mismatch"))
             return
@@ -228,6 +266,12 @@ public final class SignalingSessionController {
         }
         switch envelope.message {
         case .hello(let role, let nickname, let deviceName, let capabilities):
+            guard onClaimHello?(self) ?? true else {
+                terminate(MotoComError.unavailable("another session owns media"), finalMessage: .busy(reason: "ALREADY_CONNECTED", retryAfterMilliseconds: nil))
+                return
+            }
+            helloVerified = true
+            helloTimeout?.cancel(); helloTimeout = nil
             remoteNickname = nickname ?? ""
             remoteDeviceName = deviceName ?? ""
             remoteCapabilities = capabilities
@@ -257,12 +301,12 @@ public final class SignalingSessionController {
                 scheduleConfirmationTimeout()
             }
         case .connectAccept:
-            confirmationTimeoutTask?.cancel()
+            confirmationTimeout?.cancel(); confirmationTimeout = nil
             syncPhase()
             onAccepted?()
         case .connectReject, .busy, .disconnect:
-            confirmationTimeoutTask?.cancel()
-            syncPhase()
+            terminate(nil)
+            return
         case .offer(let sdpJSON):
             syncPhase()
             onOffer?(sdpJSON)
@@ -325,7 +369,9 @@ public final class SignalingSessionController {
         pending.forEach { send(.candidate(json: $0)) }
     }
 
-    private func send(_ message: SignalingMessage) {
+    @discardableResult
+    private func send(_ message: SignalingMessage) -> Bool {
+        guard !isTerminated else { return false }
         do {
             guard let remoteDeviceID, let attemptID else {
                 throw MotoComError.invalidField("remoteDeviceId/attemptId not established")
@@ -340,22 +386,38 @@ public final class SignalingSessionController {
             )
             channel.send(envelope: envelope) { [weak self] error in
                 if let error {
-                    Task { @MainActor [weak self] in self?.onError?(error) }
+                    Task { @MainActor [weak self] in self?.fail(error) }
                 }
             }
             syncPhase()
+            return true
         } catch {
-            onError?(error)
+            fail(error)
+            return false
         }
     }
 
     private func fail(_ error: Error) {
-        confirmationTimeoutTask?.cancel()
+        terminate(error)
+    }
+
+    private func terminate(_ error: Error?, finalMessage: SignalingMessage? = nil) {
+        guard !isTerminated else { return }
+        isTerminated = true
+        helloTimeout?.cancel(); helloTimeout = nil
+        confirmationTimeout?.cancel(); confirmationTimeout = nil
         pendingLocalCandidates.removeAll()
-        onError?(error)
+        queuedEvents.removeAll()
         machine.close()
-        channel.close()
         syncPhase()
+        if let message = finalMessage, let remoteDeviceID, let attemptID,
+           let envelope = try? SignalingEnvelope(attemptID: attemptID,
+               sourceDeviceID: localIdentity.deviceID, targetDeviceID: remoteDeviceID,
+               sourceSessionID: localIdentity.sessionID, message: message) {
+            channel.sendFinal(envelope: envelope)
+        } else { channel.close() }
+        if let error { onError?(error) }
+        onTerminated?(error)
     }
 
     private func syncPhase() {
@@ -378,16 +440,15 @@ public final class SignalingSessionController {
     }
 
     private func scheduleConfirmationTimeout() {
-        confirmationTimeoutTask?.cancel()
-        confirmationTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
-            guard !Task.isCancelled else { return }
-            guard let self, self.machine.phase == .awaitingLocalDecision else { return }
-            self.send(.connectReject(reason: .timeout, retryable: false))
-            self.channel.close()
-            self.machine.close()
-            self.syncPhase()
+        confirmationTimeout?.cancel()
+        let deadline = scheduler.now + 15
+        confirmationDeadline = deadline
+        confirmationTimeout = scheduler.schedule(at: deadline) { [weak self] in
+            guard let self, !self.isTerminated,
+                  self.machine.phase == .awaitingLocalDecision || self.machine.phase == .awaitingRemoteDecision else { return }
+            self.terminate(MotoComError.unavailable("confirmation deadline exceeded"),
+                finalMessage: self.machine.phase == .awaitingLocalDecision
+                    ? .connectReject(reason: .timeout, retryable: false) : .disconnect(reason: "CONFIRMATION_TIMEOUT"))
         }
     }
 }
-#endif
