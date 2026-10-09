@@ -149,8 +149,8 @@ internal class RiderAudioEngine(
 
     override fun suspendAudio() {
         audioSuspended = true
-        recordingOwner.authorize(false)
-        playoutOwner.authorize(false)
+        recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
+        playoutOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, false) }
         ioEvidence.recording(false)
         ioEvidence.playing(false)
         runRtc {
@@ -163,10 +163,10 @@ internal class RiderAudioEngine(
 
     override fun resumeAudio() {
         audioSuspended = false
-        recordingOwner.authorize(true)
-        playoutOwner.authorize(true)
         runRtc {
             if (engineState != EngineState.READY) return@runRtc
+            recordingOwner.authorize(true)
+            playoutOwner.authorize(true)
             audioDeviceModule?.setMicrophoneMute(false)
             audioDeviceModule?.setSpeakerMute(false)
             peerConnection?.setAudioRecording(true)
@@ -264,8 +264,8 @@ internal class RiderAudioEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        recordingOwner.authorize(false)
-        playoutOwner.authorize(false)
+        recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
+        playoutOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, false) }
         ioEvidence.recording(false)
         ioEvidence.playing(false)
         val session = synchronized(sessionLock) {

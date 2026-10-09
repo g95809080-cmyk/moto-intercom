@@ -4,14 +4,19 @@ package com.kuma.motointercom
 internal class NativeAudioProducerOwner {
     private var enabled = true
     private var producer: Thread? = null
+    private val revoked = java.util.WeakHashMap<Thread, Boolean>()
 
-    @Synchronized fun authorize(value: Boolean) {
+    @Synchronized fun authorize(value: Boolean, nativeProducer: () -> Thread? = { null }) {
         enabled = value
-        if (!value) producer = null
+        if (!value) {
+            producer?.let { revoked[it] = true }
+            nativeProducer()?.let { revoked[it] = true }
+            producer = null
+        }
     }
 
     @Synchronized fun start(thread: Thread, isNativeCurrent: () -> Boolean, action: () -> Unit) {
-        if (!enabled || !isNativeCurrent()) return
+        if (!enabled || revoked.containsKey(thread) || !isNativeCurrent()) return
         producer = thread
         action()
     }

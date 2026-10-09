@@ -37,4 +37,21 @@ class NativeAudioProducerOwnerTest {
         owner.authorized { changes++ }
         assertEquals(2, changes)
     }
+
+    @Test fun unstartedOldSdkThreadStaysRevokedEvenBeforeSdkThreadReplacement() {
+        val owner = NativeAudioProducerOwner()
+        val unstartedOld = Thread()
+        val fresh = Thread()
+        var changes = 0
+        owner.authorize(false) { unstartedOld }
+        owner.authorize(true)
+        owner.start(unstartedOld, { true }) { changes++ }
+        owner.current(unstartedOld) { changes++ }
+        owner.stop(unstartedOld) { changes++ }
+        assertEquals(0, changes)
+        owner.start(fresh, { true }) { changes++ }
+        owner.start(unstartedOld, { true }) { changes++ }
+        owner.current(fresh) { changes++ }
+        assertEquals(2, changes)
+    }
 }
