@@ -2,6 +2,14 @@ package com.kuma.motointercom.group.network
 
 import org.junit.Assert.*
 import org.junit.Test
+import java.lang.management.ManagementFactory
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class GroupNetworkPolicyTest {
     @Test fun negotiatedMtuReassemblesAtBoundariesAndReducesAttRoundTrips() {
@@ -84,6 +92,67 @@ class GroupNetworkPolicyTest {
         time = 59_999; assertFalse(budget.acquire("a", 0))
         time = 60_000; assertTrue(budget.acquire("a", 0))
         time = 1; assertThrows(Exception::class.java) { budget.acquire("a", 0) }
+    }
+    @Test fun concurrentLastGlobalPermitSerializesClockAndAccounting() {
+        assertConcurrentLastPermit(globalLimit = true)
+    }
+    @Test fun concurrentLastAddressPermitSerializesClockAndAccounting() {
+        assertConcurrentLastPermit(globalLimit = false)
+    }
+    private fun assertConcurrentLastPermit(globalLimit: Boolean) {
+        val race = AtomicBoolean()
+        val calls = AtomicInteger()
+        val firstClock = CountDownLatch(1)
+        val secondClock = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
+        val firstThread = AtomicReference<Thread>()
+        val secondThread = AtomicReference<Thread>()
+        val budget = GroupBleBudget {
+            if (!race.get()) 0L else if (calls.incrementAndGet() == 1) {
+                firstThread.set(Thread.currentThread())
+                firstClock.countDown()
+                check(releaseFirst.await(5, TimeUnit.SECONDS))
+                100L
+            } else { secondClock.countDown(); 200L }
+        }
+        if (globalLimit) repeat(11) { assertTrue(budget.acquire("seed-$it", 0)) }
+        else repeat(2) { assertTrue(budget.acquire("target", 0)) }
+        race.set(true)
+        val workers = Executors.newFixedThreadPool(2)
+        try {
+            val first = workers.submit(Callable { budget.acquire("target", 0) })
+            assertTrue(firstClock.await(5, TimeUnit.SECONDS))
+            val second = workers.submit(Callable {
+                secondThread.set(Thread.currentThread())
+                budget.acquire("target", 0)
+            })
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            var clockSerialized = false
+            val threads = ManagementFactory.getThreadMXBean()
+            while (System.nanoTime() < deadline && secondClock.count != 0L) {
+                val info = secondThread.get()?.let { threads.getThreadInfo(it.id) }
+                if (info?.threadState == Thread.State.BLOCKED &&
+                    info.lockInfo?.identityHashCode == System.identityHashCode(budget) &&
+                    info.lockOwnerId == firstThread.get().id) {
+                    clockSerialized = true
+                    break
+                }
+                Thread.yield()
+            }
+            // On the old implementation B records time 200 before A resumes at 100.
+            if (!clockSerialized) assertTrue(second.get(5, TimeUnit.SECONDS))
+            releaseFirst.countDown()
+            assertTrue(first.get(5, TimeUnit.SECONDS))
+            assertFalse(second.get(5, TimeUnit.SECONDS))
+            assertTrue("The actual budget monitor must also protect clock reads", clockSerialized)
+            assertEquals(2, calls.get())
+            assertFalse(budget.acquire("target", 0))
+            assertEquals(!globalLimit, budget.acquire("other", 0))
+        } finally {
+            releaseFirst.countDown()
+            workers.shutdownNow()
+            assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
     @Test fun timeoutDoesNotReleasePendingCreateAndOldLeaseCannotReleaseSuccessor() {
         val ownership = GroupGoOwnership()

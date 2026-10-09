@@ -1,0 +1,3 @@
+GroupBleBudget.acquire 整方法同步；读取 nowMs、倒退检查、清理窗口、容量/地址检查和记账属于同一个操作。只同步集合不足以避免旧时间迟到触发require失败。
+
+预算测试暂停A的时钟，B必须阻塞于实际budget对象且owner为A；原实现允许B先记账。覆盖全局12及单地址3的最后一个许可。server测试调用真实start，两个端口绑定0，从自有listener读取端口，发送真实HELLO/CONNECT_REQUEST并读BUSY/EOF。ThreadMXBean核对同一monitor，随后检查两accept线程存活、第三次允许、第四次关闭以及60秒后两端口重新服务。finally释放latch、关闭server/client并有界等待线程退出。默认生产clock与端口不变。
