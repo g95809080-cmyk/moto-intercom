@@ -1,6 +1,9 @@
 package com.kuma.motointercom
 
 import android.Manifest
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -16,9 +19,99 @@ import org.junit.runner.RunWith
 import org.webrtc.PeerConnection
 import org.webrtc.AudioTrackSink
 import org.webrtc.audio.AudioRecordDataCallback
+import org.webrtc.audio.JavaAudioDeviceModule
+import java.nio.ByteBuffer
 
 @RunWith(AndroidJUnit4::class)
 class NativeAudioIoGateInstrumentationTest {
+    @Test fun delayedSdkReadCannotClearOrStopReplacementRecorder() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
+        val failures = LinkedBlockingQueue<Throwable>()
+        val engine = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val peer = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val readEntered = CountDownLatch(1)
+        val releaseRead = CountDownLatch(1)
+        val replacementEntered = CountDownLatch(1)
+        val releaseReplacement = CountDownLatch(1)
+        val replacementFrame = AtomicReference<ByteBuffer>()
+        val blockReplacement = AtomicBoolean(false)
+        val delayed = object : AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, 48_000,
+            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+            AudioRecord.getMinBufferSize(48_000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2) {
+            override fun read(buffer: ByteBuffer, bytes: Int): Int {
+                readEntered.countDown()
+                releaseRead.await(8, TimeUnit.SECONDS)
+                repeat(bytes) { buffer.put(it, 0x33.toByte()) }
+                return bytes
+            }
+        }
+        try {
+            engine.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = false)))
+            peer.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = false)))
+            lateinit var offerer: RiderMediaSession
+            lateinit var answerer: RiderMediaSession
+            val connected = CountDownLatch(2)
+            offerer = engine.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = { answerer.createAnswer(it) },
+                onLocalIceCandidateGenerated = { answerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = { failures.offer(it) }, isSessionCurrent = { true }
+            ))
+            answerer = peer.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = { offerer.setRemoteAnswer(it) },
+                onLocalIceCandidateGenerated = { offerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = { failures.offer(it) }, isSessionCurrent = { true }
+            ))
+            offerer.createOffer()
+            assertTrue(connected.await(15, TimeUnit.SECONDS))
+            awaitHealthyEvidence(offerer)
+            val module = RiderAudioEngine::class.java.getDeclaredField("audioDeviceModule").run {
+                isAccessible = true; get(engine) as JavaAudioDeviceModule
+            }
+            val recorder = module.javaClass.getDeclaredField("audioInput").run { isAccessible = true; get(module) }
+            val oldThread = NativeCaptureDiagnostics.currentProducer(module, true)!!
+            val ownedRecord = oldThread.javaClass.getDeclaredField("motoOwnedRecord").apply { isAccessible = true }
+            val callback = recorder.javaClass.getField("motoCaptureCallback")
+            val original = callback.get(recorder) as AudioRecordDataCallback
+            callback.set(recorder, AudioRecordDataCallback { format, channels, rate, frame ->
+                if (Thread.currentThread() !== oldThread && blockReplacement.compareAndSet(true, false)) {
+                    repeat(frame.capacity()) { frame.put(it, 0x5a.toByte()) }
+                    replacementFrame.set(frame)
+                    replacementEntered.countDown()
+                    releaseReplacement.await(5, TimeUnit.SECONDS)
+                }
+                original.onAudioDataRecorded(format, channels, rate, frame)
+            })
+            // Substitute only this old thread's read, leaving the adapter's actual recorder and new producer intact.
+            ownedRecord.set(oldThread, delayed)
+            assertTrue("Old SDK read was not held", readEntered.await(3, TimeUnit.SECONDS))
+            engine.suspendAudio()
+            blockReplacement.set(true)
+            engine.resumeAudio()
+            assertTrue("Replacement SDK input did not start", replacementEntered.await(5, TimeUnit.SECONDS))
+            module.setMicrophoneMute(true)
+            releaseRead.countDown()
+            oldThread.join(1_000)
+            assertFalse("Old read producer failed to retire", oldThread.isAlive)
+            val frame = replacementFrame.get()!!
+            assertTrue("Old SDK mute path cleared replacement buffer", (0 until frame.capacity()).all { frame.get(it) == 0x5a.toByte() })
+            val replacement = recorder.javaClass.getDeclaredField("audioRecord").run { isAccessible = true; get(recorder) as AudioRecord }
+            assertEquals("Old SDK tail stopped replacement input", AudioRecord.RECORDSTATE_RECORDING, replacement.recordingState)
+            module.setMicrophoneMute(false)
+            releaseReplacement.countDown()
+            awaitHealthyEvidence(offerer)
+            engine.suspendAudio(); engine.resumeAudio()
+            awaitHealthyEvidence(offerer)
+            assertNull("Old read damaged replacement media", failures.poll())
+        } finally {
+            releaseRead.countDown(); releaseReplacement.countDown()
+            engine.close(); peer.close(); delayed.release()
+        }
+    }
+
     @Test fun immediateResumeCannotRevivePausedProducerAndRealCaptureRestarts() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -116,6 +209,8 @@ class NativeAudioIoGateInstrumentationTest {
             engine.resumeAudio()
             release.countDown()
             assertTrue("An old native producer crossed pause/resume", rejectedOldFrame.await(5, TimeUnit.SECONDS))
+            oldProducer.get().join(1_000)
+            assertFalse("Stopped native producer did not exit after its delayed callback", oldProducer.get().isAlive)
             assertTrue("Resume did not restart real unmuted capture", freshFrames.await(5, TimeUnit.SECONDS))
             assertNotSame(oldProducer.get(), newProducer.get())
             val freshDeadline = SystemClock.elapsedRealtime() + 2_000
