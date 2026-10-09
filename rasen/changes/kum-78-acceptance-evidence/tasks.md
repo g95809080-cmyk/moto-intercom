@@ -1,4 +1,4 @@
 - [x] 1. 固定 Android 工具范围、真实调用入口、DataStore与Room格式和失败证据契约
 - [x] 2. 最小工具修复、真实CLI/loopback/mock回归和旧源反证（45+14+原Windows34项通过）
 - [x] 3. 固定018b682架构/OCR三审APPROVED、10路径归账与必要验证
-- [ ] 4. 独立 Draft PR、固定源码Android CI、Linear与最终证据
+- [x] 4. 独立 Draft PR #51、固定018b682 Android CI三job成功、Linear InReview与最终证据

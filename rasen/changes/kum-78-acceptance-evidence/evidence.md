@@ -14,4 +14,4 @@ Android产品代码没有变化：固定Head与KUM77源码 `1f636f787b7ee1b62c83
 
 官方OCR1.12.13：10 changed paths，5默认选中、5扩展手审；三位只读架构/OCR均APPROVED、P0/P1=0，逐路径阅读见coverage.json及review.md。
 
-独立 [Draft PR #51](https://github.com/g95809080-cmyk/moto-intercom/pull/51) 以KUM77分支为base。[CI 37965905864](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864) 已由现有workflow_dispatch触发，实际headSha精确等于本次源码；当前等待完整结果。Linear保留InReview，未将工具mock结果记为真实双机/蓝牙/无线验收。iOS排除，未改版本、合并、发布或部署。
+独立 [Draft PR #51](https://github.com/g95809080-cmyk/moto-intercom/pull/51) 以KUM77分支为base。[CI 37965905864](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864) 由现有workflow_dispatch触发，实际headSha精确等于本次源码；完整success，Windows、JVM/Lint/双APK、API36三个job全部成功，实际最终响应保存kum78-ci-final-status.json。Linear保留InReview，未将工具mock结果记为真实双机/蓝牙/无线验收。iOS排除，未改版本、合并、发布或部署。

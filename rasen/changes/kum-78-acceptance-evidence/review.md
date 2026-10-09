@@ -6,6 +6,6 @@ APPROVED。P0=0、P1=0、findings=[]。Base `b596feac30f9079d89d01e6f723de7f0150
 
 协议终态、实际安装身份/属性/不同A/B、native exit、SQLite integrity、采集前后APK/身份、先失效当前结果/独立历史/最终原子发布均已闭合。三位实际核验45/14/34绿色日志及8个日志hash、旧源真实误成功和Windows原子替换失败记录，未运行构建或操作设备。app tree与KUM77精确相同，原本地Android证据可复用。
 
-Non-blocking：新的远端CI仍待结果；普通蓝牙、多应用听音、射频及Android9/16双手机按用户要求暂缓；iOS排除。Pass为操作者传入的产品判定，mock标签只证明工具不会误判，不证明硬件验收。既有action使用tag未在本项引入，不作为本次阻断。
+新的固定源码远端CI 37965905864已全量success、三个job成功。Non-blocking：普通蓝牙、多应用听音、射频及Android9/16双手机按用户要求暂缓；iOS排除。Pass为操作者传入的产品判定，mock标签只证明工具不会误判，不证明硬件验收。既有action使用tag未在本项引入，不作为本次阻断。
 
 Next gate allowed：独立Draft PR #51、固定源码CI、证据更新。保留InReview；不授权合并、发布或部署，不把本项批准扩大为父任务实机验收批准。
