@@ -18,3 +18,7 @@ TCP/HELLO及确认、媒体MUST有期限；fallback和glare不得延长原attemp
 
 ### Requirement: 验证边界
 自动回归MUST运行真实controller/driver ingress；native adapter MUST在真实WebRTC模块下编译，excluded source不能计为native通过。实机BLE和解码sink验证独立记录。
+
+#### Scenario: 真实SDK验证构建
+- WHEN CI显式启用固定URL、SHA256和Simulator切片的WebRTC制品
+- THEN native编译断言和实际测试锚点必须通过，缺失模块或锚点失败；默认构建不引入二进制，模拟事件不计为解码首帧或实机验收。
