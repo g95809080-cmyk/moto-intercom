@@ -1,0 +1,682 @@
+{
+  "scope": "Android fixed-source CI; metadata heads distinguished",
+  "checkpoints": [
+    {
+      "issue": "KUM-65",
+      "source_sha": "6c8e56c3e78c9149c89b13b4a10a537c3add7afc",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/40",
+      "branch": "fix/kum-65-audio-focus",
+      "base_branch": "chore/kum-64-open-code-review",
+      "draft": true,
+      "pr_head_sha": "8b8d15012d377c07280d0d43b6164f2bb1c80a1f",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37882188306",
+        "head_sha": "6c8e56c3e78c9149c89b13b4a10a537c3add7afc",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "exact_source",
+        "changed_paths": [],
+        "jobs": [
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37882188306/job/113664163271"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37882188306/job/113664163503"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-65-audio-focus/review.md",
+          "rasen/changes/kum-65-audio-focus/tasks.md"
+        ]
+      },
+      "raw_snapshot": "ci-37882188306-final.json",
+      "snapshot_sha256": "1668a1ba11f994fc262751c109a5cfa98bbdbe005349161838c91332aed0e25e"
+    },
+    {
+      "issue": "KUM-66",
+      "source_sha": "34229a3b86e80fbf75cdb3884afb909c1f1c097d",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/41",
+      "branch": "fix/kum-66-vox-transmit",
+      "base_branch": "fix/kum-65-audio-focus",
+      "draft": true,
+      "pr_head_sha": "ac559d1c2a6aec56e60878d78460652dd1116c99",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37885467933",
+        "head_sha": "34229a3b86e80fbf75cdb3884afb909c1f1c097d",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "exact_source",
+        "changed_paths": [],
+        "jobs": [
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37885467933/job/113674394454"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37885467933/job/113674394641"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-66-vox-transmit/review.md",
+          "rasen/changes/kum-66-vox-transmit/tasks.md"
+        ]
+      },
+      "raw_snapshot": "ci-37885467933-final.json",
+      "snapshot_sha256": "b9d5427a5c6ac57c10780ff510e6b017dce00c700adddda9d5e64f8d3d56f1f5"
+    },
+    {
+      "issue": "KUM-67",
+      "source_sha": "985aeb89b6ab92df0c454b82690cbf99137890d6",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/42",
+      "branch": "fix/kum-67-noise-processing",
+      "base_branch": "fix/kum-66-vox-transmit",
+      "draft": true,
+      "pr_head_sha": "6578f67499a3c1286cef60234575600138091b30",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37888252920",
+        "head_sha": "6578f67499a3c1286cef60234575600138091b30",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-67-noise-processing/review.md",
+          "rasen/changes/kum-67-noise-processing/tasks.md"
+        ],
+        "jobs": [
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37888252920/job/113683049067"
+          },
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37888252920/job/113683049273"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-67-noise-processing/review.md",
+          "rasen/changes/kum-67-noise-processing/tasks.md"
+        ]
+      },
+      "raw_snapshot": "ci-37888252920-final.json",
+      "snapshot_sha256": "47944be75582458ba4853e9c6dc721f052500f594331d4683e76d19ba3ad8486"
+    },
+    {
+      "issue": "KUM-68",
+      "source_sha": "25f6a9d760704e357065b6fb183da63c343d6cf8",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/43",
+      "branch": "fix/kum-68-bluetooth-routing",
+      "base_branch": "fix/kum-67-noise-processing",
+      "draft": true,
+      "pr_head_sha": "87724363ee8b2370197fcd43c98c5a5d2c9b8033",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37898285291",
+        "head_sha": "25f6a9d760704e357065b6fb183da63c343d6cf8",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "exact_source",
+        "changed_paths": [],
+        "jobs": [
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37898285291/job/113714622206"
+          },
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37898285291/job/113714622323"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-68-bluetooth-routing/ci.json",
+          "rasen/changes/kum-68-bluetooth-routing/coverage.json",
+          "rasen/changes/kum-68-bluetooth-routing/design.md",
+          "rasen/changes/kum-68-bluetooth-routing/review.md",
+          "rasen/changes/kum-68-bluetooth-routing/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum68-ci-final-status.json",
+      "snapshot_sha256": "9343ba30fcbef3652758387a119f6be2800e920b430bdc2959506739b49ad71b"
+    },
+    {
+      "issue": "KUM-69",
+      "source_sha": "58fa051c61a2d367322c07917a09859aa94768a3",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/44",
+      "branch": "fix/kum-69-connection-races",
+      "base_branch": "fix/kum-68-bluetooth-routing",
+      "draft": true,
+      "pr_head_sha": "fc0d2b5bc7a8495fbf42ba832eae4336666a237f",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37915204711",
+        "head_sha": "579b6415496bfd8ca8700618106e16257ee9ae0a",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-69-connection-races/.openspec.yaml",
+          "rasen/changes/kum-69-connection-races/coverage.json",
+          "rasen/changes/kum-69-connection-races/design.md",
+          "rasen/changes/kum-69-connection-races/proposal.md",
+          "rasen/changes/kum-69-connection-races/review.md",
+          "rasen/changes/kum-69-connection-races/specs/connection-reliability/spec.md",
+          "rasen/changes/kum-69-connection-races/tasks.md"
+        ],
+        "jobs": [
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37915204711/job/113769580070"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37915204711/job/113769580470"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-69-connection-races/.openspec.yaml",
+          "rasen/changes/kum-69-connection-races/ci.json",
+          "rasen/changes/kum-69-connection-races/coverage.json",
+          "rasen/changes/kum-69-connection-races/design.md",
+          "rasen/changes/kum-69-connection-races/proposal.md",
+          "rasen/changes/kum-69-connection-races/review.md",
+          "rasen/changes/kum-69-connection-races/specs/connection-reliability/spec.md",
+          "rasen/changes/kum-69-connection-races/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum69-ci-final-status.json",
+      "snapshot_sha256": "aa5fb3ebc1ca34abee6a9d50878132758b066b517aa3f6532f73f8fca2bd43ac"
+    },
+    {
+      "issue": "KUM-70",
+      "source_sha": "99fc2bc3877a5d52d69d18f36b41c6bdc15102cb",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/45",
+      "branch": "fix/kum-70-automatic-recovery",
+      "base_branch": "fix/kum-69-connection-races",
+      "draft": true,
+      "pr_head_sha": "6fcfc8bc4c1788bf2d3be68cb832070f1c57445f",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37924933236",
+        "head_sha": "0616b8f81bf5d013cc720a42b0f8407233fc086c",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-70-automatic-recovery/coverage.json",
+          "rasen/changes/kum-70-automatic-recovery/review.md",
+          "rasen/changes/kum-70-automatic-recovery/tasks.md"
+        ],
+        "jobs": [
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37924933236/job/113801492082"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37924933236/job/113801492317"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-70-automatic-recovery/ci.json",
+          "rasen/changes/kum-70-automatic-recovery/coverage.json",
+          "rasen/changes/kum-70-automatic-recovery/review.md",
+          "rasen/changes/kum-70-automatic-recovery/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum70-ci-final-status.json",
+      "snapshot_sha256": "19d4469f374d5a996a86a24735a0b3d03c23e2eb2da65fe1faca58da293fcd98"
+    },
+    {
+      "issue": "KUM-71",
+      "source_sha": "d095e03e954f33c7674f1cb6553029078f17bf94",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/46",
+      "branch": "fix/kum-71-log-export-budget",
+      "base_branch": "fix/kum-70-automatic-recovery",
+      "draft": true,
+      "pr_head_sha": "b7f717bd9f4c635ddd442185fb8335e0a35928cd",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37925795827",
+        "head_sha": "d7eaa6c0c14b5edc00ef70bebd45af5cfd014266",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-71-log-export-budget/coverage.json",
+          "rasen/changes/kum-71-log-export-budget/review.md",
+          "rasen/changes/kum-71-log-export-budget/tasks.md"
+        ],
+        "jobs": [
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37925795827/job/113804296185"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37925795827/job/113804296474"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-71-log-export-budget/ci.json",
+          "rasen/changes/kum-71-log-export-budget/coverage.json",
+          "rasen/changes/kum-71-log-export-budget/review.md",
+          "rasen/changes/kum-71-log-export-budget/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum71-ci-final-status.json",
+      "snapshot_sha256": "2450d65022c3994eadfab2ef9df9b8b649d6aedd2121899ab77846ab2d50a514"
+    },
+    {
+      "issue": "KUM-72",
+      "source_sha": "ba4550d7410b2a4b070cad80213d1724381ffd29",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/47",
+      "branch": "fix/kum-72-group-budget-concurrency",
+      "base_branch": "main",
+      "draft": true,
+      "pr_head_sha": "221ad3b8919b31845ff578d083ac75e91c29605e",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966744534",
+        "head_sha": "221ad3b8919b31845ff578d083ac75e91c29605e",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-72-group-budget-concurrency/ci.json",
+          "rasen/changes/kum-72-group-budget-concurrency/coverage.json",
+          "rasen/changes/kum-72-group-budget-concurrency/review.md",
+          "rasen/changes/kum-72-group-budget-concurrency/tasks.md"
+        ],
+        "jobs": [
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966744534/job/113942876988"
+          },
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966744534/job/113942877348"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-72-group-budget-concurrency/ci.json",
+          "rasen/changes/kum-72-group-budget-concurrency/coverage.json",
+          "rasen/changes/kum-72-group-budget-concurrency/review.md",
+          "rasen/changes/kum-72-group-budget-concurrency/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum72-latest-ci-final-status.json",
+      "snapshot_sha256": "1b4e8192d5813385ad825f8596014a225c4c2dc430ee7a58a7d1bf0a559a85fd"
+    },
+    {
+      "issue": "KUM-75",
+      "source_sha": "65c23200d81efb44258737ed1c22f9e4258e6151",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/48",
+      "branch": "fix/kum-75-network-fault-exit",
+      "base_branch": "main",
+      "draft": true,
+      "pr_head_sha": "d83a6f811ad47aceba7683e09272a4ff50479faa",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966772679",
+        "head_sha": "d83a6f811ad47aceba7683e09272a4ff50479faa",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-75-network-fault-exit/ci.json",
+          "rasen/changes/kum-75-network-fault-exit/coverage.json",
+          "rasen/changes/kum-75-network-fault-exit/review.md",
+          "rasen/changes/kum-75-network-fault-exit/tasks.md"
+        ],
+        "jobs": [
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966772679/job/113942965284"
+          },
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966772679/job/113942965627"
+          },
+          {
+            "name": "Windows emulator fault-script regressions",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966772679/job/113942965845"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-75-network-fault-exit/ci.json",
+          "rasen/changes/kum-75-network-fault-exit/coverage.json",
+          "rasen/changes/kum-75-network-fault-exit/review.md",
+          "rasen/changes/kum-75-network-fault-exit/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum75-latest-ci-final-status.json",
+      "snapshot_sha256": "24b1a56f0d1f2004b4af86759ead688671155571ba4d4298643e0dba145e9541"
+    },
+    {
+      "issue": "KUM-76",
+      "source_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/49",
+      "branch": "fix/kum-76-main-field-fixes",
+      "base_branch": "main",
+      "draft": true,
+      "pr_head_sha": "170e7ff4349c9390dac774a944bc9aebab3c6360",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37955528528",
+        "head_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "exact_source",
+        "changed_paths": [],
+        "jobs": [
+          {
+            "name": "Windows emulator fault-script regressions",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37955528528/job/113904945230"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37955528528/job/113904945660"
+          },
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37955528528/job/113904945705"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-76-main-field-fixes/coverage.json",
+          "rasen/changes/kum-76-main-field-fixes/evidence.md",
+          "rasen/changes/kum-76-main-field-fixes/review.md",
+          "rasen/changes/kum-76-main-field-fixes/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum76-ci-final-status.json",
+      "snapshot_sha256": "38bf180d9f0d8a80098ec87adbecd2bd791ee07338440ff04d0a9762b2d6d469"
+    },
+    {
+      "issue": "KUM-77",
+      "source_sha": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/50",
+      "branch": "fix/kum-77-group-control-ownership",
+      "base_branch": "fix/kum-76-main-field-fixes",
+      "draft": true,
+      "pr_head_sha": "b596feac30f9079d89d01e6f723de7f015011006",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37961390317",
+        "head_sha": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "exact_source",
+        "changed_paths": [],
+        "jobs": [
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37961390317/job/113924825207"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37961390317/job/113924825492"
+          },
+          {
+            "name": "Windows emulator fault-script regressions",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37961390317/job/113924825581"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-77-group-control-ownership/coverage.json",
+          "rasen/changes/kum-77-group-control-ownership/evidence.md",
+          "rasen/changes/kum-77-group-control-ownership/review.md",
+          "rasen/changes/kum-77-group-control-ownership/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum77-ci-final-status.json",
+      "snapshot_sha256": "b2f15e21d2e0758c1fd4efd737eba12c67b907ebde0b31e5f69eb8d1cd7908e7"
+    },
+    {
+      "issue": "KUM-78",
+      "source_sha": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+      "architecture": "APPROVED",
+      "open_P0": 0,
+      "open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/51",
+      "branch": "fix/kum-78-acceptance-evidence",
+      "base_branch": "fix/kum-77-group-control-ownership",
+      "draft": true,
+      "pr_head_sha": "bf3aec86971fd601b2d62192b42c1fbe7ca65ae3",
+      "ci": {
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864",
+        "head_sha": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+        "status": "completed",
+        "conclusion": "success",
+        "source_relation": "exact_source",
+        "changed_paths": [],
+        "jobs": [
+          {
+            "name": "Windows emulator fault-script regressions",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864/job/113940074792"
+          },
+          {
+            "name": "Test, lint, assemble, and test APK",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864/job/113940075175"
+          },
+          {
+            "name": "Android API 36 instrumentation tests",
+            "conclusion": "success",
+            "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864/job/113940075492"
+          }
+        ]
+      },
+      "approval_to_pr_head": {
+        "source_relation": "only_rasen_review_metadata_differs",
+        "changed_paths": [
+          "rasen/changes/kum-78-acceptance-evidence/coverage.json",
+          "rasen/changes/kum-78-acceptance-evidence/evidence.md",
+          "rasen/changes/kum-78-acceptance-evidence/review.md",
+          "rasen/changes/kum-78-acceptance-evidence/tasks.md"
+        ]
+      },
+      "raw_snapshot": "kum78-ci-final-status.json",
+      "snapshot_sha256": "4b7ff0bfabe94515584a02330350a48e30ebadb7b8d20e67d8485bc3e285aef8"
+    }
+  ],
+  "metadata_head_retry": {
+    "issue": "KUM-76",
+    "run": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37957257683",
+    "head_sha": "170e7ff4349c9390dac774a944bc9aebab3c6360",
+    "attempt": 2,
+    "status": "completed",
+    "conclusion": "success",
+    "source_relation": "only_rasen_review_metadata_differs",
+    "changed_paths": [
+      "rasen/changes/kum-76-main-field-fixes/coverage.json",
+      "rasen/changes/kum-76-main-field-fixes/evidence.md",
+      "rasen/changes/kum-76-main-field-fixes/review.md",
+      "rasen/changes/kum-76-main-field-fixes/tasks.md"
+    ],
+    "jobs": [
+      {
+        "name": "Android API 36 instrumentation tests",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37957257683/job/113946379766"
+      },
+      {
+        "name": "Test, lint, assemble, and test APK",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37957257683/job/113946382329"
+      },
+      {
+        "name": "Windows emulator fault-script regressions",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37957257683/job/113946382811"
+      }
+    ],
+    "original_failure": {
+      "kind": "dependency_download_http_502",
+      "tests_started": false,
+      "dependency": "androidx.test:core-ktx:1.7.0",
+      "repository": "Google Maven",
+      "log": "kum76-metadata-ci-failure.log",
+      "sha256": "bdef75b2d97ca1be3def67dba24be1efca7156a5bc2008b8e596e92feb773050"
+    },
+    "rerun_scope": "only_failed_instrumentation_job; other successful jobs retained",
+    "raw_snapshot": "kum76-metadata-retry-ci-final-status.json",
+    "snapshot_sha256": "5151ac7eaeee99c75e65abccc4b213bd7c134f1398a1810089dbe1eae234b48b"
+  },
+  "local_android": {
+    "lint": {
+      "warnings": 79,
+      "errors": 0
+    },
+    "unit": {
+      "suites": 114,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "tests": 886
+    },
+    "native": {
+      "tests": 32,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "sha256": "E9C0F203F593FD1222BB6C2E07A6F2AC000DEDAE749FCE7B0CE65AC59C1B1E45"
+    },
+    "source": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+    "app_tree": "4ee9ced9fdc65439a9a91f02d886bff517668757",
+    "reused_by_KUM78": "exact same app Git tree"
+  },
+  "local_cli": {
+    "source": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+    "actual_cli_cases": 45,
+    "cli_seconds": 154.7,
+    "python_tests": 14,
+    "existing_windows_cases": 34,
+    "app_tree": "4ee9ced9fdc65439a9a91f02d886bff517668757",
+    "physical_acceptance": "not_run_user_deferred",
+    "files": [
+      {
+        "name": "kum78-evidence-final.log",
+        "sha256": "3e58703c5d52083e9b36eeae23d72567973bead17b6ceb3361d360e8b736cb63"
+      },
+      {
+        "name": "kum78-peer-final.log",
+        "sha256": "2151f51f5aa061c9abe46ebe191270b79832cc653c417594e25561f89f3b19b4"
+      },
+      {
+        "name": "kum78-network-fault-regression.log",
+        "sha256": "3e0d75b77dd1417763a458784576028fa690c02392a6056212072bab743e5066"
+      },
+      {
+        "name": "kum78-repeated-targeted.log",
+        "sha256": "fe621a07fd8ce653867bb11385cb1ecc5f45b65a97c07558c1755660a6df95e3"
+      },
+      {
+        "name": "kum78-old-peer-red.log",
+        "sha256": "5b73b613363d582660c3e1f652f1cebfe2f2e8c3fdc25eb867054f08f6aafcb0"
+      },
+      {
+        "name": "kum78-old-same-serial-red.log",
+        "sha256": "a9202cba5622dfb902a228b27ab004e10fefa1206d04ecc124e2ecb42150bf82"
+      },
+      {
+        "name": "kum78-old-prior-pass-red.log",
+        "sha256": "6c5380043ce20355bf28d8cfd17a85d0140a02f4dc9511d0a53e6194707ea396"
+      },
+      {
+        "name": "kum78-evidence-first-failure.log",
+        "sha256": "9adb6fee226e989af0044e0285824f2eb4852efd6ee9287c052705f47bfca882"
+      }
+    ]
+  },
+  "physical_acceptance": "not_run_user_deferred"
+}

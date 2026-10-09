@@ -1,0 +1,402 @@
+{
+  "scope": "Android only; iOS excluded by explicit user instruction",
+  "baselines": {
+    "stable": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+    "main": "0f5e7b778ee0b945725c9506055d6137a7faf546"
+  },
+  "counts": {
+    "user_faults": 6,
+    "code_review_fix_tasks": 12,
+    "open_architecture_P0": 0,
+    "open_architecture_P1": 0
+  },
+  "effect_acceptance": "ordinary Bluetooth, navigation/music mixing, wind-noise listening, Android9/16 two-device radio validation deferred by user",
+  "findings": [
+    {
+      "issue": "KUM-65",
+      "title": "多应用音频焦点与中断恢复",
+      "user_report_number": 1,
+      "classification": "confirmed_code_contributors_to_field_report",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "音频焦点失去/迟到回调及通信模式释放不完整；旧会话排队事件可作用于新会话。它们是确认的代码缺陷，不能独自解释普通蓝牙的 SCO/A2DP 无声。",
+      "fix": "每次独立 focus listener/request，失效 revision 撤权；延迟焦点只在真实 GAIN 后恢复；永久失焦和结束释放当前焦点及通信模式，保留电话优先。",
+      "verification": "API28/35 实际 Android focus producer 排队旧 LOSS/GAIN、当前 transient/GAIN、abandon 回归；22 项定向测试及完整 CI。",
+      "locations": [
+        {
+          "sha": "6c8e56c3e78c9149c89b13b4a10a537c3add7afc",
+          "path": "app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt",
+          "blob": "9c195173fca8674e56a0aab930179506e7f25bbe",
+          "line": 91,
+          "anchor": "override fun request(): AudioFocusResult",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/6c8e56c3e78c9149c89b13b4a10a537c3add7afc/app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt#L91"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/40",
+      "fixed_sha": "6c8e56c3e78c9149c89b13b4a10a537c3add7afc",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37882188306",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-66",
+      "title": "VOX 连续检测及真正的上行静音",
+      "user_report_number": 2,
+      "classification": "confirmed_code_contributors_to_field_report",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "固定 WebRTC SDK 的 track 静音会停止采集，使 VOX 不能持续检测；高噪声下不同灵敏度被噪声基准压平。",
+      "fix": "唯一采集器持续进行编码前 PCM 检测，关闭上行时真正清零；区分噪声学习和灵敏度，保留手动静音优先，隔离旧 revision。",
+      "verification": "实际 JNI 双 PeerConnection：静音期间持续检测、非零背景清零、新讲话重开、手动静音优先和关闭后旧回调；595 项当轮 JVM 与远端 CI。",
+      "locations": [
+        {
+          "sha": "34229a3b86e80fbf75cdb3884afb909c1f1c097d",
+          "path": "app/src/main/java/com/kuma/motointercom/PcmTransmitGate.kt",
+          "blob": "80d1a9014883f0443516081b88e330f1558a4374",
+          "line": 21,
+          "anchor": "fun silence(",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/34229a3b86e80fbf75cdb3884afb909c1f1c097d/app/src/main/java/com/kuma/motointercom/PcmTransmitGate.kt#L21"
+        },
+        {
+          "sha": "34229a3b86e80fbf75cdb3884afb909c1f1c097d",
+          "path": "app/src/main/java/com/kuma/motointercom/VoxGate.kt",
+          "blob": "78b1d80f80790343469430af20a765b7f596b884",
+          "line": 3,
+          "anchor": "class VoxGate",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/34229a3b86e80fbf75cdb3884afb909c1f1c097d/app/src/main/java/com/kuma/motointercom/VoxGate.kt#L3"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/41",
+      "fixed_sha": "34229a3b86e80fbf75cdb3884afb909c1f1c097d",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37885467933",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-67",
+      "title": "软件降噪与原生错误归属",
+      "user_report_number": 3,
+      "classification": "confirmed_code_contributors_to_field_report",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "硬件 NS 可用声明不能保证有实际效果，软件 NS 被关闭；迟到原生 producer 错误可能结束替代会话。",
+      "fix": "固定软件 NS 路径，保留 AEC/AGC/Opus；增加实际 recorder/PCM 诊断与 ADM 错误回执，按当前原生线程及媒体归属撤权。",
+      "verification": "真实原生 read error、旧 PCM 线程阻塞超过关闭边界、同 engine 的 B 重新录音；601 项当轮 JVM 和远端 CI。软件 NS 配置不等于风噪听感通过。",
+      "locations": [
+        {
+          "sha": "985aeb89b6ab92df0c454b82690cbf99137890d6",
+          "path": "app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt",
+          "blob": "dde230b72ef5d7d6607e34792bc341cb68067243",
+          "line": 438,
+          "anchor": ".setUseHardwareNoiseSuppressor(false)",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/985aeb89b6ab92df0c454b82690cbf99137890d6/app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt#L438"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/42",
+      "fixed_sha": "985aeb89b6ab92df0c454b82690cbf99137890d6",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37888252920",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-68",
+      "title": "蓝牙首次选路及实际录放音恢复",
+      "user_report_number": 4,
+      "classification": "confirmed_code_contributors_to_field_report",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "首次蓝牙路由受理被当成已激活，旧 sticky SCO 状态提前结束；暂停后未重新 Init，实际 I/O 无法启动；迟到 read/JNI 可误用 B 的对象。",
+      "fix": "有界重试并核对当前设备；实际录音、新鲜 PCM、Android 输出写入和双向 RTP 才报告音频就绪；重新 Init 并隔离旧线程/缓冲与替代设备。",
+      "verification": "迟到 callback/read、超过 SDK join 时间、B buffer 不被清零、实际录放音线程/输出 session ID 重建和 RTP 增长；631 项 JVM，最终原生回归及 CI。",
+      "locations": [
+        {
+          "sha": "25f6a9d760704e357065b6fb183da63c343d6cf8",
+          "path": "app/src/main/java/com/kuma/motointercom/AudioRouteController.kt",
+          "blob": "8ffc8e663620de830fba5d24407337205cab377e",
+          "line": 253,
+          "anchor": "private fun selectBluetooth(",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/25f6a9d760704e357065b6fb183da63c343d6cf8/app/src/main/java/com/kuma/motointercom/AudioRouteController.kt#L253"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/43",
+      "fixed_sha": "25f6a9d760704e357065b6fb183da63c343d6cf8",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37898285291",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-69",
+      "title": "发现、连接候选和迟到请求撤销",
+      "user_report_number": 5,
+      "classification": "confirmed_code_contributors_to_field_report",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "连接候选回退、HELLO 截止及 pending Socket 生命周期不完整；阻塞工厂、glare 转移、旧 EOF/Abort 可误用新请求归属。",
+      "fix": "保留候选及验证身份；绝对 HELLO 截止、可取消实际 Socket；从请求到最终采用/Connected 提交持续核对可撤销授权及 lineage，I/O 在短锁外。",
+      "verification": "真实 TCP HELLO、实际 reader EOF/writer failure、原 Service effect collector、lease 转移和工厂阻塞竞态；671 项 JVM 与 CI。SDK CONNECTED 部分是测试注入。",
+      "locations": [
+        {
+          "sha": "58fa051c61a2d367322c07917a09859aa94768a3",
+          "path": "app/src/main/java/com/kuma/motointercom/PendingSocketLease.kt",
+          "blob": "2ff2c380a523922580fff9068f24bebe04f55dc9",
+          "line": 94,
+          "anchor": "fun tryTransfer(",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/58fa051c61a2d367322c07917a09859aa94768a3/app/src/main/java/com/kuma/motointercom/PendingSocketLease.kt#L94"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/44",
+      "fixed_sha": "58fa051c61a2d367322c07917a09859aa94768a3",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37915204711",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-70",
+      "title": "自动重连授权与真实新发现",
+      "user_report_number": 6,
+      "classification": "confirmed_code_contributors_to_field_report",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "真实断链未正确触发恢复；自动重连开关、取消和旧回调授权脱节；Reset 后靠缓存/定时无法获得可验证的新目标。",
+      "fix": "保留原 verified deviceId；精确 ResetCompleted 后等待 30 秒，只接受当前 adapter 的真实新发现启动新三次尝试，重新 Socket/HELLO；手动操作在 Room await 前同步撤权。",
+      "verification": "真实 NSD/TXT、UDP/TCP、HELLO、EOF/write failure、旧 adapter/Lost、Reset/probe、跨 runtime 观测与 Room 阻塞；710 项 JVM、原生和 CI。",
+      "locations": [
+        {
+          "sha": "99fc2bc3877a5d52d69d18f36b41c6bdc15102cb",
+          "path": "app/src/main/java/com/kuma/motointercom/AutomaticRecoveryPolicy.kt",
+          "blob": "a1b24be125e05cdb4c1b8207053b76ce0bc8724a",
+          "line": 37,
+          "anchor": "fun cancelAutomaticStarts(",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/99fc2bc3877a5d52d69d18f36b41c6bdc15102cb/app/src/main/java/com/kuma/motointercom/AutomaticRecoveryPolicy.kt#L37"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/45",
+      "fixed_sha": "99fc2bc3877a5d52d69d18f36b41c6bdc15102cb",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37924933236",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-71",
+      "title": "日志导出目录失败绕过预算",
+      "user_report_number": null,
+      "classification": "additional_confirmed_defect_or_integration",
+      "baseline_sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+      "root_cause": "File.listFiles() 返回 null 被误当空目录，导出预算与旧分享保留失效。",
+      "fix": "两次目录读取均明确失败；TTL 清理及新文件创建前退出，现有 worker 返回失败并保留未过期分享原字节。",
+      "verification": "真实 worker/目录、首次真实导出、精确枚举失败、380B 预算与恢复；7 项导出 session 回归和 CI。",
+      "locations": [
+        {
+          "sha": "d095e03e954f33c7674f1cb6553029078f17bf94",
+          "path": "app/src/main/java/com/kuma/motointercom/DiagnosticLogSession.kt",
+          "blob": "71fd183fa6b60c5940c198a8eb44c34806dd9dce",
+          "line": 78,
+          "anchor": "private fun exportFiles()",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/d095e03e954f33c7674f1cb6553029078f17bf94/app/src/main/java/com/kuma/motointercom/DiagnosticLogSession.kt#L78"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/46",
+      "fixed_sha": "d095e03e954f33c7674f1cb6553029078f17bf94",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37925795827",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-72",
+      "title": "群组准入时钟与额度并发",
+      "user_report_number": null,
+      "classification": "additional_confirmed_defect_or_integration",
+      "baseline_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+      "root_cause": "多入口并发读取时钟与记账，旧时间与最后一个全局/单地址额度竞争。",
+      "fix": "完整 acquire 时钟、窗口清理、额度检查和记账共用 monitor；Socket I/O 保留在锁外。",
+      "verification": "去掉同步时三个新增回归失败；修复后 14 项定向、真实双 TCP HELLO/BUSY/EOF、完整 JVM/原生及最新 PR CI。",
+      "locations": [
+        {
+          "sha": "ba4550d7410b2a4b070cad80213d1724381ffd29",
+          "path": "app/src/main/java/com/kuma/motointercom/group/network/GroupNetworkPolicy.kt",
+          "blob": "a1a38514195d1e271965adc56fbe32c9a9c5043c",
+          "line": 88,
+          "anchor": "fun acquire(address:",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/ba4550d7410b2a4b070cad80213d1724381ffd29/app/src/main/java/com/kuma/motointercom/group/network/GroupNetworkPolicy.kt#L88"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/47",
+      "fixed_sha": "ba4550d7410b2a4b070cad80213d1724381ffd29",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966744534",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-75",
+      "title": "网络故障脚本错误退出码",
+      "user_report_number": null,
+      "classification": "additional_confirmed_defect_or_integration",
+      "baseline_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+      "root_cause": "PowerShell 忽略 native ADB 非零退出码，注入失败仍输出 APPLIED 并可能产生错误验收。",
+      "fix": "每条 native 命令检查退出码，失败停止后续命令；Mode 必填，保留模拟器/root/接口约束。",
+      "verification": "旧源码实际进程误 APPLIED 红回归；Windows PowerShell 5.1 子进程/native mock 34 个场景通过，最新 Windows CI 成功。",
+      "locations": [
+        {
+          "sha": "65c23200d81efb44258737ed1c22f9e4258e6151",
+          "path": "scripts/emulator/inject-network-fault.ps1",
+          "blob": "ac8b6c657a70cc1710eae54fb0cd9a1a06d38582",
+          "line": 37,
+          "anchor": "function Set-EmulatorNetwork",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/65c23200d81efb44258737ed1c22f9e4258e6151/scripts/emulator/inject-network-fault.ps1#L37"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/48",
+      "fixed_sha": "65c23200d81efb44258737ed1c22f9e4258e6151",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37966772679",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-76",
+      "title": "主线移植、群组媒体与关闭并发",
+      "user_report_number": null,
+      "classification": "additional_confirmed_defect_or_integration",
+      "baseline_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+      "root_cause": "主线需要移植稳定线修复并适配共享采集/独立成员输出；关闭 pending registry 的 last-entry 竞态，以及旧 renderer 回执和跨原生 fixture 清理缺少完成屏障。",
+      "fix": "共享 ADM/factory/track 保留唯一归属，成员各自 PC/renderer/readiness；快照关闭 pending leases；精确撤权，按实际资源完成回执等待自有 fixture 清理。",
+      "verification": "真实 producer 关闭竞态旧源红/新源 13 项绿；健康 B/C PCM/RTP/owner、RTC/token 阻塞负对照；完整固定源码 CI 三 job 通过。",
+      "locations": [
+        {
+          "sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+          "path": "app/src/main/java/com/kuma/motointercom/group/GroupAudio.kt",
+          "blob": "c415b220dc1dea48df2830133118cba340674f30",
+          "line": 131,
+          "anchor": "val available = routeReady",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/5b9b6a7d853446280403f20a1b0fed39f370308a/app/src/main/java/com/kuma/motointercom/group/GroupAudio.kt#L131"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/49",
+      "fixed_sha": "5b9b6a7d853446280403f20a1b0fed39f370308a",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37955528528",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-77",
+      "title": "群组控制连接关闭与迟到认证",
+      "user_report_number": null,
+      "classification": "additional_confirmed_defect_or_integration",
+      "baseline_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+      "root_cause": "认证后关闭的旧 channel 可重新注册 ingress，迟到失败可能删除新队列；局部连接/密钥释放及关闭最后元素存在竞态，当前断链不能正确恢复。",
+      "fix": "安装前后及 Main 终点检查 attempt、channel、adapter、queue；exact remove 只清理自身；局部连接在 finally 独立释放，当前异常断链报告真实 onFailed，数组快照关闭。",
+      "verification": "真实 TCP/JPAKE/AEAD、实际 Signal/Roster 回执，旧源 17 项中 10 项失败；27 项定向与最终 886 项 JVM、32 项原生结果及三 job CI。",
+      "locations": [
+        {
+          "sha": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+          "path": "app/src/main/java/com/kuma/motointercom/group/GroupNetworkRuntime.kt",
+          "blob": "4e96cafb0fdb088e83232db76b480a47d25fac3b",
+          "line": 126,
+          "anchor": "if (!current(attempt) || !channel.hasCurrentOwner())",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/1f636f787b7ee1b62c834bf642a14823fff560fb/app/src/main/java/com/kuma/motointercom/group/GroupNetworkRuntime.kt#L126"
+        },
+        {
+          "sha": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+          "path": "app/src/main/java/com/kuma/motointercom/group/GroupSocketTransport.kt",
+          "blob": "c8540c73d3729ac03b2f0e516a8cbdd8744d68d1",
+          "line": 66,
+          "anchor": "hasCurrentOwner",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/1f636f787b7ee1b62c834bf642a14823fff560fb/app/src/main/java/com/kuma/motointercom/group/GroupSocketTransport.kt#L66"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/50",
+      "fixed_sha": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37961390317",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    },
+    {
+      "issue": "KUM-78",
+      "title": "协议及双设备验收误成功",
+      "user_report_number": null,
+      "classification": "additional_confirmed_defect_or_integration",
+      "baseline_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+      "root_cause": "CLI 接受非终态响应；同 serial、nickname 中 UUID、模拟器、坏 SQLite 或 native 失败可冒充双实机成功；新采集失败后根目录保留旧 Pass。",
+      "fix": "验证合法终态；解析真实 DataStore 身份，核对不同物理设备、前后 APK/身份、所有 native 退出码和完整 SQLite integrity；先将当前结果标 NotRun、独立保留历史、最后原子发布。",
+      "verification": "旧源码实际 CLI 非法终态/同 serial/旧 Pass 误成功；45 项真实 Windows CLI/native mock、14 项 Python TCP 子进程、34 项原脚本回归及三 job CI。Pass 仍是操作者判定，不是自动硬件听音证明。",
+      "locations": [
+        {
+          "sha": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+          "path": "tools/kum26_peer.py",
+          "blob": "8e3c60947a4f176c022c44cf0ad5295186cbccce",
+          "line": 19,
+          "anchor": "TERMINAL_RESPONSES =",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/018b6827bce93c928d3ce7883d3230456a3dfcb8/tools/kum26_peer.py#L19"
+        },
+        {
+          "sha": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+          "path": "tools/kum26_two_device_evidence.ps1",
+          "blob": "e52beacf4b5d38d2537d68a8085252208d93726b",
+          "line": 160,
+          "anchor": "function Get-PhysicalPair",
+          "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/018b6827bce93c928d3ce7883d3230456a3dfcb8/tools/kum26_two_device_evidence.ps1#L160"
+        }
+      ],
+      "status": "fixed_architecture_approved_ci_success",
+      "architecture_open_P0": 0,
+      "architecture_open_P1": 0,
+      "pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/51",
+      "fixed_sha": "018b6827bce93c928d3ce7883d3230456a3dfcb8",
+      "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37965905864",
+      "physical_acceptance": "not_run_user_deferred",
+      "ios": "excluded_by_user"
+    }
+  ],
+  "seven_day_logs": {
+    "issues": [
+      "KUM-62",
+      "KUM-63",
+      "KUM-71",
+      "KUM-76"
+    ],
+    "stable_source": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+    "locations": [
+      {
+        "sha": "e958fff38c98177a9995343601eb82d75e3cbdd6",
+        "path": "app/src/main/java/com/kuma/motointercom/PersistentLogStore.kt",
+        "blob": "bd63401f2d98d5b28d6b8ac4f1f814e007928b17",
+        "line": 17,
+        "anchor": "private val budgetBytes:",
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/blob/e958fff38c98177a9995343601eb82d75e3cbdd6/app/src/main/java/com/kuma/motointercom/PersistentLogStore.kt#L17"
+      }
+    ],
+    "policy": "rolling_near_7_days_local; automatic_expiry; restart_read_and_export",
+    "segment_bytes": 1048576,
+    "budget_bytes": 268435456,
+    "at_budget": "refuse_new_records_and_report_gap; do_not_delete_unexpired_window",
+    "historical_delivery": "v1.2.1 log test was previously installed; current audit fixes have not been deployed",
+    "stable_pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/38",
+    "main_backport_pr": "https://github.com/g95809080-cmyk/moto-intercom/pull/49"
+  }
+}
