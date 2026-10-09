@@ -7,6 +7,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -100,6 +101,67 @@ class DiagnosticLogSessionTest {
             assertTrue("One new export must fit; existing exports consume the remaining budget", singleExport.size() <= 380)
             assertTrue(first.exists())
             assertEquals(listOf(first), exports.listFiles()!!.toList())
+        }
+    }
+
+    @Test fun firstEnumerationFailureKeepsFilesAndCanRecoverWithoutForgettingBudget() {
+        enumerationFailurePreservesBudget(failAt = 1)
+    }
+
+    @Test fun secondEnumerationFailureAfterTtlCleanupKeepsSharedFilesAndBudget() {
+        enumerationFailurePreservesBudget(failAt = 2)
+    }
+
+    private fun enumerationFailurePreservesBudget(failAt: Int) {
+        val directory = temp.newFolder()
+        val reads = AtomicInteger()
+        val failure = AtomicInteger()
+        val exports = object : File(directory.path) {
+            override fun listFiles(): Array<File>? =
+                if (reads.incrementAndGet() == failure.get()) null else super.listFiles()
+        }
+        val time = AtomicLong(now)
+        val headers = AtomicInteger()
+        val store = PersistentLogStore(temp.newFolder(), "test")
+        DiagnosticLogSession(store, exports, { headers.incrementAndGet(); "metadata" },
+            clock = time::get, exportBudgetBytes = 380).use { log ->
+            log.record("I", "test", "one")
+            val shared = await(log::export).getOrThrow()
+            val original = shared.readBytes()
+            assertTrue(shared.setLastModified(now))
+            val expired = File(directory, "motocom-logs-1-00000000-0000-0000-0000-000000000000.txt")
+                .apply { writeText("expired"); assertTrue(setLastModified(now - DiagnosticLogSession.EXPORT_TTL_MS - 1)) }
+            log.record("I", "test", "two-${"x".repeat(250)}")
+            reads.set(0)
+            headers.set(0)
+            failure.set(failAt)
+
+            val error = await(log::export).exceptionOrNull()
+            assertTrue(error is IOException)
+            assertEquals("Cannot read export directory", error!!.message)
+            assertEquals(failAt, reads.get())
+            assertEquals("Failure must precede writing an export", 0, headers.get())
+            assertArrayEquals(original, shared.readBytes())
+            assertEquals(failAt == 1, expired.exists())
+            assertEquals(if (failAt == 1) setOf(shared, expired) else setOf(shared), directory.listFiles()!!.toSet())
+
+            // Subsequent reads succeed on the same worker. One new file fits alone,
+            // but the retained share must still be included in the directory budget.
+            val budgetError = await(log::export).exceptionOrNull()
+            assertTrue(budgetError is IOException)
+            assertTrue(budgetError!!.message!!.contains("storage budget"))
+            assertArrayEquals(original, shared.readBytes())
+            assertEquals(setOf(shared), directory.listFiles()!!.toSet())
+            val single = ByteArrayOutputStream()
+            store.export(now, single, "metadata")
+            assertTrue("The failure must be due to existing exports", single.size() <= 380)
+            assertTrue(await(log::recent).getOrThrow().any { it.contains("two-") })
+
+            time.set(now + DiagnosticLogSession.EXPORT_TTL_MS + 1)
+            val recovered = await(log::export).getOrThrow()
+            assertFalse(shared.exists())
+            assertTrue(recovered.readText().contains("two-"))
+            assertEquals(setOf(recovered), directory.listFiles()!!.toSet())
         }
     }
 }

@@ -49,11 +49,11 @@ internal class DiagnosticLogSession(
     override fun export(callback: (Result<File>) -> Unit) = submit(callback) {
         val now = clock()
         if (!exportDirectory.isDirectory && !exportDirectory.mkdirs()) throw IOException("Cannot create export directory")
-        val oldFiles = exportDirectory.listFiles().orEmpty().filter { EXPORT_NAME.matches(it.name) }
+        val oldFiles = exportFiles()
         oldFiles.filter { it.lastModified() < now - EXPORT_TTL_MS }.forEach {
             if (!it.delete()) throw IOException("Cannot remove expired export")
         }
-        val used = exportDirectory.listFiles().orEmpty().filter { EXPORT_NAME.matches(it.name) }.sumOf(File::length)
+        val used = exportFiles().sumOf(File::length)
         val file = File(exportDirectory, "motocom-logs-$now-${UUID.randomUUID()}.txt")
         try {
             file.outputStream().use { raw ->
@@ -74,6 +74,10 @@ internal class DiagnosticLogSession(
             throw error
         }
     }
+
+    private fun exportFiles(): List<File> =
+        (exportDirectory.listFiles() ?: throw IOException("Cannot read export directory"))
+            .filter { EXPORT_NAME.matches(it.name) }
 
     private fun <T> submit(callback: (Result<T>) -> Unit, operation: () -> T) {
         if (closed || !commands.offer({ callback(runCatching(operation)) })) {
