@@ -38,7 +38,8 @@ internal class LanDiscoveryCoordinator(
     initialTargetAttempt: ConnectionAttempt? = null,
     private val monotonicClock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(SystemClock.elapsedRealtime())
-    }
+    },
+    private val onFreshObservation: (FreshDiscoveryObservation) -> Unit = {}
 ) : Closeable {
     private val context = context.applicationContext
     private val closed = AtomicBoolean(false)
@@ -54,6 +55,8 @@ internal class LanDiscoveryCoordinator(
     private val clientConnectAttempt = LanAttemptLease()
     private val retryPause = RecoveryAttemptPause()
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
+    val observationSource = FreshDiscoverySource(Transport.LAN)
+    private val observedSessions = DiscoverySessionTracker()
 
     private var nsdManager: NsdManager? = null
     private var nsdRegistrationListener: NsdManager.RegistrationListener? = null
@@ -66,6 +69,13 @@ internal class LanDiscoveryCoordinator(
         startLanDiscovery(localIp)
         startNsdDiscovery()
         return true
+    }
+
+    fun probeDiscovery() {
+        if (!isActive()) return
+        observationSource.advanceEpoch()
+        stopNsdDiscovery()
+        startNsdDiscovery()
     }
 
     private fun startLanDiscovery(localIp: String) {
@@ -167,6 +177,7 @@ internal class LanDiscoveryCoordinator(
     private fun startNsdDiscovery() {
         if (!isActive()) return
         val manager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
+        val sourceEpoch = observationSource.advanceEpoch()
         nsdManager = manager
         nsdServiceName = "MotoCom-${nodeId.take(8)}-${runtimeSessionId.value.take(8)}"
 
@@ -199,10 +210,13 @@ internal class LanDiscoveryCoordinator(
                 if (!isActive() || info.serviceType != NSD_SERVICE_TYPE || info.serviceName == nsdServiceName) {
                     return
                 }
-                resolveNsdService(info)
+                val receipt = observationSource.capture(DiscoveryObservationKind.LAN_NSD,
+                    monotonicClock.now().elapsedRealtimeMs, sourceEpoch, info.serviceName) ?: return
+                resolveNsdService(info, receipt)
             }
 
             override fun onServiceLost(info: NsdServiceInfo) {
+                if (!observationSource.invalidateKey(DiscoveryObservationKind.LAN_NSD, info.serviceName, sourceEpoch)) return
                 removeLanDevice(info.serviceName)
             }
         }
@@ -228,8 +242,8 @@ internal class LanDiscoveryCoordinator(
         }
     }
 
-    private fun resolveNsdService(info: NsdServiceInfo) {
-        if (!isActive()) return
+    private fun resolveNsdService(info: NsdServiceInfo, receipt: FreshDiscoveryReceipt) {
+        if (!isActive() || !observationSource.isCurrentEpoch(receipt.sourceEpoch)) return
         val manager = nsdManager ?: return
         try {
             @Suppress("DEPRECATION")
@@ -239,12 +253,12 @@ internal class LanDiscoveryCoordinator(
                 }
 
                 override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                    if (!isActive()) return
+                    if (!isActive() || !observationSource.isCurrentEpoch(receipt.sourceEpoch)) return
                     val deviceId = serviceInfo.attributeString("id").takeIf(String::isNotBlank)
                     if (deviceId == nodeId) return
                     val ip = serviceInfo.resolvedHostAddress() ?: return
                     val name = serviceInfo.attributeString("name").ifBlank { serviceInfo.serviceName }
-                    rememberLanDevice(
+                    rememberObservedLanDevice(
                         serviceInfo.serviceName,
                         LanRiderDevice(
                             discoveryEndpointId = serviceInfo.serviceName,
@@ -259,7 +273,8 @@ internal class LanDiscoveryCoordinator(
                                 ?: 0,
                             ip = ip,
                             port = serviceInfo.port.takeIf { it > 0 } ?: LAN_TCP_PORT
-                        )
+                        ),
+                        receipt
                     )
                 }
             })
@@ -328,8 +343,10 @@ internal class LanDiscoveryCoordinator(
                 try {
                     val packet = DatagramPacket(buffer, buffer.size)
                     candidate.receive(packet)
+                    val receipt = observationSource.capture(DiscoveryObservationKind.LAN_UDP,
+                        monotonicClock.now().elapsedRealtimeMs) ?: continue
                     expireLanBroadcastDevices()
-                    handleLanBroadcast(localIp, packet)
+                    handleLanBroadcast(localIp, packet, receipt)
                 } catch (_: SocketTimeoutException) {
                     expireLanBroadcastDevices()
                 }
@@ -368,7 +385,7 @@ internal class LanDiscoveryCoordinator(
         }
     }
 
-    private fun handleLanBroadcast(localIp: String, packet: DatagramPacket) {
+    private fun handleLanBroadcast(localIp: String, packet: DatagramPacket, receipt: FreshDiscoveryReceipt) {
         if (!isActive()) return
         val json = runCatching {
             JSONObject(String(packet.data, 0, packet.length, StandardCharsets.UTF_8))
@@ -388,11 +405,12 @@ internal class LanDiscoveryCoordinator(
             localDeviceId = nodeId
         ) ?: return
         log("发现同一 Wi-Fi 车友：${device.name} / ${device.ip}")
-        rememberLanDevice(
+        rememberObservedLanDevice(
             serviceName = device.discoveryEndpointId,
             device = device,
+            receipt = receipt,
             expiresAtElapsedRealtimeMs =
-                monotonicClock.now().elapsedRealtimeMs + LAN_BROADCAST_RETENTION_MS
+                receipt.receivedAtElapsedRealtimeMs + LAN_BROADCAST_RETENTION_MS
         )
     }
 
@@ -475,19 +493,24 @@ internal class LanDiscoveryCoordinator(
         true
     }
 
-    private fun rememberLanDevice(
+    private fun rememberObservedLanDevice(
         serviceName: String,
         device: LanRiderDevice,
+        receipt: FreshDiscoveryReceipt,
         expiresAtElapsedRealtimeMs: Long? = null
     ) {
         if (!isActive()) return
-        val snapshot = deviceRegistry.remember(
-            serviceName,
-            device,
-            expiresAtElapsedRealtimeMs
-        )
+        val candidate = runCatching { DiscoveryCandidate(Transport.LAN, device.discoveryEndpointId,
+            device.ip, device.port, DiscoveryIdentityClaim(device.deviceId, device.sessionId,
+                device.name, device.deviceName, device.protocolVersion)) }.getOrNull() ?: return
+        val (snapshot, observation) = observationSource.accept(receipt, candidate) {
+            if (observedSessions.register(candidate.identity) == DiscoverySessionRegistration.SUPERSEDED) null
+            else deviceRegistry.remember(serviceName, device, expiresAtElapsedRealtimeMs)
+        } ?: return
+        if (!isActive() || !observationSource.isCurrent(observation)) return
         log("发现局域网车友：${device.name} / ${device.ip}")
         publishLanDevices(snapshot)
+        if (isActive() && observationSource.isCurrent(observation)) onFreshObservation(observation)
         connectTargetIfAvailable()
     }
 
@@ -580,6 +603,7 @@ internal class LanDiscoveryCoordinator(
         else isAttemptCurrent(attempt)
 
     override fun close() {
+        observationSource.close()
         val resources = synchronized(lifecycleLock) {
             if (!closed.compareAndSet(false, true)) return
             val sockets = listOfNotNull<Closeable>(
@@ -596,6 +620,7 @@ internal class LanDiscoveryCoordinator(
         clientConnectAttempt.clear()
         retryPause.clear()
         deviceRegistry.clear()
+        observedSessions.clear()
         onDevicesChanged(emptyList())
     }
 

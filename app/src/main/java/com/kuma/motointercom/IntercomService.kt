@@ -159,6 +159,7 @@ class IntercomService : Service() {
     private val binder = LocalBinder()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = SessionGeneration()
+    private val automaticRecoveryPolicy = AutomaticRecoveryPolicy()
     private val recoveryCleanupCoordinator = RecoveryCleanupCoordinator(
         postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
         removeCallbacks = mainHandler::removeCallbacks,
@@ -167,6 +168,7 @@ class IntercomService : Service() {
     private val discoveryRefreshGate = DiscoveryRefreshGate()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val presenceAggregator = PresenceAggregator(SystemClock::elapsedRealtime)
+    private val discoveryPresenceAdmission = DiscoveryPresenceAdmission()
 
     private lateinit var identityStore: LocalIdentityStore
     private lateinit var pairingRepository: PairingRepository
@@ -212,13 +214,13 @@ class IntercomService : Service() {
                 ?: return@onTimedOut
             closeControlChannel(session)
             orchestrator.dispatch(
-                SessionEvent.SignalingSendFailed(
+                orchestrator.observeConnectionLoss(SessionEvent.SignalingSendFailed(
                     deadline.runtimeSessionId,
                     deadline.attemptId,
                     deadline.channelId,
                     SignalingMessageTypeV2.CONNECT_REJECT,
                     "superseded channel close deadline elapsed"
-                )
+                ))
             )
         }
     )
@@ -290,7 +292,8 @@ class IntercomService : Service() {
             pairingRepository,
             onLog = ::publishLog,
             onError = ::handleError,
-            elapsedRealtime = SystemClock::elapsedRealtime
+            elapsedRealtime = SystemClock::elapsedRealtime,
+            automaticRecoveryPolicy = automaticRecoveryPolicy
         )
         serviceScope.launch {
             orchestrator.state.collect { state ->
@@ -458,7 +461,9 @@ class IntercomService : Service() {
 
     internal fun setAutomaticReconnectEnabled(enabled: Boolean) {
         dispatchOnMain {
-            orchestrator.dispatch(SessionEvent.AutomaticReconnectChanged(enabled))
+            automaticRecoveryPolicy.setEnabled(enabled)
+            if (!enabled) cancelFutureRecovery()
+            orchestrator.dispatch(SessionEvent.AutomaticReconnectChanged(enabled, policyAlreadyApplied = true))
         }
     }
 
@@ -518,6 +523,9 @@ class IntercomService : Service() {
             publishMissingPairing()
             return
         }
+        dispatchOnMain {
+            automaticRecoveryPolicy.cancelTarget(normalizedDeviceId)
+            cancelFutureRecovery(normalizedDeviceId)
         serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
             pairingMutationMutex.withLock {
                 try {
@@ -540,6 +548,7 @@ class IntercomService : Service() {
                     publishToast(getString(R.string.pairing_update_failed))
                 }
             }
+        }
         }
     }
 
@@ -698,24 +707,26 @@ class IntercomService : Service() {
     }
 
     fun requestStop() {
-        mainHandler.post {
+        dispatchOnMain {
             stopIntercom()
             stopSelf()
         }
     }
 
     fun requestDisconnectCurrent() {
-        mainHandler.post {
-            if (!running) return@post
-            val runtimeSessionId = activeRuntimeSessionId ?: return@post
+        dispatchOnMain {
+            if (!running) return@dispatchOnMain
+            val runtimeSessionId = activeRuntimeSessionId ?: return@dispatchOnMain
             if (primaryIntercomAction(orchestrator.state.value) !=
                 PrimaryIntercomAction.DISCONNECT_CURRENT
             ) {
-                return@post
+                return@dispatchOnMain
             }
             val attempt = orchestrator.currentAttempt
                 ?.takeIf { it.runtimeSessionId == runtimeSessionId }
-                ?: return@post
+                ?: return@dispatchOnMain
+            automaticRecoveryPolicy.cancelAutomaticStarts((orchestrator.state.value as? IntercomState.Connected)?.attempt)
+            cancelFutureRecovery()
             orchestrator.dispatch(SessionEvent.DisconnectRequested(runtimeSessionId, attempt.id))
         }
     }
@@ -731,6 +742,8 @@ class IntercomService : Service() {
             selectedPresence.deviceId != request.targetDeviceId ||
             selectedPresence.sessionId != request.targetSessionId
         ) return false
+        automaticRecoveryPolicy.manualChoice(request.targetDeviceId, (orchestrator.state.value as? IntercomState.Connected)?.attempt)
+        cancelFutureRecovery()
         revokePresenceAdmission(latestPresenceAdmission)
         revokePresenceAdmission(autoConnectAdmission)
         autoConnectAdmission = null
@@ -765,6 +778,14 @@ class IntercomService : Service() {
             latestPresenceConnectRequest = null
         }
         return posted
+    }
+
+    private fun cancelFutureRecovery(deviceId: String? = null) {
+        val runtime = activeRuntimeSessionId ?: return
+        val goal = orchestrator.recoveryIntent?.takeIf { it.ref.runtimeSessionId == runtime }
+        val source = (orchestrator.state.value as? IntercomState.Connected)?.attempt
+        if (deviceId != null && (goal?.targetDeviceId ?: source?.targetDeviceId) != deviceId) return
+        orchestrator.dispatch(SessionEvent.RecoveryIntentCanceled(runtime, goal?.ref, source))
     }
 
     private fun isPresenceConnectRuntimeCurrent(
@@ -883,6 +904,8 @@ class IntercomService : Service() {
 
         val token = sessions.start()
         val runtimeSessionId = RuntimeSessionId.create()
+        automaticRecoveryPolicy.beginRuntime()
+        discoveryPresenceAdmission.clear()
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
@@ -1012,10 +1035,7 @@ class IntercomService : Service() {
             localDeviceName = Build.MODEL.orEmpty(),
             sessionId = runtimeSessionId,
             onPeersChanged = { peers ->
-                postForSession(token) {
-                    publishPresenceSnapshot(
-                        presenceAggregator.replaceCandidates(
-                            Transport.WIFI_DIRECT,
+                onDiscoveryCandidatesChanged(token, runtimeSessionId, Transport.WIFI_DIRECT,
                             peers.map { peer ->
                                 val address = peer.device.deviceAddress.trim()
                                 DiscoveryCandidate(
@@ -1025,12 +1045,7 @@ class IntercomService : Service() {
                                     port = null,
                                     identity = peer.identity
                                 )
-                            }
-                        )
-                    )
-                    publishLog("发现附近设备：${peers.size}")
-                    if (peers.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
-                }
+                            })
             },
             onDiscoveryStatus = {
                 postForSession(token) {
@@ -1053,7 +1068,8 @@ class IntercomService : Service() {
             },
             onStartupReady = onStartupReady,
             onError = { error -> postForSession(token) { handleError(error) } },
-            initialTargetAttempt = targetAttempt
+            initialTargetAttempt = targetAttempt,
+            onFreshObservation = { observation -> onFreshDiscoveryObservation(token, runtimeSessionId, observation) }
         )
             },
             installWifiDirect = { wifiTunnel = it },
@@ -1069,10 +1085,7 @@ class IntercomService : Service() {
             deviceName = Build.MODEL.orEmpty(),
             protocolVersion = SignalingV2Codec.PROTOCOL_VERSION,
             onDevicesChanged = { devices ->
-                postForSession(token) {
-                    publishPresenceSnapshot(
-                        presenceAggregator.replaceCandidates(
-                            Transport.LAN,
+                onDiscoveryCandidatesChanged(token, runtimeSessionId, Transport.LAN,
                             devices.map { device ->
                                 DiscoveryCandidate(
                                     transport = Transport.LAN,
@@ -1087,18 +1100,15 @@ class IntercomService : Service() {
                                         protocolVersion = device.protocolVersion
                                     )
                                 )
-                            }
-                        )
-                    )
-                    if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
-                }
+                            })
             },
             onControlChannelReady = { session, lease ->
                 registerControlChannel(token, session, lease)
             },
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } },
-            initialTargetAttempt = targetAttempt
+            initialTargetAttempt = targetAttempt,
+            onFreshObservation = { observation -> onFreshDiscoveryObservation(token, runtimeSessionId, observation) }
         )
             },
             installLan = { lanDiscovery = it },
@@ -1182,8 +1192,11 @@ class IntercomService : Service() {
                             }
                         },
                         onFailure = { failure ->
+                            val loss = orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(
+                                session.pinnedIdentity.localSessionId, session.channel.channelId,
+                                session.wireRequestKey, failure.message.orEmpty()))
                             dispatchOnMain {
-                                handleSignalingFailure(token, session, failure)
+                                handleSignalingFailure(token, session, failure, loss)
                             }
                         }
                     )
@@ -1290,7 +1303,8 @@ class IntercomService : Service() {
     private fun handleSignalingFailure(
         token: SessionGeneration.Token,
         session: SignalingSessionV2,
-        failure: Throwable
+        failure: Throwable,
+        observedLoss: SessionEvent
     ) {
         if (
             !isSessionCurrent(token) ||
@@ -1309,12 +1323,7 @@ class IntercomService : Service() {
                 failure.message.orEmpty()
             )
         } else {
-            SessionEvent.ChannelClosed(
-                runtimeSessionId,
-                session.channel.channelId,
-                session.wireRequestKey,
-                failure.message.orEmpty()
-            )
+            observedLoss
         }
         orchestrator.dispatch(event)
     }
@@ -1561,15 +1570,14 @@ class IntercomService : Service() {
         candidate: ConnectionCandidateContext,
         state: PeerConnection.PeerConnectionState
     ) {
+        val lossObservation = orchestrator.captureConnectionLossObservation()
+        val event = orchestrator.observeConnectionLoss(SessionEvent.WebRtcStateChanged(
+            candidate.runtimeSessionId, candidate.attemptId, state.toProductState(), System.currentTimeMillis()
+        ), lossObservation)
         postForMediaContext(token, candidate) {
             publishLog("WebRTC 状态：$state")
             orchestrator.dispatch(
-                SessionEvent.WebRtcStateChanged(
-                    runtimeSessionId = candidate.runtimeSessionId,
-                    attemptId = candidate.attemptId,
-                    state = state.toProductState(),
-                    occurredAt = System.currentTimeMillis()
-                )
+                event
             ) { accepted ->
                 if (state == PeerConnection.PeerConnectionState.CONNECTED) {
                     postForMediaContext(token, candidate) {
@@ -1606,13 +1614,12 @@ class IntercomService : Service() {
         candidate: ConnectionCandidateContext,
         error: IOException
     ) {
+        val event = orchestrator.observeConnectionLoss(SessionEvent.SignalingDisconnected(
+            candidate.runtimeSessionId, candidate.attemptId))
         postForMediaContext(token, candidate) {
             publishLog("信令通道断开：${error.message}")
             orchestrator.dispatch(
-                SessionEvent.SignalingDisconnected(
-                    runtimeSessionId = candidate.runtimeSessionId,
-                    attemptId = candidate.attemptId
-                )
+                event
             )
         }
     }
@@ -1795,6 +1802,8 @@ class IntercomService : Service() {
     }
 
     private fun stopIntercom() {
+        automaticRecoveryPolicy.cancelAutomaticStarts((orchestrator.state.value as? IntercomState.Connected)?.attempt)
+        cancelFutureRecovery()
         invalidatePresenceConnectRequests(notifyCancellation = true)
         val runtimeSessionId = activeRuntimeSessionId
         val keepAliveToRelease = runtimeKeepAlive
@@ -1815,6 +1824,7 @@ class IntercomService : Service() {
         activeRuntimeSessionId = null
         localDeviceId = ""
         running = false
+        discoveryPresenceAdmission.clear()
         publishPresenceSnapshot(presenceAggregator.clear())
         drainSignalingSessions().forEach(SignalingSessionV2::close)
         lanDiscovery?.close()
@@ -1911,6 +1921,7 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.ProbeRecoveryDiscovery -> scheduleRecoveryDiscoveryProbe(effect)
             is SessionEffect.RefreshDiscovery -> {
                 if (!discoveryRefreshGate.accepts(effect.generation)) return
                 if (
@@ -2335,18 +2346,18 @@ class IntercomService : Service() {
                     channelId,
                     message.type,
                     "control channel is unavailable"
-                )
+                ).let { orchestrator.observeConnectionLoss(it) }
             )
             return
         }
         session.send(message) { result ->
-            val completionEvent = controlSendCompletionEvent(
+            val completionEvent = orchestrator.observeConnectionLoss(controlSendCompletionEvent(
                 runtimeSessionId,
                 attemptId,
                 channelId,
                 message.type,
                 result
-            )
+            ))
             dispatchOnMain {
                 if (
                     signalingSessions[channelId] !== session ||
@@ -2519,7 +2530,6 @@ class IntercomService : Service() {
 
     private fun publishPresenceSnapshot(snapshot: PresenceSnapshot) {
         listener?.onPresencesChanged(snapshot.presences)
-        maybeAutoConnectPreferred(snapshot)
         val generation = ++presenceExpiryGeneration
         val expiry = snapshot.nextExpiryElapsedRealtimeMs ?: return
         val delayMs = (expiry - SystemClock.elapsedRealtime()).coerceAtLeast(1L)
@@ -2529,7 +2539,75 @@ class IntercomService : Service() {
         }, delayMs)
     }
 
-    private fun maybeAutoConnectPreferred(snapshot: PresenceSnapshot) {
+    private fun onFreshDiscoveryObservation(
+        token: SessionGeneration.Token,
+        runtimeSessionId: RuntimeSessionId,
+        observation: FreshDiscoveryObservation
+    ) {
+        postForSession(token) {
+            if (!isPresenceConnectRuntimeCurrent(token, runtimeSessionId)) return@postForSession
+            val source = when (observation.candidate.transport) {
+                Transport.LAN -> lanDiscovery?.observationSource
+                Transport.WIFI_DIRECT -> wifiTunnel?.observationSource
+            }
+            if (source !== observation.source || !source.isCurrent(observation)) return@postForSession
+            if (!discoveryPresenceAdmission.admit(observation)) return@postForSession
+            presenceAggregator.replaceCandidates(Transport.LAN, discoveryPresenceAdmission.eligibleCandidates(Transport.LAN))
+            val snapshot = presenceAggregator.replaceCandidates(Transport.WIFI_DIRECT,
+                discoveryPresenceAdmission.eligibleCandidates(Transport.WIFI_DIRECT))
+            publishPresenceSnapshot(snapshot)
+            val currentPresence = snapshot.presences.firstOrNull { presence ->
+                presence.deviceId == observation.candidate.identity.claimedDeviceId &&
+                    presence.sessionId == observation.candidate.identity.sourceSessionId && presence.isSelectable &&
+                    presence.candidates.any {
+                        it.isAvailable && it.transport == observation.candidate.transport &&
+                            it.endpointId == observation.candidate.endpointId && it.address == observation.candidate.address &&
+                            it.port == observation.candidate.port
+                    }
+            } ?: return@postForSession
+            val goal = orchestrator.recoveryIntent
+            if (goal == null) {
+                maybeAutoConnectPreferred(snapshot, observation)
+                return@postForSession
+            }
+            val resetAttemptId = goal.resetAttemptId ?: return@postForSession
+            val eligibleAfter = goal.eligibleAfterElapsedMs ?: return@postForSession
+            if (goal.ref.runtimeSessionId != runtimeSessionId ||
+                goal.targetDeviceId != observation.candidate.identity.claimedDeviceId ||
+                observation.receivedAtElapsedRealtimeMs < eligibleAfter
+            ) return@postForSession
+            val authorization = automaticRecoveryPolicy.captureForGoal(goal.authorization) ?: return@postForSession
+            val available = currentPresence.availableTransports
+            val request = RecoveryEpisodeRequest(goal.ref, resetAttemptId, eligibleAfter, observation, available.toSet())
+            val admission = RecoveryEpisodeAdmission(automaticRecoveryPolicy, authorization, sessions, token, request,
+                discoveryPresenceAdmission)
+            orchestrator.dispatch(SessionEvent.RecoveryEpisodeRequested(admission))
+        }
+    }
+
+    private fun scheduleRecoveryDiscoveryProbe(effect: SessionEffect.ProbeRecoveryDiscovery) {
+        val callback = object : Runnable {
+            override fun run() {
+                val goal = orchestrator.recoveryIntent ?: return
+                if (!running || activeRuntimeSessionId != effect.intent.runtimeSessionId ||
+                    goal.ref != effect.intent || goal.resetAttemptId != effect.resetAttemptId ||
+                    goal.eligibleAfterElapsedMs != effect.eligibleAfterElapsedMs ||
+                    !automaticRecoveryPolicy.isAuthorized(goal.authorization) ||
+                    orchestrator.state.value != IntercomState.Discovering(effect.intent.runtimeSessionId)
+                ) return
+                val token = activeSession
+                if (token != null && isPresenceConnectRuntimeCurrent(token, effect.intent.runtimeSessionId)) {
+                    lanDiscovery?.probeDiscovery()
+                    wifiTunnel?.discoverPeers()
+                }
+                // Probe real discovery only; cached candidates cannot start an episode.
+                mainHandler.postDelayed(this, 30_000L)
+            }
+        }
+        mainHandler.postDelayed(callback, (effect.eligibleAfterElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(1L))
+    }
+
+    private fun maybeAutoConnectPreferred(snapshot: PresenceSnapshot, observation: FreshDiscoveryObservation) {
         if (!running) return
         val token = activeSession ?: return
         val runtimeSessionId = activeRuntimeSessionId ?: return
@@ -2540,14 +2618,20 @@ class IntercomService : Service() {
         ) ?: run {
             val state = orchestrator.state.value
             if (state is IntercomState.Discovering && state.runtimeSessionId == runtimeSessionId) {
-                revokePresenceAdmission(autoConnectAdmission)
+                if (autoConnectAdmission?.revokeIfNotAdopted() == false) return
                 autoConnectAdmission = null
                 autoConnectRequestGeneration += 1
                 autoConnectTargetKey = null
             }
             return
         }
-        if (target.key == autoConnectTargetKey) return
+        if (target.deviceId != observation.candidate.identity.claimedDeviceId ||
+            target.sessionId != observation.candidate.identity.sourceSessionId
+        ) return
+        val ticket = automaticRecoveryPolicy.capture(target.deviceId, preferred = true) ?: return
+        ticket.observation = observation
+        ticket.presenceAdmission = discoveryPresenceAdmission
+        if (autoConnectAdmission?.revokeIfNotAdopted() == false) return
 
         val generation = ++autoConnectRequestGeneration
         revokePresenceAdmission(autoConnectAdmission)
@@ -2578,7 +2662,8 @@ class IntercomService : Service() {
                 targetSessionId = target.sessionId,
                 availableTransports = target.availableTransports,
                 trigger = ConnectionTrigger.AUTO_PAIRED,
-                admission = admission
+                admission = admission,
+                automaticTicket = ticket
             )
         ) { accepted ->
             if (!accepted) clearRejected()
@@ -2587,10 +2672,25 @@ class IntercomService : Service() {
     }
 
     private fun markDiscoveryUnavailable() {
-        presenceAggregator.replaceCandidates(Transport.LAN, emptyList())
+        replaceCachedDiscoveryCandidates(Transport.LAN, emptyList())
         publishPresenceSnapshot(
-            presenceAggregator.replaceCandidates(Transport.WIFI_DIRECT, emptyList())
+            replaceCachedDiscoveryCandidates(Transport.WIFI_DIRECT, emptyList())
         )
+    }
+
+    private fun replaceCachedDiscoveryCandidates(transport: Transport, candidates: List<DiscoveryCandidate>): PresenceSnapshot {
+        discoveryPresenceAdmission.replaceCached(transport, candidates)
+        return presenceAggregator.replaceCandidates(transport, discoveryPresenceAdmission.eligibleCandidates(transport))
+    }
+
+    private fun onDiscoveryCandidatesChanged(token: SessionGeneration.Token, runtimeSessionId: RuntimeSessionId,
+        transport: Transport, candidates: List<DiscoveryCandidate>) {
+        postForSession(token) {
+            if (!isPresenceConnectRuntimeCurrent(token, runtimeSessionId)) return@postForSession
+            val snapshot = replaceCachedDiscoveryCandidates(transport, candidates)
+            publishPresenceSnapshot(snapshot)
+            if (candidates.isNotEmpty() && !physicalLinkReady) publishStatus(PEER_FOUND_STATUS)
+        }
     }
 
     private fun publishStatus(status: String) {

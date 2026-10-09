@@ -18,6 +18,11 @@ internal class PresenceConnectAdmission(
         adopted
     }
 
+    fun revokeIfNotAdopted(): Boolean = synchronized(lock) {
+        if (adopted != null || completed) false
+        else { revoked = true; true }
+    }
+
     val adoptedAttempt: ConnectionAttempt? get() = synchronized(lock) { adopted }
     val isRevoked: Boolean get() = synchronized(lock) { revoked }
 

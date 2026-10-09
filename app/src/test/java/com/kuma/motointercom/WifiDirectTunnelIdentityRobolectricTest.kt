@@ -186,7 +186,7 @@ class WifiDirectTunnelIdentityRobolectricTest {
         sessionId = LOCAL_SESSION_ID,
         onPeersChanged = onPeersChanged,
         monotonicClock = clock
-    )
+    ).also { setRunning(it, true) }
 
     private fun device(address: String) = WifiP2pDevice().apply {
         deviceAddress = address
@@ -202,9 +202,11 @@ class WifiDirectTunnelIdentityRobolectricTest {
             "handleServiceResponse",
             String::class.java,
             String::class.java,
-            WifiP2pDevice::class.java
+            WifiP2pDevice::class.java,
+            FreshDiscoveryReceipt::class.java
         ).apply { isAccessible = true }
-            .invoke(tunnel, instanceName, "_motocom._tcp.local.", device)
+            .invoke(tunnel, instanceName, "_motocom._tcp.local.", device,
+                tunnel.observationSource.capture(DiscoveryObservationKind.WIFI_DIRECT_V2_INSTANCE, 1_000L))
     }
 
     private fun invokeTxtRecord(
@@ -215,9 +217,11 @@ class WifiDirectTunnelIdentityRobolectricTest {
         WifiDirectTunnel::class.java.getDeclaredMethod(
             "handleTxtRecord",
             Map::class.java,
-            WifiP2pDevice::class.java
+            WifiP2pDevice::class.java,
+            FreshDiscoveryReceipt::class.java
         ).apply { isAccessible = true }
-            .invoke(tunnel, record, device)
+            .invoke(tunnel, record, device,
+                tunnel.observationSource.capture(DiscoveryObservationKind.WIFI_DIRECT_TXT, 1_000L))
     }
 
     private fun peerRegistry(tunnel: WifiDirectTunnel): WifiDirectPeerRegistry =

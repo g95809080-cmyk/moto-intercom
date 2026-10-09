@@ -23,7 +23,8 @@ internal class SessionOrchestrator(
     private val onError: (Throwable) -> Unit = {},
     elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
     attemptTimeoutMs: Long = 10_000L,
-    attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create
+    attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
+    private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy()
 ) : Closeable {
     private data class QueuedEvent(
         val event: SessionEvent,
@@ -38,7 +39,8 @@ internal class SessionOrchestrator(
     private val signalingControl = SignalingControlCoordinator(
         clock = MonotonicClock { MonotonicTimestamp(elapsedRealtime()) },
         attemptTimeoutMs = attemptTimeoutMs,
-        attemptIdFactory = attemptIdFactory
+        attemptIdFactory = attemptIdFactory,
+        automaticRecoveryPolicy = automaticRecoveryPolicy
     )
     private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
     private val persistedConnectedAttempts = mutableSetOf<ConnectionAttemptId>()
@@ -79,6 +81,26 @@ internal class SessionOrchestrator(
     internal val currentAttempt: ConnectionAttempt?
         get() = signalingControl.currentAttempt
 
+    internal val recoveryIntent: AutomaticRecoveryIntent?
+        get() = signalingControl.recoveryIntent
+
+    /** Capture at the actual loss producer, before the Main queue or any clock/ID factory. */
+    internal fun captureConnectionLossObservation(): ConnectionLossObservation {
+        val source = currentAttempt
+        return ConnectionLossObservation(source, source?.let(automaticRecoveryPolicy::captureLoss))
+    }
+
+    internal fun observeConnectionLoss(
+        event: SessionEvent,
+        observation: ConnectionLossObservation = captureConnectionLossObservation()
+    ): SessionEvent {
+        val loss = event is SessionEvent.ChannelClosed || event is SessionEvent.SignalingSendFailed ||
+            event is SessionEvent.SignalingDisconnected || event is SessionEvent.WebRtcStateChanged &&
+            event.state in setOf(WebRtcConnectionState.DISCONNECTED, WebRtcConnectionState.FAILED, WebRtcConnectionState.CLOSED)
+        if (!loss) return event
+        return SessionEvent.ConnectionLossObserved(event, observation)
+    }
+
     internal fun isAttemptAuthorized(attempt: ConnectionAttempt): Boolean =
         signalingControl.isAttemptAuthorized(attempt)
 
@@ -95,7 +117,9 @@ internal class SessionOrchestrator(
     internal val pendingInboundRequest: PendingInboundRequest?
         get() = signalingControl.pendingInboundRequest
 
-    private suspend fun handle(event: SessionEvent): Boolean {
+    private suspend fun handle(queuedEvent: SessionEvent): Boolean {
+        val observedLoss = queuedEvent as? SessionEvent.ConnectionLossObserved
+        val event = observedLoss?.event ?: queuedEvent
         val previous = mutableState.value
         if (event is SessionEvent.ConfirmationAvailabilityChanged) {
             if (previous.runtimeSessionId != event.runtimeSessionId) return false
@@ -106,7 +130,7 @@ internal class SessionOrchestrator(
         } else {
             null
         }
-        val controlDecision = signalingControl.handle(previous, event, incomingPolicy)
+        val controlDecision = signalingControl.handle(previous, event, incomingPolicy, observedLoss?.observation)
         if (controlDecision != null) {
             if (!controlDecision.accepted) return false
             val next = controlDecision.state ?: previous
