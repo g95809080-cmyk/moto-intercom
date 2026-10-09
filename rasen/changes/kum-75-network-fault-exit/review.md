@@ -9,3 +9,10 @@ normal、slow、online共用helper逐条检查native ADB退出码，速度设置
 Windows PowerShell 5.1实际子进程、native .cmd mock的34个场景通过，核对每个失败位置的精确命令前缀、无后续命令、无APPLIED及参数边界。原实现红回归明确为 `normal//fail=1 emitted APPLIED after failure`，随后按原字节恢复修复版本。测试入口首次在param默认值读取PSScriptRoot失败，已将路径解析移入脚本主体并重跑34项。两脚本AST零解析错误，Rasen strict有效，diff --check通过。Windows CI执行相同进程测试并检查退出码。
 
 8/8改动路径全文审查：官方选中4项，另4个Markdown补审；实际深度见coverage.json。额外追读run-scenario.ps1的生产调用及清理。app/、ios/、version.properties与Base相同，无需重复本地产品构建。未操作手机或修改版本。
+
+
+## 远端 CI 最终记录
+
+[CI](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37929472718) 已完成success，全部3个job成功。审查源码 `65c23200d81efb44258737ed1c22f9e4258e6151`；实际CI head `2e6a9ff1e040431185c2202aed58d0fba6148e77`。实际CI head与审查源码仅Rasen审查元数据不同，已用Git逐路径核对，无产品、工具、构建或工作流差异。精确响应、job结果及差异路径见ci.json。
+
+Draft PR #48和Linear保持InReview；实机蓝牙、多应用听音、双手机按用户要求deferred，iOS排除。未合并、改版本、发布或部署。
