@@ -47,6 +47,7 @@ internal interface RiderMediaSession : Closeable {
     fun createAnswer(remoteSdpJson: String)
     fun setRemoteAnswer(remoteSdpJson: String)
     fun addRemoteIceCandidate(candidateJson: String)
+    fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
 }
 
 internal interface RiderMediaEngine : Closeable {
@@ -112,11 +113,13 @@ internal class RiderAudioEngine(
     private var gateState = voxGate.currentState()
     private var lastPublishedVoxSnapshot: Pair<VersionedAudioControls, VoxRuntimeState>? = null
     private var engineState = EngineState.INITIALIZING
-    @Volatile private var audioSuspended = false
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
     private val sessionLock = Any()
     private var activeSession: MediaSession? = null
+    private val audioIoGate = AudioIoGate(sessionLock, true,
+        { work -> runRtc(allowClosed = true, block = work) }, ::applyNativeAudioIo)
+    private val audioSuspended get() = !audioIoGate.allows(audioIoGate.revision())
 
     init {
         runRtc { initializeRtc() }
@@ -148,13 +151,9 @@ internal class RiderAudioEngine(
     }
 
     override fun suspendAudio() {
-        audioSuspended = true
-        revokeNativeProducers()
-        runRtc {
-            peerConnection?.setAudioRecording(false)
-            peerConnection?.setAudioPlayout(false)
-            audioDeviceModule?.setMicrophoneMute(true)
-            audioDeviceModule?.setSpeakerMute(true)
+        synchronized(sessionLock) {
+            audioIoGate.request(false)
+            revokeNativeProducers()
         }
     }
 
@@ -166,16 +165,20 @@ internal class RiderAudioEngine(
     }
 
     override fun resumeAudio() {
-        audioSuspended = false
-        runRtc {
-            if (engineState != EngineState.READY) return@runRtc
+        audioIoGate.request(true)
+    }
+
+    private fun applyNativeAudioIo(enabled: Boolean) {
+        if (engineState != EngineState.READY) return
+        if (!enabled) revokeNativeProducers()
+        else {
             recordingOwner.authorize(true)
             playoutOwner.authorize(true)
-            audioDeviceModule?.setMicrophoneMute(false)
-            audioDeviceModule?.setSpeakerMute(false)
-            peerConnection?.setAudioRecording(true)
-            peerConnection?.setAudioPlayout(true)
         }
+        peerConnection?.setAudioRecording(enabled)
+        peerConnection?.setAudioPlayout(enabled)
+        audioDeviceModule?.setMicrophoneMute(!enabled)
+        audioDeviceModule?.setSpeakerMute(!enabled)
     }
 
     private fun initializeRtc() {
@@ -208,11 +211,13 @@ internal class RiderAudioEngine(
         if (!isActiveSession(session)) return
         try {
             requireEngineReady()
-            if (!audioSuspended) {
-                recordingOwner.authorize(true)
-                playoutOwner.authorize(true)
+            audioIoGate.applyCurrent { enabled ->
+                if (enabled) {
+                    recordingOwner.authorize(true)
+                    playoutOwner.authorize(true)
+                }
+                createPeerConnection(session)
             }
-            createPeerConnection(session)
             attachLocalAudioTrack()
             session.state = MediaSessionState.READY
         } catch (t: Throwable) {
@@ -272,6 +277,7 @@ internal class RiderAudioEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        audioIoGate.close()
         revokeNativeProducers()
         val session = synchronized(sessionLock) {
             activeSession.also { activeSession = null }
@@ -418,14 +424,15 @@ internal class RiderAudioEngine(
             // The build patch wires the SDK's unused public callback before native encoding.
             // Keep native tracks active: this pinned native build stops capture when all tracks mute.
             .setAudioRecordDataCallback { format, channels, rate, buffer ->
+                val gate = audioIoGate.revision()
                 try {
-                    if (captureFailed.get()) PcmTransmitGate.silence(buffer)
+                    if (captureFailed.get() || !audioIoGate.allows(gate) || !recordingOwner.isCurrent(Thread.currentThread())) PcmTransmitGate.silence(buffer)
                     else {
                         ioEvidence.pcm(SystemClock.elapsedRealtime())
                         if (pcmFormatLogged.compareAndSet(false, true)) {
                             postRuntimeMain { Log.i(TAG, "ADM captured PCM format=$format rate=$rate channels=$channels") }
                         }
-                        handleCapturedPcm(format, buffer)
+                        handleCapturedPcm(format, buffer, gate)
                     }
                 } catch (error: Throwable) {
                     PcmTransmitGate.silence(buffer)
@@ -524,15 +531,15 @@ internal class RiderAudioEngine(
         setOpusBitrate(localAudioSender)
     }
 
-    private fun handleCapturedPcm(format: Int, buffer: java.nio.ByteBuffer) {
-        if (closed.get() || audioSuspended || format != AudioFormat.ENCODING_PCM_16BIT) {
+    private fun handleCapturedPcm(format: Int, buffer: java.nio.ByteBuffer, gateRevision: Long) {
+        if (closed.get() || !audioIoGate.allows(gateRevision) || format != AudioFormat.ENCODING_PCM_16BIT) {
             PcmTransmitGate.silence(buffer)
             return
         }
         val energy = PcmTransmitGate.approximateLevel(buffer)
         val now = SystemClock.elapsedRealtime()
         val result = synchronized(audioControlLock) {
-            if (closed.get() || audioSuspended) {
+            if (closed.get() || !audioIoGate.allows(gateRevision)) {
                 PcmTransmitGate.silence(buffer)
                 return
             }
@@ -540,7 +547,7 @@ internal class RiderAudioEngine(
             gateState = decision.state
             // Controls and the actual frame mutation share a lock, so an acknowledged mute
             // cannot leak a subsequent frame through a stale queued RTC task.
-            if (closed.get() || audioSuspended || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
+            if (closed.get() || !audioIoGate.allows(gateRevision) || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
                 PcmTransmitGate.silence(buffer)
             }
             VoxSampleResult(
@@ -712,6 +719,7 @@ internal class RiderAudioEngine(
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             runSession(session) {
+                session.connected = newState == PeerConnection.PeerConnectionState.CONNECTED
                 if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "PeerConnection state=$newState")
                 postSessionMain(session) {
@@ -783,6 +791,7 @@ internal class RiderAudioEngine(
 
     private fun enableRemoteTrack(session: MediaSession, track: MediaStreamTrack?) {
         if (track is AudioTrack) {
+            session.remoteTrackObserved = true
             track.setEnabled(true)
             postSessionMain(session) { session.callbacks.onRemoteAudioTrack(track) }
         }
@@ -939,6 +948,31 @@ internal class RiderAudioEngine(
     ) : RiderMediaSession {
         val closed = AtomicBoolean(false)
         @Volatile var state = MediaSessionState.INITIALIZING
+        var connected = false
+        var remoteTrackObserved = false
+        private val statsPending = AtomicBoolean(false)
+
+        override fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) {
+            if (!statsPending.compareAndSet(false, true)) return
+            runSession(this) {
+                val peer = peerConnection
+                if (peer == null) { statsPending.set(false); return@runSession }
+                val gate = audioIoGate.revision()
+                val native = ioEvidence.revision()
+                peer.getStats { report ->
+                    runSession(this) {
+                        val counters = audioRtpCounters(report.statsMap.values.map { Triple(it.id, it.type, it.members) })
+                        val result = counters?.let { RiderMediaEvidence(it, connected, remoteTrackObserved,
+                            audioIoGate.allows(gate) && ioEvidence.ready(native, SystemClock.elapsedRealtime()), gate, native) }
+                        postSessionMain(this) {
+                            statsPending.set(false)
+                            callback(result?.copy(audioIoEnabled = result.audioIoEnabled && audioIoGate.allows(gate) &&
+                                ioEvidence.ready(native, SystemClock.elapsedRealtime())))
+                        }
+                    }
+                }
+            }
+        }
 
         override fun createOffer() = this@RiderAudioEngine.createOffer(this)
 
@@ -959,6 +993,7 @@ internal class RiderAudioEngine(
                     // Revoke native producers before dispose can stop their I/O threads.
                     // Keep this enqueue ordered before any replacement session initialization.
                     revokeNativeProducers()
+                    audioIoGate.invalidate()
                     activeSession = null
                     runRtc(allowClosed = true, onFailure = ::postEngineError) {
                         disposeMediaSessionResources()

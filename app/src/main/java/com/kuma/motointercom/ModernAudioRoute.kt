@@ -24,14 +24,17 @@ internal class ModernAudioRoute(
     private val audioManager: AudioManager,
     private val callbackExecutor: Executor,
     private val onBluetoothConnected: (String) -> Unit,
-    private val onDeviceLost: () -> Unit
+    private val onDeviceLost: () -> Unit,
+    private val onDeviceChanged: () -> Unit = {}
 ) : CommunicationDeviceRoute {
     enum class RouteResult { ROUTED, NO_MATCHING_DEVICE, REJECTED }
 
     private val initialDevice = audioManager.communicationDevice
     private val closed = AtomicBoolean(false)
-    private val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
+    private val listener = AudioManager.OnCommunicationDeviceChangedListener {
         if (closed.get()) return@OnCommunicationDeviceChangedListener
+        onDeviceChanged()
+        val device = audioManager.communicationDevice
         if (isBluetooth(device)) {
             onBluetoothConnected(device?.let(::safeProductName).orEmpty())
         } else {

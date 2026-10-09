@@ -235,6 +235,81 @@ class CommunicationAudioCoordinatorTest {
         harness.coordinator.close()
     }
 
+    @Test
+    fun routeInvalidationSuspendsUntilVerificationWithoutRequestingFocusAgain() {
+        val harness = Harness()
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+        harness.coordinator.onRouteReady()
+
+        harness.coordinator.reapplyPreferredRoute()
+        assertEquals(AudioInterruptionState.RESUMING, harness.states.last())
+        assertEquals(1, harness.focus.requestCount)
+        assertEquals(2, harness.activateRouteCount)
+        assertEquals(listOf("suspend", "resume", "suspend"), harness.engine.audioOperations)
+        harness.coordinator.reapplyPreferredRoute()
+        assertEquals(2, harness.activateRouteCount)
+
+        harness.coordinator.onRouteReady()
+        assertEquals(AudioInterruptionState.NORMAL, harness.states.last())
+        assertEquals(2, harness.engine.resumeCount)
+        harness.coordinator.close()
+    }
+
+    @Test
+    fun explicitSelectionCanReplaceAnUnverifiedRouteWithoutReacquiringFocus() {
+        val harness = Harness()
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+        harness.coordinator.reapplyPreferredRoute()
+        assertEquals(1, harness.activateRouteCount)
+        harness.coordinator.reapplyPreferredRoute(force = true)
+        assertEquals(2, harness.activateRouteCount)
+        assertEquals(1, harness.focus.requestCount)
+        assertEquals(0, harness.engine.resumeCount)
+        harness.coordinator.onRouteReady()
+        assertEquals(1, harness.engine.resumeCount)
+        harness.coordinator.close()
+    }
+
+    @Test
+    fun routeEventsCannotRevivePhoneOrFocusInterruptions() {
+        for (interruption in listOf("phone", "transient", "permanent")) {
+            val harness = Harness()
+            harness.coordinator.start()
+            harness.coordinator.beginMediaSession()
+            harness.coordinator.onRouteReady()
+            when (interruption) {
+                "phone" -> harness.phone.emit(PhoneCallState.OFFHOOK)
+                "transient" -> harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+                else -> harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS)
+            }
+            val operations = harness.engine.audioOperations.toList()
+            val state = harness.states.last()
+            harness.coordinator.reapplyPreferredRoute()
+            harness.coordinator.reapplyPreferredRoute(force = true)
+            harness.coordinator.onRouteReady()
+            assertEquals(interruption, state, harness.states.last())
+            assertEquals(interruption, operations, harness.engine.audioOperations)
+            assertEquals(1, harness.activateRouteCount)
+            assertEquals(1, harness.focus.requestCount)
+            harness.coordinator.close()
+        }
+    }
+
+    @Test
+    fun routeEventsCannotBypassDelayedFocus() {
+        val harness = Harness(focusResults = listOf(AudioFocusResult.DELAYED))
+        harness.coordinator.start()
+        harness.coordinator.beginMediaSession()
+        harness.coordinator.reapplyPreferredRoute(force = true)
+        harness.coordinator.onRouteReady()
+        assertEquals(0, harness.activateRouteCount)
+        assertEquals(0, harness.engine.resumeCount)
+        assertEquals(1, harness.focus.requestCount)
+        harness.coordinator.close()
+    }
+
     private class Harness(
         initialPhoneState: PhoneCallState = PhoneCallState.IDLE,
         focusResults: List<AudioFocusResult> = emptyList()

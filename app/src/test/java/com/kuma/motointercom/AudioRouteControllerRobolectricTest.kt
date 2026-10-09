@@ -33,6 +33,130 @@ class AudioRouteControllerRobolectricTest {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val shadowAudioManager = shadowOf(audioManager)
 
+    @Test fun rejectedFirstBluetoothRequestRetriesWithoutAnotherDeviceEvent() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+        val route = DelayedCommunicationRoute().apply { result = ModernAudioRoute.RouteResult.REJECTED }
+        val connected = mutableListOf<String>(); val speakers = mutableListOf<Boolean>()
+        val controller = AudioRouteController(context, onScoConnected = connected::add,
+            onSpeakerFallback = speakers::add, modernRouteFactory = { route })
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH); drainRouteExecutor()
+            assertEquals(listOf(AudioRouteSelection.BLUETOOTH), route.requests)
+            assertTrue(speakers.isEmpty())
+            route.result = ModernAudioRoute.RouteResult.ROUTED
+            route.activateWhenRequested = { true }
+            val bluetooth = audioDevice(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+            shadowAudioManager.setAvailableCommunicationDevices(listOf(bluetooth))
+            audioManager.setCommunicationDevice(bluetooth)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500)); drainRouteExecutor()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(2, route.requests.size)
+            assertEquals(listOf("test Bluetooth"), connected)
+            assertTrue(speakers.isEmpty()); assertTrue(controller.evidence().ready)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun acceptedInactiveBluetoothHasBoundedRetriesThenVerifiedPhoneFallback() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+        val route = DelayedCommunicationRoute().apply { activateWhenRequested = { it == AudioRouteSelection.SPEAKER } }
+        val speakers = mutableListOf<Boolean>(); val connected = mutableListOf<String>()
+        val controller = AudioRouteController(context, onScoConnected = connected::add,
+            onSpeakerFallback = speakers::add, modernRouteFactory = { route })
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH); drainRouteExecutor()
+            repeat(8) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500)); drainRouteExecutor() }
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(connected.isEmpty()); assertEquals(listOf(false), speakers)
+            assertTrue(route.requests.count { it == AudioRouteSelection.BLUETOOTH } in 2..7)
+            val count = route.requests.size
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(20)); drainRouteExecutor()
+            assertEquals(count, route.requests.size)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun phoneSelectionCancelsPendingBluetoothRetryAndOldTimer() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+        val route = DelayedCommunicationRoute()
+        val controller = AudioRouteController(context, modernRouteFactory = { route })
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH); drainRouteExecutor()
+            val old = field<Runnable>(controller, "bluetoothVerificationRunnable")
+            route.activateWhenRequested = { true }
+            controller.select(AudioRouteSelection.SPEAKER); drainRouteExecutor()
+            old.run(); drainRouteExecutor()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(5)); drainRouteExecutor()
+            assertEquals(listOf(AudioRouteSelection.BLUETOOTH, AudioRouteSelection.SPEAKER), route.requests)
+            assertNull(field<Runnable?>(controller, "bluetoothVerificationRunnable"))
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun queuedBluetoothCallbackCannotUseStaleDeviceParameter() {
+        val bluetooth = audioDevice(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        val phone = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(bluetooth, phone))
+        audioManager.setCommunicationDevice(phone)
+        val connected = mutableListOf<String>(); var lost = 0
+        val route = ModernAudioRoute(audioManager, { it.run() }, connected::add, { lost++ })
+        try {
+            field<AudioManager.OnCommunicationDeviceChangedListener>(route, "listener").onCommunicationDeviceChanged(bluetooth)
+            assertTrue(connected.isEmpty()); assertEquals(1, lost)
+        } finally { route.close() }
+    }
+
+    @Test @Config(sdk = [28])
+    @Suppress("DEPRECATION")
+    fun initialStickyDisconnectAndConnectingDisconnectWaitForActualScoConnection() {
+        shadowAudioManager.setIsBluetoothScoAvailableOffCall(true)
+        context.sendStickyBroadcast(Intent(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+            .putExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_DISCONNECTED))
+        val speakers = mutableListOf<Boolean>(); val connected = mutableListOf<String>()
+        val controller = AudioRouteController(context, onScoConnected = connected::add, onSpeakerFallback = speakers::add)
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH); drainRouteExecutor()
+            shadowOf(Looper.getMainLooper()).idle(); drainRouteExecutor()
+            assertTrue(speakers.isEmpty()); assertNotNull(field<Runnable?>(controller, "legacyConnectRunnable"))
+            context.sendBroadcast(Intent(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+                .putExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_DISCONNECTED))
+            shadowOf(Looper.getMainLooper()).idle(); drainRouteExecutor()
+            assertTrue(speakers.isEmpty()); assertFalse(controller.evidence().ready)
+            context.sendBroadcast(Intent(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+                .putExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_CONNECTED))
+            shadowOf(Looper.getMainLooper()).idle(); drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, connected.size); assertNull(field<Runnable?>(controller, "legacyConnectRunnable"))
+            assertTrue(controller.evidence().ready)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test @Config(sdk = [28])
+    fun legacyScoTimeoutFallsBackAndNewSelectionInvalidatesOldDeadline() {
+        shadowAudioManager.setIsBluetoothScoAvailableOffCall(true)
+        val speakers = mutableListOf<Boolean>()
+        val controller = AudioRouteController(context, onSpeakerFallback = speakers::add)
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH); drainRouteExecutor()
+            val old = field<Runnable>(controller, "legacyConnectRunnable")
+            controller.select(AudioRouteSelection.EARPIECE); drainRouteExecutor()
+            old.run(); drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(speakers.isEmpty())
+            controller.select(AudioRouteSelection.BLUETOOTH); drainRouteExecutor()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(4_000)); drainRouteExecutor()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(false), speakers); assertTrue(controller.evidence().ready)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
+    @Test fun verifiedRouteLosesEvidenceWhenCommunicationModeChanges() {
+        val phone = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(phone))
+        val controller = AudioRouteController(context)
+        try {
+            controller.select(AudioRouteSelection.SPEAKER); drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(controller.evidence().ready)
+            audioManager.mode = AudioManager.MODE_NORMAL
+            assertFalse(controller.evidence().ready)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
     @Test
     fun bluetoothRecoveryCancelsQueuedSpeakerFallbackBeforeItCanRetakeRoute() {
         val speakerFallbacks = mutableListOf<Boolean>()
@@ -451,12 +575,15 @@ class AudioRouteControllerRobolectricTest {
     private class DelayedCommunicationRoute : CommunicationDeviceRoute {
         val requests = mutableListOf<AudioRouteSelection>()
         var activeSelection: AudioRouteSelection? = null
+        var result = ModernAudioRoute.RouteResult.ROUTED
+        var activateWhenRequested: (AudioRouteSelection) -> Boolean = { false }
 
         override fun register() = Unit
 
         override fun routeTo(selection: AudioRouteSelection): ModernAudioRoute.RouteResult {
             requests += selection
-            return ModernAudioRoute.RouteResult.ROUTED
+            if (result == ModernAudioRoute.RouteResult.ROUTED && activateWhenRequested(selection)) activeSelection = selection
+            return result
         }
 
         override fun currentName(): String? =

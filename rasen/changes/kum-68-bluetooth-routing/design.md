@@ -1,0 +1,7 @@
+路由请求使用不可变revision。Android31+在固定预算内重试setCommunicationDevice，核验系统当前通信设备与MODE_IN_COMMUNICATION；接受请求不能证明路由生效。事件读取当前系统设备，旧callback参数不能证明已连接。新事件不延长正在进行的预算；停止/手动切换清除定时器。
+
+Android28的广播在入队前捕获revision和sticky标记；初始DISCONNECTED不终止新请求，连接中断开等待有界截止，真正连接后断开才回退。CONNECTED与当前SCO状态构成证据；设置isBluetoothScoOn不能代替native连接。
+
+AudioIoGate共享engine session锁，RTC队列FIFO。每次撤权必须实际停止旧producer，保证KUM-67撤权后的线程不会被复用；只有最新grant执行，旧resume不能覆盖更新的暂停。媒体移除时失效旧stats revision。
+
+LegacyAudioReadiness只从实际route/native/PCM和双向audio RTP增长成立；路由、I/O/native revision或stream改变立即撤销。已证明后VOX静音不使它失效。Service回调使用现有media context门禁，产品状态仍由orchestrator写入，UI仅展示音频事实。
