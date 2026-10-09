@@ -402,12 +402,12 @@ final class SessionOwnershipTests: XCTestCase {
         await fulfillment(of: [started], timeout: 2)
         transport.onStart = nil
         XCTAssertEqual(session.phase, .manualActionRequired)
-        ble.runs[0].1(.state(ble.runs[0].0, .permissionBlocked(.unsupported)))
+        ble.runs[0].1(.state(ble.runs[0].0, .permissionBlocked(.restricted)))
         for _ in 0..<20 { await Task.yield() }
         XCTAssertEqual(session.phase, .manualActionRequired)
         let old = try XCTUnwrap(path.callbacks.last)
         session.finishManualNetworkSetup()
-        ble.runs[1].1(.state(ble.runs[1].0, .permissionBlocked(.unsupported)))
+        ble.runs[1].1(.state(ble.runs[1].0, .permissionBlocked(.restricted)))
         for _ in 0..<20 { await Task.yield() }
         XCTAssertEqual(session.phase, .networkReady)
         let current = try XCTUnwrap(path.callbacks.last)
