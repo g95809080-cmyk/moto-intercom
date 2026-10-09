@@ -13,11 +13,30 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import org.robolectric.android.controller.ServiceController
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class GroupServiceLifecycleTest {
     private fun field(service: IntercomService, name: String) = IntercomService::class.java.getDeclaredField(name).apply { isAccessible = true }
+    private fun destroyAndAwait(owner: ServiceController<IntercomService>) {
+        val service = owner.get()
+        val scope = field(service, "serviceScope").get(service) as CoroutineScope
+        val job = checkNotNull(scope.coroutineContext[Job])
+        val completed = CountDownLatch(1)
+        job.invokeOnCompletion { completed.countDown() }
+        val instance = PairingDatabase::class.java.getDeclaredField("instance").apply { isAccessible = true }
+        val database = instance.get(null) as? PairingDatabase
+        owner.destroy()
+        assertTrue("Actual Service coroutine scope did not finish", completed.await(5, TimeUnit.SECONDS))
+        assertTrue(job.isCompleted)
+        database?.close()
+        if (instance.get(null) === database) instance.set(null, null)
+    }
     @Test fun bindingReplaysProductStateBeforeAudioReadiness() {
         val owner = Robolectric.buildService(IntercomService::class.java).create()
         val events = mutableListOf<String>()
@@ -32,7 +51,7 @@ class GroupServiceLifecycleTest {
                 override fun onAudioReadyChanged(ready: Boolean) { events += "ready:$ready" }
             })
             assertEquals(listOf("state", "ready:true"), events)
-        } finally { owner.destroy() }
+        } finally { destroyAndAwait(owner) }
     }
     @Test fun searchFailureAndCancelPublishTerminalThroughRealServiceBeforeSynchronousRelease() {
         val owner = Robolectric.buildService(IntercomService::class.java).create()
@@ -70,7 +89,7 @@ class GroupServiceLifecycleTest {
                 runtime.writer.dispatch(GroupSessionEvent.Found(operation, emptyList()))
                 assertEquals(finalState, observed.last())
             }
-        } finally { owner.destroy() }
+        } finally { destroyAndAwait(owner) }
     }
     @Test fun restartedServiceWithoutExplicitActionHasNoRoomOrMicrophoneIntent() {
         val owner = Robolectric.buildService(IntercomService::class.java).create()
@@ -80,7 +99,7 @@ class GroupServiceLifecycleTest {
             assertNull(field(service, "groupRuntime").get(service))
             assertNull(field(service, "groupStarting").get(service))
             assertFalse(field(service, "running").getBoolean(service))
-        } finally { owner.destroy() }
+        } finally { destroyAndAwait(owner) }
     }
     @Test fun globalCleanupOwnershipBlocksLegacyEvenAfterServiceRecreation() {
         val token = GroupRuntimeOwnership.acquire()!!
@@ -92,7 +111,7 @@ class GroupServiceLifecycleTest {
             assertNull(field(service, "audioSessionController").get(service))
             assertTrue(GroupRuntimeOwnership.hasOwner())
             assertTrue(shadowOf(service).isStoppedBySelf)
-        } finally { owner.destroy(); GroupRuntimeOwnership.release(token) }
+        } finally { try { destroyAndAwait(owner) } finally { GroupRuntimeOwnership.release(token) } }
     }
     @Test fun foreignCleanupOwnerRejectsGroupStartAndStopsOnlyNewService() {
         val token = GroupRuntimeOwnership.acquire()!!
@@ -104,7 +123,7 @@ class GroupServiceLifecycleTest {
             assertTrue(shadowOf(service).isStoppedBySelf)
             assertNull(field(service, "groupRuntime").get(service))
             assertTrue(GroupRuntimeOwnership.hasOwner())
-        } finally { owner.destroy(); GroupRuntimeOwnership.release(token) }
+        } finally { try { destroyAndAwait(owner) } finally { GroupRuntimeOwnership.release(token) } }
     }
     @Test fun legacyRunningAndNativeDisposalBothBlockGroupStart() {
         val owner = Robolectric.buildService(IntercomService::class.java).create()
@@ -121,7 +140,7 @@ class GroupServiceLifecycleTest {
                 assertNull(field(service, "groupRuntime").get(service))
                 assertNull(field(service, "groupStarting").get(service))
             } finally { AudioPlatformOwnership.release(native) }
-        } finally { owner.destroy() }
+        } finally { destroyAndAwait(owner) }
     }
     @Test fun cancellingPendingIdentityLoadRevokesItsStartToken() {
         val owner = Robolectric.buildService(IntercomService::class.java).create()
@@ -131,7 +150,7 @@ class GroupServiceLifecycleTest {
             service.groupAction(GroupSessionEvent.Leave)
             assertNull(field(service, "groupStarting").get(service))
             assertNull(field(service, "groupRuntime").get(service))
-        } finally { owner.destroy() }
+        } finally { destroyAndAwait(owner) }
     }
     @Test fun permissionCallbackStartsOnlyAfterResumeAndDestroyedPageCannotRestart() {
         val app = ApplicationProvider.getApplicationContext<Application>()

@@ -329,6 +329,7 @@ class GroupControlOwnershipRobolectricTest {
     private class Peer {
         val channel = AtomicReference<GroupSocketChannel>()
         val authFinished = CountDownLatch(1); val joinReceived = CountDownLatch(1)
+        val received = LinkedBlockingQueue<GroupControl>()
     }
     private class Fixture : AutoCloseable {
         var clock = groupNowMs()
@@ -362,11 +363,22 @@ class GroupControlOwnershipRobolectricTest {
             val before = (node.writer.snapshot.view as GroupRoster).publication
             attempt.received.clear()
             val available = !node.writer.snapshot.view!!.members.single { it.lease == lease }.audioAvailable
+            val peer = peer(attempt); peer.received.clear()
             node.writer.dispatch(GroupSessionEvent.AudioAvailable(available))
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            var sent = false
+            while (!sent) {
+                val remaining = deadline - System.nanoTime()
+                assertTrue("Healthy member lost this encrypted signal", remaining > 0)
+                val control = peer.received.poll(remaining, TimeUnit.NANOSECONDS)
+                assertNotNull("Healthy member lost this encrypted signal", control)
+                idle()
+                sent = control is GroupControl.Signal && (control.frame.message as? GroupMessage.AudioAvailable)?.available == available
+            }
+            val responseDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
             var observed: GroupRoster? = null
             while (observed == null) {
-                val remaining = deadline - System.nanoTime()
+                val remaining = responseDeadline - System.nanoTime()
                 assertTrue("Healthy member lost this encrypted room update", remaining > 0)
                 val control = attempt.received.poll(remaining, TimeUnit.NANOSECONDS)
                 assertNotNull("Healthy member lost this encrypted room update", control)
@@ -424,9 +436,11 @@ class GroupControlOwnershipRobolectricTest {
                             authenticate(runtime, channel, effect.operation, effect.operation); peer.authFinished.countDown()
                         } },
                         { channel, bytes -> guarded {
-                            val joined = GroupControlCodec.decode(bytes, groupNowMs()) is GroupControl.Join
+                            val decoded = GroupControlCodec.decode(bytes, groupNowMs())
                             message(runtime, channel, bytes)
-                            if (joined) handshakes[channel.context.handshakeId]!!.joinReceived.countDown()
+                            val peer = handshakes[channel.context.handshakeId]!!
+                            if (decoded is GroupControl.Join) peer.joinReceived.countDown()
+                            peer.received.offer(decoded)
                             fixture.afterHostMessage(channel)
                         } }, { channel -> closed(runtime, channel) }, { fixture.failure.set(AssertionError("Actual host failed")) })
                     server = owner; field(runtime, "server").set(runtime, owner); owner.start()
