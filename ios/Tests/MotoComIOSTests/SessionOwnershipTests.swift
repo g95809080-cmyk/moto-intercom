@@ -393,17 +393,23 @@ final class SessionOwnershipTests: XCTestCase {
         XCTAssertFalse(controller.isTerminated); XCTAssertEqual(controller.attemptID, child); session.stop()
     }
     func testSameCommandManualDiscoveryRestartRetiresExactPathProducer() async throws {
-        let transport = TestControlTransport(); let path = TestPathDriver(); let raw = TestRawControlIO()
+        let transport = TestControlTransport(); let path = TestPathDriver(); let raw = TestRawControlIO(); let ble = TestBLESource()
         let installed = expectation(description: "inbound channel after manual restart")
-        let session = try makeSession(transport: transport, pathDriver: path) { _ in installed.fulfill(); return NWControlChannel(io: raw) }
+        let session = try makeSession(transport: transport, ble: ble, pathDriver: path) { _ in installed.fulfill(); return NWControlChannel(io: raw) }
         let started = expectation(description: "host discovery")
         transport.onStart = { started.fulfill() }
         session.prepareIOSHost()
         await fulfillment(of: [started], timeout: 2)
         transport.onStart = nil
         XCTAssertEqual(session.phase, .manualActionRequired)
+        ble.runs[0].1(.state(ble.runs[0].0, .permissionBlocked(.unsupported)))
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(session.phase, .manualActionRequired)
         let old = try XCTUnwrap(path.callbacks.last)
         session.finishManualNetworkSetup()
+        ble.runs[1].1(.state(ble.runs[1].0, .permissionBlocked(.unsupported)))
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(session.phase, .networkReady)
         let current = try XCTUnwrap(path.callbacks.last)
         let response = expectation(description: "inbound verified HELLO")
         raw.onWrite = { data in

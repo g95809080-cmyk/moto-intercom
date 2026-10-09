@@ -528,7 +528,8 @@ public final class SessionCoordinator: ObservableObject {
         }
     }
     private func recordBLEState(_ state: BLEBootstrapState) {
-        guard owner == nil else { return }
+        guard owner == nil, discoveryRun != nil, bootstrapOperation == nil,
+              phase == .discovering || phase == .permissionBlocked else { return }
         if case .permissionBlocked(let permission) = state {
             phase = .permissionBlocked; statusMessage = "蓝牙不可用（\(permission.rawValue)），无法自动准备网络"
         } else if (state == .scanning || state == .ready), phase == .permissionBlocked {
