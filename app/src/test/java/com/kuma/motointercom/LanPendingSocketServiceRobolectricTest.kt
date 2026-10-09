@@ -36,6 +36,7 @@ class LanPendingSocketServiceRobolectricTest {
                 assertEquals(0, a.pendingCount())
                 assertEquals(0, registeredCount(f))
                 assertTrue(a.session().isClosed)
+                f.awaitMain { f.actor.state.value == IntercomState.Offline }
                 assertEquals(IntercomState.Offline, f.actor.state.value)
             }
         }
