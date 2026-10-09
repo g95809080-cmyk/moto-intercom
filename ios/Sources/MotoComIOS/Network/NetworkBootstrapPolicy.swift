@@ -171,7 +171,10 @@ public final class NetworkBootstrapCoordinator {
         if let expiresAt = hotspot.expiresAt, expiresAt <= Date() { throw MotoComError.invalidField("hotspot credentials expired") }
         currentHotspot = hotspot; state = .networkPreparing
         let id = UUID(); let join = self.join
-        let task = Task { @MainActor in try await join(hotspot) }
+        let task = Task { @MainActor [weak self] in
+            guard let self, self.generation == operation, self.applyID == id else { throw CancellationError() }
+            try await join(hotspot)
+        }
         applyID = id; applyTask = task
         do {
             try await task.value

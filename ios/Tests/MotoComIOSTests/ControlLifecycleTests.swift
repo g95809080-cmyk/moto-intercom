@@ -25,13 +25,19 @@ final class TestRawControlIO: RawControlIO {
     private var writes = [Data]()
     private var senders = [(Error?) -> Void]()
     private var cancels = 0
+    private var writeHandler: ((Data) -> Void)?
+    var onWrite: ((Data) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return writeHandler }
+        set { lock.lock(); writeHandler = newValue; lock.unlock() }
+    }
     var sent: [Data] { lock.lock(); defer { lock.unlock() }; return writes }
     var cancelCount: Int { lock.lock(); defer { lock.unlock() }; return cancels }
     func receive(_ completion: @escaping (Data?, Bool, Error?) -> Void) {
         lock.lock(); receiver = completion; lock.unlock()
     }
     func send(_ data: Data, completion: @escaping (Error?) -> Void) {
-        lock.lock(); writes.append(data); senders.append(completion); lock.unlock()
+        lock.lock(); writes.append(data); senders.append(completion); let callback = writeHandler; lock.unlock()
+        callback?(data)
     }
     func cancel() { lock.lock(); cancels += 1; lock.unlock() }
     func emit(_ data: Data? = nil, complete: Bool = false, error: Error? = nil) {
@@ -128,6 +134,30 @@ final class ControlLifecycleTests: XCTestCase {
         raw.emit(try hello + frame(.connectRequest(trigger: .user, preferredTransportHint: .lan)))
         await fulfillment(of: [request], timeout: 2)
         clock.advance(to: 15)
+        XCTAssertTrue(controller.isTerminated); XCTAssertFalse(controller.accept())
+    }
+    func testResponderWaitingForRequestKeepsOriginalDeadline() async throws {
+        let raw = TestRawControlIO(); let clock = ManualSessionClock()
+        let controller = try SignalingSessionController(channel: NWControlChannel(io: raw), localIdentity: identity(), scheduler: clock)
+        let hello = expectation(description: "first HELLO")
+        controller.onHello = { _, _, _, _ in hello.fulfill() }
+        raw.emit(try frame(.hello(requestRole: .requester, nickname: "remote", deviceName: "Android", capabilities: [])))
+        await fulfillment(of: [hello], timeout: 2)
+        XCTAssertEqual(controller.phase, .awaitingConnectRequest)
+        clock.advance(to: 10)
+        XCTAssertTrue(controller.isTerminated)
+    }
+    func testLocalWinningGlareDoesNotDropOriginalHelloDeadline() async throws {
+        let raw = TestRawControlIO(); let clock = ManualSessionClock()
+        let controller = try SignalingSessionController(channel: NWControlChannel(io: raw), localIdentity: identity(), remoteDeviceID: remoteID,
+            attemptID: "00000000-0000-4000-8000-000000000020", expectedRemoteSessionID: remoteRuntime, scheduler: clock)
+        controller.startAsRequester(capabilities: [])
+        let hello = expectation(description: "requester glare")
+        controller.onHello = { _, _, _, _ in hello.fulfill() }
+        raw.emit(try frame(.hello(requestRole: .requester, nickname: "remote", deviceName: "Android", capabilities: [])))
+        await fulfillment(of: [hello], timeout: 2)
+        XCTAssertEqual(controller.phase, .requesterHelloSent)
+        clock.advance(to: 10)
         XCTAssertTrue(controller.isTerminated); XCTAssertFalse(controller.accept())
     }
 }

@@ -1,0 +1,294 @@
+import XCTest
+import Network
+@testable import MotoComIOS
+
+@MainActor
+final class TestAudioDriver: AudioSessionDriving {
+    var currentRoute: AudioRoute = .phoneSpeaker
+    var active = false
+    var permission: CheckedContinuation<Bool, Never>?
+    var permissionStarted: XCTestExpectation?
+    func requestMicrophonePermission() async -> Bool {
+        guard let started = permissionStarted else { return true }
+        return await withCheckedContinuation { permission = $0; started.fulfill() }
+    }
+    func activate() throws { active = true }
+    func deactivate() { active = false }
+}
+
+final class TestWebRTCEngine: WebRTCEngine {
+    var onStateChanged: ((WebRTCMediaState) -> Void)?
+    var onLocalOffer: ((String) -> Void)?
+    var onLocalAnswer: ((String) -> Void)?
+    var onLocalCandidate: ((String) -> Void)?
+    var onRemoteAudioTrack: (() -> Void)?
+    var onRemoteAudioFrame: (() -> Void)?
+    struct Run {
+        let state: ((WebRTCMediaState) -> Void)?
+        let offer: ((String) -> Void)?
+        let answer: ((String) -> Void)?
+        let candidate: ((String) -> Void)?
+        let track: (() -> Void)?
+        let frame: (() -> Void)?
+    }
+    var runs = [Run]()
+    var closeCount = 0
+    func start(configuration: WebRTCSessionConfiguration, offerer: Bool) throws {
+        runs.append(Run(state: onStateChanged, offer: onLocalOffer, answer: onLocalAnswer,
+            candidate: onLocalCandidate, track: onRemoteAudioTrack, frame: onRemoteAudioFrame))
+    }
+    func setRemoteOffer(_ sdpJSON: String) throws {}
+    func setRemoteAnswer(_ sdpJSON: String) throws {}
+    func addRemoteCandidate(_ candidateJSON: String) throws {}
+    func setAudioEnabled(_ enabled: Bool) {}
+    func close() { closeCount += 1; runs.last?.state?(.closed) }
+}
+
+final class TestControlTransport: IOSControlTransport {
+    var onPeerFound: ((NWEndpoint, BonjourServiceAdvertisement?) -> Void)?
+    var onConnection: ((NWConnection) -> Void)?
+    var onError: ((Error) -> Void)?
+    var completions = [(Result<NWConnection, Error>) -> Void]()
+    var starts = 0; var stops = 0
+    var cancelled = 0
+    func start(advertisement: BonjourServiceAdvertisement) throws { starts += 1 }
+    func startBrowsing() {}
+    func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
+        completions.append(completion)
+        return NetworkDialCancellation { [weak self] in self?.cancelled += 1 }
+    }
+    func stop() { stops += 1 }
+}
+
+actor TestPairingStore: PairingStoring {
+    var records = [PairingRecord]()
+    var saves = [(PairingRecord, CheckedContinuation<Void, Error>)]()
+    let saved: XCTestExpectation?
+    init(saved: XCTestExpectation? = nil) { self.saved = saved }
+    func all() -> [PairingRecord] { records }
+    func saveConnectedPeer(_ record: PairingRecord, audioReady: Bool, transport: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            saves.append((record, continuation)); saved?.fulfill()
+        }
+        records.append(record)
+    }
+    func finish(_ index: Int, error: Error? = nil) {
+        if let error { saves[index].1.resume(throwing: error) } else { saves[index].1.resume() }
+    }
+    var saveCount: Int { saves.count }
+}
+
+final class TestBLESource: BLEBootstrapSource {
+    var runs = [(UUID, @Sendable (BLEBootstrapEvent) -> Void)]()
+    var sources = [BLEBootstrapSourceLease]()
+    func start(runID: UUID, announcement: BootstrapAnnouncement, events: @escaping @Sendable (BLEBootstrapEvent) -> Void) { runs.append((runID, events)) }
+    func stop(runID: UUID) { for source in sources where source.key.runID == runID { source.revoke() } }
+    func send(_ message: BootstrapMessage, to source: BLEBootstrapSourceKey, completion: @escaping @Sendable (Result<Void, BLEBootstrapSendFailure>) -> Void) { completion(.success(())) }
+    func source(in index: Int, identifier: UUID = UUID()) -> BLEBootstrapSourceLease {
+        let source = BLEBootstrapSourceLease(key: BLEBootstrapSourceKey(runID: runs[index].0, role: .centralClient,
+            managerInstanceID: UUID(), peerIdentifier: identifier, peerInstanceID: UUID(), peerLeaseID: UUID()))
+        sources.append(source); return source
+    }
+}
+
+@MainActor
+final class SessionOwnershipTests: XCTestCase {
+    let localID = "00000000-0000-4000-8000-000000000001"
+    let localRuntime = "00000000-0000-4000-8000-000000000011"
+    let remoteID = "00000000-0000-4000-8000-000000000002"
+    let remoteRuntime = "00000000-0000-4000-8000-000000000012"
+    let attemptID = "00000000-0000-4000-8000-000000000021"
+    let sdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n"
+    func identity() throws -> StableIdentity { try StableIdentity(deviceID: localID, sessionID: localRuntime, nickname: "local", deviceName: "iPhone") }
+    func capabilities() throws -> RuntimeCapabilities { try RuntimeCapabilities(platform: .ios, platformVersion: "16", deviceName: "iPhone", capabilities: [.lan, .bleBootstrap, .wifiJoin, .iosPeerToPeer]) }
+    func remote(_ device: String? = nil, runtime: String? = nil) throws -> NearbyPeer {
+        try NearbyPeer(deviceID: device ?? remoteID, sessionID: runtime ?? remoteRuntime, nickname: "remote", deviceName: "remote", capabilities: capabilities())
+    }
+    func makeSession(engine: TestWebRTCEngine = TestWebRTCEngine(), audio: TestAudioDriver = TestAudioDriver(),
+        store: PairingStoring = TestPairingStore(), clock: ManualSessionClock = ManualSessionClock(),
+        transport: TestControlTransport = TestControlTransport(), ble: BLEBootstrapSource? = nil,
+        bootstrap: NetworkBootstrapCoordinator? = nil,
+        factory: @escaping (NWConnection) -> NWControlChannel = { NWControlChannel(connection: $0) }) throws -> SessionCoordinator {
+        try SessionCoordinator(pairingStore: store, audio: AudioSessionController(driver: audio), webRTCEngine: engine,
+            networkBootstrap: bootstrap, scheduler: clock, bleSource: ble, initialIdentity: identity(), initialCapabilities: capabilities(),
+            bonjourTransport: transport, peerToPeerTransport: TestControlTransport(), channelFactory: factory)
+    }
+    func frame(_ message: SignalingMessage, attempt: String? = nil, device: String? = nil, runtime: String? = nil) throws -> Data {
+        try LengthPrefixedFraming.encode(SignalingV2Codec().encode(SignalingEnvelope(attemptID: attempt ?? attemptID,
+            sourceDeviceID: device ?? remoteID, targetDeviceID: localID, sourceSessionID: runtime ?? remoteRuntime, message: message)))
+    }
+    func attach(_ session: SessionCoordinator, raw: TestRawControlIO, clock: ManualSessionClock, attempt: String? = nil) throws -> SignalingSessionController {
+        let controller = try SignalingSessionController(channel: NWControlChannel(io: raw), localIdentity: identity(),
+            remoteDeviceID: remoteID, attemptID: attempt ?? attemptID, expectedRemoteSessionID: remoteRuntime,
+            autoStart: false, scheduler: clock)
+        session.attachSignaling(controller, remote: try capabilities())
+        controller.startAsRequester(capabilities: []); controller.start()
+        return controller
+    }
+    func establish(_ session: SessionCoordinator, raw: TestRawControlIO, engine: TestWebRTCEngine, controller: SignalingSessionController) async throws {
+        let requestSent = expectation(description: "real CONNECT_REQUEST")
+        raw.onWrite = { data in
+            var decoder = LengthPrefixedFrameDecoder()
+            if let payload = try? decoder.append(data).first,
+               let envelope = try? SignalingV2Codec().decode(payload), case .connectRequest = envelope.message { requestSent.fulfill() }
+        }
+        raw.emit(try frame(.hello(requestRole: .responder, nickname: "remote", deviceName: "remote", capabilities: []), attempt: controller.attemptID))
+        await fulfillment(of: [requestSent], timeout: 2)
+        raw.onWrite = nil
+        raw.emit(try frame(.connectAccept(nickname: "remote", deviceName: "remote"), attempt: controller.attemptID))
+        for _ in 0..<50 where engine.runs.isEmpty { await Task.yield() }
+        XCTAssertFalse(engine.runs.isEmpty)
+        let offerSent = expectation(description: "real OFFER")
+        raw.onWrite = { data in
+            var decoder = LengthPrefixedFrameDecoder()
+            if let payload = try? decoder.append(data).first,
+               let envelope = try? SignalingV2Codec().decode(payload), case .offer = envelope.message { offerSent.fulfill() }
+        }
+        engine.runs.last?.offer?(try WebRTCSignalingCodec.encodeSessionDescription(type: "offer", sdp: sdp))
+        await fulfillment(of: [offerSent], timeout: 2)
+        raw.onWrite = nil
+        raw.emit(try frame(.answer(sdpJSON: WebRTCSignalingCodec.encodeSessionDescription(type: "answer", sdp: sdp)), attempt: controller.attemptID))
+        for _ in 0..<50 where controller.phase != .mediaNegotiating { await Task.yield() }
+        XCTAssertEqual(controller.phase, .mediaNegotiating)
+    }
+    func testConnectedIsSynchronousAndDuplicateRouteCannotDowngradeWhileSaveIsSuspended() async throws {
+        let save = expectation(description: "actual pairing save"); let store = TestPairingStore(saved: save)
+        let clock = ManualSessionClock(); let raw = TestRawControlIO(); let engine = TestWebRTCEngine(); let driver = TestAudioDriver()
+        let session = try makeSession(engine: engine, audio: driver, store: store, clock: clock)
+        let controller = try attach(session, raw: raw, clock: clock)
+        try await establish(session, raw: raw, engine: engine, controller: controller)
+        let run = try XCTUnwrap(engine.runs.last)
+        run.state?(.connected); run.track?(); run.frame?()
+        await fulfillment(of: [save], timeout: 2)
+        XCTAssertEqual(session.phase, .connected)
+        for _ in 0..<3 { session.refreshAudioRoute(); run.frame?() }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(session.phase, .connected)
+        let count = await store.saveCount; XCTAssertEqual(count, 1)
+        session.stop(); await store.finish(0)
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(session.phase, .offline); XCTAssertFalse(driver.active)
+    }
+    func testOldPairingErrorAndEngineEventsCannotEndB() async throws {
+        let save = expectation(description: "A pairing save"); let store = TestPairingStore(saved: save)
+        let clock = ManualSessionClock(); let aRaw = TestRawControlIO(); let engine = TestWebRTCEngine()
+        let session = try makeSession(engine: engine, store: store, clock: clock)
+        let a = try attach(session, raw: aRaw, clock: clock)
+        try await establish(session, raw: aRaw, engine: engine, controller: a)
+        let old = try XCTUnwrap(engine.runs.last)
+        old.state?(.connected); old.track?(); old.frame?()
+        await fulfillment(of: [save], timeout: 2)
+        session.stop()
+        let bRaw = TestRawControlIO()
+        let b = try attach(session, raw: bRaw, clock: clock, attempt: "00000000-0000-4000-8000-000000000022")
+        old.state?(.failed); old.track?(); old.frame?(); old.offer?("old SDP")
+        await store.finish(0, error: MotoComError.storageFailure("old A"))
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertFalse(b.isTerminated); XCTAssertEqual(b.phase, .requesterHelloSent)
+        XCTAssertFalse(session.audio.readiness.remoteTrackPresent)
+        XCTAssertFalse(session.statusMessage.contains("old A")); session.stop()
+    }
+    func testRemoteDisconnectAndNormalEOFCloseActualMedia() async throws {
+        for eof in [false, true] {
+            let clock = ManualSessionClock(); let raw = TestRawControlIO(); let engine = TestWebRTCEngine(); let driver = TestAudioDriver()
+            let session = try makeSession(engine: engine, audio: driver, clock: clock)
+            let controller = try attach(session, raw: raw, clock: clock)
+            try await establish(session, raw: raw, engine: engine, controller: controller)
+            let end = expectation(description: "real controller terminal")
+            let original = controller.onTerminated
+            controller.onTerminated = { error in original?(error); end.fulfill() }
+            let closes = engine.closeCount
+            if eof { raw.emit(complete: true) } else { raw.emit(try frame(.disconnect(reason: "USER_CANCELED"))) }
+            await fulfillment(of: [end], timeout: 2)
+            XCTAssertEqual(session.phase, .offline); XCTAssertFalse(driver.active); XCTAssertGreaterThan(engine.closeCount, closes)
+            session.stop()
+        }
+    }
+    func testPausedPermissionAfterStopCannotStartDiscovery() async throws {
+        let driver = TestAudioDriver(); let started = expectation(description: "permission suspended"); driver.permissionStarted = started
+        let transport = TestControlTransport(); let session = try makeSession(audio: driver, transport: transport)
+        let task = Task { await session.startDiscoveryWithPermission() }
+        await fulfillment(of: [started], timeout: 2)
+        session.stop(); driver.permission?.resume(returning: true)
+        await task.value
+        XCTAssertEqual(session.phase, .offline); XCTAssertEqual(transport.starts, 0)
+    }
+    func testActualTransportACompletionQueuedBeforeStopCannotAttachToB() async throws {
+        let transport = TestControlTransport(); let clock = ManualSessionClock()
+        let aConnection = NWConnection(host: "localhost", port: 9, using: .tcp)
+        let bConnection = NWConnection(host: "localhost", port: 9, using: .tcp)
+        let bAttached = expectation(description: "B channel factory")
+        var attached = [ObjectIdentifier]()
+        let session = try makeSession(clock: clock, transport: transport) { connection in
+            attached.append(ObjectIdentifier(connection)); if connection === bConnection { bAttached.fulfill() }
+            return NWControlChannel(io: TestRawControlIO())
+        }
+        session.startDiscovery()
+        let advertisement = try BonjourServiceAdvertisement(deviceID: remoteID, sessionID: remoteRuntime, nickname: "remote", deviceName: "remote", capabilities: [.lan])
+        transport.onPeerFound?(.hostPort(host: "localhost", port: 8890), advertisement)
+        for _ in 0..<30 where session.nearbyPeers.isEmpty { await Task.yield() }
+        session.connect(to: try remote())
+        let aCompletion = try XCTUnwrap(transport.completions.first)
+        aCompletion(.success(aConnection))
+        session.stop(); session.startDiscovery()
+        transport.onPeerFound?(.hostPort(host: "localhost", port: 8890), advertisement)
+        for _ in 0..<30 where session.nearbyPeers.isEmpty { await Task.yield() }
+        session.connect(to: try remote())
+        let bCompletion = try XCTUnwrap(transport.completions.last)
+        bCompletion(.success(bConnection))
+        await fulfillment(of: [bAttached], timeout: 2)
+        XCTAssertEqual(attached, [ObjectIdentifier(bConnection)])
+        session.stop()
+    }
+    func testHotspotSourceRevokedBeforeMainDoesNotApplyAndExactDeliveryIsAcknowledged() async throws {
+        let source = TestBLESource(); var joins = 0
+        let bootstrap = NetworkBootstrapCoordinator { _ in joins += 1 }
+        let session = try makeSession(ble: source, bootstrap: bootstrap)
+        session.startDiscovery()
+        let lease = source.source(in: 0); let acknowledged = expectation(description: "exact delivery ack")
+        let receipt = BLEBootstrapReceipt(source: lease, delivery: BLEBootstrapDeliveryLease { acknowledged.fulfill() })
+        let remote = try BootstrapAnnouncement(platform: .android, deviceID: remoteID, sessionID: remoteRuntime, capabilities: [.lan], networkRole: .host)
+        source.runs[0].1(.message(receipt, BootstrapMessage(type: .capabilities, announcement: remote)))
+        lease.revoke() // before queued Main claim
+        await fulfillment(of: [acknowledged], timeout: 2)
+        XCTAssertTrue(session.nearbyPeers.isEmpty); XCTAssertEqual(joins, 0)
+        session.stop()
+    }
+    func testJoinedOperationSurvivesExpectedBLERunRetirementButStopRejectsOldCompletion() async throws {
+        let source = TestBLESource(); let joined = expectation(description: "actual join suspended")
+        var continuation: CheckedContinuation<Void, Error>?
+        let bootstrap = NetworkBootstrapCoordinator { _ in
+            try await withCheckedThrowingContinuation { continuation = $0; joined.fulfill() }
+        }
+        let session = try makeSession(ble: source, bootstrap: bootstrap)
+        session.startDiscovery(); let lease = source.source(in: 0)
+        let announcement = try BootstrapAnnouncement(platform: .android, deviceID: remoteID, sessionID: remoteRuntime, capabilities: [.lan], networkRole: .host)
+        let announced = expectation(description: "capabilities ack")
+        source.runs[0].1(.message(BLEBootstrapReceipt(source: lease, delivery: BLEBootstrapDeliveryLease { announced.fulfill() }), BootstrapMessage(type: .capabilities, announcement: announcement)))
+        await fulfillment(of: [announced], timeout: 2)
+        let credentials = try HotspotCredentials(ssid: "test-network", security: "WPA2", password: "test-only-password")
+        source.runs[0].1(.message(BLEBootstrapReceipt(source: lease, delivery: BLEBootstrapDeliveryLease {}), BootstrapMessage(type: .hotspotReady, hotspot: credentials)))
+        await fulfillment(of: [joined], timeout: 2)
+        lease.revoke() // after synchronous transfer, not a product command
+        continuation?.resume()
+        for _ in 0..<50 where session.phase != .networkReady { await Task.yield() }
+        XCTAssertEqual(session.phase, .networkReady); XCTAssertEqual(source.runs.count, 2)
+        session.stop()
+
+        let waiting = expectation(description: "next join")
+        var oldContinuation: CheckedContinuation<Void, Error>?
+        let lateBootstrap = NetworkBootstrapCoordinator { _ in
+            try await withCheckedThrowingContinuation { oldContinuation = $0; waiting.fulfill() }
+        }
+        let otherSource = TestBLESource(); let other = try makeSession(ble: otherSource, bootstrap: lateBootstrap)
+        other.startDiscovery(); let otherLease = otherSource.source(in: 0)
+        let ack = expectation(description: "other capabilities ack")
+        otherSource.runs[0].1(.message(BLEBootstrapReceipt(source: otherLease, delivery: BLEBootstrapDeliveryLease { ack.fulfill() }), BootstrapMessage(type: .capabilities, announcement: announcement)))
+        await fulfillment(of: [ack], timeout: 2)
+        otherSource.runs[0].1(.message(BLEBootstrapReceipt(source: otherLease, delivery: BLEBootstrapDeliveryLease {}), BootstrapMessage(type: .hotspotReady, hotspot: credentials)))
+        await fulfillment(of: [waiting], timeout: 2)
+        other.stop(); oldContinuation?.resume(throwing: MotoComError.unavailable("old hotspot"))
+        for _ in 0..<30 { await Task.yield() }
+        XCTAssertEqual(other.phase, .offline); XCTAssertFalse(other.statusMessage.contains("old hotspot"))
+    }
+}

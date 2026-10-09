@@ -32,6 +32,7 @@ public final class NWControlChannel: @unchecked Sendable {
     private var envelopeHandler: ((SignalingEnvelope) -> Void)?
     private var closeHandler: ((Error?) -> Void)?
     private var partialDeadline: DispatchWorkItem?
+    private var awaitingDelivery: UInt64?
 
     public var onEvent: ((UInt64, ControlChannelEvent) -> Void)? {
         get { owned { eventHandler } } set { owned { eventHandler = newValue } }
@@ -100,6 +101,12 @@ public final class NWControlChannel: @unchecked Sendable {
         }
     }
     public func close() { owned { finish(nil) } }
+    public func acknowledge(_ deliveredSequence: UInt64) {
+        owned {
+            guard !terminal, !closing, awaitingDelivery == deliveredSequence else { return }
+            awaitingDelivery = nil; receiveNext()
+        }
+    }
     private func emit(_ event: ControlChannelEvent) {
         sequence += 1
         eventHandler?(sequence, event)
@@ -113,15 +120,21 @@ public final class NWControlChannel: @unchecked Sendable {
         emit(.closed(error)); closeHandler?(error)
     }
     private func receiveNext() {
-        guard !terminal, !closing else { return }
+        guard !terminal, !closing, awaitingDelivery == nil else { return }
         io.receive { [weak self] data, complete, error in
             self?.queue.async { [weak self] in
                 guard let self, !self.terminal, !self.closing else { return }
                 do {
                     if let data, !data.isEmpty {
+                        guard data.count <= LengthPrefixedFraming.maxFrameBytes + 4 else {
+                            throw MotoComError.invalidFrame("raw control read exceeds bound")
+                        }
                         let frames = try self.decoder.append(data)
                         let envelopes = try frames.map { try self.codec.decode($0) }
-                        if !envelopes.isEmpty { self.emit(.envelopes(envelopes)) }
+                        if !envelopes.isEmpty {
+                            self.awaitingDelivery = self.sequence + 1
+                            self.emit(.envelopes(envelopes))
+                        }
                         for (frame, envelope) in zip(frames, envelopes) {
                             self.frameHandler?(frame); self.envelopeHandler?(envelope)
                         }

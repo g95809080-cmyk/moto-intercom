@@ -48,7 +48,7 @@ public final class SignalingSessionController {
     private var helloTimeout: SessionDeadlineToken?
     private var confirmationTimeout: SessionDeadlineToken?
     private var confirmationDeadline: TimeInterval?
-    private var helloVerified = false
+    public private(set) var handshakeComplete = false
     private var nextEvent: UInt64 = 1
     private var queuedEvents = [UInt64: ControlChannelEvent]()
     private var pendingLocalCandidates = [Data]()
@@ -89,7 +89,7 @@ public final class SignalingSessionController {
             }
         }
         helloTimeout = resolvedScheduler.schedule(at: self.helloDeadline) { [weak self] in
-            guard let self, !self.helloVerified else { return }
+            guard let self, !self.handshakeComplete else { return }
             self.fail(MotoComError.unavailable("TCP/HELLO deadline exceeded"))
         }
         if autoStart { channel.start() }
@@ -124,7 +124,9 @@ public final class SignalingSessionController {
     }
 
     public func sendConnectRequest(trigger: RequestTrigger = .user) {
-        if send(.connectRequest(trigger: trigger, preferredTransportHint: .lan)) { scheduleConfirmationTimeout() }
+        if send(.connectRequest(trigger: trigger, preferredTransportHint: .lan)) {
+            finishHandshake(); scheduleConfirmationTimeout()
+        }
     }
 
     @discardableResult
@@ -183,18 +185,20 @@ public final class SignalingSessionController {
         guard !isTerminated, sequence >= nextEvent else { return }
         queuedEvents[sequence] = event
         while !isTerminated, let pending = queuedEvents.removeValue(forKey: nextEvent) {
+            let delivered = nextEvent
             nextEvent += 1
             switch pending {
             case .envelopes(let envelopes):
                 for envelope in envelopes where !isTerminated { receive(envelope) }
             case .closed(let error): terminate(error)
             }
+            channel.acknowledge(delivered)
         }
     }
 
     private func receive(_ envelope: SignalingEnvelope) {
         guard !isTerminated else { return }
-        if !helloVerified, scheduler.now >= helloDeadline {
+        if !handshakeComplete, scheduler.now >= helloDeadline {
             fail(MotoComError.unavailable("TCP/HELLO deadline exceeded")); return
         }
         if let deadline = confirmationDeadline,
@@ -270,8 +274,6 @@ public final class SignalingSessionController {
                 terminate(MotoComError.unavailable("another session owns media"), finalMessage: .busy(reason: "ALREADY_CONNECTED", retryAfterMilliseconds: nil))
                 return
             }
-            helloVerified = true
-            helloTimeout?.cancel(); helloTimeout = nil
             remoteNickname = nickname ?? ""
             remoteDeviceName = deviceName ?? ""
             remoteCapabilities = capabilities
@@ -295,6 +297,7 @@ public final class SignalingSessionController {
                 onReadyToRequest?()
             }
         case .connectRequest:
+            finishHandshake()
             syncPhase()
             onIncomingRequest?()
             if machine.phase == .awaitingLocalDecision {
@@ -450,5 +453,10 @@ public final class SignalingSessionController {
                 finalMessage: self.machine.phase == .awaitingLocalDecision
                     ? .connectReject(reason: .timeout, retryable: false) : .disconnect(reason: "CONFIRMATION_TIMEOUT"))
         }
+    }
+
+    private func finishHandshake() {
+        handshakeComplete = true
+        helloTimeout?.cancel(); helloTimeout = nil
     }
 }

@@ -30,7 +30,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MotoComIOSTests",
-            dependencies: ["MotoComIOS"],
+            dependencies: nativeValidation ? ["MotoComIOS", "WebRTC"] : ["MotoComIOS"],
             path: "Tests/MotoComIOSTests",
             resources: [
                 .copy("Fixtures")

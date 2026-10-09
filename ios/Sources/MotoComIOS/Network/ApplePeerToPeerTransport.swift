@@ -29,7 +29,7 @@ public final class ApplePeerToPeerTransport: ApplePeerToPeerTransporting, IOSCon
     public func connect(to endpoint: NWEndpoint, completion: @escaping (Result<NWConnection, Error>) -> Void) {
         connect(to: endpoint, includePeerToPeer: true, completion: completion)
     }
-    public func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) {
+    @discardableResult public func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
         core.connect(to: endpoint, includePeerToPeer: includePeerToPeer, completion: completion)
     }
     public func stop() { core.stop() }

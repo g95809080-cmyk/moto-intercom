@@ -2,13 +2,23 @@ import Foundation
 #if canImport(Network)
 import Network
 
+public protocol IOSConnectionCancellation: AnyObject { func cancel() }
+/// Only the once-only cancellation closure is shared. Execute it after unlock;
+/// the registry still checks exact Entry identity on its own queue.
+final class NetworkDialCancellation: IOSConnectionCancellation, @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (() -> Void)?
+    init(_ action: @escaping () -> Void) { self.action = action }
+    func cancel() { lock.lock(); let action = self.action; self.action = nil; lock.unlock(); action?() }
+}
+
 public protocol IOSControlTransport: AnyObject {
     var onPeerFound: ((NWEndpoint, BonjourServiceAdvertisement?) -> Void)? { get set }
     var onConnection: ((NWConnection) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
     func start(advertisement: BonjourServiceAdvertisement) throws
     func startBrowsing()
-    func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void)
+    @discardableResult func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation
     func stop()
 }
 
@@ -86,15 +96,15 @@ final class NetworkTransportCore: @unchecked Sendable {
             self.browser = browser; browser.start(queue: queue)
         }
     }
-    func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) {
+    @discardableResult func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
         owned {
             let parameters = NWParameters.tcp; parameters.includePeerToPeer = includePeerToPeer
-            track(NWConnection(to: endpoint, using: parameters), epoch: epoch, completion: completion)
+            return track(NWConnection(to: endpoint, using: parameters), epoch: epoch, completion: completion)
         }
     }
-    private func track(_ connection: NWConnection, epoch run: UUID, completion: @escaping (Result<NWConnection, Error>) -> Void) {
+    @discardableResult private func track(_ connection: NWConnection, epoch run: UUID, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
         guard run == epoch, entries.count < 8 else {
-            connection.cancel(); completion(.failure(MotoComError.unavailable("connection admission is closed"))); return
+            connection.cancel(); completion(.failure(MotoComError.unavailable("connection admission is closed"))); return NetworkDialCancellation {}
         }
         let id = ObjectIdentifier(connection); let entry = Entry(connection, run, completion)
         entries[id] = entry // pending registration precedes start and every callback
@@ -117,6 +127,10 @@ final class NetworkTransportCore: @unchecked Sendable {
         entry.timeout = timeout
         queue.asyncAfter(deadline: .now() + .seconds(10), execute: timeout)
         connection.start(queue: queue)
+        return NetworkDialCancellation { [weak self, weak entry] in
+            guard let self, let entry else { return }
+            self.owned { self.remove(entry, error: MotoComError.unavailable("dial revoked")) }
+        }
     }
     private func remove(_ entry: Entry, error: Error) {
         let id = ObjectIdentifier(entry.connection)

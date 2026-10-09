@@ -126,7 +126,7 @@ public final class BonjourTransport: IOSControlTransport, @unchecked Sendable {
         try core.startListener(serviceName: "motocom-\(advertisement.deviceID.prefix(8))", txtRecord: advertisement.txtRecord())
     }
     public func startBrowsing() { core.startBrowsing(includePeerToPeer: false) }
-    public func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool = true, completion: @escaping (Result<NWConnection, Error>) -> Void) {
+    @discardableResult public func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool = true, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
         core.connect(to: endpoint, includePeerToPeer: includePeerToPeer, completion: completion)
     }
     public func stop() { core.stop() }

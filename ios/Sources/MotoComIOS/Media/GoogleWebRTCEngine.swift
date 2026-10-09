@@ -177,6 +177,19 @@ public final class GoogleWebRTCEngine: NSObject, WebRTCEngine {
         }
     }
 
+    #if MOTOCOM_REQUIRE_NATIVE_WEBRTC
+    // CI-only ingress receipt retains the real old PC and its native delegate.
+    // It exercises production revocation without enabling a microphone or
+    // treating an injected callback as actual decoded audio evidence.
+    func nativeValidationReceipt() -> (RTCPeerConnection, RTCPeerConnectionDelegate, () -> Void)? {
+        owned {
+            guard let run = current, let pc = run.connection, let delegate = run.delegate else { return nil }
+            return (pc, delegate, { [weak self] in self?.ingress(run, pc) { $0.callbacks.frame?() } })
+        }
+    }
+    func waitForNativeIngress() { owned {} }
+    #endif
+
     private final class PeerDelegate: NSObject, RTCPeerConnectionDelegate {
         weak var owner: GoogleWebRTCEngine?
         weak var run: Run?

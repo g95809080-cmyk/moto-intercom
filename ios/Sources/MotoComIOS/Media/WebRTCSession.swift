@@ -362,9 +362,9 @@ public final class WebRTCSessionCoordinator {
         runID = run
         bindCallbacks(run: run)
         audio.clearRemoteAudio()
-        try audio.activate()
         state = .negotiating
         do {
+            try audio.activate()
             try engine.start(configuration: configuration, offerer: offerer)
         } catch {
             runID = nil

@@ -40,7 +40,9 @@ public final class SessionCoordinator: ObservableObject {
         let runtime: String?
         let wireAttempt: String
         let deadline: TimeInterval
+        let createdAt = ProcessInfo.processInfo.systemUptime
         var controller: SignalingSessionController?
+        var dial: IOSConnectionCancellation?
         var timeout: SessionDeadlineToken?
         var transport: NetworkPath
         var helloVerified = false
@@ -129,6 +131,7 @@ public final class SessionCoordinator: ObservableObject {
         let old = owner; owner = nil
         old?.timeout?.cancel(); old?.timeout = nil
         let inbound = Array(pendingInbound.values); pendingInbound.removeAll()
+        old?.dial?.cancel(); old?.dial = nil
         old?.controller?.close(reason: reason)
         for controller in inbound { controller.close(reason: reason) }
         webRTC.close(); remoteCapabilities = nil
@@ -137,6 +140,7 @@ public final class SessionCoordinator: ObservableObject {
         guard isCurrent(attempt) else { return }
         owner = nil
         attempt.timeout?.cancel(); attempt.timeout = nil
+        attempt.dial?.cancel(); attempt.dial = nil
         attempt.controller?.close(reason: "SESSION_TERMINATED")
         webRTC.close(); remoteCapabilities = nil
         self.phase = phase; statusMessage = message
@@ -222,11 +226,16 @@ public final class SessionCoordinator: ObservableObject {
                 }
             }
         }
+        bindPathMonitor(command: ticket)
+    }
+    private func bindPathMonitor(command ticket: UInt64) {
+        monitor?.cancel()
         let pathMonitor = NWPathMonitor(); monitor = pathMonitor
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let usable = path.status == .satisfied
+            let observedAt = ProcessInfo.processInfo.systemUptime
             Task { @MainActor [weak self] in
-                guard let self, self.discoveryRun == run, !usable, let attempt = self.owner else { return }
+                guard let self, self.command == ticket, !usable, let attempt = self.owner, observedAt >= attempt.createdAt else { return }
                 self.end(attempt, phase: .recovering, message: "网络路径已变化，对讲连接已暂停")
             }
         }
@@ -271,6 +280,7 @@ public final class SessionCoordinator: ObservableObject {
         let lan = discoveredEndpoints[peer.deviceID].flatMap { $0.runtime == peer.sessionID ? $0.endpoint : nil }
         let p2p = discoveredPeerToPeerEndpoints[peer.deviceID].flatMap { $0.runtime == peer.sessionID ? $0.endpoint : nil }
         let ticket = beginCommand(preserveDiscovery: true)
+        bindPathMonitor(command: ticket)
         selectedTarget = (peer.deviceID, peer.sessionID)
         guard let endpoint = lan ?? p2p, let identity, let local = runtimeCapabilities else {
             phase = .failed; statusMessage = "尚未获得 " + peer.deviceName + " 的当前 TCP 端点，请重新发现"; return
@@ -287,7 +297,7 @@ public final class SessionCoordinator: ObservableObject {
     private func armDeadline(_ attempt: Attempt) {
         attempt.timeout?.cancel()
         attempt.timeout = scheduler.schedule(at: attempt.deadline) { [weak self, weak attempt] in
-            guard let self, let attempt, self.isCurrent(attempt), !attempt.helloVerified else { return }
+            guard let self, let attempt, self.isCurrent(attempt), attempt.controller?.handshakeComplete != true else { return }
             self.end(attempt, phase: .failed, message: "TCP/HELLO 超时")
         }
     }
@@ -316,7 +326,8 @@ public final class SessionCoordinator: ObservableObject {
             }
         }
         let transport = attempt.transport == .applePeerToPeer ? peerToPeerTransport : bonjourTransport
-        transport.connect(to: endpoint, includePeerToPeer: attempt.transport == .applePeerToPeer, completion: completion)
+        attempt.dial?.cancel()
+        attempt.dial = transport.connect(to: endpoint, includePeerToPeer: attempt.transport == .applePeerToPeer, completion: completion)
     }
     public func attachSignaling(_ controller: SignalingSessionController, remote: RuntimeCapabilities? = nil) {
         guard !controller.isTerminated, owner == nil else { controller.close(reason: "BUSY"); return }
@@ -344,17 +355,17 @@ public final class SessionCoordinator: ObservableObject {
         if let old = owner {
             if old.controller === controller {
                 guard old.device == device, old.runtime == nil || old.runtime == runtime else { return false }
-                old.helloVerified = true; old.timeout?.cancel(); old.timeout = nil; return true
+                old.helloVerified = true; return true
             }
             guard !old.mediaStarted, !old.connected, old.device == device, old.runtime == runtime,
                   scheduler.now < old.deadline, let local = identity else { return false }
-            let localKey = [old.wireAttempt, local.deviceID, local.sessionID, device]
+            let localKey = [old.controller?.attemptID ?? old.wireAttempt, local.deviceID, local.sessionID, device]
             let remoteKey = [attemptID, device, runtime, local.deviceID]
             guard remoteKey.lexicographicallyPrecedes(localKey) else { return false }
             let replacement = Attempt(command: ticket, device: device, runtime: runtime, wireAttempt: attemptID,
                 deadline: old.deadline, transport: old.transport)
             replacement.controller = controller; replacement.helloVerified = true
-            owner = replacement; old.timeout?.cancel(); old.controller?.close(reason: "GLARE_LOST")
+            owner = replacement; old.timeout?.cancel(); old.dial?.cancel(); old.dial = nil; old.controller?.close(reason: "GLARE_LOST")
         } else {
             if let selectedTarget, selectedTarget.device != device || selectedTarget.runtime != runtime { return false }
             let incoming = Attempt(command: ticket, device: device, runtime: runtime, wireAttempt: attemptID, deadline: deadline, transport: .commonLAN)
