@@ -3,4 +3,4 @@
 - [x] 3. 修补pending socket与绝对HELLO预算
 - [x] 4. 修补进程清理与迟到确认/请求回执/Presence，完成adoption/glare/terminal撤权排序
 - [x] 5. 回归、完整本地门禁及固定SHA独立审查
-- [ ] 6. Draft PR/CI及实机deferred边界记录（待远端CI；实机已明确deferred）
+- [x] 6. 独立 Draft PR #44 与远端CI全部job成功；实机听音按用户要求deferred，非实机验收通过

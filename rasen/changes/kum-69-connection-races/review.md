@@ -13,3 +13,10 @@ Base SHA `d0655b5ae736a9c85c0a0f92688408e411a8c8b0`；源码/测试 Head SHA `58
 完整门禁：88 suites / 671 JVM tests，failure/error/skipped=0；Lint 0 errors / 70 warnings；Debug 与 AndroidTest APK 构建成功 1m48s。Lineage 五项使用真实 TCP HELLO、actor 和实际媒体 owner 选择，但 CONNECTED 通知由测试注入；Service 三项保持原 effect collector，覆盖真实 HELLO、lease 移交、实际 reader EOF/writer failure 和实际 Abort 投递。Activity 回归使用 fresh A/B IDs，覆盖同目标、异目标、adopt-first 撤权及物理清理先完成的顺序。
 
 API 36 原生 OK (27 tests) /10.341s；adaf06f 到最终 Head 仅增加 JVM 测试，app/src/main 与 app/src/androidTest 完全相同，复用其原生证据。缺少 peer 的网络探针按原 assumption 跳过；不据此声称双机、Wi-Fi P2P 射频或蓝牙听音验收通过。没有改发行版本、合并、发布或部署。
+
+
+## 远端 CI 最终记录
+
+[CI](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37915204711) 已完成success，全部2个job成功。审查源码 `58fa051c61a2d367322c07917a09859aa94768a3`；实际CI head `579b6415496bfd8ca8700618106e16257ee9ae0a`。实际CI head与审查源码仅Rasen审查元数据不同，已用Git逐路径核对，无产品、工具、构建或工作流差异。精确响应、job结果及差异路径见ci.json。
+
+Draft PR #44和Linear保持InReview；实机蓝牙、多应用听音、双手机按用户要求deferred，iOS排除。未合并、改版本、发布或部署。
