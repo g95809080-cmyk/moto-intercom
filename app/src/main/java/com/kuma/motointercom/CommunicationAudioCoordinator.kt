@@ -333,6 +333,7 @@ internal class CommunicationAudioCoordinator(
     private var mediaActive = false
     private var phoneCallState = PhoneCallState.IDLE
     private var awaitingRoute = false
+    private var awaitingFocusGain = false
     private var resumePromptPending = false
     private var state = AudioInterruptionState.NORMAL
     private var retryRunnable: Runnable? = null
@@ -377,10 +378,11 @@ internal class CommunicationAudioCoordinator(
             if (!mediaActive) return
             mediaActive = false
             awaitingRoute = false
+            awaitingFocusGain = false
             resumePromptPending = false
             cancelRetry()
             audioFocus.abandon()
-            route.suspendForInterruption(restoreMode = false)
+            route.suspendForInterruption(restoreMode = phoneCallState == PhoneCallState.IDLE)
             engine.suspendAudio()
             publish(
                 if (phoneCallState == PhoneCallState.IDLE) {
@@ -443,15 +445,25 @@ internal class CommunicationAudioCoordinator(
             phoneCallState
         }
         when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                if (phoneState == PhoneCallState.IDLE) suspendForFocus(permanent = true)
+            }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 if (phoneState == PhoneCallState.IDLE) {
-                    suspendForFocus()
+                    suspendForFocus(permanent = false)
                 } else {
                     publish(phoneStateToInterruption(phoneState))
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                if (phoneState == PhoneCallState.IDLE) requestFocusAndRoute()
+                synchronized(lock) {
+                    if (phoneState == PhoneCallState.IDLE && awaitingFocusGain) {
+                        awaitingFocusGain = false
+                        cancelRetry()
+                        publish(AudioInterruptionState.RESUMING)
+                        activateAuthorizedRoute()
+                    }
+                }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> Unit
         }
@@ -461,6 +473,7 @@ internal class CommunicationAudioCoordinator(
         synchronized(lock) {
             cancelRetry()
             awaitingRoute = false
+            awaitingFocusGain = false
             resumePromptPending = true
             audioFocus.abandon()
             route.suspendForInterruption(restoreMode = false)
@@ -469,13 +482,16 @@ internal class CommunicationAudioCoordinator(
         }
     }
 
-    private fun suspendForFocus() {
+    private fun suspendForFocus(permanent: Boolean) {
         synchronized(lock) {
+            if (closed.get() || !mediaActive || phoneCallState != PhoneCallState.IDLE) return
             cancelRetry()
             awaitingRoute = false
+            awaitingFocusGain = !permanent
             resumePromptPending = true
-            audioFocus.abandon()
-            route.suspendForInterruption(restoreMode = false)
+            // Transient loss stays on the focus stack so Android can grant it back.
+            if (permanent) audioFocus.abandon()
+            route.suspendForInterruption(restoreMode = true)
             engine.suspendAudio()
             publish(AudioInterruptionState.FOCUS_LOST)
         }
@@ -485,6 +501,7 @@ internal class CommunicationAudioCoordinator(
         synchronized(lock) {
             if (closed.get() || !mediaActive || phoneCallState != PhoneCallState.IDLE) return
             cancelRetry()
+            awaitingFocusGain = false
             publish(AudioInterruptionState.RESUMING)
             when (val focusResult = audioFocus.request()) {
                 AudioFocusResult.GRANTED -> {
@@ -493,17 +510,29 @@ internal class CommunicationAudioCoordinator(
                         audioFocus.abandon()
                         return
                     }
-                    engine.suspendAudio()
-                    awaitingRoute = true
-                    activateRoute()
+                    activateAuthorizedRoute()
                 }
-                AudioFocusResult.DELAYED,
-                AudioFocusResult.FAILED -> {
+                AudioFocusResult.DELAYED -> {
+                    awaitingRoute = false
+                    awaitingFocusGain = true
                     engine.suspendAudio()
+                    route.suspendForInterruption(restoreMode = true)
+                }
+                AudioFocusResult.FAILED -> {
+                    awaitingRoute = false
+                    engine.suspendAudio()
+                    route.suspendForInterruption(restoreMode = true)
                     scheduleRetry()
                 }
             }
         }
+    }
+
+    private fun activateAuthorizedRoute() {
+        if (closed.get() || !mediaActive || phoneCallState != PhoneCallState.IDLE) return
+        engine.suspendAudio()
+        awaitingRoute = true
+        activateRoute()
     }
 
     private fun scheduleRetry() {
@@ -548,12 +577,13 @@ internal class CommunicationAudioCoordinator(
             mediaActive = false
             cancelRetry()
             awaitingRoute = false
+            awaitingFocusGain = false
             resumePromptPending = false
         }
         phoneState.close()
         audioFocus.close()
         audioPrompt.close()
-        route.suspendForInterruption(restoreMode = false)
+        route.suspendForInterruption(restoreMode = phoneCallState == PhoneCallState.IDLE)
         engine.suspendAudio()
     }
 

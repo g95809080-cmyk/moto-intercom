@@ -79,7 +79,7 @@ class CommunicationAudioCoordinatorTest {
     }
 
     @Test
-    fun delayedFocusRetriesThenWaitsForRouteBeforeResuming() {
+    fun delayedFocusWaitsForSystemGainWithoutReRequestingOrResumingEarly() {
         val harness = Harness(
             focusResults = listOf(AudioFocusResult.DELAYED, AudioFocusResult.GRANTED)
         )
@@ -91,9 +91,13 @@ class CommunicationAudioCoordinatorTest {
         assertEquals(0, harness.activateRouteCount)
         assertEquals(1, harness.engine.suspendCount)
 
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_000L))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(10))
+        harness.coordinator.onRouteReady()
+        assertEquals(1, harness.focus.requestCount)
+        assertEquals(0, harness.engine.resumeCount)
+        harness.focus.emit(AudioManager.AUDIOFOCUS_GAIN)
 
-        assertEquals(2, harness.focus.requestCount)
+        assertEquals(1, harness.focus.requestCount)
         assertEquals(1, harness.activateRouteCount)
         assertEquals(2, harness.engine.suspendCount)
         assertEquals(0, harness.engine.resumeCount)
@@ -149,10 +153,12 @@ class CommunicationAudioCoordinatorTest {
         harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
         assertEquals(AudioInterruptionState.FOCUS_LOST, harness.states.last())
         assertEquals(2, harness.engine.suspendCount)
+        assertEquals(0, harness.focus.abandonCount)
+        assertEquals(listOf(true), harness.route.restoreModes)
 
         harness.focus.emit(AudioManager.AUDIOFOCUS_GAIN)
         assertEquals(AudioInterruptionState.RESUMING, harness.states.last())
-        assertEquals(2, harness.focus.requestCount)
+        assertEquals(1, harness.focus.requestCount)
         assertEquals(2, harness.activateRouteCount)
         assertEquals(1, harness.engine.resumeCount)
 
@@ -189,7 +195,7 @@ class CommunicationAudioCoordinatorTest {
     }
 
     @Test
-    fun permanentFocusLossDoesNotSuspendIntercom() {
+    fun permanentFocusLossReleasesRouteAndDoesNotResumeOnStaleGain() {
         val harness = Harness()
         harness.coordinator.start()
         harness.coordinator.beginMediaSession()
@@ -198,8 +204,15 @@ class CommunicationAudioCoordinatorTest {
 
         harness.focus.emit(AudioManager.AUDIOFOCUS_LOSS)
 
-        assertEquals(AudioInterruptionState.NORMAL, harness.states.last())
-        assertEquals(suspendCount, harness.engine.suspendCount)
+        assertEquals(AudioInterruptionState.FOCUS_LOST, harness.states.last())
+        assertEquals(suspendCount + 1, harness.engine.suspendCount)
+        assertEquals(1, harness.focus.abandonCount)
+        assertEquals(listOf(true), harness.route.restoreModes)
+        harness.focus.emit(AudioManager.AUDIOFOCUS_GAIN)
+        harness.coordinator.onRouteReady()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(10))
+        assertEquals(1, harness.engine.resumeCount)
+        assertEquals(1, harness.focus.requestCount)
         harness.coordinator.close()
     }
 
@@ -210,6 +223,7 @@ class CommunicationAudioCoordinatorTest {
         harness.coordinator.beginMediaSession()
         harness.coordinator.onRouteReady()
         harness.coordinator.endMediaSession()
+        assertEquals(listOf(true), harness.route.restoreModes)
 
         val resumeCount = harness.engine.resumeCount
         val activateCount = harness.activateRouteCount
@@ -268,11 +282,13 @@ class CommunicationAudioCoordinatorTest {
 
     private class FakeRoute : RiderAudioRoute {
         var suspendCount = 0
+        val restoreModes = mutableListOf<Boolean>()
 
         override fun select(selection: AudioRouteSelection) = Unit
 
         override fun suspendForInterruption(restoreMode: Boolean) {
             suspendCount++
+            restoreModes += restoreMode
         }
 
         override fun close() = Unit
