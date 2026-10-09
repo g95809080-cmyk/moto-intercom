@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: 音频焦点等待和释放
 音频控制 SHALL 在 transient loss 保留系统焦点等待，在 delayed grant 等待真实 GAIN，在 permanent loss 释放路由且不处理迟到 GAIN；媒体结束 SHALL 释放本应用通信模式，电话优先不覆盖系统电话模式。
