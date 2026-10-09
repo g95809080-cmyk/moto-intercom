@@ -123,7 +123,7 @@ class GroupControlOwnershipRobolectricTest {
             val attempt = f.join(a)
             try {
                 await(attempt.authFinished)
-                val peer = f.host.peers[a.endpoint.deviceId]!!; await(peer.authFinished)
+                val peer = f.peer(attempt); await(peer.authFinished)
                 idle(); await(held)
                 val channel = peer.channel.get()
                 val queue = checkNotNull(f.host.ingress()[channel.id])
@@ -274,7 +274,15 @@ class GroupControlOwnershipRobolectricTest {
             f.host.peers[a.endpoint.deviceId]!!.channel.get().send {
                 GroupControlCodec.encode(GroupControl.Terminated(GroupTermination.HOST_ENDED), groupNowMs())
             }
-            assertNotNull(attempt.received.poll(3, TimeUnit.SECONDS))
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            var terminal = false
+            while (!terminal) {
+                val remaining = deadline - System.nanoTime()
+                assertTrue("Actual encrypted termination did not reach ingress", remaining > 0)
+                val control = attempt.received.poll(remaining, TimeUnit.NANOSECONDS)
+                assertNotNull("Actual encrypted termination did not reach ingress", control)
+                terminal = control is GroupControl.Terminated && control.reason == GroupTermination.HOST_ENDED
+            }
             val queue = checkNotNull(a.ingress()[attempt.channel.get().id])
             attempt.channel.get().close(); attempt.awaitWorker(); idle()
             assertEquals(before, a.events.count { it is GroupSessionEvent.Control })
@@ -329,7 +337,8 @@ class GroupControlOwnershipRobolectricTest {
         var afterHostMessage: (GroupSocketChannel) -> Unit = {}
         var beforeHostAuthentication: (GroupSocketChannel) -> Unit = {}
         val host = Node(this, true).also { nodes += it; it.writer.dispatch(GroupSessionEvent.Create) }
-        fun newClient() = Node(this, false).also { nodes += it; host.peers[it.endpoint.deviceId] = Peer() }
+        fun newClient() = Node(this, false).also { nodes += it }
+        fun peer(attempt: Attempt) = host.handshakes.computeIfAbsent(attempt.channel.get().context.handshakeId) { Peer() }
         fun join(node: Node, holdAuth: Boolean = false): Attempt {
             node.nextHoldAuth = holdAuth
             node.writer.dispatch(GroupSessionEvent.Search(host.writer.snapshot.code!!))
@@ -341,7 +350,7 @@ class GroupControlOwnershipRobolectricTest {
             GroupNetworkDescriptor(GroupWifiCredentials("DIRECT-fixture", "12345678"), "127.0.0.1", host.server!!.localPort))
         fun joinHealthy() = newClient().also { finishJoin(it, join(it)) }
         fun finishJoin(node: Node, attempt: Attempt) {
-            await(attempt.authFinished); val peer = host.peers[node.endpoint.deviceId]!!; await(peer.authFinished)
+            await(attempt.authFinished); val peer = peer(attempt); await(peer.authFinished)
             idle(); await(peer.joinReceived); idle()
             assertNotNull("Actual AEAD Welcome missing", attempt.received.poll(3, TimeUnit.SECONDS)); idle()
             assertEquals(GroupPhase.IN_ROOM, node.writer.snapshot.phase); assertNotNull(node.writer.snapshot.local)
@@ -352,8 +361,8 @@ class GroupControlOwnershipRobolectricTest {
             val attempt = node.attempts.last(); assertFalse(attempt.channel.get().isClosed)
             val before = (node.writer.snapshot.view as GroupRoster).publication
             attempt.received.clear()
-            val available = !host.audioAvailable
-            host.writer.dispatch(GroupSessionEvent.AudioAvailable(available)); host.audioAvailable = available
+            val available = !node.writer.snapshot.view!!.members.single { it.lease == lease }.audioAvailable
+            node.writer.dispatch(GroupSessionEvent.AudioAvailable(available))
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
             var observed: GroupRoster? = null
             while (observed == null) {
@@ -364,17 +373,20 @@ class GroupControlOwnershipRobolectricTest {
                 idle()
                 val roster = (control as? GroupControl.Roster)?.value
                 if (roster != null && roster.publication > before &&
-                    roster.members.single { it.lease.deviceId == host.endpoint.deviceId }.audioAvailable == available) observed = roster
+                    roster.members.single { it.lease == lease }.audioAvailable == available) observed = roster
             }
             val accepted = node.writer.snapshot.view as GroupRoster
             assertTrue(accepted.publication >= observed.publication)
-            assertEquals(available, accepted.members.single { it.lease.deviceId == host.endpoint.deviceId }.audioAvailable)
+            assertEquals(available, accepted.members.single { it.lease == lease }.audioAvailable)
+            assertEquals(available, host.writer.snapshot.view!!.members.single { it.lease == lease }.audioAvailable)
             assertEquals(lease, node.writer.snapshot.local); assertNull(failure.get())
         }
         override fun close() {
             nodes.flatMap { it.attempts }.forEach { it.releaseAuth.countDown() }
             LoopbackControlNetwork.binding = null
             nodes.forEach { runCatching { it.runtime.stop(false) {} }; it.server?.close() }
+            nodes.flatMap { it.attempts }.forEach { it.parent.close() }
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
             nodes.flatMap { it.attempts }.forEach { it.parent.close(); it.awaitWorker(); it.channel.get()?.let(::assertChannelReleased) }
             host.server?.let { server ->
                 val readers = field(server, "readers").get(server) as ExecutorService
@@ -389,7 +401,8 @@ class GroupControlOwnershipRobolectricTest {
         val endpoint = GroupAuthEndpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString())
         val events = mutableListOf<GroupSessionEvent>(); val effects = mutableListOf<GroupSessionEffect>()
         val attempts = mutableListOf<Attempt>(); val peers = ConcurrentHashMap<String, Peer>()
-        var nextHoldAuth = false; var server: GroupSocketHost? = null; var stopCompletions = 0; var audioAvailable = false
+        val handshakes = ConcurrentHashMap<String, Peer>()
+        var nextHoldAuth = false; var server: GroupSocketHost? = null; var stopCompletions = 0
         lateinit var writer: GroupSessionOrchestrator
         val runtime = GroupNetworkRuntime(ApplicationProvider.getApplicationContext<Context>(), endpoint, { writer.snapshot }) {
             events += it; writer.dispatch(it)
@@ -404,15 +417,16 @@ class GroupControlOwnershipRobolectricTest {
                     owner = GroupSocketHost(effect.descriptor, effect.code, InetAddress.getLoopbackAddress(), 0,
                         { current(runtime, effect.operation) && server === owner },
                         { channel -> guarded {
-                            val peer = peers.computeIfAbsent(channel.context.client.deviceId) { Peer() }
+                            val peer = handshakes.computeIfAbsent(channel.context.handshakeId) { Peer() }
                             peer.channel.set(channel)
+                            peers[channel.context.client.deviceId] = peer
                             fixture.beforeHostAuthentication(channel)
                             authenticate(runtime, channel, effect.operation, effect.operation); peer.authFinished.countDown()
                         } },
                         { channel, bytes -> guarded {
                             val joined = GroupControlCodec.decode(bytes, groupNowMs()) is GroupControl.Join
                             message(runtime, channel, bytes)
-                            if (joined) peers[channel.context.client.deviceId]!!.joinReceived.countDown()
+                            if (joined) handshakes[channel.context.handshakeId]!!.joinReceived.countDown()
                             fixture.afterHostMessage(channel)
                         } }, { channel -> closed(runtime, channel) }, { fixture.failure.set(AssertionError("Actual host failed")) })
                     server = owner; field(runtime, "server").set(runtime, owner); owner.start()
