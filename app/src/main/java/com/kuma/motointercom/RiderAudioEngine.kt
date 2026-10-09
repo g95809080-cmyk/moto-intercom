@@ -98,6 +98,8 @@ internal class RiderAudioEngine(
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
     private val captureFailed = AtomicBoolean(false)
+    private val ioEvidence = RiderAudioIoEvidence()
+    private val pcmFormatLogged = AtomicBoolean(false)
     private val audioControlLock = Any()
     private var versionedAudioControls = initialAudioControls.normalized()
     private var audioControls = versionedAudioControls.settings
@@ -348,6 +350,32 @@ internal class RiderAudioEngine(
         initWebRtcOnce(appContext)
 
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setAudioFormat(AudioFormat.ENCODING_PCM_16BIT)
+            .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
+                override fun onWebRtcAudioRecordStart() {
+                    ioEvidence.recording(true)
+                    pcmFormatLogged.set(false)
+                    postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=software-requested") }
+                }
+                override fun onWebRtcAudioRecordStop() {
+                    ioEvidence.recording(false)
+                    postRuntimeMain { Log.i(TAG, "ADM recording stopped") }
+                }
+            })
+            .setAudioTrackStateCallback(object : JavaAudioDeviceModule.AudioTrackStateCallback {
+                override fun onWebRtcAudioTrackStart() { ioEvidence.playing(true); postRuntimeMain { Log.i(TAG, "ADM playout started") } }
+                override fun onWebRtcAudioTrackStop() { ioEvidence.playing(false); postRuntimeMain { Log.i(TAG, "ADM playout stopped") } }
+            })
+            .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
+                override fun onWebRtcAudioRecordInitError(error: String) = captureError("init", error)
+                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode, error: String) = captureError("start:$code", error)
+                override fun onWebRtcAudioRecordError(error: String) = captureError("read", error)
+            })
+            .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
+                override fun onWebRtcAudioTrackInitError(error: String) = playoutError("init", error)
+                override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode, error: String) = playoutError("start:$code", error)
+                override fun onWebRtcAudioTrackError(error: String) = playoutError("write", error)
+            })
             .setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -358,18 +386,25 @@ internal class RiderAudioEngine(
             .setUseLowLatency(true)
             // The build patch wires the SDK's unused public callback before native encoding.
             // Keep native tracks active: this pinned native build stops capture when all tracks mute.
-            .setAudioRecordDataCallback { format, _, _, buffer ->
+            .setAudioRecordDataCallback { format, channels, rate, buffer ->
                 try {
                     if (captureFailed.get()) PcmTransmitGate.silence(buffer)
-                    else handleCapturedPcm(format, buffer)
+                    else {
+                        ioEvidence.pcm(SystemClock.elapsedRealtime())
+                        if (pcmFormatLogged.compareAndSet(false, true)) {
+                            postRuntimeMain { Log.i(TAG, "ADM captured PCM format=$format rate=$rate channels=$channels") }
+                        }
+                        handleCapturedPcm(format, buffer)
+                    }
                 } catch (error: Throwable) {
                     PcmTransmitGate.silence(buffer)
                     if (captureFailed.compareAndSet(false, true)) postEngineError(error)
                 }
             }
-            // 优先启用设备硬件 AEC/NS；不支持时 WebRTC 会回退到软件处理。
+            // Keep AEC; use the pinned native software NS path for every input, including SCO.
+            // Declared hardware support cannot prove the effect was created/enabled on this input.
             .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
+            .setUseHardwareNoiseSuppressor(false)
             .setUseStereoInput(false)
             .setUseStereoOutput(false)
             .createAudioDeviceModule()
@@ -377,6 +412,22 @@ internal class RiderAudioEngine(
         factory = PeerConnectionFactory.builder()
             .setAudioDeviceModule(audioDeviceModule)
             .createPeerConnectionFactory()
+    }
+
+    private fun captureError(stage: String, error: String) {
+        ioEvidence.recording(false)
+        audioDeviceFailure("capture:$stage", error)
+    }
+
+    private fun playoutError(stage: String, error: String) {
+        ioEvidence.playing(false)
+        audioDeviceFailure("playout:$stage", error)
+    }
+
+    private fun audioDeviceFailure(stage: String, error: String) {
+        if (!closed.get() && !audioSuspended && captureFailed.compareAndSet(false, true)) {
+            postEngineError(IllegalStateException("ADM $stage failed: $error"))
+        }
     }
 
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
@@ -402,14 +453,12 @@ internal class RiderAudioEngine(
 
     private fun createLocalAudioTrack() = mediaStep("local audio track 创建") {
         // 3A 开关：AEC 回声消除、ANS 噪声抑制、AGC 自动增益。
-        // Android Java API 不暴露“噪声抑制等级”；摩托车风噪要更狠时，需要自编 WebRTC
-        // 并注入 AudioProcessingFactory。这里使用官方 AAR 能稳定拿到的最高层开关。
+        // Pinned m125.4 maps software NS=true to its kHigh processing policy.
+        // This configures the processing path; real wind-noise reduction still needs listening evidence.
         val constraints = MediaConstraints().apply {
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoiseSupression", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoisesuppression2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))

@@ -841,6 +841,7 @@ class IntercomService : Service() {
                 }
             },
             onError = { error -> postForRuntime(runtimeSessionId) { handleAudioRouteError(error) } },
+            onPlatformError = { error -> onAudioPlatformError(runtimeSessionId, error) },
             isRuntimeCurrent = {
                 running && activeRuntimeSessionId == runtimeSessionId
             },
@@ -2393,6 +2394,14 @@ class IntercomService : Service() {
         DiagnosticLog.e("IntercomService", "Service effect failed", t)
         val message = t.message ?: t.javaClass.simpleName
         dispatchOnMain { listener?.onError(message) }
+    }
+
+    private fun onAudioPlatformError(runtimeSessionId: RuntimeSessionId, error: Throwable) {
+        postForRuntime(runtimeSessionId) {
+            publishLog("音频采集/播放失败，停止对讲：${error.message}")
+            handleError(error)
+            stopIntercom()
+        }
     }
 
     private fun handleAudioRouteError(t: Throwable) {
