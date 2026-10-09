@@ -112,7 +112,7 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
-    fun preferredPresenceSnapshotStartsAnAutoPairedAttempt() = runBlocking {
+    fun cachedPreferredPresenceSnapshotDoesNotStartAnAutomaticAttempt() = runBlocking {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
         val ownership = requireNotNull(LegacyRuntimeOwnership.acquire())
         try {
@@ -142,12 +142,9 @@ class IntercomServiceRobolectricTest {
                 )
             )
 
-            withTimeout(1_000L) {
-                while (orchestrator.state.value !is IntercomState.Connecting) delay(10L)
-            }
-            val attempt = requireNotNull(orchestrator.currentAttempt)
-            assertEquals(ConnectionTrigger.AUTO_PAIRED, attempt.trigger)
-            assertEquals("preferred-device", attempt.targetDeviceId)
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.AutomaticReconnectChanged(true)))
+            assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
+            assertNull(orchestrator.currentAttempt)
         } finally {
             try { destroyAndAwait(controller) } finally { LegacyRuntimeOwnership.release(ownership) }
         }

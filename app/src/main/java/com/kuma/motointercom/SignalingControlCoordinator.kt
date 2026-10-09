@@ -32,7 +32,8 @@ internal class SignalingControlCoordinator(
     private val optimizationWindowMs: Long = 1_000L,
     private val confirmationTimeoutMs: Long = 15_000L,
     private val actionNonce: () -> String = { UUID.randomUUID().toString() },
-    private val attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create
+    private val attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
+    private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy()
 ) {
     init {
         require(attemptTimeoutMs > 0L) { "Attempt timeout must be positive" }
@@ -70,6 +71,10 @@ internal class SignalingControlCoordinator(
     private var targetedTransportRace: TargetedTransportRace? = null
     private var automaticReconnectEnabled = true
     private var authorizedDecisionTime: MonotonicTimestamp? = null
+    private var preparedLossTicket: AutomaticRecoveryPolicy.Ticket? = null
+    private var nextRecoveryIntentGeneration = 0L
+    @Volatile private var automaticRecoveryIntent: AutomaticRecoveryIntent? = null
+    internal val recoveryIntent get() = automaticRecoveryIntent
 
     internal val currentAttempt: ConnectionAttempt?
         get() = ownedAttempt
@@ -106,13 +111,22 @@ internal class SignalingControlCoordinator(
     fun handle(
         current: IntercomState,
         event: SessionEvent,
-        incomingPolicy: IncomingRequestPolicy? = null
+        incomingPolicy: IncomingRequestPolicy? = null,
+        lossObservation: ConnectionLossObservation? = null
     ): SignalingControlDecision? {
+        // Capture authorization before prune/clock/factory: a Main command may already be queued.
+        preparedLossTicket = (current as? IntercomState.Connected)?.takeIf {
+            it.peer.isVerifiedFor(it.attempt.targetLock)
+        }?.let {
+            if (lossObservation == null) automaticRecoveryPolicy.captureLoss(it.attempt)
+            else lossObservation.authorization.takeIf { _ -> lossObservation.sourceAttempt == it.attempt }
+        }
         val admission = ownedPresenceAdmission
         val attempt = ownedAttempt
         if (admission == null || attempt == null ||
             event is SessionEvent.PresenceConnectCanceled || event is SessionEvent.StopRequested ||
             event is SessionEvent.AutomaticReconnectChanged
+            || event is SessionEvent.RecoveryIntentCanceled
         ) return handleEvent(current, event, incomingPolicy)
         // Capture the clock outside the short authorization lock. Every graph write below is pure.
         val preparedAt = decisionNow()
@@ -136,9 +150,14 @@ internal class SignalingControlCoordinator(
         pruneCompleted()
         return when (event) {
             is SessionEvent.AutomaticReconnectChanged -> {
+                if (!event.policyAlreadyApplied) automaticRecoveryPolicy.setEnabled(event.enabled)
                 automaticReconnectEnabled = event.enabled
+                if (!event.enabled) automaticRecoveryIntent = null
                 accepted(state = current)
             }
+            is SessionEvent.RecoveryEpisodeRequested -> recoveryEpisodeRequested(current, event)
+            is SessionEvent.RecoveryIntentCanceled -> cancelRecoveryIntent(current, event)
+            is SessionEvent.ResetCompleted -> resetCompleted(current, event)
             is SessionEvent.ConnectRequested -> adoptOutboundAttempt(current, event)
             is SessionEvent.ConnectPresenceRequested -> connectPresenceRequested(current, event)
             is SessionEvent.PresenceConnectCanceled -> cancelPresenceConnect(current, event)
@@ -240,6 +259,7 @@ internal class SignalingControlCoordinator(
             targetedTransportRace = null
             completedAttempts.clear()
             terminalAttempts.clear()
+            automaticRecoveryIntent = null
         }
     }
 
@@ -248,9 +268,12 @@ internal class SignalingControlCoordinator(
         event: SessionEvent.ConnectRequested
     ): SignalingControlDecision {
         if (ownedAttempt != null || terminalOutcome(event.attempt.id) != null) return rejected()
+        if (event.attempt.trigger == ConnectionTrigger.AUTO_PAIRED && automaticRecoveryIntent != null) return rejected()
         val transition = reduceIntercomState(current, event) ?: return rejected()
-        ownedAttempt = event.attempt
-        return accepted(transition.state, transition.effects)
+        val claim = { ownedAttempt = event.attempt; accepted(transition.state, transition.effects) }
+        if (event.attempt.trigger != ConnectionTrigger.AUTO_PAIRED) return claim()
+        val ticket = automaticRecoveryPolicy.capture(event.attempt.targetDeviceId, preferred = true) ?: return rejected()
+        return automaticRecoveryPolicy.tryConsume(ticket, claim) ?: rejected()
     }
 
     private fun connectPresenceRequested(
@@ -267,6 +290,11 @@ internal class SignalingControlCoordinator(
             return rejected()
         }
         if (event.admission?.isAvailableFor(event) == false) return rejected()
+        if (event.trigger == ConnectionTrigger.AUTO_PAIRED && automaticRecoveryIntent != null) return rejected()
+        val automaticTicket = if (event.trigger == ConnectionTrigger.AUTO_PAIRED) {
+            event.automaticTicket ?: automaticRecoveryPolicy.capture(event.targetDeviceId, preferred = true)
+                ?: return rejected()
+        } else null
         val plan = when {
             Transport.LAN in event.availableTransports &&
                 Transport.WIFI_DIRECT in event.availableTransports ->
@@ -301,8 +329,12 @@ internal class SignalingControlCoordinator(
             targetedTransportRace = race
             decision
         }
-        return if (event.admission == null) adopt()
-        else event.admission.tryAdopt(event, attempt, adopt) ?: rejected()
+        val admitted = {
+            if (event.admission == null) adopt()
+            else event.admission.tryAdopt(event, attempt, adopt)
+        }
+        return if (automaticTicket == null) admitted() ?: rejected()
+        else automaticRecoveryPolicy.tryConsume(automaticTicket, admitted) ?: rejected()
     }
 
     private fun cancelPresenceConnect(
@@ -321,6 +353,88 @@ internal class SignalingControlCoordinator(
         return if (event.resourcesAlreadyClosing) decision.copy(
             effects = decision.effects.filterNot { it is SessionEffect.AbortAttemptAndResumeDiscovery }
         ) else decision
+    }
+
+    private fun cancelRecoveryIntent(
+        current: IntercomState,
+        event: SessionEvent.RecoveryIntentCanceled
+    ): SignalingControlDecision {
+        val goal = automaticRecoveryIntent ?: return rejected()
+        if (current.runtimeSessionId != event.runtimeSessionId || goal.ref.runtimeSessionId != event.runtimeSessionId)
+            return rejected()
+        val matches = if (event.expectedIntent != null) goal.ref == event.expectedIntent
+        else event.expectedConnectedSource != null && goal.sourceConnectedAttempt == event.expectedConnectedSource
+        if (!matches) return rejected()
+        automaticRecoveryIntent = null
+        return accepted(state = current)
+    }
+
+    private fun resetCompleted(current: IntercomState, event: SessionEvent.ResetCompleted): SignalingControlDecision {
+        val transition = reduceIntercomState(current, event) ?: return rejected()
+        val resetting = current as IntercomState.Resetting
+        val completedAt = decisionNow()
+        automaticRecoveryIntent?.takeIf {
+            it.ref.runtimeSessionId == event.runtimeSessionId && it.targetDeviceId == resetting.targetDeviceId &&
+                it.resetAttemptId == event.failedAttemptId
+        }?.let {
+            automaticRecoveryIntent = if (automaticRecoveryPolicy.isAuthorized(it.authorization))
+                it.copy(eligibleAfterElapsedMs = Math.addExact(completedAt.elapsedRealtimeMs, 30_000L)) else null
+        }
+        val goal = automaticRecoveryIntent
+        val probe = goal?.eligibleAfterElapsedMs?.let {
+            SessionEffect.ProbeRecoveryDiscovery(goal.ref, requireNotNull(goal.resetAttemptId), it)
+        }
+        return accepted(transition.state, transition.effects + listOfNotNull(probe))
+    }
+
+    private fun recoveryEpisodeRequested(
+        current: IntercomState,
+        event: SessionEvent.RecoveryEpisodeRequested
+    ): SignalingControlDecision {
+        val admission = event.admission
+        val request = admission.request
+        val goal = automaticRecoveryIntent ?: return rejected()
+        val observed = request.observation
+        val initialAt = decisionNow()
+        if (!automaticReconnectEnabled || !automaticRecoveryPolicy.isAuthorized(goal.authorization) ||
+            current != IntercomState.Discovering(request.intent.runtimeSessionId) || ownedAttempt != null ||
+            active != null || pendingInbound != null || ownedPresenceAdmission != null ||
+            goal.ref != request.intent || goal.resetAttemptId != request.resetAttemptId ||
+            goal.eligibleAfterElapsedMs != request.eligibleAfterElapsedMs ||
+            !observed.candidate.hasStableV2ObservationIdentity() || !observed.source.isCurrent(observed) ||
+            goal.targetDeviceId != request.targetLock.targetDeviceId ||
+            observed.receivedAtElapsedRealtimeMs < request.eligibleAfterElapsedMs ||
+            observed.receivedAtElapsedRealtimeMs > initialAt.elapsedRealtimeMs ||
+            observed.candidate.transport !in request.availableTransports
+        ) return rejected()
+        val id = attemptIdFactory()
+        if (id == goal.sourceConnectedAttempt.id || id == request.resetAttemptId || terminalOutcome(id) != null)
+            return rejected()
+        val preparedAt = decisionNow()
+        val preferred = goal.preferredTransport.takeIf { it in request.availableTransports }
+            ?: Transport.LAN.takeIf { it in request.availableTransports } ?: Transport.WIFI_DIRECT
+        val alternate = request.availableTransports.firstOrNull { it != preferred }
+        val plan = alternate?.let { ChannelPlan.race(preferred, it) } ?: ChannelPlan.single(preferred)
+        val attempt = ConnectionAttempt(id, request.intent.runtimeSessionId, request.targetLock,
+            ConnectionTrigger.RECOVERY, plan, deadlineAfter(preparedAt, attemptTimeoutMs).elapsedRealtimeMs)
+        val race = createTargetedTransportRace(attempt)
+        val identity = observed.candidate.identity
+        val peer = PeerIdentity(identity.claimedDeviceId, identity.nickname, identity.deviceName,
+            identity.sourceSessionId, isDeviceIdVerified = false)
+        val decision = accepted(IntercomState.Recovering(attempt, peer, 0), listOfNotNull(
+            SessionEffect.ScheduleAttemptDeadline(attempt),
+            SessionEffect.OpenTargetedTransport(attempt, preferred),
+            race.fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
+        ))
+        return admission.tryConsume {
+            if (automaticRecoveryIntent != goal) rejected()
+            else {
+                ownedAttempt = attempt
+                targetedTransportRace = race
+                automaticRecoveryIntent = goal.copy(resetAttemptId = null, eligibleAfterElapsedMs = null)
+                decision
+            }
+        } ?: rejected()
     }
 
     private fun replaceOwnedAttempt(
@@ -631,6 +745,7 @@ internal class SignalingControlCoordinator(
             else {
                 targetedTransportRace = null
                 ownedPresenceAdmission = null
+                automaticRecoveryIntent = null
                 accepted(IntercomState.Connected(attempt, peer, connectedAt, winnerTransport))
             }
         }
@@ -739,8 +854,10 @@ internal class SignalingControlCoordinator(
         ) {
             return rejected()
         }
+        val authorization = preparedLossTicket
+            ?: return finishConnectedAttemptWithoutRecovery(current, outcome)
         val recoveryAttemptId = attemptIdFactory()
-        if (terminalOutcome(recoveryAttemptId) != null) return rejected()
+        if (recoveryAttemptId == current.attempt.id || terminalOutcome(recoveryAttemptId) != null) return rejected()
         val recoveryPlan = current.attempt.channelPlan.orderedForRecovery(current.transport)
         val recoveryAttempt = ConnectionAttempt(
             id = recoveryAttemptId,
@@ -750,14 +867,13 @@ internal class SignalingControlCoordinator(
             channelPlan = recoveryPlan,
             deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
         )
-        if (existingOutcome == null) recordTerminal(current.attempt, outcome)
-        ownedAttempt = recoveryAttempt
-        targetedTransportRace = createTargetedTransportRace(
+        val race = createTargetedTransportRace(
             recoveryAttempt,
             preferredTransportOpened = !restartConnectedDiscovery
         )
-        val fallbackMilestone = targetedTransportRace?.fallbackMilestone
-        return accepted(
+        val fallbackMilestone = race.fallbackMilestone
+        val nextGeneration = Math.incrementExact(nextRecoveryIntentGeneration)
+        val decision = accepted(
             state = IntercomState.Recovering(
                 recoveryAttempt,
                 current.peer,
@@ -783,6 +899,17 @@ internal class SignalingControlCoordinator(
                 )
             }
         )
+        return automaticRecoveryPolicy.tryConsume(authorization) {
+            if (existingOutcome == null) recordTerminal(current.attempt, outcome)
+            ownedAttempt = recoveryAttempt
+            targetedTransportRace = race
+            nextRecoveryIntentGeneration = nextGeneration
+            automaticRecoveryIntent = AutomaticRecoveryIntent(
+                RecoveryIntentRef(current.runtimeSessionId, nextRecoveryIntentGeneration),
+                current.attempt, current.transport, authorization
+            )
+            decision
+        } ?: finishConnectedAttemptWithoutRecovery(current, outcome)
     }
 
     private fun recoveryExhausted(
@@ -805,6 +932,7 @@ internal class SignalingControlCoordinator(
         current: IntercomState,
         event: SessionEvent.StopRequested
     ): SignalingControlDecision? {
+        if (current.runtimeSessionId == event.runtimeSessionId) automaticRecoveryIntent = null
         pendingInbound?.let { pending ->
             if (
                 pending.runtimeSessionId != event.runtimeSessionId ||
@@ -954,7 +1082,12 @@ internal class SignalingControlCoordinator(
             )
         }
         if (current is IntercomState.Discovering) {
-            return when {
+            val waitingGoal = automaticRecoveryIntent
+            waitingGoal?.let { goal ->
+                if (channel.peer.deviceId != goal.targetDeviceId || !policy.paired || event.trigger != RequestTrigger.USER)
+                    return busyRequest(event.runtimeSessionId, event.wireRequestKey)
+            }
+            val decision = when {
                 policy.paired -> beginPairedInboundConnection(
                     current,
                     channel,
@@ -974,6 +1107,11 @@ internal class SignalingControlCoordinator(
                     RejectReason.CONFIRMATION_UNAVAILABLE
                 )
             }
+            if (waitingGoal != null && decision.accepted &&
+                ownedAttempt?.id == channel.wireRequestKey.attemptId && ownedAttempt?.targetLock == channel.targetLock &&
+                (decision.state is IntercomState.Connecting || decision.state is IntercomState.Optimizing)
+            ) automaticRecoveryIntent = null
+            return decision
         }
         return busyRequest(event.runtimeSessionId, event.wireRequestKey)
     }
@@ -1613,6 +1751,7 @@ internal class SignalingControlCoordinator(
         if (context.mediaOwnerChannelId != event.channelId) {
             return removeChannelAndContinueOrTerminate(current, context, event.channelId)
         }
+        automaticRecoveryIntent = null
         remember(context.wireRequestKey, AttemptOutcome.DISCONNECTED, null)
         return finishActiveSessionDisconnect(
             current,
@@ -1628,6 +1767,7 @@ internal class SignalingControlCoordinator(
         val attempt = matchingOwnedAttempt(event.runtimeSessionId, event.attemptId)
             ?.takeIf { current.connectionAttemptOrNull() == it }
             ?: return rejected()
+        automaticRecoveryIntent = null
         val context = active?.takeIf { it.attempt == attempt }
         if (context == null) {
             if (terminalOutcome(attempt.id) == null) {
@@ -2874,6 +3014,12 @@ internal class SignalingControlCoordinator(
         }
 
         if (retryAttempt == null) {
+            automaticRecoveryIntent?.takeIf {
+                it.ref.runtimeSessionId == attempt.runtimeSessionId && it.targetDeviceId == attempt.targetDeviceId
+            }?.let {
+                automaticRecoveryIntent = if (automaticRecoveryPolicy.isAuthorized(it.authorization))
+                    it.copy(resetAttemptId = attempt.id, eligibleAfterElapsedMs = null) else null
+            }
             return accepted(
                 state = IntercomState.Resetting(
                     runtimeSessionId = attempt.runtimeSessionId,

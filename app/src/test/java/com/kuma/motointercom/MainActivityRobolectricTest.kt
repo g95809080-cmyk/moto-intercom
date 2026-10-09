@@ -225,21 +225,35 @@ class MainActivityRobolectricTest {
             }
             if (first) spent else attemptB
         }) { service, actor, activity, presence, _ ->
-            val preferred = presence.copy(pairing = requireNotNull(pairedPresence().pairing).copy(
-                remoteDeviceId = requireNotNull(presence.deviceId), isPreferred = true
+            val preferred = presence.copy(
+                deviceId = "a0000000-0000-4000-8000-000000000070",
+                sessionId = RuntimeSessionId("10000000-0000-4000-8000-000000000070"),
+                pairing = requireNotNull(pairedPresence().pairing).copy(
+                remoteDeviceId = "a0000000-0000-4000-8000-000000000070", isPreferred = true
             ))
             val snapshot = PresenceSnapshot(listOf(preferred), nextExpiryElapsedRealtimeMs = null)
             val key = PreferredAutoConnectTargetKey(
-                requireNotNull(presence.deviceId), requireNotNull(presence.sessionId)
+                requireNotNull(preferred.deviceId), requireNotNull(preferred.sessionId)
             )
-            try {
+            val source = FreshDiscoverySource(Transport.LAN)
+            fun publishFresh() {
                 publishAdmissionSnapshot(service, snapshot)
+                val candidate = DiscoveryCandidate(Transport.LAN, "admission-endpoint", "127.0.0.1", 1234,
+                    DiscoveryIdentityClaim(preferred.deviceId, preferred.sessionId, preferred.nickname, preferred.deviceName, 2))
+                val receipt = requireNotNull(source.capture(DiscoveryObservationKind.LAN_UDP, android.os.SystemClock.elapsedRealtime()))
+                val observed = requireNotNull(source.accept(receipt, candidate) { true }).second
+                val globalAdmission = admissionField(service, "discoveryPresenceAdmission").get(service) as DiscoveryPresenceAdmission
+                globalAdmission.replaceCached(Transport.LAN, listOf(candidate))
+                assertTrue(globalAdmission.admit(observed))
+                IntercomService::class.java.getDeclaredMethod("maybeAutoConnectPreferred", PresenceSnapshot::class.java,
+                    FreshDiscoveryObservation::class.java).apply { isAccessible = true }.invoke(service, snapshot, observed)
+            }
+            try {
+                publishFresh()
                 awaitAdmissionGate(enteredA)
                 val generationA = admissionField(service, "autoConnectRequestGeneration").getLong(service)
                 assertEquals(key, admissionField(service, "autoConnectTargetKey").get(service))
-                publishAdmissionSnapshot(service, PresenceSnapshot(emptyList(), null))
-                assertNull(admissionField(service, "autoConnectTargetKey").get(service))
-                publishAdmissionSnapshot(service, snapshot)
+                publishFresh()
                 val generationB = admissionField(service, "autoConnectRequestGeneration").getLong(service)
                 assertTrue(generationB > generationA)
                 releaseA.countDown()
