@@ -55,10 +55,14 @@ class IntercomServiceRobolectricTest {
             setPrivate(service, "running", true)
             setPrivate(service, "activeRuntimeSessionId", runtimeA.value)
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtimeA)))
-            val failure = IntercomService::class.java.declaredMethods.single { it.name.startsWith("onAudioPlatformError") }.apply { isAccessible = true }
+            val failure = IntercomService::class.java.declaredMethods.single {
+                it.name.startsWith("onAudioPlatformError") &&
+                    !java.lang.reflect.Modifier.isStatic(it.modifiers) &&
+                    it.parameterTypes.contentEquals(arrayOf(String::class.java, Throwable::class.java))
+            }.apply { isAccessible = true }
             failure.invoke(service, runtimeA.value, IllegalStateException("native capture failed"))
             withTimeout(1_000) {
-                while (orchestrator.state.value !is IntercomState.Idle) { shadowOf(android.os.Looper.getMainLooper()).idle(); delay(10) }
+                while (orchestrator.state.value != IntercomState.Offline) { shadowOf(android.os.Looper.getMainLooper()).idle(); delay(10) }
             }
             assertEquals(listOf("native capture failed"), errors)
             val runtimeB = RuntimeSessionId("replacement-audio-runtime")
