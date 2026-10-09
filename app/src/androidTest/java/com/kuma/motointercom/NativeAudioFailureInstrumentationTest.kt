@@ -10,6 +10,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +31,7 @@ class NativeAudioFailureInstrumentationTest {
         val released = CountDownLatch(1)
         val oldErrorDelivered = CountDownLatch(1)
         val blockNext = AtomicBoolean(false)
+        val freshFrames = AtomicReference(CountDownLatch(1))
         try {
             val admField = RiderAudioEngine::class.java.getDeclaredField("audioDeviceModule").apply { isAccessible = true }
             val deadline = SystemClock.elapsedRealtime() + 5_000
@@ -54,10 +56,11 @@ class NativeAudioFailureInstrumentationTest {
                     }
                 }
                 capture.onAudioDataRecorded(format, channels, rate, frame)
+                freshFrames.get().countDown()
             })
             lateinit var offerer: RiderMediaSession
             lateinit var answerer: RiderMediaSession
-            val connected = CountDownLatch(2)
+            var connected = CountDownLatch(2)
             offerer = first.openSession(RiderMediaSessionCallbacks(
                 onLocalSdpGenerated = { answerer.createAnswer(it) },
                 onLocalIceCandidateGenerated = { answerer.addRemoteIceCandidate(it) },
@@ -78,17 +81,26 @@ class NativeAudioFailureInstrumentationTest {
             released.countDown()
             assertTrue(oldErrorDelivered.await(5, TimeUnit.SECONDS))
             assertNull("Old producer stopped its online runtime", failures.poll(300, TimeUnit.MILLISECONDS))
-            val replacement = first.openSession(RiderMediaSessionCallbacks(
-                onLocalSdpGenerated = {}, onLocalIceCandidateGenerated = {}, isSessionCurrent = { true }
+            answerer.close()
+            connected = CountDownLatch(2)
+            offerer = first.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = { answerer.createAnswer(it) },
+                onLocalIceCandidateGenerated = { answerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = { failures.offer(it) }, isSessionCurrent = { true }
             ))
-            val initialized = CountDownLatch(1)
-            val rtc = RiderAudioEngine::class.java.getDeclaredField("rtc").run {
-                isAccessible = true; get(first) as java.util.concurrent.ExecutorService
-            }
-            rtc.execute(initialized::countDown)
-            assertTrue(initialized.await(5, TimeUnit.SECONDS))
+            answerer = second.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = { offerer.setRemoteAnswer(it) },
+                onLocalIceCandidateGenerated = { offerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = { failures.offer(it) }, isSessionCurrent = { true }
+            ))
+            offerer.createOffer()
+            assertTrue("Replacement native peers did not connect", connected.await(15, TimeUnit.SECONDS))
+            freshFrames.set(CountDownLatch(6))
+            assertTrue("Replacement native capture did not restart", freshFrames.get().await(5, TimeUnit.SECONDS))
             assertNull("Teardown permanently failed the reused engine", failures.poll())
-            replacement.close()
+            offerer.close()
         } finally { released.countDown(); first.close(); second.close() }
     }
 
