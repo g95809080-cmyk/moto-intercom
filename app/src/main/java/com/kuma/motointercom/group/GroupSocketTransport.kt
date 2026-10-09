@@ -63,6 +63,7 @@ internal class GroupSocketChannel internal constructor(
         }, 2, 2, TimeUnit.SECONDS)
     }
     val isClosed: Boolean get() = closed.get()
+    internal fun hasCurrentOwner(): Boolean = !closed.get() && isCurrent()
     fun markAdmitted() { if (!closed.get() && isCurrent()) admitted.set(true) }
 
     /** Builder runs on the same writer that assigns AEAD nonces and writes the frame. */
@@ -286,6 +287,7 @@ internal class GroupSocketClient(
     }
     private fun run() {
         var secure: SecureGroupChannel? = null
+        var connection: GroupSocketChannel? = null
         var timeout: ScheduledFuture<*>? = null
         try {
             check(!closed.get() && isCurrent())
@@ -298,16 +300,22 @@ internal class GroupSocketClient(
             GroupSocketPackets.write(DataOutputStream(socket.getOutputStream()), GroupSocketPackets.header(context), 128)
             secure = GroupSocketPackets.authenticate(socket, context, GroupAuthRole.CLIENT, code) { !closed.get() && !socket.isClosed && isCurrent() }
             check(!closed.get() && !socket.isClosed && isCurrent())
-            val connection = GroupSocketChannel(socket, context, secure, scheduler,
+            val connected = GroupSocketChannel(socket, context, secure, scheduler,
                 { !closed.get() && isCurrent() }, onMessage, onClosed)
-            secure = null; channel = connection
+            connection = connected
+            secure = null; channel = connected
             check(!closed.get() && isCurrent())
             timeout.cancel(false)
-            connection.startTimers()
-            onAuthenticated(connection)
-            connection.readLoop()
-        } catch (_: Exception) { if (!closed.get()) runCatching(onFailed) }
-        finally { timeout?.cancel(false); secure?.close(); close() }
+            connected.startTimers()
+            onAuthenticated(connected)
+            connected.readLoop()
+            if (!closed.get() && isCurrent()) runCatching(onFailed)
+        } catch (_: Exception) { if (!closed.get() && isCurrent()) runCatching(onFailed) }
+        finally {
+            timeout?.cancel(false)
+            try { connection?.close() }
+            finally { try { secure?.close() } finally { close() } }
+        }
     }
     override fun close() {
         if (!closed.compareAndSet(false, true)) return

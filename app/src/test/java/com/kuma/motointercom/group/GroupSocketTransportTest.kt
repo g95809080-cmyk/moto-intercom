@@ -8,6 +8,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -15,8 +16,74 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 class GroupSocketTransportTest {
+    @Test fun closeBeforeConnectionPublicationReleasesActualLateChannelAndKeys() {
+        val constructorEntered = CountDownLatch(1)
+        val releaseConstructor = CountDownLatch(1)
+        val readyB = CountDownLatch(1)
+        val replies = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
+        val releasedA = CountDownLatch(1)
+        val lateA = AtomicReference<GroupSocketChannel>()
+        val workerA = AtomicReference<Thread>()
+        val authenticatedA = AtomicInteger()
+        val failedA = AtomicInteger()
+        val channelB = AtomicReference<GroupSocketChannel>()
+        val socketA = object : Socket() {
+            private var outputCalls = 0
+            override fun getOutputStream(): OutputStream {
+                val output = super.getOutputStream()
+                if (++outputCalls == 3) {
+                    constructorEntered.countDown()
+                    check(releaseConstructor.await(5, TimeUnit.SECONDS))
+                }
+                return output
+            }
+        }
+        val host = GroupSocketHost(descriptor, code, InetAddress.getLoopbackAddress(), 0, { true },
+            { it.markAdmitted() }, { channel, packet -> channel.send { packet.copyOf() } }, {}, {})
+        host.start()
+        val b = GroupSocketClient(context(82), code, InetSocketAddress(InetAddress.getLoopbackAddress(), host.localPort), {}, { true },
+            { channelB.set(it); it.markAdmitted(); readyB.countDown() },
+            { _, bytes -> replies.offer(bytes.copyOf()) }, {}, { fail("healthy B failed") })
+        val a = GroupSocketClient(context(81), code, InetSocketAddress(InetAddress.getLoopbackAddress(), host.localPort),
+            { workerA.set(Thread.currentThread()) }, { true }, { authenticatedA.incrementAndGet() }, { _, _ -> },
+            { lateA.set(it); releasedA.countDown() }, { failedA.incrementAndGet() })
+        (field(a, "socket").get(a) as Socket).close()
+        field(a, "socket").set(a, socketA)
+        try {
+            b.start(); assertTrue(readyB.await(15, TimeUnit.SECONDS))
+            channelB.get().send { byteArrayOf(42) }
+            assertArrayEquals(byteArrayOf(42), replies.poll(3, TimeUnit.SECONDS))
+            a.start(); assertTrue(constructorEntered.await(15, TimeUnit.SECONDS))
+            a.close(); assertTrue(socketA.isClosed)
+            assertNull(field(a, "channel").get(a))
+            releaseConstructor.countDown()
+            workerA.get().join(3_000); assertFalse(workerA.get().isAlive)
+            assertTrue("Late connection never received its own close", releasedA.await(1, TimeUnit.SECONDS))
+            val late = checkNotNull(lateA.get())
+            assertTrue(late.isClosed)
+            val secure = checkNotNull(field(late, "secure").get(late))
+            listOf("sending", "receiving", "context").forEach { name ->
+                assertTrue((field(secure, name).get(secure) as ByteArray).all { it == 0.toByte() })
+            }
+            val writer = field(late, "writer").get(late) as java.util.concurrent.ExecutorService
+            assertTrue(writer.isShutdown); assertTrue(writer.awaitTermination(2, TimeUnit.SECONDS))
+            val timer = field(a, "scheduler").get(a) as java.util.concurrent.ExecutorService
+            assertTrue(timer.isShutdown); assertTrue(timer.awaitTermination(2, TimeUnit.SECONDS))
+            assertEquals(0, authenticatedA.get()); assertEquals(0, failedA.get())
+            channelB.get().send { byteArrayOf(43) }
+            assertArrayEquals(byteArrayOf(43), replies.poll(3, TimeUnit.SECONDS))
+            assertFalse(channelB.get().isClosed)
+            a.close(); assertTrue(late.isClosed)
+        } finally {
+            releaseConstructor.countDown()
+            try { (field(a, "channel").get(a) as GroupSocketChannel?)?.close(); a.close(); b.close(); host.close() }
+            finally { workerA.get()?.join(3_000) }
+        }
+    }
+    private fun field(owner: Any, name: String) = owner.javaClass.getDeclaredField(name).apply { isAccessible = true }
     @Test fun admissionDeadlineClosesSocketEvenWhenNoReadLoopIsRunning() {
         val listener = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
         val peer = Socket(InetAddress.getLoopbackAddress(), listener.localPort)

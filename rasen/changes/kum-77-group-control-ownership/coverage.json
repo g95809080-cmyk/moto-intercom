@@ -1,0 +1,126 @@
+{
+  "base": "170e7ff4349c9390dac774a944bc9aebab3c6360",
+  "head": "1f636f787b7ee1b62c834bf642a14823fff560fb",
+  "tool": "alibaba/open-code-review 1.12.13 delegate preview/rule",
+  "total": 10,
+  "selected": 3,
+  "default_excluded_manually_reviewed": 7,
+  "accounted": 10,
+  "skipped": 0,
+  "coverage_note": "Complete changed-path accounting; full and exact-blob prior full-source reuse remain distinct. No hardware acceptance claim.",
+  "files": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupNetworkRuntime.kt",
+      "status": "reviewed",
+      "insertions": 15,
+      "deletions": 6,
+      "selected": true,
+      "blob": "4e96cafb0fdb088e83232db76b480a47d25fac3b",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "verified_prior_full_source_and_complete_diff_reuse",
+      "reviewed_at": "b9f5ac7a60d1c727c0d2f180c47410a56b262705"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/group/GroupSocketTransport.kt",
+      "status": "reviewed",
+      "insertions": 15,
+      "deletions": 7,
+      "selected": true,
+      "blob": "c8540c73d3729ac03b2f0e516a8cbdd8744d68d1",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "verified_prior_full_source_and_complete_diff_reuse",
+      "reviewed_at": "b9f5ac7a60d1c727c0d2f180c47410a56b262705"
+    },
+    {
+      "path": "rasen/changes/kum-77-group-control-ownership/.openspec.yaml",
+      "status": "reviewed",
+      "insertions": 2,
+      "deletions": 0,
+      "selected": true,
+      "blob": "53f62d70601ea15c704cee870a71fc2240581898",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "verified_prior_full_source_and_complete_diff_reuse",
+      "reviewed_at": "b9f5ac7a60d1c727c0d2f180c47410a56b262705"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/GroupServiceLifecycleTest.kt",
+      "status": "reviewed",
+      "insertions": 26,
+      "deletions": 7,
+      "exclude_reason": "default_path",
+      "selected": false,
+      "blob": "3aca8bcd87a662e27d180ee9f21b3c75911f96a3",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "full_source_and_complete_diff"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/GroupControlOwnershipRobolectricTest.kt",
+      "status": "reviewed",
+      "insertions": 509,
+      "deletions": 0,
+      "exclude_reason": "default_path",
+      "selected": false,
+      "blob": "7b955eb145d2e824c75a618703ad6574181c220b",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "full_source_and_complete_diff"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/group/GroupSocketTransportTest.kt",
+      "status": "reviewed",
+      "insertions": 67,
+      "deletions": 0,
+      "exclude_reason": "default_path",
+      "selected": false,
+      "blob": "ee1fd82b703b79b7ef07fbc5e97b9426e24ce44b",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "verified_prior_full_source_and_complete_diff_reuse",
+      "reviewed_at": "b9f5ac7a60d1c727c0d2f180c47410a56b262705"
+    },
+    {
+      "path": "rasen/changes/kum-77-group-control-ownership/design.md",
+      "status": "reviewed",
+      "insertions": 9,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "selected": false,
+      "blob": "fea859327754f91a72668f31ffd4f40bbc534b88",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "full_source_and_complete_diff"
+    },
+    {
+      "path": "rasen/changes/kum-77-group-control-ownership/proposal.md",
+      "status": "reviewed",
+      "insertions": 7,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "selected": false,
+      "blob": "032fa79ec98046aff564c72739b6f2aab8872899",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "verified_prior_full_source_and_complete_diff_reuse",
+      "reviewed_at": "b9f5ac7a60d1c727c0d2f180c47410a56b262705"
+    },
+    {
+      "path": "rasen/changes/kum-77-group-control-ownership/specs/group-control-ownership/spec.md",
+      "status": "reviewed",
+      "insertions": 23,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "selected": false,
+      "blob": "ae69e2ff026c3659dc96d23cf2959f17ed0396bc",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "verified_prior_full_source_and_complete_diff_reuse",
+      "reviewed_at": "b9f5ac7a60d1c727c0d2f180c47410a56b262705"
+    },
+    {
+      "path": "rasen/changes/kum-77-group-control-ownership/tasks.md",
+      "status": "reviewed",
+      "insertions": 5,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext",
+      "selected": false,
+      "blob": "88365a8f830f9c4fd71aa79b02f2f7950009bbd4",
+      "reviewer": "/root/logging_architecture_review",
+      "depth": "full_source_and_complete_diff"
+    }
+  ]
+}

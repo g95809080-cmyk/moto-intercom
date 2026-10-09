@@ -119,30 +119,39 @@ internal class GroupNetworkRuntime(
             InetSocketAddress(effect.match.network.hostAddress, effect.match.network.port), target::bindSocket,
             { current(networkAttempt) && client === adapter },
             { authenticated(it, effect.attempt, networkAttempt) }, ::message, ::closed,
-            { post { if (!stopped && client === adapter) dispatch(GroupSessionEvent.ControlFailed(effect.attempt)) } })
+            { post { if (current(networkAttempt) && client === adapter) dispatch(GroupSessionEvent.ControlFailed(effect.attempt)) } })
         client = adapter; adapter.start()
     }
     private fun authenticated(channel: GroupSocketChannel, operation: UUID, attempt: UUID) {
+        if (!current(attempt) || !channel.hasCurrentOwner()) { channel.close(); return }
         val authenticatedAt = groupNowMs()
         val queue = GroupBoundedCallbacks(::post, { channel.close() })
         channels[channel.id] = channel; ingress[channel.id] = queue
+        if (!current(attempt) || !channel.hasCurrentOwner() || channels[channel.id] !== channel || ingress[channel.id] !== queue) {
+            channels.remove(channel.id, channel); ingress.remove(channel.id, queue)
+            queue.close(); channel.close(); return
+        }
         queue.post {
-            if (current(attempt) && channels[channel.id] === channel) {
+            if (current(attempt) && channel.hasCurrentOwner() && channels[channel.id] === channel && ingress[channel.id] === queue) {
                 dispatch(GroupSessionEvent.Authenticated(operation, channel.id, channel.context, authenticatedAt))
             } else channel.close()
         }
     }
     private fun message(channel: GroupSocketChannel, bytes: ByteArray) {
         try {
+            val queue = ingress[channel.id] ?: return
+            if (!channel.hasCurrentOwner() || channels[channel.id] !== channel || ingress[channel.id] !== queue) return
             val decoded = GroupControlCodec.decode(bytes, groupNowMs())
-            ingress[channel.id]?.post {
-                if (!stopped && channels[channel.id] === channel) dispatch(GroupSessionEvent.Control(channel.id, decoded))
+            queue.post {
+                if (!stopped && channel.hasCurrentOwner() && channels[channel.id] === channel && ingress[channel.id] === queue) dispatch(GroupSessionEvent.Control(channel.id, decoded))
             }
         } catch (_: Exception) { channel.close() }
         finally { bytes.fill(0) }
     }
     private fun closed(channel: GroupSocketChannel) {
-        ingress.remove(channel.id)?.close(); channels.remove(channel.id, channel)
+        val queue = ingress[channel.id]
+        if (!channels.remove(channel.id, channel)) return
+        if (queue != null && ingress.remove(channel.id, queue)) queue.close()
         post { if (!stopped) dispatch(GroupSessionEvent.Closed(channel.id)) }
     }
     override fun send(effect: GroupSessionEffect.Send) {
@@ -154,7 +163,7 @@ internal class GroupNetworkRuntime(
     override fun admit(id: UUID) { channels[id]?.markAdmitted() }
     private fun closeControl() {
         ingress.values.forEach { it.close() }; ingress.clear()
-        channels.values.toList().forEach { it.close() }; channels.clear()
+        channels.values.toTypedArray().toList().forEach { it.close() }; channels.clear()
         client?.close(); client = null; server?.close(); server = null
     }
     /** This application-context owner survives UI/service detach until GO release is known. */
