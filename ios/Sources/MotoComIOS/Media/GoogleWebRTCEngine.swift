@@ -183,8 +183,9 @@ public final class GoogleWebRTCEngine: NSObject, WebRTCEngine {
     // treating an injected callback as actual decoded audio evidence.
     func nativeValidationReceipt() -> (RTCPeerConnection, RTCPeerConnectionDelegate, () -> Void)? {
         owned {
-            guard let run = current, let pc = run.connection, let delegate = run.delegate else { return nil }
-            return (pc, delegate, { [weak self] in self?.ingress(run, pc) { $0.callbacks.frame?() } })
+            guard let run = current, let pc = run.connection, let delegate = run.delegate,
+                  let observer = remoteAudioFrameObserver(for: pc) else { return nil }
+            return (pc, delegate, observer)
         }
     }
     func waitForNativeIngress() { owned {} }

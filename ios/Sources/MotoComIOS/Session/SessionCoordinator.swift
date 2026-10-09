@@ -62,6 +62,8 @@ public final class SessionCoordinator: ObservableObject {
     private let peerToPeerTransport: IOSControlTransport
     private let channelFactory: (NWConnection) -> NWControlChannel
     private let pathDriver: NetworkPathDriving
+    private var pathRun: UUID?
+    private let settingsOpener: (@MainActor () -> Void)?
     private var owner: Attempt?
     private var pendingInbound = [ObjectIdentifier: SignalingSessionController]()
     private var discoveredEndpoints = [String: EndpointReceipt]()
@@ -76,7 +78,8 @@ public final class SessionCoordinator: ObservableObject {
         initialCapabilities: RuntimeCapabilities? = nil,
         bonjourTransport: IOSControlTransport = BonjourTransport(), peerToPeerTransport: IOSControlTransport = ApplePeerToPeerTransport(),
         channelFactory: @escaping (NWConnection) -> NWControlChannel = { NWControlChannel(connection: $0) },
-        pathDriver: NetworkPathDriving? = nil
+        pathDriver: NetworkPathDriving? = nil,
+        settingsOpener: (@MainActor () -> Void)? = nil
     ) {
         self.identityStore = identityStore; self.pairingStore = pairingStore
         let resolvedAudio = audio ?? AudioSessionController()
@@ -86,6 +89,7 @@ public final class SessionCoordinator: ObservableObject {
         self.scheduler = scheduler ?? SessionDeadlineScheduler(); self.bleSource = bleSource
         self.bonjourTransport = bonjourTransport; self.peerToPeerTransport = peerToPeerTransport; self.channelFactory = channelFactory
         self.pathDriver = pathDriver ?? NetworkPathDriver()
+        self.settingsOpener = settingsOpener
         identity = initialIdentity; runtimeCapabilities = initialCapabilities
         webRTC.onAudioReadinessChanged = { [weak self] in self?.updateAudioReady() }
         webRTC.onTerminated = { [weak self] in
@@ -202,7 +206,7 @@ public final class SessionCoordinator: ObservableObject {
         #if canImport(CoreBluetooth)
         legacyBLE.stop()
         #endif
-        pathDriver.stop()
+        pathRun = nil; pathDriver.stop()
         bonjourTransport.stop(); peerToPeerTransport.stop()
         announcements.removeAll()
     }
@@ -231,9 +235,11 @@ public final class SessionCoordinator: ObservableObject {
         bindPathMonitor(command: ticket)
     }
     private func bindPathMonitor(command ticket: UInt64) {
+        let producer = UUID(); pathRun = producer
         pathDriver.start { [weak self] usable, observedAt in
             Task { @MainActor [weak self] in
-                guard let self, self.command == ticket, !usable, let attempt = self.owner, observedAt >= attempt.createdAt else { return }
+                guard let self, self.command == ticket, self.pathRun == producer, !usable,
+                      let attempt = self.owner, observedAt >= attempt.createdAt else { return }
                 self.end(attempt, phase: .recovering, message: "网络路径已变化，对讲连接已暂停")
             }
         }
@@ -266,6 +272,7 @@ public final class SessionCoordinator: ObservableObject {
         return granted
     }
     public func openSystemNetworkSettings() {
+        if let settingsOpener { settingsOpener(); return }
         #if canImport(UIKit)
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }; UIApplication.shared.open(url)
         #else
@@ -357,7 +364,7 @@ public final class SessionCoordinator: ObservableObject {
             }
             guard !old.mediaStarted, !old.connected, old.device == device, old.runtime == runtime,
                   scheduler.now < old.deadline, let local = identity else { return false }
-            let localKey = [old.controller?.attemptID ?? old.wireAttempt, local.deviceID, local.sessionID, device]
+            let localKey = old.controller?.currentWireKey ?? [old.wireAttempt, local.deviceID, local.sessionID, device]
             let remoteKey = [attemptID, device, runtime, local.deviceID]
             guard remoteKey.lexicographicallyPrecedes(localKey) else { return false }
             let replacement = Attempt(command: ticket, device: device, runtime: runtime, wireAttempt: attemptID,

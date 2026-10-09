@@ -9,16 +9,31 @@ public protocol NetworkPathDriving: AnyObject {
 }
 @MainActor
 public final class NetworkPathDriver: NetworkPathDriving {
-    private var monitor: NWPathMonitor?
+    /// Main owns the Run; its native callback reads only immutable monitor
+    /// identity and this lock-protected revocation bit.
+    private final class Run: @unchecked Sendable {
+        let monitor = NWPathMonitor()
+        private let lock = NSLock()
+        private var revoked = false
+        func revoke() { lock.lock(); revoked = true; lock.unlock() }
+        func isCurrent(_ monitor: NWPathMonitor) -> Bool {
+            lock.lock(); defer { lock.unlock() }; return !revoked && self.monitor === monitor
+        }
+    }
+    private var current: Run?
     public init() {}
     public func start(_ callback: @escaping @Sendable (Bool, TimeInterval) -> Void) {
         stop()
-        let monitor = NWPathMonitor(); self.monitor = monitor
-        monitor.pathUpdateHandler = { path in
+        let run = Run(); current = run; let monitor = run.monitor
+        monitor.pathUpdateHandler = { [weak run, weak monitor] path in
+            guard let run, let monitor, run.isCurrent(monitor) else { return }
             callback(path.status == .satisfied, ProcessInfo.processInfo.systemUptime)
         }
         monitor.start(queue: DispatchQueue(label: "com.motocom.path-monitor"))
     }
-    public func stop() { monitor?.cancel(); monitor = nil }
+    public func stop() {
+        let old = current; current = nil
+        old?.revoke(); old?.monitor.cancel()
+    }
 }
 #endif

@@ -55,6 +55,14 @@ public final class SignalingSessionController {
     private let expectedRemoteSessionID: String?
     public var expectedRuntimeID: String? { expectedRemoteSessionID }
     public var absoluteHelloDeadline: TimeInterval { helloDeadline }
+    public var currentWireKey: [String]? {
+        guard let attemptID, let remoteDeviceID else { return nil }
+        if machine.requestRole == .requester {
+            return [attemptID, localIdentity.deviceID, localIdentity.sessionID, remoteDeviceID]
+        }
+        guard machine.requestRole == .responder, let remoteSessionID else { return nil }
+        return [attemptID, remoteDeviceID, remoteSessionID, localIdentity.deviceID]
+    }
 
     public init(
         channel: NWControlChannel,

@@ -19,6 +19,7 @@ final class NativeWebRTCCompileGateTests: XCTestCase {
         try engine.start(configuration: WebRTCSessionConfiguration(), offerer: false)
         let b = try XCTUnwrap(engine.nativeValidationReceipt())
         a.1.peerConnection(a.0, didChange: RTCIceConnectionState.failed); a.2()
+        b.1.peerConnection(a.0, didChange: RTCIceConnectionState.failed)
         engine.waitForNativeIngress()
         XCTAssertFalse(bStates.contains(.failed)); XCTAssertEqual(bFrames, 0); XCTAssertEqual(aFrames, 0)
         b.2(); engine.waitForNativeIngress()
