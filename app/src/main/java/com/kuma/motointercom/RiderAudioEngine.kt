@@ -99,6 +99,8 @@ internal class RiderAudioEngine(
     private val closed = AtomicBoolean(false)
     private val captureFailed = AtomicBoolean(false)
     private val ioEvidence = RiderAudioIoEvidence()
+    private val recordingOwner = NativeAudioProducerOwner()
+    private val playoutOwner = NativeAudioProducerOwner()
     private val pcmFormatLogged = AtomicBoolean(false)
     private val audioControlLock = Any()
     private var versionedAudioControls = initialAudioControls.normalized()
@@ -147,6 +149,10 @@ internal class RiderAudioEngine(
 
     override fun suspendAudio() {
         audioSuspended = true
+        recordingOwner.authorize(false)
+        playoutOwner.authorize(false)
+        ioEvidence.recording(false)
+        ioEvidence.playing(false)
         runRtc {
             peerConnection?.setAudioRecording(false)
             peerConnection?.setAudioPlayout(false)
@@ -157,6 +163,8 @@ internal class RiderAudioEngine(
 
     override fun resumeAudio() {
         audioSuspended = false
+        recordingOwner.authorize(true)
+        playoutOwner.authorize(true)
         runRtc {
             if (engineState != EngineState.READY) return@runRtc
             audioDeviceModule?.setMicrophoneMute(false)
@@ -256,6 +264,10 @@ internal class RiderAudioEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        recordingOwner.authorize(false)
+        playoutOwner.authorize(false)
+        ioEvidence.recording(false)
+        ioEvidence.playing(false)
         val session = synchronized(sessionLock) {
             activeSession.also { activeSession = null }
         }
@@ -353,28 +365,42 @@ internal class RiderAudioEngine(
             .setAudioFormat(AudioFormat.ENCODING_PCM_16BIT)
             .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
                 override fun onWebRtcAudioRecordStart() {
-                    ioEvidence.recording(true)
-                    pcmFormatLogged.set(false)
-                    postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=software-requested") }
+                    val thread = Thread.currentThread()
+                    recordingOwner.start(thread, { NativeCaptureDiagnostics.isCurrentProducer(audioDeviceModule, true, thread) }) {
+                        ioEvidence.recording(true)
+                        pcmFormatLogged.set(false)
+                        postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=software-requested") }
+                    }
                 }
                 override fun onWebRtcAudioRecordStop() {
-                    ioEvidence.recording(false)
-                    postRuntimeMain { Log.i(TAG, "ADM recording stopped") }
+                    recordingOwner.stop(Thread.currentThread()) {
+                        ioEvidence.recording(false)
+                        postRuntimeMain { Log.i(TAG, "ADM recording stopped") }
+                    }
                 }
             })
             .setAudioTrackStateCallback(object : JavaAudioDeviceModule.AudioTrackStateCallback {
-                override fun onWebRtcAudioTrackStart() { ioEvidence.playing(true); postRuntimeMain { Log.i(TAG, "ADM playout started") } }
-                override fun onWebRtcAudioTrackStop() { ioEvidence.playing(false); postRuntimeMain { Log.i(TAG, "ADM playout stopped") } }
+                override fun onWebRtcAudioTrackStart() {
+                    val thread = Thread.currentThread()
+                    playoutOwner.start(thread, { NativeCaptureDiagnostics.isCurrentProducer(audioDeviceModule, false, thread) }) {
+                        ioEvidence.playing(true); postRuntimeMain { Log.i(TAG, "ADM playout started") }
+                    }
+                }
+                override fun onWebRtcAudioTrackStop() {
+                    playoutOwner.stop(Thread.currentThread()) {
+                        ioEvidence.playing(false); postRuntimeMain { Log.i(TAG, "ADM playout stopped") }
+                    }
+                }
             })
             .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
                 override fun onWebRtcAudioRecordInitError(error: String) = captureError("init", error)
                 override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode, error: String) = captureError("start:$code", error)
-                override fun onWebRtcAudioRecordError(error: String) = captureError("read", error)
+                override fun onWebRtcAudioRecordError(error: String) = recordingOwner.current(Thread.currentThread()) { captureError("read", error) }
             })
             .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
                 override fun onWebRtcAudioTrackInitError(error: String) = playoutError("init", error)
                 override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode, error: String) = playoutError("start:$code", error)
-                override fun onWebRtcAudioTrackError(error: String) = playoutError("write", error)
+                override fun onWebRtcAudioTrackError(error: String) = playoutOwner.current(Thread.currentThread()) { playoutError("write", error) }
             })
             .setAudioAttributes(
                 android.media.AudioAttributes.Builder()
@@ -415,13 +441,17 @@ internal class RiderAudioEngine(
     }
 
     private fun captureError(stage: String, error: String) {
-        ioEvidence.recording(false)
-        audioDeviceFailure("capture:$stage", error)
+        recordingOwner.authorized {
+            ioEvidence.recording(false)
+            audioDeviceFailure("capture:$stage", error)
+        }
     }
 
     private fun playoutError(stage: String, error: String) {
-        ioEvidence.playing(false)
-        audioDeviceFailure("playout:$stage", error)
+        playoutOwner.authorized {
+            ioEvidence.playing(false)
+            audioDeviceFailure("playout:$stage", error)
+        }
     }
 
     private fun audioDeviceFailure(stage: String, error: String) {
