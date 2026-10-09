@@ -1,191 +1,219 @@
 {
   "base": "6578f67499a3c1286cef60234575600138091b30",
-  "source_head": "c504894a49b6c587078b0d2c3600dd05ee3bac77",
+  "source_head": "25f6a9d760704e357065b6fb183da63c343d6cf8",
   "reviewer": "independent readonly motointercom-product-architect",
   "decision": "APPROVED",
   "p0": 0,
   "p1": 0,
   "findings": [],
-  "official_selected": 16,
-  "official_reviewed": 16,
-  "extended_reviewed": 13,
-  "reviewed": 29,
+  "official_selected": 19,
+  "official_reviewed": 19,
+  "extended_reviewed": 14,
+  "reviewed": 33,
   "skipped": 0,
-  "coverage_scope": "changed paths and related producer/consumer/lifecycle, not whole-project line coverage",
+  "coverage_scope": "fixed diff plus producer/consumer/lifecycle; unchanged source reused after blob comparison, not whole-project line coverage",
+  "native": "OK (27 tests), 13.519s; paired network probes retain missing-peer assumptions",
+  "jvm": "81 suites / 631 tests / 0 failure,error,skip",
+  "lint": "0 errors / 70 warnings",
+  "ci": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37898285291",
   "files": [
     {
       "path": "app/src/androidTest/java/com/kuma/motointercom/NativeAudioIoGateInstrumentationTest.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Full source reread for JNI/stop mutual exclusion, immutable producer resources and native ordering regressions"
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/RiderAudioEngineHotSessionTest.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/AudioIoGate.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/AudioRouteController.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/AudioSessionController.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/CommunicationAudioCoordinator.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/DecodedAudioPlayout.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/IntercomManager.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/LegacyAudioReadiness.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/MainActivity.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/ModernAudioRoute.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/NativeAudioProducerOwner.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/RiderAudioIoEvidence.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "app/src/main/java/com/kuma/motointercom/RiderMediaEvidence.kt",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
-      "path": "app/src/test/java/com/kuma/motointercom/AudioIoGateTest.kt",
+      "path": "buildSrc/src/main/java/com/kuma/buildlogic/WebRtcCaptureCallbackPatch.java",
       "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/CommunicationAudioCoordinatorTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/DecodedAudioPlayoutTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/IntercomManagerReadinessTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/LegacyAudioReadinessTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/MainActivityRobolectricTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/RiderAudioIoEvidenceTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
-    },
-    {
-      "path": "app/src/test/java/com/kuma/motointercom/RiderMediaEvidenceTest.kt",
-      "status": "reviewed",
-      "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "official_selected": true,
+      "reason": "Full source reread for JNI/stop mutual exclusion, immutable producer resources and native ordering regressions"
     },
     {
       "path": "rasen/changes/kum-68-bluetooth-routing/.openspec.yaml",
       "status": "reviewed",
       "official_selected": true,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "rasen/changes/kum-68-bluetooth-routing/coverage.json",
+      "status": "reviewed",
+      "official_selected": true,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AudioIoGateTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/CommunicationAudioCoordinatorTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DecodedAudioPlayoutTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IntercomManagerReadinessTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/LegacyAudioReadinessTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainActivityRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/RiderAudioIoEvidenceTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/RiderMediaEvidenceTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "rasen/changes/kum-68-bluetooth-routing/design.md",
       "status": "reviewed",
       "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "rasen/changes/kum-68-bluetooth-routing/proposal.md",
       "status": "reviewed",
       "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
+    },
+    {
+      "path": "rasen/changes/kum-68-bluetooth-routing/review.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "rasen/changes/kum-68-bluetooth-routing/specs/audio-routing/spec.md",
       "status": "reviewed",
       "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     },
     {
       "path": "rasen/changes/kum-68-bluetooth-routing/tasks.md",
       "status": "reviewed",
       "official_selected": false,
-      "reason": "Fixed diff plus relevant runtime ownership and regression context; default exclusions supplemented manually"
+      "reason": "Fixed diff and related lifecycle; unchanged source review reused after blob comparison; default exclusions supplemented"
     }
   ]
 }

@@ -11,3 +11,5 @@ Pinned stream-webrtc-android 1.3.9/m125.4的SetRecording/SetPlayout恢复只Star
 Sink校验PCM16、8k–48k/mono或stereo、最长20ms/3840字节；Long算长度后复制自有数据，有界10帧队列满时丢最旧帧，不把JNI内存引用入队。创建/播放/非阻塞写/释放在自有worker或暂停操作中执行，sink不等待设备。部分写继续，零返回短暂退让，500ms无进展报当前设备故障；只有实际成功write和PLAYSTATE_PLAYING及两秒内新写入构成输出证据。暂停撤销lease、清队列并释放当前设备，恢复新线程/新设备。旧构造器返回、旧异常与finally只处理其自有设备，不能撤销新lease或新媒体的证据。SDK sink增删沿RTC队列，重复track事件按id去重；没有另开AudioRecord或改变协议/产品状态归属。
 
 LegacyAudioReadiness只从实际route/native/PCM和双向audio RTP增长成立；路由、I/O/native revision或stream改变立即撤销。已证明后VOX静音不使它失效。Service回调使用现有media context门禁，产品状态仍由orchestrator写入，UI仅展示音频事实。
+
+完整原生回归暴露了第三个阻断：SDK最多join录音线程两秒，callback或read迟到返回时，静音PCM不能阻止JNI访问已清空的缓存。Java补丁把native调用与stopThread撤权收归同一Thread monitor；callback、SDK join和应用锁均在该monitor外。整个run读取构造时捕获的record/buffer，JNI前重新校验线程身份与keepAlive；失效立即退出run。原SDK尾部stop还核验当前线程、owned record和外层record三重身份，旧线程不能清零新buffer或停止新record。native库、JNI声明和ABI均保持原样；字节码布局、调用点和保留locals边界严格校验，不支持的SDK布局使构建失败。
