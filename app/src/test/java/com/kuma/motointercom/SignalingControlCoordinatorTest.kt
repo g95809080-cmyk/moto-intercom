@@ -23,6 +23,68 @@ import org.junit.Test
 
 class SignalingControlCoordinatorTest {
     @Test
+    fun connectedSocketFailuresRespectTheReconnectSwitchAndIgnoreOldOwners() = runBlocking {
+        for (enabled in listOf(false, true)) {
+            for (sendFailure in listOf(false, true)) {
+                var recoveryIdsCreated = 0
+                harness(attemptIdFactory = {
+                    recoveryIdsCreated++
+                    ConnectionAttemptId("30000000-0000-4000-8000-000000000091")
+                }).use { h ->
+                    val attempt = outboundAttempt()
+                    val owner = requesterChannel(CHANNEL_A, attempt)
+                    h.start(attempt)
+                    assertTrue(h.orchestrator.dispatchAndAwait(
+                        SessionEvent.ControlChannelVerified(RUNTIME_A, owner)))
+                    assertTrue(h.nextEffect() is SessionEffect.SendConnectRequest)
+                    assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.RemoteConnectAccepted(
+                        RUNTIME_A, attempt.id, owner.channelId, owner.wireRequestKey)))
+                    assertTrue(h.nextEffect() is SessionEffect.StartWebRtc)
+                    assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(
+                        RUNTIME_A, attempt.id, WebRtcConnectionState.CONNECTED, 500L)))
+                    assertTrue(h.orchestrator.dispatchAndAwait(
+                        SessionEvent.AutomaticReconnectChanged(enabled)))
+
+                    val stale = if (sendFailure) SessionEvent.SignalingSendFailed(
+                        RUNTIME_A, attempt.id, ControlChannelId.parse(CHANNEL_B),
+                        SignalingMessageTypeV2.CANDIDATE, "stale owner")
+                    else SessionEvent.ChannelClosed(RUNTIME_A, ControlChannelId.parse(CHANNEL_B),
+                        owner.wireRequestKey, "stale owner")
+                    assertFalse(h.orchestrator.dispatchAndAwait(stale))
+                    assertTrue(h.orchestrator.state.value is IntercomState.Connected)
+                    assertEquals(0, recoveryIdsCreated)
+                    assertFalse(h.hasPendingEffect())
+
+                    val lost = if (sendFailure) SessionEvent.SignalingSendFailed(
+                        RUNTIME_A, attempt.id, owner.channelId,
+                        SignalingMessageTypeV2.CANDIDATE, "network unavailable")
+                    else SessionEvent.ChannelClosed(RUNTIME_A, owner.channelId,
+                        owner.wireRequestKey, "remote EOF")
+                    assertTrue(h.orchestrator.dispatchAndAwait(lost))
+                    val effects = listOf(h.nextEffect(), h.nextEffect())
+                    if (enabled) {
+                        val recovery = h.orchestrator.state.value as IntercomState.Recovering
+                        assertEquals(attempt.targetLock, recovery.attempt.targetLock)
+                        assertEquals(1, recoveryIdsCreated)
+                        assertTrue(effects.any { it == SessionEffect.RestartDiscovery(RUNTIME_A, recovery.attempt) })
+                        assertTrue(effects.any { it == SessionEffect.ScheduleAttemptDeadline(recovery.attempt) })
+                    } else {
+                        assertEquals(IntercomState.Discovering(RUNTIME_A), h.orchestrator.state.value)
+                        assertNull(h.orchestrator.currentAttempt)
+                        assertEquals(0, recoveryIdsCreated)
+                        assertTrue(effects.any { it is SessionEffect.CloseControlChannel })
+                        assertTrue(effects.any { it == SessionEffect.ReleaseActiveSessionAndContinueDiscovery(attempt) })
+                        assertFalse(effects.any { it is SessionEffect.RestartDiscovery || it is SessionEffect.ScheduleAttemptDeadline })
+                    }
+                    assertNull(h.orchestrator.activeControlAttempt)
+                    assertFalse(h.orchestrator.dispatchAndAwait(lost))
+                    assertFalse(h.hasPendingEffect())
+                }
+            }
+        }
+    }
+
+    @Test
     fun lateFallbackOpenFailureCannotTerminateTheAcceptedWinner() = runBlocking {
         harness().use { h ->
             val attempt = h.startPresence(setOf(Transport.LAN, Transport.WIFI_DIRECT))

@@ -1780,13 +1780,14 @@ internal class SignalingControlCoordinator(
             context.mediaOwnerChannelId == event.channelId
         ) {
             rememberDisconnectedIfAccepted(context)
-            val decision = recoverConnectedAttempt(
+            val decision = connectionLost(
                 current,
+                context.attempt,
                 ConnectionAttemptTerminalOutcome.DISCONNECTED,
                 restartConnectedDiscovery = true
             )
             if (!decision.accepted) return decision
-            forgetActiveChannels(context)
+            if (decision.state is IntercomState.Recovering) forgetActiveChannels(context)
             return decision
         }
         if (
@@ -1845,13 +1846,14 @@ internal class SignalingControlCoordinator(
         if (context.mediaOwnerChannelId == event.channelId) {
             if (current is IntercomState.Connected) {
                 rememberDisconnectedIfAccepted(context)
-                val decision = recoverConnectedAttempt(
+                val decision = connectionLost(
                     current,
+                    context.attempt,
                     ConnectionAttemptTerminalOutcome.DISCONNECTED,
                     restartConnectedDiscovery = true
                 )
                 if (!decision.accepted) return decision
-                forgetActiveChannels(context)
+                if (decision.state is IntercomState.Recovering) forgetActiveChannels(context)
                 return decision
             }
             return finishAttemptImmediately(current, context)
