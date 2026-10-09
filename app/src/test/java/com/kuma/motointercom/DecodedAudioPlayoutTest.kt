@@ -126,7 +126,7 @@ class DecodedAudioPlayoutTest {
         val create = CountDownLatch(1)
         val zeroWrite = CountDownLatch(1)
         val allowProgress = CountDownLatch(1)
-        val playing = java.util.concurrent.atomic.AtomicBoolean(false)
+        val published = java.util.concurrent.atomic.AtomicBoolean(false)
         val chunks = LinkedBlockingQueue<ByteArray>()
         val writes = AtomicInteger()
         val failures = LinkedBlockingQueue<Throwable>()
@@ -143,7 +143,7 @@ class DecodedAudioPlayoutTest {
                 chunks.offer(bytes.copyOfRange(offset, offset + count)); return count
             }
         }
-        val output = DecodedAudioPlayout({ true }, { playing.set(it) }, {}, { failures.offer(it) }) { _, _ ->
+        val output = DecodedAudioPlayout({ true }, { published.set(it) }, {}, { failures.offer(it) }) { _, _ ->
             entered.countDown(); create.await(2, TimeUnit.SECONDS); device
         }
         try {
@@ -154,12 +154,12 @@ class DecodedAudioPlayoutTest {
             assertTrue(entered.await(2, TimeUnit.SECONDS))
             original.fill(0) // The native callback's buffer may be reused immediately after it returns.
             create.countDown(); assertTrue(zeroWrite.await(2, TimeUnit.SECONDS))
-            assertFalse("play() or a zero write granted evidence", playing.get())
+            assertFalse("play() or a zero write granted evidence", published.get())
             allowProgress.countDown()
             val actual = ArrayList<Byte>()
             repeat(8) { actual.addAll(chunks.poll(2, TimeUnit.SECONDS)!!.toList()) }
             assertArrayEquals(expected, actual.toByteArray())
-            assertTrue(playing.get())
+            assertTrue(published.get())
             assertNull(failures.poll())
         } finally { create.countDown(); allowProgress.countDown(); output.close() }
     }
