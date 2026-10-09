@@ -7,9 +7,17 @@ import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.Looper
 import android.view.View
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -64,6 +72,297 @@ class MainActivityRobolectricTest {
         MainScreen::class.java.getDeclaredField(fieldName).apply {
             isAccessible = true
             set(screen, value)
+        }
+    }
+
+    @Test
+    fun actualActorRejectionUnlocksTheBoundActivityPresenceRequest() {
+        val calls = AtomicInteger()
+        withPresenceAdmissionFixture({ spent -> calls.incrementAndGet(); spent }) {
+                service, actor, activity, presence, spent ->
+            clickAdmissionPresence(activity, presence)
+            val request = pendingAdmissionRequest(activity)
+            assertEquals(request, admissionField(service, "latestPresenceConnectRequest").get(service))
+            assertEquals(actor.state.value.runtimeSessionId, request.runtimeSessionId)
+            assertEquals(presence.deviceId, request.targetDeviceId)
+            assertEquals(presence.sessionId, request.targetSessionId)
+            assertFalse(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+            shadowOf(Looper.getMainLooper()).idle()
+            awaitAdmissionActor(actor)
+            assertEquals(1, calls.get())
+            assertEquals(ConnectionAttemptTerminalOutcome.FAILED, actor.terminalOutcome(spent))
+            assertTrue(actor.state.value is IntercomState.Discovering)
+            assertNull(actor.currentAttempt)
+            assertNull(admissionField(service, "latestPresenceConnectRequest").get(service))
+            assertNull(admissionField(screen(activity), "pendingConnectRequest").get(screen(activity)))
+            assertTrue(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+            assertEquals("连接未启动，请重新选择车友", discoverAdmissionState(activity).supplementalText)
+        }
+    }
+
+    @Test
+    fun oldSameTargetActorRejectionCannotClearTheReboundActivityRequest() {
+        val enteredA = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        val enteredB = CountDownLatch(1)
+        val releaseB = CountDownLatch(1)
+        val calls = AtomicInteger()
+        withPresenceAdmissionFixture({ spent ->
+            val (entered, release) = when (calls.incrementAndGet()) {
+                1 -> enteredA to releaseA
+                2 -> enteredB to releaseB
+                else -> error("unexpected Presence admission")
+            }
+            entered.countDown()
+            check(release.await(5L, TimeUnit.SECONDS)) { "Presence factory gate timed out" }
+            spent
+        }) { service, actor, activity, presence, _ ->
+            try {
+                clickAdmissionPresence(activity, presence)
+                val requestA = pendingAdmissionRequest(activity)
+                awaitAdmissionGate(enteredA)
+                stopAdmissionActivity(activity)
+                bindAdmissionService(activity, service)
+                clickAdmissionPresence(activity, presence)
+                val requestB = pendingAdmissionRequest(activity)
+                assertEquals(requestA.runtimeSessionId, requestB.runtimeSessionId)
+                assertEquals(requestA.targetDeviceId, requestB.targetDeviceId)
+                assertEquals(requestA.targetSessionId, requestB.targetSessionId)
+                assertFalse(requestA.requestId == requestB.requestId)
+                releaseA.countDown()
+                awaitAdmissionGate(enteredB)
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(requestB, pendingAdmissionRequest(activity))
+                assertEquals(requestB, admissionField(service, "latestPresenceConnectRequest").get(service))
+                assertFalse(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+                assertFalse(discoverAdmissionState(activity).supplementalText == "连接未启动，请重新选择车友")
+                releaseB.countDown()
+                awaitAdmissionActor(actor)
+                assertTrue(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+                assertNull(admissionField(screen(activity), "pendingConnectRequest").get(screen(activity)))
+                assertTrue(actor.state.value is IntercomState.Discovering)
+                assertNull(actor.currentAttempt)
+            } finally {
+                releaseA.countDown()
+                releaseB.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun admittedAttemptThatFinishesBeforeMainReceiptReportsItsActualTerminalOutcome() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val attemptId = ConnectionAttemptId("presence-receipt-finished")
+        withPresenceAdmissionFixture({
+            entered.countDown()
+            check(release.await(5L, TimeUnit.SECONDS)) { "Presence factory gate timed out" }
+            attemptId
+        }) { service, actor, activity, presence, _ ->
+            val admissions = mutableListOf<Pair<PresenceConnectRequest, Boolean>>()
+            service.setListener(object : IntercomService.Listener by activity {
+                override fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+                    admissions += request to accepted
+                    activity.onPresenceConnectAdmission(request, accepted)
+                }
+            })
+            try {
+                clickAdmissionPresence(activity, presence)
+                val request = pendingAdmissionRequest(activity)
+                awaitAdmissionGate(entered)
+                release.countDown()
+                awaitAdmissionActor(actor, deliverOnMain = false)
+                val actual = requireNotNull(actor.currentAttempt)
+                assertEquals(attemptId, actual.id)
+                assertEquals(request.runtimeSessionId, actual.runtimeSessionId)
+                assertEquals(TargetLock(request.targetDeviceId, request.targetSessionId), actual.targetLock)
+                assertNull(actor.terminalOutcome(attemptId))
+                assertTrue(admissions.isEmpty())
+                assertEquals(request, pendingAdmissionRequest(activity))
+                runBlocking {
+                    withTimeout(5_000L) {
+                        assertTrue(actor.dispatchAndAwait(SessionEvent.TargetedTransportOpenFailed(
+                            request.runtimeSessionId, attemptId, Transport.LAN, "finish before Main receipt"
+                        )))
+                    }
+                }
+                awaitAdmissionActor(actor, deliverOnMain = false)
+                assertEquals(ConnectionAttemptTerminalOutcome.FAILED, actor.terminalOutcome(attemptId))
+                assertEquals(IntercomState.Discovering(request.runtimeSessionId), actor.state.value)
+                assertNull(actor.currentAttempt)
+                assertTrue(admissions.isEmpty())
+                assertEquals(request, admissionField(service, "latestPresenceConnectRequest").get(service))
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(listOf(request to false), admissions)
+                assertNull(admissionField(service, "latestPresenceConnectRequest").get(service))
+                assertNull(admissionField(screen(activity), "pendingConnectRequest").get(screen(activity)))
+                assertFalse(admissionField(screen(activity), "discoverConnectAwaitingState").getBoolean(screen(activity)))
+                invokeShowPage(screen(activity), MainRoute.DISCOVER)
+                assertTrue(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+            } finally {
+                release.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun oldAutoPairedActorRejectionCannotClearTheNewSameTargetGeneration() {
+        val enteredA = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        val enteredB = CountDownLatch(1)
+        val releaseB = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val attemptB = ConnectionAttemptId("presence-auto-generation-b")
+        withPresenceAdmissionFixture({ spent ->
+            val first = when (calls.incrementAndGet()) {
+                1 -> true
+                2 -> false
+                else -> error("unexpected auto Presence admission")
+            }
+            (if (first) enteredA else enteredB).countDown()
+            check((if (first) releaseA else releaseB).await(5L, TimeUnit.SECONDS)) {
+                "Auto Presence factory gate timed out"
+            }
+            if (first) spent else attemptB
+        }) { service, actor, activity, presence, _ ->
+            val preferred = presence.copy(pairing = requireNotNull(pairedPresence().pairing).copy(
+                remoteDeviceId = requireNotNull(presence.deviceId), isPreferred = true
+            ))
+            val snapshot = PresenceSnapshot(listOf(preferred), nextExpiryElapsedRealtimeMs = null)
+            val key = PreferredAutoConnectTargetKey(
+                requireNotNull(presence.deviceId), requireNotNull(presence.sessionId)
+            )
+            try {
+                publishAdmissionSnapshot(service, snapshot)
+                awaitAdmissionGate(enteredA)
+                val generationA = admissionField(service, "autoConnectRequestGeneration").getLong(service)
+                assertEquals(key, admissionField(service, "autoConnectTargetKey").get(service))
+                publishAdmissionSnapshot(service, PresenceSnapshot(emptyList(), null))
+                assertNull(admissionField(service, "autoConnectTargetKey").get(service))
+                publishAdmissionSnapshot(service, snapshot)
+                val generationB = admissionField(service, "autoConnectRequestGeneration").getLong(service)
+                assertTrue(generationB > generationA)
+                releaseA.countDown()
+                awaitAdmissionGate(enteredB)
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(2, calls.get())
+                assertEquals(generationB, admissionField(service, "autoConnectRequestGeneration").getLong(service))
+                assertEquals(key, admissionField(service, "autoConnectTargetKey").get(service))
+                assertTrue(actor.state.value is IntercomState.Discovering)
+                assertNull(actor.currentAttempt)
+                releaseB.countDown()
+                awaitAdmissionActor(actor, deliverOnMain = false)
+                val actualB = requireNotNull(actor.currentAttempt)
+                assertEquals(attemptB, actualB.id)
+                assertEquals(ConnectionTrigger.AUTO_PAIRED, actualB.trigger)
+                assertEquals(TargetLock(key.deviceId, key.sessionId), actualB.targetLock)
+                assertEquals(actor.state.value.runtimeSessionId, actualB.runtimeSessionId)
+                assertEquals(key, admissionField(service, "autoConnectTargetKey").get(service))
+                assertFalse(admissionField(screen(activity), "discoverConnectAwaitingState").getBoolean(screen(activity)))
+            } finally {
+                releaseA.countDown()
+                releaseB.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun cleanupCancelsOldTokenBeforeSameRuntimeRestartAndLateRejectionPreservesRequestB() {
+        val enteredA = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        val enteredB = CountDownLatch(1)
+        val releaseB = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val runtime = RuntimeSessionId.create()
+        withPresenceAdmissionFixture(manualFactory = { spent ->
+            val (entered, release) = when (calls.incrementAndGet()) {
+                1 -> enteredA to releaseA
+                2 -> enteredB to releaseB
+                else -> error("unexpected Presence admission")
+            }
+            entered.countDown()
+            check(release.await(5L, TimeUnit.SECONDS)) { "Presence factory gate timed out" }
+            spent
+        }, runtime = runtime) { service, actor, activity, presence, _ ->
+            val sessions = admissionField(service, "sessions").get(service) as SessionGeneration
+            val tokenA = admissionField(service, "activeSession").get(service) as SessionGeneration.Token
+            val originalOwner = admissionField(service, "wifiTunnelCloseOwner").get(service)
+            val cleanup = mutableListOf<() -> Unit>()
+            val localDeviceId = java.util.UUID.randomUUID().toString()
+            val tunnelA = WifiDirectTunnel(service, { _, _ -> }, localDeviceId = localDeviceId,
+                localDeviceName = "admission fixture", sessionId = runtime)
+            val pendingClose = PendingCloseOwner<WifiDirectTunnel> { resource, complete ->
+                resource.close { cleanup += complete }
+            }
+            val admissions = mutableListOf<Pair<PresenceConnectRequest, Boolean>>()
+            service.setListener(object : IntercomService.Listener by activity {
+                override fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+                    admissions += request to accepted
+                    activity.onPresenceConnectAdmission(request, accepted)
+                }
+            })
+            admissionField(service, "localDeviceId").set(service, localDeviceId)
+            admissionField(service, "wifiTunnel").set(service, tunnelA)
+            admissionField(service, "wifiTunnelCloseOwner").set(service, pendingClose)
+            try {
+                clickAdmissionPresence(activity, presence)
+                val requestA = pendingAdmissionRequest(activity)
+                awaitAdmissionGate(enteredA)
+                assertTrue(abortAdmissionResources(service, runtime))
+                assertEquals(listOf(requestA to false), admissions)
+                assertNull(admissionField(screen(activity), "pendingConnectRequest").get(screen(activity)))
+                assertFalse(admissionField(screen(activity), "discoverConnectAwaitingState").getBoolean(screen(activity)))
+                assertNull(admissionField(service, "activeSession").get(service))
+                assertFalse(sessions.isCurrent(tokenA))
+                assertEquals(runtime.value, admissionField(service, "activeRuntimeSessionId").get(service))
+                assertTrue(pendingClose.hasPending)
+                assertEquals(1, cleanup.size)
+                cleanup.single().invoke()
+                shadowOf(Looper.getMainLooper()).idle()
+                val tokenB = admissionField(service, "activeSession").get(service) as SessionGeneration.Token
+                assertFalse(tokenA == tokenB)
+                assertTrue(sessions.isCurrent(tokenB))
+                assertEquals(runtime.value, admissionField(service, "activeRuntimeSessionId").get(service))
+                assertEquals(IntercomState.Discovering(runtime), actor.state.value)
+                assertFalse(pendingClose.hasPending)
+                admissionField(service, "wifiTunnelCloseOwner").set(service, originalOwner)
+                val candidate = presence.candidates.single { it.transport == Transport.LAN }
+                val aggregator = admissionField(service, "presenceAggregator").get(service) as PresenceAggregator
+                val restored = aggregator.replaceCandidates(Transport.LAN, listOf(DiscoveryCandidate(
+                    candidate.transport, candidate.endpointId, candidate.address, candidate.port,
+                    DiscoveryIdentityClaim(presence.deviceId, presence.sessionId,
+                        presence.nickname, presence.deviceName, presence.protocolVersion)
+                )))
+                publishAdmissionSnapshot(service, restored)
+                val selectedB = requireNotNull(restored.resolveCurrentSelection(presence))
+                assertTrue(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+                clickAdmissionPresence(activity, selectedB)
+                val requestB = pendingAdmissionRequest(activity)
+                assertEquals(requestA.runtimeSessionId, requestB.runtimeSessionId)
+                assertEquals(requestA.targetDeviceId, requestB.targetDeviceId)
+                assertEquals(requestA.targetSessionId, requestB.targetSessionId)
+                assertFalse(requestA.requestId == requestB.requestId)
+                releaseA.countDown()
+                awaitAdmissionGate(enteredB)
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(2, calls.get())
+                assertEquals(listOf(requestA to false), admissions)
+                assertEquals(requestB, pendingAdmissionRequest(activity))
+                assertEquals(requestB, admissionField(service, "latestPresenceConnectRequest").get(service))
+                assertFalse(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+                assertTrue(sessions.isCurrent(tokenB))
+                releaseB.countDown()
+                awaitAdmissionActor(actor)
+                assertEquals(listOf(requestA to false, requestB to false), admissions)
+                assertNull(admissionField(service, "latestPresenceConnectRequest").get(service))
+                assertNull(admissionField(screen(activity), "pendingConnectRequest").get(screen(activity)))
+                assertTrue(discoverAdmissionState(activity).presentation.cards.single().connectEnabled)
+            } finally {
+                releaseA.countDown()
+                releaseB.countDown()
+                cleanup.toList().forEach { it() }
+                admissionField(service, "wifiTunnelCloseOwner").set(service, originalOwner)
+            }
         }
     }
 
@@ -572,7 +871,19 @@ class MainActivityRobolectricTest {
             activity.onAudioReadyChanged(true)
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(ready.getBoolean(screen(activity)))
-        } finally { controller.destroy(); serviceController.destroy() }
+        } finally {
+            controller.destroy()
+            val scope = admissionField(service, "serviceScope").get(service) as CoroutineScope
+            val stopped = CountDownLatch(1)
+            scope.coroutineContext[Job]?.invokeOnCompletion { stopped.countDown() } ?: stopped.countDown()
+            serviceController.destroy()
+            assertTrue("Service scope did not stop", stopped.await(5L, TimeUnit.SECONDS))
+            val databaseField = PairingDatabase::class.java.getDeclaredField("instance").apply {
+                isAccessible = true
+            }
+            (databaseField.get(null) as? PairingDatabase)?.close()
+            databaseField.set(null, null)
+        }
     }
 
     private fun showIncomingConfirmation(
@@ -635,6 +946,133 @@ class MainActivityRobolectricTest {
             pairing = null
         )
     )
+
+    private fun withPresenceAdmissionFixture(
+        manualFactory: (ConnectionAttemptId) -> ConnectionAttemptId,
+        runtime: RuntimeSessionId = RuntimeSessionId("presence-admission-runtime"),
+        block: (IntercomService, SessionOrchestrator, MainActivity, RiderPresence, ConnectionAttemptId) -> Unit
+    ) {
+        val databaseField = PairingDatabase::class.java.getDeclaredField("instance").apply { isAccessible = true }
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        var ownership: Any? = null
+        try {
+            val actor = admissionField(service, "orchestrator").get(service) as SessionOrchestrator
+            val control = requireNotNull(admissionField(actor, "signalingControl").get(actor))
+            val spent = ConnectionAttemptId("presence-admission-spent")
+            val remote = RuntimeSessionId("presence-admission-remote")
+            var generated = 0
+            val factory: () -> ConnectionAttemptId = {
+                if (generated++ == 0) spent else manualFactory(spent)
+            }
+            admissionField(control, "attemptIdFactory").set(control, factory)
+            runBlocking {
+                withTimeout(5_000L) {
+                    assertTrue(actor.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
+                    assertTrue(actor.dispatchAndAwait(SessionEvent.ConnectPresenceRequested(
+                        runtime, "admission-device", remote, setOf(Transport.LAN)
+                    )))
+                    assertTrue(actor.dispatchAndAwait(SessionEvent.TargetedTransportOpenFailed(
+                        runtime, spent, Transport.LAN, "seed terminal attempt"
+                    )))
+                }
+            }
+            assertEquals(ConnectionAttemptTerminalOutcome.FAILED, actor.terminalOutcome(spent))
+            assertEquals(IntercomState.Discovering(runtime), actor.state.value)
+            shadowOf(Looper.getMainLooper()).idle()
+            val aggregator = admissionField(service, "presenceAggregator").get(service) as PresenceAggregator
+            val presence = aggregator.replaceCandidates(Transport.LAN, listOf(DiscoveryCandidate(
+                Transport.LAN, "admission-endpoint", "127.0.0.1", 1234,
+                DiscoveryIdentityClaim("admission-device", remote, "Admission Rider", "Test Phone", 2)
+            ))).presences.single()
+            val sessions = admissionField(service, "sessions").get(service) as SessionGeneration
+            ownership = requireNotNull(LegacyRuntimeOwnership.acquire())
+            admissionField(service, "legacyOwnership").set(service, ownership)
+            admissionField(service, "activeSession").set(service, sessions.start())
+            admissionField(service, "activeRuntimeSessionId").set(service, runtime.value)
+            admissionField(service, "running").set(service, true)
+            val activityController = Robolectric.buildActivity(MainActivity::class.java).create()
+            val activity = activityController.get()
+            try {
+                bindAdmissionService(activity, service)
+                invokeShowPage(screen(activity), MainRoute.DISCOVER)
+                shadowOf(Looper.getMainLooper()).idle()
+                block(service, actor, activity, presence, spent)
+            } finally {
+                stopAdmissionActivity(activity)
+                activityController.destroy()
+            }
+        } finally {
+            val scope = admissionField(service, "serviceScope").get(service) as CoroutineScope
+            val stopped = CountDownLatch(1)
+            scope.coroutineContext[Job]?.invokeOnCompletion { stopped.countDown() } ?: stopped.countDown()
+            try {
+                controller.destroy()
+                assertTrue("Service scope did not stop", stopped.await(5L, TimeUnit.SECONDS))
+            } finally {
+                ownership?.let(LegacyRuntimeOwnership::release)
+                (databaseField.get(null) as? PairingDatabase)?.close()
+                databaseField.set(null, null)
+            }
+        }
+    }
+
+    private fun bindAdmissionService(activity: MainActivity, service: IntercomService) {
+        setPrivateBoolean(activity, "bindingRegistered", true)
+        val connection = admissionField(activity, "serviceConnection").get(activity) as ServiceConnection
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        shadowOf(app).setComponentNameAndServiceForBindService(
+            ComponentName(activity, IntercomService::class.java), service.onBind(Intent())
+        )
+        assertTrue(activity.bindService(Intent(activity, IntercomService::class.java), connection, android.content.Context.BIND_AUTO_CREATE))
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun stopAdmissionActivity(activity: MainActivity) {
+        MainActivity::class.java.getDeclaredMethod("onStop").apply { isAccessible = true }.invoke(activity)
+    }
+
+    private fun clickAdmissionPresence(activity: MainActivity, presence: RiderPresence) {
+        MainScreen::class.java.getDeclaredMethod("connectFromDiscover", RiderPresence::class.java).apply {
+            isAccessible = true
+        }.invoke(screen(activity), presence)
+    }
+
+    private fun pendingAdmissionRequest(activity: MainActivity): PresenceConnectRequest =
+        admissionField(screen(activity), "pendingConnectRequest").get(screen(activity)) as PresenceConnectRequest
+
+    private fun discoverAdmissionState(activity: MainActivity): DiscoverScreenUiState =
+        stateValue(screen(activity), "discoverUiState") as DiscoverScreenUiState
+
+    private fun awaitAdmissionActor(actor: SessionOrchestrator, deliverOnMain: Boolean = true) {
+        runBlocking {
+            withTimeout(5_000L) { assertTrue(actor.dispatchAndAwait(SessionEvent.AutomaticReconnectChanged(true))) }
+        }
+        if (deliverOnMain) shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun awaitAdmissionGate(gate: CountDownLatch) {
+        repeat(100) {
+            shadowOf(Looper.getMainLooper()).idle()
+            if (gate.await(10L, TimeUnit.MILLISECONDS)) return
+        }
+        error("Presence actor did not reach its gate")
+    }
+
+    private fun abortAdmissionResources(service: IntercomService, runtime: RuntimeSessionId): Boolean {
+        val method = IntercomService::class.java.declaredMethods.single {
+            it.name.startsWith("abortResourcesAndResumeDiscovery") && it.parameterCount == 6
+        }.apply { isAccessible = true }
+        return method.invoke(service, runtime.value, null, 0L, null, "Refreshing discovery", null) as Boolean
+    }
+
+    private fun publishAdmissionSnapshot(service: IntercomService, snapshot: PresenceSnapshot) {
+        IntercomService::class.java.getDeclaredMethod("publishPresenceSnapshot", PresenceSnapshot::class.java)
+            .apply { isAccessible = true }.invoke(service, snapshot)
+    }
+
+    private fun admissionField(owner: Any, name: String) =
+        owner.javaClass.getDeclaredField(name).apply { isAccessible = true }
 
     private fun pairedPresence(): RiderPresence = RiderPresence(
         deviceId = "paired-device",

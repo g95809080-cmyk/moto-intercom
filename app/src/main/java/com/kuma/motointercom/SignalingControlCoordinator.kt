@@ -274,6 +274,7 @@ internal class SignalingControlCoordinator(
                     event.transport in it.channelPlan
             }
             ?: return rejected()
+        if (active?.takeIf { it.attempt == attempt }?.mediaOwnerChannelId != null) return rejected()
         val race = targetedTransportRace?.takeIf { it.attempt == attempt }
             ?: return terminateOwnedAttempt(
                 current,
@@ -292,7 +293,8 @@ internal class SignalingControlCoordinator(
         val viableOpened = (
             updated.openedTransports - updated.failedTransports - updated.retiredTransports
             ) + liveTransports
-        val pending = attempt.channelPlan.plannedTransports - updated.openedTransports
+        val pending = attempt.channelPlan.plannedTransports - updated.openedTransports -
+            updated.failedTransports - updated.retiredTransports
         return if (viableOpened.isNotEmpty() || pending.isNotEmpty()) {
             accepted(state = current)
         } else {
@@ -458,7 +460,7 @@ internal class SignalingControlCoordinator(
             return rejected()
         }
         val remaining = context.channelIds.filterTo(linkedSetOf()) { it in channels }
-        if (remaining.isEmpty()) return finishAttemptImmediately(current, context)
+        if (remaining.isEmpty()) return reconcilePreMediaCandidates(current, context, remaining)
         val cohort = SelectionCohort(
             context.wireRequestKey,
             remaining,
@@ -797,7 +799,8 @@ internal class SignalingControlCoordinator(
                 phase = SignalingAttemptPhase.WAITING_REMOTE_DECISION
             )
         } else {
-            context.copy(channelIds = context.channelIds + channel.channelId)
+            context.copy(peer = if (context.channelIds.isEmpty()) channel.peer else context.peer,
+                channelIds = context.channelIds + channel.channelId)
         }
         val nextState = when (current) {
             is IntercomState.Connecting -> current.copy(peer = channel.peer)
@@ -1297,7 +1300,8 @@ internal class SignalingControlCoordinator(
                 it.phase == SignalingAttemptPhase.SELECTING_MEDIA &&
                     it.attempt.runtimeSessionId == event.runtimeSessionId &&
                     it.attempt.id == event.attemptId &&
-                    it.wireRequestKey == event.wireRequestKey
+                    it.wireRequestKey == event.wireRequestKey &&
+                    it.selectionCohort == event.cohort
             }
             ?: return rejected()
         if (context.attempt.isExpiredAt(clock.now())) {
@@ -1311,7 +1315,7 @@ internal class SignalingControlCoordinator(
         val selected = event.channelId
         if (selected == null || selected !in cohort.channelIds || selected !in channels) {
             val remaining = cohort.channelIds.filterTo(linkedSetOf()) { it in channels }
-            if (remaining.isEmpty()) return finishAttemptImmediately(current, context)
+            if (remaining.isEmpty()) return reconcilePreMediaCandidates(current, context, remaining)
             val reducedCohort = cohort.copy(channelIds = remaining)
             active = context.copy(channelIds = remaining, selectionCohort = reducedCohort)
             return accepted(effects = listOf(selectEffect(context.attempt, reducedCohort)))
@@ -1668,6 +1672,7 @@ internal class SignalingControlCoordinator(
                 )
             )
         }
+        removePreMediaCandidate(current, context, event.channelId, closeRemoved = true)?.let { return it }
         channels.remove(event.channelId)
         if (
             current is IntercomState.Connected &&
@@ -1735,6 +1740,7 @@ internal class SignalingControlCoordinator(
             channels.remove(storedChannel.channelId)
             return accepted(state = current)
         }
+        removePreMediaCandidate(current, context, event.channelId, closeRemoved = false)?.let { return it }
         channels.remove(event.channelId)
         if (context.mediaOwnerChannelId == event.channelId) {
             if (current is IntercomState.Connected) {
@@ -1932,6 +1938,7 @@ internal class SignalingControlCoordinator(
         context: AttemptChannelSet,
         channelId: ControlChannelId
     ): SignalingControlDecision {
+        removePreMediaCandidate(current, context, channelId, closeRemoved = true)?.let { return it }
         channels.remove(channelId)
         val remaining = context.channelIds - channelId
         if (remaining.isEmpty() || context.mediaOwnerChannelId == channelId) {
@@ -1952,6 +1959,70 @@ internal class SignalingControlCoordinator(
                 )
             )
         )
+    }
+
+    private fun canContinuePreMedia(context: AttemptChannelSet): Boolean =
+        context.mediaOwnerChannelId == null && context.terminalOutcome == null &&
+            context.phase in setOf(SignalingAttemptPhase.WAITING_REMOTE_DECISION,
+                SignalingAttemptPhase.OPTIMIZING_MEDIA, SignalingAttemptPhase.SELECTING_MEDIA)
+
+    private fun hasTargetedWork(attempt: ConnectionAttempt, liveChannelIds: Set<ControlChannelId>): Boolean {
+        val race = targetedTransportRace?.takeIf { it.attempt == attempt }
+        val retired = race?.retiredTransports.orEmpty()
+        if (liveChannelIds.any { channels[it]?.transport?.let { transport -> transport !in retired } == true }) return true
+        if (race == null) return false
+        val opened = race.openedTransports - race.failedTransports - retired
+        val planned = attempt.channelPlan.plannedTransports - race.openedTransports - race.failedTransports - retired
+        return opened.isNotEmpty() || planned.isNotEmpty()
+    }
+
+    private fun reconcilePreMediaCandidates(
+        current: IntercomState,
+        context: AttemptChannelSet,
+        candidateIds: Set<ControlChannelId> = context.channelIds,
+        prefixEffects: List<SessionEffect> = emptyList()
+    ): SignalingControlDecision {
+        if (!canContinuePreMedia(context) || ownedAttempt != context.attempt ||
+            current.connectionAttemptOrNull() != context.attempt) return rejected()
+        if (context.attempt.isExpiredAt(clock.now())) return finishAttemptImmediately(
+            current, context, prefixEffects, ConnectionAttemptTerminalOutcome.TIMED_OUT)
+        val retired = targetedTransportRace?.takeIf { it.attempt == context.attempt }?.retiredTransports.orEmpty()
+        val remaining = candidateIds.filterTo(linkedSetOf()) { channels[it]?.transport?.let { transport -> transport !in retired } == true }
+        val cohort = context.selectionCohort?.let {
+            val ids = it.channelIds.intersect(remaining)
+            if (ids.isEmpty()) null else it.copy(channelIds = ids)
+        }
+        val updated = context.copy(channelIds = remaining, selectionCohort = cohort,
+            pendingTerminalChannels = context.pendingTerminalChannels.intersect(remaining))
+        if (!hasTargetedWork(context.attempt, remaining)) return finishAttemptImmediately(current, updated, prefixEffects)
+        if (context.phase == SignalingAttemptPhase.WAITING_REMOTE_DECISION || cohort == null) {
+            active = updated.copy(phase = SignalingAttemptPhase.WAITING_REMOTE_DECISION,
+                selectionCohort = null, optimizationMilestone = null)
+            val state = if (current is IntercomState.Optimizing) IntercomState.Connecting(context.attempt, context.peer) else current
+            return accepted(state = state, effects = prefixEffects)
+        }
+        val selectNow = context.phase == SignalingAttemptPhase.SELECTING_MEDIA ||
+            remaining.any { channels[it]?.transport == context.attempt.preferredTransport }
+        active = updated.copy(phase = if (selectNow) SignalingAttemptPhase.SELECTING_MEDIA else SignalingAttemptPhase.OPTIMIZING_MEDIA,
+            optimizationMilestone = if (selectNow) null else context.optimizationMilestone)
+        return accepted(state = selectionState(current, context.attempt, context.peer, optimizing = !selectNow),
+            effects = prefixEffects + if (selectNow) listOf(selectEffect(context.attempt, requireNotNull(cohort))) else emptyList())
+    }
+
+    private fun removePreMediaCandidate(
+        current: IntercomState,
+        context: AttemptChannelSet,
+        channelId: ControlChannelId,
+        closeRemoved: Boolean
+    ): SignalingControlDecision? {
+        if (!canContinuePreMedia(context)) return null
+        if (ownedAttempt != context.attempt || current.connectionAttemptOrNull() != context.attempt) return rejected()
+        channels.remove(channelId)
+        // A channel loss cannot prove sibling pending HELLO sockets on this transport failed.
+        // Only TargetedTransportOpenFailed marks failed work; unknown opened work retains its deadline.
+        val close = if (closeRemoved) listOf(closeEffect(context.attempt.runtimeSessionId,
+            context.attempt.id, channelId, context.attempt.targetLock)) else emptyList()
+        return reconcilePreMediaCandidates(current, context, context.channelIds - channelId, close)
     }
 
     private fun finishSentPendingTerminalChannel(

@@ -1734,7 +1734,11 @@ class MainScreenRobolectricTest {
         assertFalse(discoverEnabled("discover_connect_device-a"))
 
         fixture.screen.setPresences(emptyList())
-        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(2_001L))
+        repeat(3) {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(500L))
+            fixture.screen.setPresences(emptyList())
+        }
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(501L))
         fixture.screen.setPresences(listOf(presence))
 
         assertTrue(discoverEnabled("discover_connect_device-a"))

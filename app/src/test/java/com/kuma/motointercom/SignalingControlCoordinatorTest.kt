@@ -23,6 +23,125 @@ import org.junit.Test
 
 class SignalingControlCoordinatorTest {
     @Test
+    fun lateFallbackOpenFailureCannotTerminateTheAcceptedWinner() = runBlocking {
+        harness().use { h ->
+            val attempt = h.startPresence(setOf(Transport.LAN, Transport.WIFI_DIRECT))
+            h.nextEffect(); h.nextEffect()
+            val fallback = (h.nextEffect() as SessionEffect.ScheduleAttemptMilestone).milestone
+            h.advanceBy(5_000L)
+            h.orchestrator.dispatchAndAwait(SessionEvent.AttemptMilestoneElapsed(fallback))
+            assertEquals(Transport.WIFI_DIRECT, (h.nextEffect() as SessionEffect.OpenTargetedTransport).transport)
+            val owner = requesterChannel(CHANNEL_A, attempt)
+            h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, owner))
+            h.nextEffect()
+            h.orchestrator.dispatchAndAwait(SessionEvent.RemoteConnectAccepted(RUNTIME_A,
+                attempt.id, owner.channelId, owner.wireRequestKey))
+            assertTrue(h.nextEffect() is SessionEffect.StartWebRtc)
+            val context = h.orchestrator.activeControlAttempt
+            assertFalse(h.orchestrator.dispatchAndAwait(SessionEvent.TargetedTransportOpenFailed(
+                RUNTIME_A, attempt.id, Transport.WIFI_DIRECT, "late sibling failure")))
+            assertEquals(context, h.orchestrator.activeControlAttempt)
+            assertEquals(owner.channelId, h.orchestrator.activeControlAttempt?.mediaOwnerChannelId)
+            assertEquals(attempt, h.orchestrator.currentAttempt)
+            assertNull(h.orchestrator.terminalOutcome(attempt.id))
+            assertFalse(h.hasPendingEffect())
+        }
+    }
+
+    @Test
+    fun earlyCandidateLossRetainsNormalFallbackAndOriginalDeadline() = runBlocking {
+        listOf(false, true).forEach { sendFailure ->
+            harness().use { h ->
+                val attempt = h.startPresence(setOf(Transport.LAN, Transport.WIFI_DIRECT))
+                assertTrue(h.nextEffect() is SessionEffect.ScheduleAttemptDeadline)
+                assertEquals(Transport.LAN, (h.nextEffect() as SessionEffect.OpenTargetedTransport).transport)
+                val fallback = (h.nextEffect() as SessionEffect.ScheduleAttemptMilestone).milestone
+                val first = requesterChannel(CHANNEL_A, attempt)
+                assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, first)))
+                assertTrue(h.nextEffect() is SessionEffect.SendConnectRequest)
+                val loss = if (sendFailure) SessionEvent.SignalingSendFailed(
+                    RUNTIME_A, attempt.id, first.channelId, SignalingMessageTypeV2.CONNECT_REQUEST, "closed"
+                ) else SessionEvent.ChannelClosed(RUNTIME_A, first.channelId, first.wireRequestKey, "closed")
+                assertTrue(h.orchestrator.dispatchAndAwait(loss))
+                if (sendFailure) assertTrue(h.nextEffect() is SessionEffect.CloseControlChannel)
+                assertEquals(attempt, h.orchestrator.currentAttempt)
+                assertNull(h.orchestrator.terminalOutcome(attempt.id))
+                assertFalse(h.hasPendingEffect())
+                h.advanceBy(4_999L)
+                assertFalse(h.orchestrator.dispatchAndAwait(SessionEvent.AttemptMilestoneElapsed(fallback)))
+                h.advanceBy(1L)
+                assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.AttemptMilestoneElapsed(fallback)))
+                assertEquals(attempt, (h.nextEffect() as SessionEffect.OpenTargetedTransport).attempt)
+                val next = requesterChannel(CHANNEL_B, attempt, Transport.WIFI_DIRECT)
+                assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, next)))
+                assertTrue(h.nextEffect() is SessionEffect.SendConnectRequest)
+                assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.RemoteConnectAccepted(
+                    RUNTIME_A, attempt.id, next.channelId, next.wireRequestKey
+                )))
+                val start = h.nextEffect() as SessionEffect.StartWebRtc
+                assertEquals(next.channelId, start.channelId)
+                assertEquals(attempt.targetLock, start.attempt.targetLock)
+                assertEquals(attempt.deadlineElapsedRealtimeMs, start.attempt.deadlineElapsedRealtimeMs)
+            }
+        }
+    }
+
+    @Test
+    fun earlyRecoveryCandidateLossRetainsThreeSecondFallback() = runBlocking {
+        harness().use { h ->
+            val recovering = enterRecovery(h, ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT))
+            val attempt = recovering.attempt
+            val fallback = (h.nextEffect() as SessionEffect.ScheduleAttemptMilestone).milestone
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.RecoveryTransportReady(attempt, Transport.LAN)))
+            assertTrue(h.nextEffect() is SessionEffect.OpenTargetedTransport)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.RecoveryTransportReady(attempt, Transport.WIFI_DIRECT)))
+            assertFalse(h.hasPendingEffect())
+            val first = requesterChannel(CHANNEL_A, attempt)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, first)))
+            h.nextEffect()
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ChannelClosed(RUNTIME_A, first.channelId, first.wireRequestKey, "closed")))
+            assertEquals(attempt, h.orchestrator.currentAttempt)
+            h.advanceBy(2_999L)
+            assertFalse(h.orchestrator.dispatchAndAwait(SessionEvent.AttemptMilestoneElapsed(fallback)))
+            h.advanceBy(1L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.AttemptMilestoneElapsed(fallback)))
+            val opened = h.nextEffect() as SessionEffect.OpenTargetedTransport
+            assertEquals(attempt, opened.attempt)
+            assertEquals(Transport.WIFI_DIRECT, opened.transport)
+            assertNull(h.orchestrator.terminalOutcome(attempt.id))
+        }
+    }
+
+    @Test
+    fun channelLossDoesNotMarkSiblingHandshakeFailedAndAllWorkFailsOnlyOnce() = runBlocking {
+        harness().use { h ->
+            val attempt = h.startPresence(setOf(Transport.LAN, Transport.WIFI_DIRECT))
+            h.nextEffect(); h.nextEffect()
+            val fallback = (h.nextEffect() as SessionEffect.ScheduleAttemptMilestone).milestone
+            val first = requesterChannel(CHANNEL_A, attempt)
+            h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, first))
+            h.nextEffect()
+            h.orchestrator.dispatchAndAwait(SessionEvent.ChannelClosed(RUNTIME_A, first.channelId, first.wireRequestKey, "closed"))
+            // A separate HELLO on LAN can still complete before the fallback is due.
+            val sibling = requesterChannel(CHANNEL_B, attempt)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, sibling)))
+            assertTrue(h.nextEffect() is SessionEffect.SendConnectRequest)
+            h.orchestrator.dispatchAndAwait(SessionEvent.ChannelClosed(RUNTIME_A, sibling.channelId, sibling.wireRequestKey, "closed"))
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.TargetedTransportOpenFailed(RUNTIME_A, attempt.id, Transport.LAN, "failed")))
+            assertEquals(attempt, h.orchestrator.currentAttempt)
+            h.advanceBy(5_000L)
+            h.orchestrator.dispatchAndAwait(SessionEvent.AttemptMilestoneElapsed(fallback))
+            h.nextEffect()
+            val failed = SessionEvent.TargetedTransportOpenFailed(RUNTIME_A, attempt.id, Transport.WIFI_DIRECT, "failed")
+            assertTrue(h.orchestrator.dispatchAndAwait(failed))
+            assertTrue(h.nextEffect() is SessionEffect.AbortAttemptAndResumeDiscovery)
+            assertEquals(ConnectionAttemptTerminalOutcome.FAILED, h.orchestrator.terminalOutcome(attempt.id))
+            assertFalse(h.orchestrator.dispatchAndAwait(failed))
+            assertFalse(h.hasPendingEffect())
+        }
+    }
+
+    @Test
     fun requesterStartsWebRtcOnlyAfterRemoteAccept() = runBlocking {
         harness().use { harness ->
             val attempt = outboundAttempt()
@@ -194,7 +313,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         channel.wireRequestKey,
-                        channel.channelId
+                        channel.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -234,7 +354,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         owner.wireRequestKey,
-                        owner.channelId
+                        owner.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -299,7 +420,8 @@ class SignalingControlCoordinatorTest {
                     RUNTIME_B,
                     attempt.id,
                     owner.wireRequestKey,
-                    owner.channelId
+                    owner.channelId,
+                    requireNotNull(harness.orchestrator.activeControlAttempt?.selectionCohort)
                 )
             )
             harness.nextEffect()
@@ -339,7 +461,8 @@ class SignalingControlCoordinatorTest {
                     RUNTIME_B,
                     attempt.id,
                     channel.wireRequestKey,
-                    channel.channelId
+                    channel.channelId,
+                    requireNotNull(harness.orchestrator.activeControlAttempt?.selectionCohort)
                 )
             )
             harness.nextEffect()
@@ -621,7 +744,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_A,
                         converged.attempt.id,
                         select.cohort.wireRequestKey,
-                        remoteWinner.channelId
+                        remoteWinner.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -1045,7 +1169,8 @@ class SignalingControlCoordinatorTest {
                     RUNTIME_B,
                     attempt.id,
                     owner.wireRequestKey,
-                    owner.channelId
+                    owner.channelId,
+                    requireNotNull(harness.orchestrator.activeControlAttempt?.selectionCohort)
                 )
             )
             harness.nextEffect()
@@ -1677,7 +1802,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         preferred.wireRequestKey,
-                        preferred.channelId
+                        preferred.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -1692,7 +1818,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         fallback.wireRequestKey,
-                        fallback.channelId
+                        fallback.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -1807,7 +1934,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         fallback.wireRequestKey,
-                        fallback.channelId
+                        fallback.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -1821,7 +1949,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         preferred.wireRequestKey,
-                        preferred.channelId
+                        preferred.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -1876,7 +2005,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         fallback.wireRequestKey,
-                        select.cohort.channelIds.single()
+                        select.cohort.channelIds.single(),
+                        select.cohort
                     )
                 )
             )
@@ -1933,7 +2063,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         fallback.wireRequestKey,
-                        fallback.channelId
+                        fallback.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -2131,7 +2262,8 @@ class SignalingControlCoordinatorTest {
                         RUNTIME_B,
                         attempt.id,
                         preferred.wireRequestKey,
-                        preferred.channelId
+                        preferred.channelId,
+                        select.cohort
                     )
                 )
             )
@@ -2204,7 +2336,8 @@ class SignalingControlCoordinatorTest {
                     RUNTIME_B,
                     attempt.id,
                     select.wireRequestKey,
-                    if (index % 2 == 0) preferred.channelId else fallback.channelId
+                    if (index % 2 == 0) preferred.channelId else fallback.channelId,
+                    select.cohort
                 )
             }
             assertEquals(1, claimResults.count { it })
@@ -2950,7 +3083,8 @@ class SignalingControlCoordinatorTest {
                     RUNTIME_B,
                     attempt.id,
                     owner.wireRequestKey,
-                    owner.channelId
+                    owner.channelId,
+                    requireNotNull(harness.orchestrator.activeControlAttempt?.selectionCohort)
                 )
             )
             harness.nextEffect()
@@ -3013,7 +3147,8 @@ class SignalingControlCoordinatorTest {
                     RUNTIME_B,
                     attempt.id,
                     owner.wireRequestKey,
-                    owner.channelId
+                    owner.channelId,
+                    requireNotNull(harness.orchestrator.activeControlAttempt?.selectionCohort)
                 )
             )
             harness.nextEffect()
@@ -3563,8 +3698,11 @@ class SignalingControlCoordinatorTest {
         isDeviceIdVerified = true
     )
 
-    private suspend fun enterRecovery(harness: Harness): IntercomState.Recovering {
-        val connectedAttempt = outboundAttempt(ATTEMPT_C)
+    private suspend fun enterRecovery(
+        harness: Harness,
+        channelPlan: ChannelPlan = ChannelPlan.single(Transport.LAN)
+    ): IntercomState.Recovering {
+        val connectedAttempt = outboundAttempt(ATTEMPT_C, channelPlan)
         harness.start(connectedAttempt)
         val connectedChannel = requesterChannel(CHANNEL_C, connectedAttempt)
         assertTrue(

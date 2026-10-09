@@ -61,7 +61,7 @@ internal class WifiDirectStartupReadiness(
 
 internal class WifiDirectTunnel(
     context: Context,
-    private val onControlChannelReady: (SignalingSessionV2) -> Unit,
+    private val onControlChannelReady: (SignalingSessionV2, PendingSocketLease) -> Unit,
     private val signalingPort: Int = 8888,
     private val localDeviceId: String,
     private val localNickname: String = "骑士",
@@ -1397,10 +1397,10 @@ internal class WifiDirectTunnel(
         if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         if (removingGroup) return
         val removalGeneration = ++groupRemovalGeneration
+        resetTunnelOnly(taskContext)
         val m = manager ?: return recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
         val c = channel ?: return recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
         removingGroup = true
-        resetTunnelOnly(taskContext)
         cancelConnectWatchdog()
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
@@ -1555,13 +1555,13 @@ internal class WifiDirectTunnel(
                     (taskContext == null || isTargetedContextCurrent(taskContext)) &&
                     (taskContext != null || targetAttempt == null)
             },
-            onReady = { _, physicalRole, socket ->
+            onReady = { _, physicalRole, lease ->
                 postTransportReady(
                     generation,
                     taskContext,
                     expectedTargetLock,
                     physicalRole,
-                    socket
+                    lease
                 )
             },
             onFailure = { error -> postTransportFailure(generation, taskContext, error) }
@@ -1992,8 +1992,9 @@ internal class WifiDirectTunnel(
         taskContext: TargetedTaskContext?,
         expectedTargetLock: TargetLock,
         physicalRole: PhysicalSocketRole,
-        socket: Socket
+        lease: PendingSocketLease
     ) {
+        val socket = lease.socket
         val session = establishWifiDirectSignalingSession(
             socket = socket,
             establish = {
@@ -2008,7 +2009,8 @@ internal class WifiDirectTunnel(
                     localDeviceName = localDeviceName,
                     originatingAttempt = taskContext?.attempt,
                     expectedRemoteTargetLock = expectedTargetLock,
-                    monotonicClock = monotonicClock
+                    monotonicClock = monotonicClock,
+                    pendingSocketLease = lease
                 )
             },
             onFailure = { failure ->
@@ -2026,7 +2028,7 @@ internal class WifiDirectTunnel(
                 isTargetedContextIdentityCurrent(taskContext) &&
                 !isTargetedContextCurrent(taskContext)
             ) {
-                session.close()
+                lease.close()
                 removeGroupAndRediscover(
                     "P2P attempt budget expired before Socket handoff",
                     taskContext = taskContext
@@ -2036,20 +2038,38 @@ internal class WifiDirectTunnel(
             if (
                 !isTransportCurrent(generation) ||
                 (taskContext != null && !isTargetedContextCurrent(taskContext)) ||
-                (taskContext == null && targetAttempt != null) ||
-                session.isClosed
+                (taskContext == null && targetAttempt != null)
             ) {
-                session.close()
+                lease.close()
+                return@post
+            }
+            if (session.isClosed) {
+                lease.close()
+                postTransportFailure(generation, taskContext, IOException("pending Socket expired before admission"))
                 return@post
             }
 
-            state = State.SIGNALING_READY
-            connectingAddress = null
-            cancelConnectWatchdog()
+            if (!lease.prepareAdmission(
+                    isAdapterCurrent = {
+                        isTransportCurrent(generation) &&
+                            (taskContext == null || isTargetedContextCurrent(taskContext)) &&
+                            (taskContext != null || targetAttempt == null)
+                    },
+                    onTransferred = {
+                        state = State.SIGNALING_READY
+                        connectingAddress = null
+                        cancelConnectWatchdog()
+                    }
+                )
+            ) {
+                lease.close()
+                postTransportFailure(generation, taskContext, IOException("pending Socket admission expired"))
+                return@post
+            }
             try {
-                onControlChannelReady(session)
+                onControlChannelReady(session, lease)
             } catch (t: Throwable) {
-                session.close()
+                lease.close()
                 if (taskContext == null || isTargetedContextCurrent(taskContext)) {
                     postError(t, taskContext)
                     removeGroupAndRediscover(
@@ -2067,6 +2087,7 @@ internal class WifiDirectTunnel(
         error: IOException
     ) {
         mainHandler.post {
+            if (!isTransportCurrent(generation)) return@post
             if (
                 taskContext != null &&
                 isTargetedContextIdentityCurrent(taskContext) &&

@@ -107,7 +107,8 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
         val wireRequestKey: WireRequestKey,
-        val channelId: ControlChannelId?
+        val channelId: ControlChannelId?,
+        val cohort: SelectionCohort
     ) : SessionEvent
 
     data class SignalingMessageSent(

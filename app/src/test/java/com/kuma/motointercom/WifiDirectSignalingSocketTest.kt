@@ -16,6 +16,50 @@ import java.util.concurrent.atomic.AtomicReference
 
 class WifiDirectSignalingSocketTest {
     @Test
+    fun closeDuringActualHelloReturnsWithoutWaitingForSocketRead() {
+        val entered = CountDownLatch(1)
+        val ended = CountDownLatch(1)
+        val port = ServerSocket(0).use { it.localPort }
+        val pending = AtomicReference<PendingSocketLease>()
+        val transport = WifiDirectSignalingSocket(
+            port, 5_000, 500, 10, { true },
+            { _, role, lease ->
+                pending.set(lease)
+                entered.countDown()
+                try {
+                    SignalingSessionV2.establish(
+                        lease.socket, Transport.WIFI_DIRECT, role, 0L, DEVICE_A,
+                        RuntimeSessionId(SESSION_A), "A", "Phone A", null,
+                        monotonicClock = MonotonicClock { MonotonicTimestamp(System.nanoTime() / 1_000_000L) },
+                        pendingSocketLease = lease
+                    ).close()
+                } catch (_: SignalingV2Exception) {
+                } finally {
+                    ended.countDown()
+                }
+            }, { }
+        )
+        try {
+            val loopback = InetAddress.getLoopbackAddress()
+            transport.startServer(loopback) { true }
+            assertTrue(waitUntil(1_000) { runCatching {
+                Socket(loopback, port).also { peer = it }
+            }.isSuccess })
+            assertTrue(entered.await(1, TimeUnit.SECONDS))
+            val close = CompletableFuture.runAsync { transport.close() }
+            close.get(300, TimeUnit.MILLISECONDS)
+            assertTrue(ended.await(300, TimeUnit.MILLISECONDS))
+            assertTrue(pending.get().socket.isClosed)
+        } finally {
+            transport.close()
+            peer?.close()
+            peer = null
+        }
+    }
+
+    private var peer: Socket? = null
+
+    @Test
     fun rejectedHelloClosesSocketAndRoutesCurrentGroupCleanup() {
         listOf(
             DEVICE_C to SESSION_C,

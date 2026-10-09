@@ -114,12 +114,18 @@ class IntercomServiceRobolectricTest {
     @Test
     fun preferredPresenceSnapshotStartsAnAutoPairedAttempt() = runBlocking {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val ownership = requireNotNull(LegacyRuntimeOwnership.acquire())
         try {
             val service = controller.get()
             val runtime = RuntimeSessionId("auto-connect-runtime")
             val orchestrator = IntercomService::class.java.getDeclaredField("orchestrator").apply {
                 isAccessible = true
             }.get(service) as SessionOrchestrator
+            val sessions = IntercomService::class.java.getDeclaredField("sessions").apply {
+                isAccessible = true
+            }.get(service) as SessionGeneration
+            setPrivate(service, "activeSession", sessions.start())
+            setPrivate(service, "legacyOwnership", ownership)
             setPrivate(service, "running", true)
             setPrivate(service, "activeRuntimeSessionId", runtime.value)
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
@@ -143,7 +149,7 @@ class IntercomServiceRobolectricTest {
             assertEquals(ConnectionTrigger.AUTO_PAIRED, attempt.trigger)
             assertEquals("preferred-device", attempt.targetDeviceId)
         } finally {
-            destroyAndAwait(controller)
+            try { destroyAndAwait(controller) } finally { LegacyRuntimeOwnership.release(ownership) }
         }
     }
 
@@ -356,21 +362,13 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
-    fun listenerReplaysOnlyTheCurrentInAppConfirmationAfterActivityRebind() {
-        val controller = Robolectric.buildService(IntercomService::class.java).create()
-        val service = controller.get()
-        val prompt = incomingPrompt(
-            nonce = "rebind-in-app",
-            surface = ConfirmationSurface.IN_APP,
-            deadline = SystemClock.elapsedRealtime() + 60_000L
-        )
-        setActiveIncomingPrompt(service, prompt)
-        val replayed = mutableListOf<IncomingConfirmationPrompt>()
-
-        service.setListener(recordingListener(replayed))
-
-        assertEquals(listOf(prompt), replayed)
-        destroyAndAwait(controller)
+    fun listenerReplaysOnlyTheCurrentInAppConfirmationAfterActivityRebind() = runBlocking {
+        IncomingConfirmationServiceFixture().use { f ->
+            val prompt = f.incoming()
+            val replayed = mutableListOf<IncomingConfirmationPrompt>()
+            f.service.setListener(recordingListener(replayed))
+            assertEquals(listOf(prompt), replayed)
+        }
     }
 
     @Test
