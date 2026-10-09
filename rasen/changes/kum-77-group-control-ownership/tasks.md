@@ -1,0 +1,5 @@
+- [x] 1. 固定 Android 输入、确认实际 callback/queue/writer 归属和关闭竞态
+- [ ] 2. 最小生产修复及真实 Socket/JPAKE/AEAD 时序回归，旧源红、修复绿
+- [ ] 3. 完整 Android JVM、Lint、APK、API36 原生验证
+- [ ] 4. 固定 SHA 架构/OCR 复审和逐路径覆盖
+- [ ] 5. 独立 Draft PR、CI、Linear 与最终证据
