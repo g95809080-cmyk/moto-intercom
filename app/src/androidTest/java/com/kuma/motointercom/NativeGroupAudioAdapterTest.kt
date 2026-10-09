@@ -23,8 +23,10 @@ class NativeGroupAudioAdapterTest {
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val activity = ActivityScenario.launch(MainActivity::class.java)
         val failures = LinkedBlockingQueue<Throwable>()
-        val right = RiderAudioEngine(context, onEngineError = { failures.offer(it) }, mediaMode = RiderMediaMode.GROUP,
-            initialAudioControls = VersionedAudioControls(0, AudioControlSettings(voxEnabled = false)))
+        val groupRelease = NativeAudioRelease("group adapter")
+        val rightRelease = NativeAudioRelease("group adapter peer")
+        val right = rightRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, mediaMode = RiderMediaMode.GROUP,
+            initialAudioControls = VersionedAudioControls(0, AudioControlSettings(voxEnabled = false)), onDisposed = rightRelease::onDisposed))
         lateinit var writer: GroupSessionOrchestrator
         lateinit var audio: GroupAudio
         var audioCreated = false
@@ -74,8 +76,9 @@ class NativeGroupAudioAdapterTest {
                         else -> Unit
                     }
                 }, { writer.snapshot.operation != null }, AudioRouteSelection.SPEAKER,
-                    AudioControlSettings(voxEnabled = false), {}, {})
+                    AudioControlSettings(voxEnabled = false), {}, groupRelease::onDisposed)
                 audioCreated = true
+                groupRelease.own(field(audio, "engine") as RiderAudioEngine)
                 pending.forEach { effect ->
                     val lease = effect.lease
                     rightSessions[lease.peer.deviceId] = right.openSession(RiderMediaSessionCallbacks(
@@ -89,6 +92,7 @@ class NativeGroupAudioAdapterTest {
             injectTone(field(audio, "engine") as RiderAudioEngine); injectTone(right)
             instrumentation.runOnMainSync { pending.forEach { audio.open(it.lease, it.offerer) }; right.resumeAudio() }
             await(15_000) { instrumentation.runOnMainSync { audio.poll() }; writer.snapshot.voiceReady }
+            groupRelease.observeProducers(); rightRelease.observeProducers()
             val engine = field(audio, "engine") as RiderAudioEngine
             @Suppress("UNCHECKED_CAST")
             val sessions = (field(engine, "activeSessionSnapshot") as List<RiderMediaSession>).toList()
@@ -118,8 +122,12 @@ class NativeGroupAudioAdapterTest {
             assertTrue(closed.isEmpty())
             assertNull(failures.poll())
         } finally {
-            instrumentation.runOnMainSync { if (audioCreated) audio.close() }
-            right.close(); activity.close()
+            try {
+                if (audioCreated) NativeAudioRelease.closeAll(groupRelease, rightRelease) {
+                    instrumentation.runOnMainSync { audio.close() }
+                }
+                else NativeAudioRelease.closeAll(rightRelease)
+            } finally { activity.close() }
         }
     }
     private fun field(target: Any, name: String): Any? = target.javaClass.getDeclaredField(name).run { isAccessible = true; get(target) }

@@ -222,7 +222,7 @@ internal class WifiDirectSignalingSocket(
         val resources = synchronized(lifecycleLock) {
             if (!closed.compareAndSet(false, true)) return
             connectingSocket.set(null)
-            serverSocket.getAndSet(null) to pendingSockets.toList()
+            serverSocket.getAndSet(null) to pendingSockets.toTypedArray().toList()
         }
         resources.first?.let { runCatching { it.close() } }
         resources.second.forEach { it.close() }

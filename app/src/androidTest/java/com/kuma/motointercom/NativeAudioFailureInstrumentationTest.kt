@@ -25,8 +25,10 @@ class NativeAudioFailureInstrumentationTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val failures = LinkedBlockingQueue<Throwable>()
-        val first = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
-        val second = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val firstRelease = NativeAudioRelease("media replacement first")
+        val secondRelease = NativeAudioRelease("media replacement second")
+        val first = firstRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = firstRelease::onDisposed))
+        val second = secondRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = secondRelease::onDisposed))
         val blocked = CountDownLatch(1)
         val released = CountDownLatch(1)
         val oldErrorDelivered = CountDownLatch(1)
@@ -75,6 +77,7 @@ class NativeAudioFailureInstrumentationTest {
             ))
             offerer.createOffer()
             assertTrue(connected.await(15, TimeUnit.SECONDS))
+            firstRelease.observeProducers(); secondRelease.observeProducers()
             blockNext.set(true)
             assertTrue(blocked.await(5, TimeUnit.SECONDS))
             offerer.close()
@@ -100,8 +103,9 @@ class NativeAudioFailureInstrumentationTest {
             freshFrames.set(CountDownLatch(6))
             assertTrue("Replacement native capture did not restart", freshFrames.get().await(5, TimeUnit.SECONDS))
             assertNull("Teardown permanently failed the reused engine", failures.poll())
+            firstRelease.observeProducers(); secondRelease.observeProducers()
             offerer.close()
-        } finally { released.countDown(); first.close(); second.close() }
+        } finally { released.countDown(); NativeAudioRelease.closeAll(firstRelease, secondRelease) }
     }
 
     @Test fun nativeReadFailureReportsOnceMutesFramesAndIgnoresErrorsAfterClose() {
@@ -109,8 +113,10 @@ class NativeAudioFailureInstrumentationTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val failures = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
-        val peer = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val engineRelease = NativeAudioRelease("capture failure")
+        val peerRelease = NativeAudioRelease("capture failure peer")
+        val engine = engineRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = engineRelease::onDisposed))
+        val peer = peerRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = peerRelease::onDisposed))
         try {
             val admField = RiderAudioEngine::class.java.getDeclaredField("audioDeviceModule").apply { isAccessible = true }
             val deadline = SystemClock.elapsedRealtime() + 5_000
@@ -158,6 +164,7 @@ class NativeAudioFailureInstrumentationTest {
             ))
             offerer.createOffer()
             assertTrue("Native peers did not connect: ${failures.peek()}", connected.await(15, TimeUnit.SECONDS))
+            engineRelease.observeProducers(); peerRelease.observeProducers()
             inject.set(true)
             assertTrue(failures.poll(5, TimeUnit.SECONDS)?.message.orEmpty().contains("capture:read"))
             assertTrue("Failed native producer did not silence JNI input", failedFrame.await(5, TimeUnit.SECONDS))
@@ -167,9 +174,10 @@ class NativeAudioFailureInstrumentationTest {
             for (index in 0 until 960) frame.put(index, 32)
             capture.onAudioDataRecorded(AudioFormat.ENCODING_PCM_16BIT, 1, 48_000, frame)
             assertTrue((0 until 960).all { frame.get(it) == 0.toByte() })
+            engineRelease.observeProducers(); peerRelease.observeProducers()
             engine.close()
             errors.onWebRtcAudioRecordError("late closed capture error")
             assertNull(failures.poll(200, TimeUnit.MILLISECONDS))
-        } finally { engine.close(); peer.close() }
+        } finally { NativeAudioRelease.closeAll(engineRelease, peerRelease) }
     }
 }

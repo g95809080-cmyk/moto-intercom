@@ -29,8 +29,10 @@ class NativeAudioIoGateInstrumentationTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val failures = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
-        val peer = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val engineRelease = NativeAudioRelease("delayed SDK read")
+        val peerRelease = NativeAudioRelease("delayed SDK read peer")
+        val engine = engineRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = engineRelease::onDisposed))
+        val peer = peerRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = peerRelease::onDisposed))
         val readEntered = CountDownLatch(1)
         val releaseRead = CountDownLatch(1)
         val replacementEntered = CountDownLatch(1)
@@ -68,6 +70,7 @@ class NativeAudioIoGateInstrumentationTest {
             offerer.createOffer()
             assertTrue(connected.await(15, TimeUnit.SECONDS))
             awaitHealthyEvidence(offerer)
+            engineRelease.observeProducers(); peerRelease.observeProducers()
             val module = RiderAudioEngine::class.java.getDeclaredField("audioDeviceModule").run {
                 isAccessible = true; get(engine) as JavaAudioDeviceModule
             }
@@ -108,7 +111,7 @@ class NativeAudioIoGateInstrumentationTest {
             assertNull("Old read damaged replacement media", failures.poll())
         } finally {
             releaseRead.countDown(); releaseReplacement.countDown()
-            engine.close(); peer.close(); delayed.release()
+            try { NativeAudioRelease.closeAll(engineRelease, peerRelease) } finally { delayed.release() }
         }
     }
 
@@ -117,8 +120,10 @@ class NativeAudioIoGateInstrumentationTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val failures = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
-        val peer = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val engineRelease = NativeAudioRelease("immediate resume")
+        val peerRelease = NativeAudioRelease("immediate resume peer")
+        val engine = engineRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = engineRelease::onDisposed))
+        val peer = peerRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = peerRelease::onDisposed))
         val blockNext = AtomicBoolean(false)
         val blocked = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -188,6 +193,7 @@ class NativeAudioIoGateInstrumentationTest {
             offerer.createOffer()
             assertTrue("Native peers did not connect: ${failures.peek()}", connected.await(15, TimeUnit.SECONDS))
             val before = awaitHealthyEvidence(offerer)
+            engineRelease.observeProducers(); peerRelease.observeProducers()
             val output = offerer.javaClass.getDeclaredField("playout").run { isAccessible = true; get(offerer) as DecodedAudioPlayout }
             val firstOutput = output.snapshot() ?: error("No real Android output writes")
             tailBlockNext.set(true)
@@ -234,7 +240,7 @@ class NativeAudioIoGateInstrumentationTest {
                 assertNotSame(previous.thread, output.snapshot()!!.thread)
             }
             assertNull("Route pause/resume was reported as a fatal device error", failures.poll())
-        } finally { enterTail.countDown(); release.countDown(); engine.close(); peer.close() }
+        } finally { enterTail.countDown(); release.countDown(); NativeAudioRelease.closeAll(engineRelease, peerRelease) }
     }
 
     @Test fun publicAudioSinkStillReceivesDecodedFramesAfterSdkPlayoutStops() {
@@ -242,8 +248,10 @@ class NativeAudioIoGateInstrumentationTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val failures = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
-        val peer = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val engineRelease = NativeAudioRelease("decoded SDK sink")
+        val peerRelease = NativeAudioRelease("decoded SDK sink peer")
+        val engine = engineRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = engineRelease::onDisposed))
+        val peer = peerRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) }, onDisposed = peerRelease::onDisposed))
         val decoded = AtomicReference(CountDownLatch(3))
         val installed = AtomicBoolean(false)
         val sink = AudioTrackSink { data, bits, rate, channels, frames, _ ->
@@ -271,13 +279,14 @@ class NativeAudioIoGateInstrumentationTest {
             offerer.createOffer()
             assertTrue(connected.await(15, TimeUnit.SECONDS))
             assertTrue("No decoded PCM from public SDK sink", decoded.get().await(3, TimeUnit.SECONDS))
+            engineRelease.observeProducers(); peerRelease.observeProducers()
             engine.suspendAudio()
             val rtc = RiderAudioEngine::class.java.getDeclaredField("rtc").run { isAccessible = true; get(engine) as ExecutorService }
             rtc.submit {}.get(3, TimeUnit.SECONDS)
             decoded.set(CountDownLatch(3))
             assertTrue("SDK playout stop also stopped sink decoding", decoded.get().await(3, TimeUnit.SECONDS))
             assertNull(failures.poll())
-        } finally { engine.close(); peer.close() }
+        } finally { NativeAudioRelease.closeAll(engineRelease, peerRelease) }
     }
 
     private fun awaitHealthyEvidence(session: RiderMediaSession): RiderMediaEvidence {

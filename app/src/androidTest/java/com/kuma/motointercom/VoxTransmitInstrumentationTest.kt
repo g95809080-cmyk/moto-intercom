@@ -32,11 +32,14 @@ class VoxTransmitInstrumentationTest {
         val listening = CountDownLatch(1)
         val microphoneLevel = AtomicInteger(8192)
         val initial = VersionedAudioControls(0, AudioControlSettings(muted = true, voxEnabled = true))
-        val first = RiderAudioEngine(context, onEngineError = { errors.offer(it) }, initialAudioControls = initial,
+        val firstRelease = NativeAudioRelease("VOX native sender")
+        val secondRelease = NativeAudioRelease("VOX native peer")
+        val first = firstRelease.own(RiderAudioEngine(context, onEngineError = { errors.offer(it) }, initialAudioControls = initial,
             onVoxStateChanged = { controls, state ->
                 if (controls.revision == 1L && state == VoxRuntimeState.LISTENING) listening.countDown()
-            })
-        val second = RiderAudioEngine(context, onEngineError = { errors.offer(it) }, initialAudioControls = initial)
+            }, onDisposed = firstRelease::onDisposed))
+        val second = secondRelease.own(RiderAudioEngine(context, onEngineError = { errors.offer(it) },
+            initialAudioControls = initial, onDisposed = secondRelease::onDisposed))
         lateinit var offerer: RiderMediaSession
         lateinit var answerer: RiderMediaSession
         try {
@@ -88,13 +91,14 @@ class VoxTransmitInstrumentationTest {
             assertFalse("Older controls reopened a muted sender", audibleFrames.get().await(200, TimeUnit.MILLISECONDS))
             first.updateAudioControls(VersionedAudioControls(3, AudioControlSettings(voxEnabled = false)))
             assertTrue("Disabling VOX failed to reopen JNI input", audibleFrames.get().await(5, TimeUnit.SECONDS))
+            firstRelease.observeProducers(); secondRelease.observeProducers()
             first.close()
             val lateFrame = ByteBuffer.allocateDirect(960)
             for (index in 0 until lateFrame.capacity()) lateFrame.put(index, 32)
             callback.onAudioDataRecorded(AudioFormat.ENCODING_PCM_16BIT, 1, 48_000, lateFrame)
             assertTrue("Closed engine let a late capture through", (0 until 960).all { lateFrame.get(it) == 0.toByte() })
             assertNull("Unexpected native engine failure", errors.poll())
-        } finally { first.close(); second.close() }
+        } finally { NativeAudioRelease.closeAll(firstRelease, secondRelease) }
     }
 
     private fun awaitRecorder(engine: RiderAudioEngine): Any {

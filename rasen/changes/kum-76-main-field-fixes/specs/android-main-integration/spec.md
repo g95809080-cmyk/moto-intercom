@@ -39,3 +39,14 @@ The final gate SHALL include Android JVM, lint, APK, native SDK regression and r
 #### Scenario: Scope and version boundary
 - **WHEN** the Android integration is reviewed
 - **THEN** no iOS source, version properties, signing, release, merge or physical installation is performed
+
+### Requirement: Concurrent pending socket cleanup
+Pending socket cleanup SHALL snapshot concurrent registries without relying on a size-then-next single-element path and SHALL finish resource release when the last lease is simultaneously removed by its real release callback.
+
+#### Scenario: Last pending lease releases during close
+- **WHEN** the actual LAN HELLO or Wi-Fi Direct ready worker removes the last pending lease while the adapter takes its closing snapshot
+- **THEN** close completes, sockets and executors are released, queued admission cannot install the closed session, and repeated close is safe
+
+#### Scenario: Native fixture disposal boundary
+- **WHEN** a native regression closes its own engines
+- **THEN** the fixture waits for each actual disposal receipt, RTC executor termination, exact ownership token release and observed producer termination before another fixture begins, without clearing other owners or weakening the global release assertion

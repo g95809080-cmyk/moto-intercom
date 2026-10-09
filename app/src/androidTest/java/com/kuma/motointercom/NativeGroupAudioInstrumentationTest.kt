@@ -16,6 +16,7 @@ import org.webrtc.audio.JavaAudioDeviceModule
 import com.kuma.motointercom.group.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -23,12 +24,81 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(AndroidJUnit4::class)
 class NativeGroupAudioInstrumentationTest {
+    @Test fun disposalWaitsForItsOwnRtcCleanupAndLeavesAnotherHealthyPlatformOwned() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
+        assertFalse("Previous fixture retained audio owners: ${NativeAudioRelease.describeOwners()}", AudioPlatformOwnership.hasOwner())
+        val priorRelease = NativeAudioRelease("blocked prior fixture")
+        val leftRelease = NativeAudioRelease("healthy independent left")
+        val rightRelease = NativeAudioRelease("healthy independent right")
+        val failures = LinkedBlockingQueue<Throwable>()
+        val prior = priorRelease.own(RiderAudioEngine(context, onEngineError = failures::offer, onDisposed = priorRelease::onDisposed))
+        val left = leftRelease.own(RiderAudioEngine(context, onEngineError = failures::offer, onDisposed = leftRelease::onDisposed))
+        val right = rightRelease.own(RiderAudioEngine(context, onEngineError = failures::offer, onDisposed = rightRelease::onDisposed))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var disposal: CompletableFuture<Void>? = null
+        try {
+            injectTone(left); injectTone(right)
+            left.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = false)))
+            right.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = false)))
+            lateinit var offerer: RiderMediaSession
+            lateinit var answerer: RiderMediaSession
+            val connected = CountDownLatch(2)
+            offerer = left.openSession(RiderMediaSessionCallbacks(
+                { answerer.createAnswer(it) }, { answerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = failures::offer, isSessionCurrent = { true }
+            ))
+            answerer = right.openSession(RiderMediaSessionCallbacks(
+                { offerer.setRemoteAnswer(it) }, { offerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = failures::offer, isSessionCurrent = { true }
+            ))
+            offerer.createOffer()
+            assertTrue(connected.await(15, TimeUnit.SECONDS))
+            val before = healthy(offerer)
+            drain(prior)
+            assertNotNull(field(prior, "audioDeviceModule"))
+            (field(prior, "rtc") as ExecutorService).execute {
+                entered.countDown()
+                check(release.await(30, TimeUnit.SECONDS))
+            }
+            assertTrue(entered.await(1, TimeUnit.SECONDS))
+            priorRelease.observeProducers()
+            prior.close()
+            disposal = CompletableFuture.runAsync { priorRelease.awaitReleased() }
+            assertFalse("Async close was mistaken for disposal", disposal.isDone)
+            assertTrue("Blocked prior token was silently removed", priorRelease.hasOwner())
+            assertTrue(leftRelease.hasOwner()); assertTrue(rightRelease.hasOwner())
+            healthy(offerer, before)
+            assertFalse("Disposal barrier ignored the blocked RTC owner", disposal.isDone)
+            release.countDown()
+            disposal.get(8, TimeUnit.SECONDS)
+            assertFalse(priorRelease.hasOwner())
+            assertTrue("Fixture cleanup removed another owner's token", leftRelease.hasOwner())
+            assertTrue(rightRelease.hasOwner())
+            healthy(offerer)
+            assertNull(failures.poll())
+            NativeAudioRelease.closeAll(leftRelease, rightRelease)
+            assertFalse("Remaining owners: ${NativeAudioRelease.describeOwners()}", AudioPlatformOwnership.hasOwner())
+        } finally {
+            release.countDown()
+            try { NativeAudioRelease.closeAll(priorRelease, leftRelease, rightRelease) }
+            finally { disposal?.get(8, TimeUnit.SECONDS) }
+        }
+    }
+
     @Test fun realSharedCaptureFailureTerminatesCurrentGroupAndReleasesPlatform() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
+        assertFalse("Previous fixture retained audio owners: ${NativeAudioRelease.describeOwners()}", AudioPlatformOwnership.hasOwner())
         val stopped = CountDownLatch(1)
         val disposed = CountDownLatch(2)
+        val groupRelease = NativeAudioRelease("group capture-failure")
+        val peerRelease = NativeAudioRelease("group capture-failure peer")
         val failureEvents = LinkedBlockingQueue<GroupSessionEvent.Failed>()
         val otherFailures = LinkedBlockingQueue<Throwable>()
         lateinit var writer: GroupSessionOrchestrator
@@ -43,11 +113,13 @@ class NativeGroupAudioInstrumentationTest {
                 if (event is GroupSessionEvent.Failed) failureEvents.offer(event)
                 writer.dispatch(event)
             }, { writer.snapshot.operation != null }, AudioRouteSelection.SPEAKER,
-                AudioControlSettings(voxEnabled = false), {}, { disposed.countDown() })
+                AudioControlSettings(voxEnabled = false), {}, { groupRelease.onDisposed(); disposed.countDown() })
         }
         val operation = writer.snapshot.operation!!
         val engine = field(audio, "engine") as RiderAudioEngine
-        val peer = RiderAudioEngine(context, onEngineError = { otherFailures.offer(it) }, onDisposed = { disposed.countDown() })
+        groupRelease.own(engine)
+        val peer = peerRelease.own(RiderAudioEngine(context, onEngineError = { otherFailures.offer(it) },
+            onDisposed = { peerRelease.onDisposed(); disposed.countDown() }))
         val injectFailure = AtomicBoolean()
         try {
             val module = injectTone(engine)
@@ -77,6 +149,7 @@ class NativeGroupAudioInstrumentationTest {
             engine.resumeAudio(); offerer.createOffer()
             assertTrue(connected.await(15, TimeUnit.SECONDS))
             healthy(offerer)
+            groupRelease.observeProducers(); peerRelease.observeProducers()
             injectFailure.set(true)
             assertTrue("Shared capture failure left the group running", stopped.await(6, TimeUnit.SECONDS))
             val failure = failureEvents.poll(1, TimeUnit.SECONDS)!!
@@ -87,12 +160,11 @@ class NativeGroupAudioInstrumentationTest {
             assertNull(output(offerer).snapshot())
             peer.close()
             assertTrue("Native teardown never released the platforms", disposed.await(6, TimeUnit.SECONDS))
-            assertFalse(AudioPlatformOwnership.hasOwner())
+            groupRelease.awaitReleased(); peerRelease.awaitReleased()
+            assertFalse("Remaining audio owners: ${NativeAudioRelease.describeOwners()}", AudioPlatformOwnership.hasOwner())
             assertNull(otherFailures.poll())
         } finally {
-            instrumentation.runOnMainSync { audio.close() }
-            peer.close()
-            assertTrue(disposed.await(6, TimeUnit.SECONDS))
+            NativeAudioRelease.closeAll(groupRelease, peerRelease) { instrumentation.runOnMainSync { audio.close() } }
         }
     }
 
@@ -101,8 +173,12 @@ class NativeGroupAudioInstrumentationTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val failures = LinkedBlockingQueue<Throwable>()
-        val left = RiderAudioEngine(context, onEngineError = { failures.offer(it) }, mediaMode = RiderMediaMode.GROUP)
-        val right = RiderAudioEngine(context, onEngineError = { failures.offer(it) }, mediaMode = RiderMediaMode.GROUP)
+        val leftRelease = NativeAudioRelease("six peers left")
+        val rightRelease = NativeAudioRelease("six peers right")
+        val left = leftRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) },
+            mediaMode = RiderMediaMode.GROUP, onDisposed = leftRelease::onDisposed))
+        val right = rightRelease.own(RiderAudioEngine(context, onEngineError = { failures.offer(it) },
+            mediaMode = RiderMediaMode.GROUP, onDisposed = rightRelease::onDisposed))
         val leftSessions = arrayOfNulls<RiderMediaSession>(3)
         val rightSessions = arrayOfNulls<RiderMediaSession>(3)
         val connected = CountDownLatch(6)
@@ -132,6 +208,7 @@ class NativeGroupAudioInstrumentationTest {
             leftSessions.forEach { it!!.createOffer() }
             assertTrue("Six native peers did not connect: ${failures.peek()}", connected.await(20, TimeUnit.SECONDS))
             (leftSessions + rightSessions).forEach { healthy(it!!) }
+            leftRelease.observeProducers(); rightRelease.observeProducers()
             val capture = NativeCaptureDiagnostics.currentProducer(leftModule, true)!!
             val initialPeers = leftSessions.map { field(it!!, "peerConnection") }
             val initialOutputs = leftSessions.map { output(it!!).snapshot()!! }
@@ -163,6 +240,7 @@ class NativeGroupAudioInstrumentationTest {
             val before = leftSessions.map { healthy(it!!) }
             val hotPeers = leftSessions.map { field(it!!, "peerConnection") }
             val oldOutputs = leftSessions.map { output(it!!).snapshot()!! }
+            leftRelease.observeProducers(); rightRelease.observeProducers()
             left.suspendAudio()
             leftSessions.forEach { assertNull(output(it!!).snapshot()) }
             left.resumeAudio()
@@ -187,6 +265,7 @@ class NativeGroupAudioInstrumentationTest {
             val restore = CountDownLatch(1)
             val restored = CountDownLatch(1)
             val failedOutput = output(leftSessions[1]!!).snapshot()!!
+            leftRelease.observeProducers(); rightRelease.observeProducers()
             Handler(Looper.getMainLooper()).post {
                 mainEntered.countDown()
                 restore.await(5, TimeUnit.SECONDS)
@@ -210,7 +289,7 @@ class NativeGroupAudioInstrumentationTest {
             listOf(0, 2).forEach { healthy(leftSessions[it]!!) }
             assertEquals(false, field(left, "captureFailed").let { (it as AtomicBoolean).get() })
             assertNull(failures.poll())
-        } finally { left.close(); right.close() }
+        } finally { NativeAudioRelease.closeAll(leftRelease, rightRelease) }
     }
 
     private fun field(target: Any, name: String): Any? = target.javaClass.getDeclaredField(name).run { isAccessible = true; get(target) }

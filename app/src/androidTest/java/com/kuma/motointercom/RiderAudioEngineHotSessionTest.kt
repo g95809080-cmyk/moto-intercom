@@ -25,7 +25,9 @@ class RiderAudioEngineHotSessionTest {
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
         val errors = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(context, onEngineError = errors::offer, mediaMode = RiderMediaMode.GROUP)
+        val release = NativeAudioRelease("hot group platform")
+        val engine = release.own(RiderAudioEngine(context, onEngineError = errors::offer,
+            mediaMode = RiderMediaMode.GROUP, onDisposed = release::onDisposed))
         try {
             assertTrue(audioSuspended(engine))
             val sdps = CountDownLatch(3)
@@ -36,6 +38,7 @@ class RiderAudioEngineHotSessionTest {
             assertTrue(peers.all { it != null })
             assertNotSame(peers[0], peers[1]); assertNotSame(peers[1], peers[2])
             assertThrows(IllegalStateException::class.java) { engine.openSession(callbacks(CountDownLatch(1), errors)) }
+            release.observeProducers()
             sessions[1].close()
             assertTrue(awaitPeerClosed(engine, sessions[1]))
             assertSame(peers[0], field(sessions[0], "peerConnection"))
@@ -47,7 +50,7 @@ class RiderAudioEngineHotSessionTest {
             assertTrue(awaitPeerClosed(engine, sessions[2]))
             assertTrue(audioSuspended(engine))
             assertNull("unexpected native media error", errors.poll())
-        } finally { engine.close() }
+        } finally { NativeAudioRelease.closeAll(release) }
     }
 
     @Test
@@ -62,11 +65,13 @@ class RiderAudioEngineHotSessionTest {
         }
 
         val errors = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(
+        val release = NativeAudioRelease("hot suspend-resume")
+        val engine = release.own(RiderAudioEngine(
             context = context,
             onEngineError = errors::offer,
-            isRuntimeCurrent = { true }
-        )
+            isRuntimeCurrent = { true },
+            onDisposed = release::onDisposed
+        ))
         try {
             val sdp = CountDownLatch(1)
             val session = engine.openSession(callbacks(sdp, errors))
@@ -85,9 +90,10 @@ class RiderAudioEngineHotSessionTest {
             assertSame("resumeAudio must keep the hot PeerConnection", hotPeer, field(session, "peerConnection"))
             assertNull("unexpected media error", errors.poll(2, TimeUnit.SECONDS))
 
+            release.observeProducers()
             session.close()
         } finally {
-            engine.close()
+            NativeAudioRelease.closeAll(release)
         }
     }
 
@@ -103,11 +109,13 @@ class RiderAudioEngineHotSessionTest {
         }
 
         val errors = LinkedBlockingQueue<Throwable>()
-        val engine = RiderAudioEngine(
+        val release = NativeAudioRelease("hot sequential peers")
+        val engine = release.own(RiderAudioEngine(
             context = context,
             onEngineError = errors::offer,
-            isRuntimeCurrent = { true }
-        )
+            isRuntimeCurrent = { true },
+            onDisposed = release::onDisposed
+        ))
         try {
             val firstSdp = CountDownLatch(1)
             val first = engine.openSession(callbacks(firstSdp, errors))
@@ -123,6 +131,7 @@ class RiderAudioEngineHotSessionTest {
                 engine.openSession(callbacks(CountDownLatch(1), errors))
             }
 
+            release.observeProducers()
             first.close()
 
             val secondSdp = CountDownLatch(1)
@@ -141,10 +150,11 @@ class RiderAudioEngineHotSessionTest {
                 engine.openSession(callbacks(CountDownLatch(1), errors))
             }
 
+            release.observeProducers()
             second.close()
             assertTrue("second PeerConnection was not disposed", awaitPeerClosed(engine, second))
         } finally {
-            engine.close()
+            NativeAudioRelease.closeAll(release)
         }
     }
 
