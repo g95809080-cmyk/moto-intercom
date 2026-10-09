@@ -84,6 +84,7 @@ internal class GroupBleBudget(private val nowMs: () -> Long) {
     private val attempts = mutableMapOf<String, ArrayDeque<Long>>()
     private val global = ArrayDeque<Long>()
     private var lastTime = 0L
+    @Synchronized
     fun acquire(address: String, activeConnections: Int): Boolean {
         val now = nowMs()
         require(now >= lastTime)
