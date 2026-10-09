@@ -92,6 +92,13 @@ final class TestBLESource: BLEBootstrapSource {
 }
 
 @MainActor
+final class TestPathDriver: NetworkPathDriving {
+    var callbacks = [@Sendable (Bool, TimeInterval) -> Void]()
+    func start(_ callback: @escaping @Sendable (Bool, TimeInterval) -> Void) { callbacks.append(callback) }
+    func stop() {}
+}
+
+@MainActor
 final class SessionOwnershipTests: XCTestCase {
     let localID = "00000000-0000-4000-8000-000000000001"
     let localRuntime = "00000000-0000-4000-8000-000000000011"
@@ -108,10 +115,11 @@ final class SessionOwnershipTests: XCTestCase {
         store: PairingStoring = TestPairingStore(), clock: ManualSessionClock? = nil,
         transport: TestControlTransport = TestControlTransport(), ble: BLEBootstrapSource? = nil,
         bootstrap: NetworkBootstrapCoordinator? = nil,
+        pathDriver: TestPathDriver? = nil,
         factory: @escaping (NWConnection) -> NWControlChannel = { NWControlChannel(connection: $0) }) throws -> SessionCoordinator {
         try SessionCoordinator(pairingStore: store, audio: AudioSessionController(driver: audio ?? TestAudioDriver()), webRTCEngine: engine,
             networkBootstrap: bootstrap, scheduler: clock ?? ManualSessionClock(), bleSource: ble, initialIdentity: identity(), initialCapabilities: capabilities(),
-            bonjourTransport: transport, peerToPeerTransport: TestControlTransport(), channelFactory: factory)
+            bonjourTransport: transport, peerToPeerTransport: TestControlTransport(), channelFactory: factory, pathDriver: pathDriver ?? TestPathDriver())
     }
     func frame(_ message: SignalingMessage, attempt: String? = nil, device: String? = nil, runtime: String? = nil) throws -> Data {
         try LengthPrefixedFraming.encode(SignalingV2Codec().encode(SignalingEnvelope(attemptID: attempt ?? attemptID,
@@ -242,6 +250,25 @@ final class SessionOwnershipTests: XCTestCase {
         session.stop()
         XCTAssertEqual(transport.cancelled, 2)
     }
+    func testQueuedPathLossBeforeBAndPriorCommandCannotTerminateB() async throws {
+        let transport = TestControlTransport(); let path = TestPathDriver(); let clock = ManualSessionClock()
+        let session = try makeSession(clock: clock, transport: transport, pathDriver: path)
+        session.startDiscovery()
+        let ad = try BonjourServiceAdvertisement(deviceID: remoteID, sessionID: remoteRuntime, nickname: "remote", deviceName: "remote", capabilities: [.lan])
+        transport.onPeerFound?(.hostPort(host: "localhost", port: 8890), ad)
+        for _ in 0..<30 where session.nearbyPeers.isEmpty { await Task.yield() }
+        let old = try XCTUnwrap(path.callbacks.last)
+        old(false, ProcessInfo.processInfo.systemUptime)
+        session.connect(to: try remote())
+        let current = try XCTUnwrap(path.callbacks.last)
+        current(false, 0) // observation predates actual B creation
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(session.phase, .signaling)
+        current(false, ProcessInfo.processInfo.systemUptime)
+        for _ in 0..<20 where session.phase == .signaling { await Task.yield() }
+        XCTAssertEqual(session.phase, .recovering)
+        XCTAssertEqual(transport.cancelled, 1); session.stop()
+    }
     func testHotspotSourceRevokedBeforeMainDoesNotApplyAndExactDeliveryIsAcknowledged() async throws {
         let source = TestBLESource(); var joins = 0
         let bootstrap = NetworkBootstrapCoordinator { _ in joins += 1 }
@@ -254,6 +281,72 @@ final class SessionOwnershipTests: XCTestCase {
         lease.revoke() // before queued Main claim
         await fulfillment(of: [acknowledged], timeout: 2)
         XCTAssertTrue(session.nearbyPeers.isEmpty); XCTAssertEqual(joins, 0)
+        session.stop()
+    }
+    func testIncomingThirdDeviceCannotReplaceActualOwnerAndLegitimateSiblingInheritsDeadline() async throws {
+        let transport = TestControlTransport(); let clock = ManualSessionClock(); let engine = TestWebRTCEngine()
+        let candidateConnection = NWConnection(host: "localhost", port: 9, using: .tcp)
+        let candidateRaw = TestRawControlIO(); let installed = expectation(description: "candidate channel")
+        let session = try makeSession(engine: engine, clock: clock, transport: transport) { _ in installed.fulfill(); return NWControlChannel(io: candidateRaw) }
+        session.startDiscovery()
+        let parentRaw = TestRawControlIO(); let parent = try attach(session, raw: parentRaw, clock: clock)
+        transport.onConnection?(candidateConnection)
+        await fulfillment(of: [installed], timeout: 2)
+        let busy = expectation(description: "third device BUSY")
+        candidateRaw.onWrite = { data in
+            var decoder = LengthPrefixedFrameDecoder()
+            if let bytes = try? decoder.append(data).first, let envelope = try? SignalingV2Codec().decode(bytes), case .busy = envelope.message { busy.fulfill() }
+        }
+        candidateRaw.emit(try frame(.hello(requestRole: .requester, nickname: "third", deviceName: "third", capabilities: []), device: "00000000-0000-4000-8000-000000000003"))
+        await fulfillment(of: [busy], timeout: 2)
+        XCTAssertFalse(parent.isTerminated); XCTAssertTrue(engine.runs.isEmpty)
+        session.stop()
+
+        let siblingTransport = TestControlTransport(); let siblingRaw = TestRawControlIO()
+        let childReady = expectation(description: "sibling channel")
+        let next = try makeSession(engine: engine, clock: clock, transport: siblingTransport) { _ in childReady.fulfill(); return NWControlChannel(io: siblingRaw) }
+        next.startDiscovery(); let old = try attach(next, raw: TestRawControlIO(), clock: clock)
+        clock.advance(to: 9)
+        let reply = expectation(description: "actual smaller child wins")
+        siblingRaw.onWrite = { data in
+            var decoder = LengthPrefixedFrameDecoder()
+            if let bytes = try? decoder.append(data).first, let envelope = try? SignalingV2Codec().decode(bytes),
+               case .hello(let role, _, _, _) = envelope.message, role == .responder,
+               envelope.attemptID == "00000000-0000-4000-8000-000000000019" { reply.fulfill() }
+        }
+        siblingTransport.onConnection?(NWConnection(host: "localhost", port: 9, using: .tcp))
+        await fulfillment(of: [childReady], timeout: 2)
+        siblingRaw.emit(try frame(.hello(requestRole: .requester, nickname: "remote", deviceName: "remote", capabilities: []), attempt: "00000000-0000-4000-8000-000000000019"))
+        await fulfillment(of: [reply], timeout: 2)
+        XCTAssertTrue(old.isTerminated); XCTAssertTrue(engine.runs.isEmpty)
+        clock.advance(to: 10)
+        XCTAssertTrue(next.phase == .failed || next.phase == .offline)
+        XCTAssertTrue(engine.runs.isEmpty); next.stop()
+    }
+    func testSameSocketChildAttemptIsUsedForLaterSiblingComparison() async throws {
+        let transport = TestControlTransport(); let clock = ManualSessionClock()
+        let siblingRaw = TestRawControlIO(); let installed = expectation(description: "next sibling channel")
+        let session = try makeSession(clock: clock, transport: transport) { _ in installed.fulfill(); return NWControlChannel(io: siblingRaw) }
+        session.startDiscovery(); let raw = TestRawControlIO(); let controller = try attach(session, raw: raw, clock: clock)
+        let child = "00000000-0000-4000-8000-000000000019"
+        let response = expectation(description: "same socket becomes child")
+        raw.onWrite = { data in
+            var decoder = LengthPrefixedFrameDecoder()
+            if let bytes = try? decoder.append(data).first, let envelope = try? SignalingV2Codec().decode(bytes),
+               envelope.attemptID == child, case .hello(let role, _, _, _) = envelope.message, role == .responder { response.fulfill() }
+        }
+        raw.emit(try frame(.hello(requestRole: .requester, nickname: "remote", deviceName: "remote", capabilities: []), attempt: child))
+        await fulfillment(of: [response], timeout: 2)
+        transport.onConnection?(NWConnection(host: "localhost", port: 9, using: .tcp))
+        await fulfillment(of: [installed], timeout: 2)
+        let busy = expectation(description: "intermediate sibling loses to actual child")
+        siblingRaw.onWrite = { data in
+            var decoder = LengthPrefixedFrameDecoder()
+            if let bytes = try? decoder.append(data).first, let envelope = try? SignalingV2Codec().decode(bytes), case .busy = envelope.message { busy.fulfill() }
+        }
+        siblingRaw.emit(try frame(.hello(requestRole: .requester, nickname: "remote", deviceName: "remote", capabilities: []), attempt: "00000000-0000-4000-8000-000000000020"))
+        await fulfillment(of: [busy], timeout: 2)
+        XCTAssertEqual(controller.attemptID, child); XCTAssertFalse(controller.isTerminated)
         session.stop()
     }
     func testJoinedOperationSurvivesExpectedBLERunRetirementButStopRejectsOldCompletion() async throws {

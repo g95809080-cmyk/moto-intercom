@@ -22,6 +22,32 @@ public protocol IOSControlTransport: AnyObject {
     func stop()
 }
 
+enum NetworkConnectionState { case ready, failed(Error), cancelled, other }
+protocol NetworkConnectionDriving: AnyObject {
+    var connection: NWConnection { get }
+    var onState: ((NetworkConnectionState) -> Void)? { get set }
+    func start(queue: DispatchQueue)
+    func cancel()
+}
+private final class NativeNetworkConnectionDriver: NetworkConnectionDriving {
+    let connection: NWConnection
+    var onState: ((NetworkConnectionState) -> Void)?
+    init(_ connection: NWConnection) { self.connection = connection }
+    func start(queue: DispatchQueue) {
+        let callback = onState
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready: callback?(.ready)
+            case .failed(let error): callback?(.failed(error))
+            case .cancelled: callback?(.cancelled)
+            default: callback?(.other)
+            }
+        }
+        connection.start(queue: queue)
+    }
+    func cancel() { connection.cancel() }
+}
+
 /// One queue owns listener, browser and every pending/ready connection. Native
 /// closures capture both epoch and object, never consult newer callbacks.
 /// Wrappers provide queue-confined registration through this shared core.
@@ -32,20 +58,23 @@ final class NetworkTransportCore: @unchecked Sendable {
     private var listener: NWListener?
     private var browser: NWBrowser?
     private var entries = [ObjectIdentifier: Entry]()
+    private let connectionFactory: (NWEndpoint, NWParameters) -> NetworkConnectionDriving
     var peerHandler: ((NWEndpoint, BonjourServiceAdvertisement?) -> Void)?
     var connectionHandler: ((NWConnection) -> Void)?
     var errorHandler: ((Error) -> Void)?
     private final class Entry {
         let connection: NWConnection
+        let driver: NetworkConnectionDriving
         let epoch: UUID
         var completed = false
         var timeout: DispatchWorkItem?
         let completion: (Result<NWConnection, Error>) -> Void
-        init(_ connection: NWConnection, _ epoch: UUID, _ completion: @escaping (Result<NWConnection, Error>) -> Void) {
-            self.connection = connection; self.epoch = epoch; self.completion = completion
+        init(_ driver: NetworkConnectionDriving, _ epoch: UUID, _ completion: @escaping (Result<NWConnection, Error>) -> Void) {
+            self.driver = driver; self.connection = driver.connection; self.epoch = epoch; self.completion = completion
         }
     }
-    init(label: String) {
+    init(label: String, connectionFactory: ((NWEndpoint, NWParameters) -> NetworkConnectionDriving)? = nil) {
+        self.connectionFactory = connectionFactory ?? { NativeNetworkConnectionDriver(NWConnection(to: $0, using: $1)) }
         queue = DispatchQueue(label: label); queue.setSpecific(key: key, value: true)
     }
     func owned<T>(_ action: () throws -> T) rethrows -> T {
@@ -62,7 +91,7 @@ final class NetworkTransportCore: @unchecked Sendable {
             let incoming = connectionHandler; let errors = errorHandler
             listener.newConnectionHandler = { [weak self, weak listener] connection in
                 guard let self, let listener, self.epoch == run, self.listener === listener else { connection.cancel(); return }
-                self.track(connection, epoch: run) { result in
+                self.track(NativeNetworkConnectionDriver(connection), epoch: run) { result in
                     if case .success(let connection) = result { incoming?(connection) }
                 }
             }
@@ -99,17 +128,19 @@ final class NetworkTransportCore: @unchecked Sendable {
     @discardableResult func connect(to endpoint: NWEndpoint, includePeerToPeer: Bool, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
         owned {
             let parameters = NWParameters.tcp; parameters.includePeerToPeer = includePeerToPeer
-            return track(NWConnection(to: endpoint, using: parameters), epoch: epoch, completion: completion)
+            return track(connectionFactory(endpoint, parameters), epoch: epoch, completion: completion)
         }
     }
-    @discardableResult private func track(_ connection: NWConnection, epoch run: UUID, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
+    @discardableResult private func track(_ driver: NetworkConnectionDriving, epoch run: UUID, completion: @escaping (Result<NWConnection, Error>) -> Void) -> IOSConnectionCancellation {
+        let connection = driver.connection
         guard run == epoch, entries.count < 8 else {
-            connection.cancel(); completion(.failure(MotoComError.unavailable("connection admission is closed"))); return NetworkDialCancellation {}
+            driver.cancel(); completion(.failure(MotoComError.unavailable("connection admission is closed"))); return NetworkDialCancellation {}
         }
-        let id = ObjectIdentifier(connection); let entry = Entry(connection, run, completion)
+        let id = ObjectIdentifier(connection); let entry = Entry(driver, run, completion)
         entries[id] = entry // pending registration precedes start and every callback
-        connection.stateUpdateHandler = { [weak self, weak entry] state in
-            guard let self, let entry, self.epoch == run, self.entries[id] === entry else { connection.cancel(); return }
+        driver.onState = { [weak self, weak entry] state in
+            self?.queue.async { [weak self, weak entry] in
+            guard let self, let entry, self.epoch == run, self.entries[id] === entry else { return }
             switch state {
             case .ready:
                 guard !entry.completed else { return }
@@ -119,6 +150,7 @@ final class NetworkTransportCore: @unchecked Sendable {
             case .cancelled: self.remove(entry, error: MotoComError.unavailable("TCP cancelled"))
             default: break
             }
+            }
         }
         let timeout = DispatchWorkItem { [weak self, weak entry] in
             guard let self, let entry, self.entries[id] === entry, !entry.completed else { return }
@@ -126,7 +158,7 @@ final class NetworkTransportCore: @unchecked Sendable {
         }
         entry.timeout = timeout
         queue.asyncAfter(deadline: .now() + .seconds(10), execute: timeout)
-        connection.start(queue: queue)
+        driver.start(queue: queue)
         return NetworkDialCancellation { [weak self, weak entry] in
             guard let self, let entry else { return }
             self.owned { self.remove(entry, error: MotoComError.unavailable("dial revoked")) }
@@ -136,7 +168,7 @@ final class NetworkTransportCore: @unchecked Sendable {
         let id = ObjectIdentifier(entry.connection)
         guard entries[id] === entry else { return }
         entries.removeValue(forKey: id); entry.timeout?.cancel(); entry.timeout = nil
-        entry.connection.cancel()
+        entry.driver.cancel()
         if !entry.completed { entry.completed = true; entry.completion(.failure(error)) }
     }
     func stop() {
@@ -146,7 +178,7 @@ final class NetworkTransportCore: @unchecked Sendable {
             listener = nil; browser = nil; entries.removeAll()
             oldListener?.cancel(); oldBrowser?.cancel()
             for entry in old {
-                entry.timeout?.cancel(); entry.connection.cancel()
+                entry.timeout?.cancel(); entry.driver.cancel()
                 if !entry.completed {
                     entry.completed = true; entry.completion(.failure(MotoComError.unavailable("transport stopped")))
                 }

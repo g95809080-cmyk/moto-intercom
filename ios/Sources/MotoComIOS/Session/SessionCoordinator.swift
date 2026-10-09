@@ -61,7 +61,7 @@ public final class SessionCoordinator: ObservableObject {
     private let bonjourTransport: IOSControlTransport
     private let peerToPeerTransport: IOSControlTransport
     private let channelFactory: (NWConnection) -> NWControlChannel
-    private var monitor: NWPathMonitor?
+    private let pathDriver: NetworkPathDriving
     private var owner: Attempt?
     private var pendingInbound = [ObjectIdentifier: SignalingSessionController]()
     private var discoveredEndpoints = [String: EndpointReceipt]()
@@ -75,7 +75,8 @@ public final class SessionCoordinator: ObservableObject {
         bleSource: BLEBootstrapSource? = nil, initialIdentity: StableIdentity? = nil,
         initialCapabilities: RuntimeCapabilities? = nil,
         bonjourTransport: IOSControlTransport = BonjourTransport(), peerToPeerTransport: IOSControlTransport = ApplePeerToPeerTransport(),
-        channelFactory: @escaping (NWConnection) -> NWControlChannel = { NWControlChannel(connection: $0) }
+        channelFactory: @escaping (NWConnection) -> NWControlChannel = { NWControlChannel(connection: $0) },
+        pathDriver: NetworkPathDriving? = nil
     ) {
         self.identityStore = identityStore; self.pairingStore = pairingStore
         let resolvedAudio = audio ?? AudioSessionController()
@@ -84,6 +85,7 @@ public final class SessionCoordinator: ObservableObject {
         self.networkBootstrap = networkBootstrap ?? NetworkBootstrapCoordinator()
         self.scheduler = scheduler ?? SessionDeadlineScheduler(); self.bleSource = bleSource
         self.bonjourTransport = bonjourTransport; self.peerToPeerTransport = peerToPeerTransport; self.channelFactory = channelFactory
+        self.pathDriver = pathDriver ?? NetworkPathDriver()
         identity = initialIdentity; runtimeCapabilities = initialCapabilities
         webRTC.onAudioReadinessChanged = { [weak self] in self?.updateAudioReady() }
         webRTC.onTerminated = { [weak self] in
@@ -200,7 +202,7 @@ public final class SessionCoordinator: ObservableObject {
         #if canImport(CoreBluetooth)
         legacyBLE.stop()
         #endif
-        monitor?.cancel(); monitor = nil
+        pathDriver.stop()
         bonjourTransport.stop(); peerToPeerTransport.stop()
         announcements.removeAll()
     }
@@ -229,17 +231,12 @@ public final class SessionCoordinator: ObservableObject {
         bindPathMonitor(command: ticket)
     }
     private func bindPathMonitor(command ticket: UInt64) {
-        monitor?.cancel()
-        let pathMonitor = NWPathMonitor(); monitor = pathMonitor
-        pathMonitor.pathUpdateHandler = { [weak self] path in
-            let usable = path.status == .satisfied
-            let observedAt = ProcessInfo.processInfo.systemUptime
+        pathDriver.start { [weak self] usable, observedAt in
             Task { @MainActor [weak self] in
                 guard let self, self.command == ticket, !usable, let attempt = self.owner, observedAt >= attempt.createdAt else { return }
                 self.end(attempt, phase: .recovering, message: "网络路径已变化，对讲连接已暂停")
             }
         }
-        pathMonitor.start(queue: DispatchQueue(label: "com.motocom.path-monitor"))
     }
 
     public func prepareIOSHost() {

@@ -30,7 +30,7 @@
 - HELLO 不增加 Android 当前严格 parser 未声明的字段；平台和网络能力通过 BLE/Bonjour metadata 传递。
 - iOS↔iOS 优先使用已发现的共同 LAN 端点；只有没有 LAN 端点且双方声明 `IOS_PEER_TO_PEER` 时才使用 Apple P2P，P2P 失败会尝试禁用 P2P 回退 LAN。
 - WebRTC 首版使用 host ICE，不依赖公网 STUN/TURN；`OFFER`/`ANSWER` 的字符串内部使用 Android 同样的 `{"type":"offer|answer","sdp":"..."}` JSON，ICE candidate 使用 `sdpMid`、`sdpMLineIndex`、`candidate` 三字段，并强制 Opus 32 kbps FMTP。
-- 实际 SDK 的远端音频渲染/解码回调必须调用 `GoogleWebRTCEngine.markRemoteAudioFrameDecoded()`，之后才会满足 `AUDIO_READY`。
+- 实际远端解码 sink 必须在绑定实际 PeerConnection 时取得 `GoogleWebRTCEngine.remoteAudioFrameObserver(for:)`，只在看到解码缓冲后调用该 observer；旧连接 observer不能授予新连接 `AUDIO_READY`。M125公开RTCAudioTrack没有解码sink，本仓库尚未接入实际PCM producer，不能用track或首个RTP包冒充解码首帧。
 - 只有远端首个可播放音频帧、本地音频路由和非电话中断状态同时满足时才发布 `AUDIO_READY`。
 - 媒体开始后 10 秒内未满足 `AUDIO_READY` 会关闭当前控制/媒体会话并显示失败，不会把 TCP 或 ICE 成功误报为已连接。
 
@@ -40,3 +40,5 @@
 - Network.framework Bonjour 和 Local Network permission 弹窗。
 - AVAudioSession HFP、手机扬声器回退、电话中断和锁屏后台行为。
 - 实际 WebRTC iOS SDK 的编解码、Opus、ICE 和双真机听音。
+
+macOS CI会分别运行默认Package和显式 `MOTOCOM_NATIVE_WEBRTC_CI=1` 验证。后者仅在验证构建固定stasel第三方WebRTC M125制品及SHA256；编译断言和实际native测试阻止条件编译跳过适配器。默认构建保持原SDK集成方式。来源、制品切片、测试与未完成的真机/PCM验证见KUM-73审查记录。
