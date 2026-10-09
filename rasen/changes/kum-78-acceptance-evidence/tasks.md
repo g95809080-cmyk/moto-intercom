@@ -1,0 +1,4 @@
+- [x] 1. 固定 Android 工具范围、真实调用入口、DataStore与Room格式和失败证据契约
+- [ ] 2. 最小工具修复、真实CLI/loopback/mock回归和旧源反证
+- [ ] 3. 固定 SHA 架构/OCR复审、逐路径归账与必要验证
+- [ ] 4. 独立 Draft PR、固定源码Android CI、Linear与最终证据

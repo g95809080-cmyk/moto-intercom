@@ -16,6 +16,7 @@ from typing import Any
 
 PROTOCOL_VERSION = 2
 MAX_FRAME_BYTES = 128 * 1024
+TERMINAL_RESPONSES = ("CONNECT_ACCEPT", "CONNECT_REJECT", "BUSY")
 
 
 class ProtocolError(RuntimeError):
@@ -225,6 +226,8 @@ def run_request(args: argparse.Namespace) -> int:
             responder_device_id=identity.target_device_id,
             responder_session_id=responder_session_id,
         )
+        if response["type"] not in TERMINAL_RESPONSES:
+            raise ProtocolError(f"expected a connection decision, received {response['type']}")
         emit("received", type=response["type"], payload=response["payload"])
         if args.hold_after_response:
             time.sleep(args.hold_after_response)
@@ -248,7 +251,7 @@ def parser() -> argparse.ArgumentParser:
     request.add_argument("--timeout", type=float, default=5.0)
     request.add_argument(
         "--expect",
-        choices=("CONNECT_ACCEPT", "CONNECT_REJECT", "BUSY"),
+        choices=TERMINAL_RESPONSES,
     )
     request.set_defaults(handler=run_request)
     return result

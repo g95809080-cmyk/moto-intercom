@@ -29,6 +29,13 @@ jobs:
         run: |
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/emulator/test-inject-network-fault.ps1
           if ($LASTEXITCODE -ne 0) { throw "Emulator script regressions failed" }
+      - name: Check protocol decisions and physical evidence capture with mocks
+        shell: pwsh
+        run: |
+          python -B tools/kum26_peer_test.py
+          if ($LASTEXITCODE -ne 0) { throw "Protocol tool regressions failed" }
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tools/kum26_two_device_evidence_test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Evidence tool regressions failed" }
 
   verify:
     name: Test, lint, assemble, and test APK
