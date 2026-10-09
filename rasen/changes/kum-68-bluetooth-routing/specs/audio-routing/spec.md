@@ -17,3 +17,8 @@
 #### Scenario: 迟到stats或中断
 - **WHEN** 采样期间路由/许可/native revision改变，媒体关闭或手机来电
 - **THEN** 旧结果 MUST 失效，UI就绪 MUST 清除，旧grant或route事件 MUST 不恢复音频
+
+#### Scenario: 原生暂停后恢复
+- **WHEN** 当前许可在电话、焦点或路由重选后恢复
+- **THEN** 应用 MUST 重启真实录音线程和播放设备，核验新鲜录音/成功播放写入及双向RTP；不能只核验请求开关
+- **AND** 旧帧、旧构造器、旧异常和旧释放 MUST 不影响新媒体或新许可

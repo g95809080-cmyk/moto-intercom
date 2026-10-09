@@ -816,7 +816,7 @@ class IntercomService : Service() {
                 postForRuntime(runtimeSessionId) {
                     bluetoothReady = true
                     publishAudioSource("当前音频源：蓝牙耳机 ($deviceName)", bluetooth = true)
-                    publishToast("头盔蓝牙已连线，对讲音频已就绪")
+                    publishToast("蓝牙音频输出已连接")
                     updateStageStatus()
                 }
             },
