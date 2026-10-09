@@ -180,7 +180,7 @@ class WifiDirectTunnelIdentityRobolectricTest {
         onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {}
     ) = WifiDirectTunnel(
         context = context,
-        onControlChannelReady = {},
+        onControlChannelReady = { _, _ -> },
         localDeviceId = LOCAL_DEVICE_ID,
         localDeviceName = "Phone A",
         sessionId = LOCAL_SESSION_ID,

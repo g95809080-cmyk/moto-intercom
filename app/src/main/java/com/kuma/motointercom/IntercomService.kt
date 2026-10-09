@@ -141,6 +141,7 @@ class IntercomService : Service() {
         fun onAudioInterruptionChanged(state: AudioInterruptionState) = Unit
         fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) = Unit
         fun onPresencesChanged(presences: List<RiderPresence>) = Unit
+        fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) = Unit
         fun onAudioLevelChanged(level: Float) = Unit
         fun onAudioControlsChanged(snapshot: AudioControlSnapshot) = Unit
         fun onLog(message: String)
@@ -272,9 +273,14 @@ class IntercomService : Service() {
     private var activeIncomingPrompt: IncomingConfirmationPrompt? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
+    private var legacyOwnership: Any? = null
     private var localDeviceId = ""
     private var presenceExpiryGeneration = 0
     private var autoConnectTargetKey: PreferredAutoConnectTargetKey? = null
+    private var latestPresenceConnectRequest: PresenceConnectRequest? = null
+    private var latestPresenceAdmission: PresenceConnectAdmission? = null
+    private var autoConnectAdmission: PresenceConnectAdmission? = null
+    private var autoConnectRequestGeneration = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -289,7 +295,11 @@ class IntercomService : Service() {
         serviceScope.launch {
             orchestrator.state.collect { state ->
                 dispatchOnMain {
+                    if (state != orchestrator.state.value) return@dispatchOnMain
                     listener?.onIntercomStateChanged(state)
+                    if (state is IntercomState.Discovering) {
+                        recoveryCleanupCoordinator.recheckCompleted(state.runtimeSessionId)
+                    }
                     if (running) updateNotification()
                 }
             }
@@ -313,6 +323,11 @@ class IntercomService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_INTERCOM -> {
+                if (!running && LegacyRuntimeOwnership.hasOwner()) {
+                    publishStatus("网络正在释放，请稍后重试")
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()
                 setPreferredAudioRoute(
                     audioRouteSelectionFromPersisted(
@@ -395,7 +410,7 @@ class IntercomService : Service() {
     private fun replayActiveIncomingConfirmation(target: Listener) {
         val prompt = activeIncomingPrompt
             ?.takeIf { it.surface == ConfirmationSurface.IN_APP }
-            ?.takeIf { it.decisionDeadlineElapsedMs > SystemClock.elapsedRealtime() }
+            ?.takeIf(::isCurrentIncomingConfirmation)
             ?: return
         try {
             target.onIncomingConfirmation(prompt)
@@ -705,30 +720,126 @@ class IntercomService : Service() {
         }
     }
 
-    internal fun connectToPresence(selectedPresence: RiderPresence) {
-        mainHandler.post {
-            if (activeSession == null) return@post
-            val runtimeSessionId = activeRuntimeSessionId ?: return@post
+    internal fun connectToPresence(
+        selectedPresence: RiderPresence,
+        request: PresenceConnectRequest
+    ): Boolean {
+        if (Looper.myLooper() != Looper.getMainLooper()) return false
+        val token = activeSession ?: return false
+        if (!isPresenceConnectRuntimeCurrent(token, request.runtimeSessionId) ||
+            request.requestId.isBlank() || request.targetDeviceId.isBlank() ||
+            selectedPresence.deviceId != request.targetDeviceId ||
+            selectedPresence.sessionId != request.targetSessionId
+        ) return false
+        revokePresenceAdmission(latestPresenceAdmission)
+        revokePresenceAdmission(autoConnectAdmission)
+        autoConnectAdmission = null
+        val admission = PresenceConnectAdmission(sessions, token, request)
+        latestPresenceAdmission = admission
+        latestPresenceConnectRequest = request
+        val posted = mainHandler.post {
+            if (!ownsPresenceConnectRequest(token, request)) return@post
             val presence = presenceAggregator.snapshot().resolveCurrentSelection(selectedPresence)
             if (presence == null) {
                 publishLog("Ignored stale or unavailable Presence selection")
+                reportPresenceConnectAdmission(token, request, false, null)
                 return@post
             }
-            val targetDeviceId = requireNotNull(presence.deviceId)
-            val targetSessionId = requireNotNull(presence.sessionId)
-            orchestrator.dispatch(
+            val queued = orchestrator.dispatch(
                 SessionEvent.ConnectPresenceRequested(
-                    runtimeSessionId = runtimeSessionId,
-                    targetDeviceId = targetDeviceId,
-                    targetSessionId = targetSessionId,
-                    availableTransports = presence.availableTransports
+                    runtimeSessionId = request.runtimeSessionId,
+                    targetDeviceId = request.targetDeviceId,
+                    targetSessionId = request.targetSessionId,
+                    availableTransports = presence.availableTransports,
+                    admission = admission
                 )
             ) { accepted ->
-                if (!accepted) {
-                    dispatchOnMain { publishLog("Presence connection request was rejected") }
+                val attemptId = if (accepted) orchestrator.currentAttempt?.id else null
+                reportPresenceConnectAdmission(token, request, accepted, attemptId)
+            }
+            if (!queued) reportPresenceConnectAdmission(token, request, false, null)
+        }
+        if (!posted && latestPresenceConnectRequest == request) {
+            admission.revoke()
+            latestPresenceAdmission = null
+            latestPresenceConnectRequest = null
+        }
+        return posted
+    }
+
+    private fun isPresenceConnectRuntimeCurrent(
+        token: SessionGeneration.Token,
+        runtimeSessionId: RuntimeSessionId
+    ): Boolean = legacyOwnership != null && isSessionCurrent(token) &&
+        activeRuntimeSessionId == runtimeSessionId
+
+    private fun ownsPresenceConnectRequest(
+        token: SessionGeneration.Token,
+        request: PresenceConnectRequest
+    ): Boolean = isPresenceConnectRuntimeCurrent(token, request.runtimeSessionId) &&
+        latestPresenceConnectRequest == request
+
+    private fun reportPresenceConnectAdmission(
+        token: SessionGeneration.Token,
+        request: PresenceConnectRequest,
+        accepted: Boolean,
+        admittedAttemptId: ConnectionAttemptId?
+    ) {
+        postForSession(token) {
+            if (!ownsPresenceConnectRequest(token, request)) return@postForSession
+            val state = orchestrator.state.value
+            val attempt = state.connectionAttemptOrNull()
+            val admission = latestPresenceAdmission
+            val receiptAttemptId = admission?.adoptedAttempt?.id ?: admittedAttemptId
+            val stillAdmitted = accepted && receiptAttemptId != null && admission?.isRevoked != true &&
+                attempt?.id == receiptAttemptId && attempt.runtimeSessionId == request.runtimeSessionId &&
+                attempt.targetLock == TargetLock(request.targetDeviceId, request.targetSessionId)
+            val idle = state is IntercomState.Discovering &&
+                state.runtimeSessionId == request.runtimeSessionId &&
+                orchestrator.currentAttempt == null && orchestrator.activeControlAttempt == null &&
+                orchestrator.pendingInboundRequest == null
+            val finishedBeforeDelivery = accepted && receiptAttemptId != null && idle &&
+                orchestrator.terminalOutcome(receiptAttemptId) != null
+            if (!stillAdmitted && !finishedBeforeDelivery && !(!accepted && idle)) return@postForSession
+            if (!stillAdmitted) {
+                revokePresenceAdmission(latestPresenceAdmission)
+                latestPresenceAdmission = null
+            }
+            latestPresenceConnectRequest = null
+            if (!stillAdmitted) publishLog("Presence connection request was rejected or already finished")
+            listener?.onPresenceConnectAdmission(request, stillAdmitted)
+        }
+    }
+
+    private fun revokePresenceAdmission(
+        admission: PresenceConnectAdmission?,
+        resourcesAlreadyClosing: Boolean = false
+    ) {
+        val attempt = admission?.revoke() ?: return
+        orchestrator.dispatch(SessionEvent.PresenceConnectCanceled(attempt, admission, resourcesAlreadyClosing)) {
+            dispatchOnMain {
+                if (orchestrator.state.value is IntercomState.Discovering) {
+                    recoveryCleanupCoordinator.recheckCompleted(attempt.runtimeSessionId)
                 }
             }
         }
+    }
+
+    private fun invalidatePresenceConnectRequests(notifyCancellation: Boolean = false) {
+        revokePresenceAdmission(latestPresenceAdmission, resourcesAlreadyClosing = notifyCancellation)
+        revokePresenceAdmission(autoConnectAdmission, resourcesAlreadyClosing = notifyCancellation)
+        if (notifyCancellation) {
+            val token = activeSession
+            val request = latestPresenceConnectRequest
+            if (token != null && request != null && ownsPresenceConnectRequest(token, request)) {
+                listener?.onPresenceConnectAdmission(request, false)
+            }
+        }
+        latestPresenceAdmission = null
+        autoConnectAdmission = null
+        latestPresenceConnectRequest = null
+        autoConnectRequestGeneration += 1
+        autoConnectTargetKey = null
     }
 
     internal fun requestDiscoveryRefresh() {
@@ -753,9 +864,17 @@ class IntercomService : Service() {
             return
         }
 
+        legacyOwnership = LegacyRuntimeOwnership.acquire() ?: run {
+            publishStatus("网络正在释放，请稍后重试")
+            stopForegroundCompat()
+            return
+        }
+
         runtimeKeepAlive = try {
             IntercomRuntimeKeepAlive.acquire(this)
         } catch (failure: Throwable) {
+            legacyOwnership?.let(LegacyRuntimeOwnership::release)
+            legacyOwnership = null
             handleError(failure)
             stopForegroundCompat()
             stopSelf()
@@ -767,7 +886,7 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
-        autoConnectTargetKey = null
+        invalidatePresenceConnectRequests()
         resetSessionAudioControls()
         publishAudioControls()
         bluetoothReady = false
@@ -885,8 +1004,8 @@ class IntercomService : Service() {
             createWifiDirect = { onStartupReady ->
                 WifiDirectTunnel(
             context = this,
-            onControlChannelReady = { session ->
-                registerControlChannel(token, session)
+            onControlChannelReady = { session, lease ->
+                registerControlChannel(token, session, lease)
             },
             localDeviceId = deviceId,
             localNickname = requestedRiderName.ifBlank { "骑士" },
@@ -974,8 +1093,8 @@ class IntercomService : Service() {
                     if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
                 }
             },
-            onControlChannelReady = { session ->
-                registerControlChannel(token, session)
+            onControlChannelReady = { session, lease ->
+                registerControlChannel(token, session, lease)
             },
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } },
@@ -989,11 +1108,16 @@ class IntercomService : Service() {
 
     private fun registerControlChannel(
         token: SessionGeneration.Token,
-        session: SignalingSessionV2
+        session: SignalingSessionV2,
+        pendingLease: PendingSocketLease
     ) {
         dispatchOnMain {
             val currentAttempt = orchestrator.currentAttempt
             val currentState = orchestrator.state.value
+            if (!orchestrator.isControlOriginAuthorized(session.verifiedChannel())) {
+                pendingLease.close()
+                return@dispatchOnMain
+            }
             if (
                 admitControlSession(
                     sessionCurrent = isSessionCurrent(token),
@@ -1001,28 +1125,37 @@ class IntercomService : Service() {
                     existingSession = signalingSessions[session.channel.channelId],
                     session = session,
                     currentState = currentState,
+                    originFollowsCurrentAttempt = session.originatingAttempt != currentAttempt,
                     onRejectedNonTargetWifiDirect = { expectedAttempt, actualTargetLock ->
                         wifiTunnel?.rejectNonTargetGroup(expectedAttempt, actualTargetLock)
                     }
                 ) != ControlChannelAdmissionOutcome.ADMITTED
             ) {
+                pendingLease.close()
                 return@dispatchOnMain
             }
 
-            signalingSessions[session.channel.channelId] = session
+            val installed = pendingLease.tryTransfer(
+                    isServiceCurrent = {
+                        orchestrator.isControlOriginAuthorized(session.verifiedChannel()) &&
+                        canInstallControlSession(
+                            isSessionCurrent(token), orchestrator.currentAttempt,
+                            signalingSessions[session.channel.channelId], session,
+                            orchestrator.state.value,
+                            originFollowsCurrentAttempt = session.originatingAttempt != orchestrator.currentAttempt
+                        )
+                    },
+                    install = { signalingSessions[session.channel.channelId] = session }
+            )
+            if (!installed) {
+                pendingLease.close()
+                return@dispatchOnMain
+            }
             val runtimeSessionId = session.pinnedIdentity.localSessionId
             orchestrator.dispatch(
                 SessionEvent.ControlChannelVerified(
                     runtimeSessionId = runtimeSessionId,
-                    channel = VerifiedControlChannel(
-                        channelId = session.channel.channelId,
-                        transport = session.channel.transport,
-                        requestRole = session.requestRole,
-                        wireRequestKey = session.wireRequestKey,
-                        targetLock = session.targetLock,
-                        peer = session.peer,
-                        originatingAttempt = session.originatingAttempt
-                    )
+                    channel = session.verifiedChannel()
                 )
             ) { accepted ->
                 dispatchOnMain {
@@ -1321,6 +1454,7 @@ class IntercomService : Service() {
     }
 
     private fun startWebRtc(effect: SessionEffect.StartWebRtc) {
+        if (!orchestrator.isAttemptAuthorized(effect.attempt)) return
         val token = activeSession ?: return
         val controlAttempt = orchestrator.activeControlAttempt
         val session = signalingSessions[effect.channelId]
@@ -1520,6 +1654,7 @@ class IntercomService : Service() {
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         attemptMilestoneScheduler.cancelRuntime(runtimeSessionId)
         controlChannelCloseDeadlineScheduler.cancelRuntime(runtimeSessionId)
+        invalidatePresenceConnectRequests(notifyCancellation = true)
         markDiscoveryUnavailable()
         sessions.invalidate()
         activeSession = null
@@ -1660,8 +1795,11 @@ class IntercomService : Service() {
     }
 
     private fun stopIntercom() {
+        invalidatePresenceConnectRequests(notifyCancellation = true)
         val runtimeSessionId = activeRuntimeSessionId
         val keepAliveToRelease = runtimeKeepAlive
+        val ownershipToRelease = legacyOwnership
+        legacyOwnership = null
         runtimeKeepAlive = null
         if (runtimeSessionId != null) {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
@@ -1677,7 +1815,6 @@ class IntercomService : Service() {
         activeRuntimeSessionId = null
         localDeviceId = ""
         running = false
-        autoConnectTargetKey = null
         publishPresenceSnapshot(presenceAggregator.clear())
         drainSignalingSessions().forEach(SignalingSessionV2::close)
         lanDiscovery?.close()
@@ -1694,7 +1831,7 @@ class IntercomService : Service() {
             additionalResources = listOfNotNull(wifiToClose),
             onError = ::handleError
         ) {
-            keepAliveToRelease?.close()
+            try { keepAliveToRelease?.close() } finally { ownershipToRelease?.let(LegacyRuntimeOwnership::release) }
         }
         try {
             audioSessionController?.close()
@@ -1803,13 +1940,13 @@ class IntercomService : Service() {
                 }
             }
             is SessionEffect.RetireTargetedTransport -> {
-                if (orchestrator.currentAttempt == effect.attempt) {
+                if (canRunTargetedTransport(effect.attempt)) {
                     retireTargetedTransport(effect.attempt, effect.transport)
                 }
             }
             is SessionEffect.OpenTargetedTransport -> {
                 if (
-                    orchestrator.currentAttempt == effect.attempt &&
+                    canRunTargetedTransport(effect.attempt) &&
                     effect.transport in effect.attempt.channelPlan
                 ) {
                     beginTargetedTransport(effect.attempt, effect.transport)
@@ -1832,7 +1969,11 @@ class IntercomService : Service() {
                     )
                 ) {
                     publishLog("连接尝试已中止：${effect.attemptId.value}")
-                    abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
+                    if (recoveryCleanupCoordinator.hasActive(effect.runtimeSessionId)) {
+                        recoveryCleanupCoordinator.recheckCompleted(effect.runtimeSessionId)
+                    } else {
+                        abortResourcesAndResumeDiscovery(effect.runtimeSessionId, nextAttempt = null)
+                    }
                 }
             }
             is SessionEffect.ReleaseActiveSessionAndContinueDiscovery ->
@@ -1938,6 +2079,8 @@ class IntercomService : Service() {
             is SessionEffect.SelectMediaChannel -> {
                 val currentAttempt = orchestrator.currentAttempt
                 val activeAttempt = orchestrator.activeControlAttempt
+                if (currentAttempt == null || !orchestrator.isAttemptAuthorized(currentAttempt)) return
+                if (activeAttempt?.selectionCohort != effect.cohort) return
                 val candidates = effect.cohort.channelIds.mapNotNull { channelId ->
                     signalingSessions[channelId]
                         ?.takeUnless(SignalingSessionV2::isClosed)
@@ -1961,7 +2104,8 @@ class IntercomService : Service() {
                         effect.runtimeSessionId,
                         effect.attemptId,
                         effect.wireRequestKey,
-                        selectMediaChannel(candidates, effect.preferredTransport)
+                        selectMediaChannel(candidates, effect.preferredTransport),
+                        effect.cohort
                     )
                 )
             }
@@ -1976,6 +2120,18 @@ class IntercomService : Service() {
                 publishIncomingConfirmation(effect.prompt)
             is SessionEffect.CancelIncomingConfirmation -> cancelIncomingConfirmation(effect)
         }
+    }
+
+    private fun canRunTargetedTransport(attempt: ConnectionAttempt): Boolean {
+        val token = activeSession ?: return false
+        val context = orchestrator.activeControlAttempt
+        return isSessionCurrent(token) && activeRuntimeSessionId == attempt.runtimeSessionId &&
+            orchestrator.currentAttempt == attempt &&
+            orchestrator.isAttemptAuthorized(attempt) &&
+            attempt.deadlineElapsedRealtimeMs > SystemClock.elapsedRealtime() &&
+            orchestrator.terminalOutcome(attempt.id) == null &&
+            (context == null || context.attempt == attempt &&
+                context.mediaOwnerChannelId == null && context.terminalOutcome == null)
     }
 
     private fun publishConfirmationAvailability(
@@ -1993,7 +2149,38 @@ class IntercomService : Service() {
         )
     }
 
+    private fun isCurrentIncomingConfirmation(prompt: IncomingConfirmationPrompt): Boolean {
+        val token = activeSession ?: return false
+        if (!isSessionCurrent(token) || activeRuntimeSessionId != prompt.runtimeSessionId) return false
+        val state = orchestrator.state.value as? IntercomState.IncomingConfirmation ?: return false
+        val pending = orchestrator.pendingInboundRequest ?: return false
+        if (state.runtimeSessionId != prompt.runtimeSessionId ||
+            state.attemptId != prompt.attemptId || state.peer != prompt.peer ||
+            pending.phase != PendingInboundPhase.WAITING_LOCAL_DECISION ||
+            pending.terminalOutcome != null || pending.runtimeSessionId != prompt.runtimeSessionId ||
+            pending.attemptId != prompt.attemptId || prompt.channelId !in pending.channelIds ||
+            pending.confirmationChannelId != prompt.channelId ||
+            pending.confirmationActionNonce != prompt.actionNonce ||
+            pending.confirmationSurface != prompt.surface || pending.peer != prompt.peer ||
+            pending.decisionDeadlineAt.elapsedRealtimeMs != prompt.decisionDeadlineElapsedMs ||
+            SystemClock.elapsedRealtime() >= prompt.decisionDeadlineElapsedMs ||
+            !prompt.peer.isVerifiedFor(pending.targetLock)
+        ) return false
+        val session = signalingSessions[prompt.channelId] ?: return false
+        return !session.isClosed && session.channel.channelId == prompt.channelId &&
+            session.requestRole == RequestRole.RESPONDER &&
+            session.phase == SignalingPhase.AWAITING_LOCAL_DECISION &&
+            session.channel.transport in pending.channelPlan &&
+            session.pinnedIdentity.localSessionId == prompt.runtimeSessionId &&
+            session.pinnedIdentity.localDeviceId.value == localDeviceId &&
+            session.wireRequestKey == pending.wireRequestKey &&
+            session.targetLock == pending.targetLock && session.peer == prompt.peer &&
+            session.pinnedIdentity.remoteDeviceId.value == prompt.peer.deviceId &&
+            session.pinnedIdentity.remoteSessionId == prompt.peer.runtimeSessionId
+    }
+
     private fun publishIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
+        if (!isCurrentIncomingConfirmation(prompt)) return
         activeIncomingPrompt = prompt
         incomingConfirmationScheduler.schedule(prompt)
         when (prompt.surface) {
@@ -2055,6 +2242,7 @@ class IntercomService : Service() {
     }
 
     private fun reportConfirmationSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
+        if (!isCurrentIncomingConfirmation(prompt)) return
         orchestrator.dispatch(
             SessionEvent.ConfirmationSurfaceUnavailable(
                 prompt.runtimeSessionId,
@@ -2343,37 +2531,59 @@ class IntercomService : Service() {
 
     private fun maybeAutoConnectPreferred(snapshot: PresenceSnapshot) {
         if (!running) return
+        val token = activeSession ?: return
         val runtimeSessionId = activeRuntimeSessionId ?: return
+        if (!isPresenceConnectRuntimeCurrent(token, runtimeSessionId)) return
         val target = preferredAutoConnectTarget(
             state = orchestrator.state.value,
             presences = snapshot.presences
         ) ?: run {
-            if (orchestrator.state.value is IntercomState.Discovering) {
+            val state = orchestrator.state.value
+            if (state is IntercomState.Discovering && state.runtimeSessionId == runtimeSessionId) {
+                revokePresenceAdmission(autoConnectAdmission)
+                autoConnectAdmission = null
+                autoConnectRequestGeneration += 1
                 autoConnectTargetKey = null
             }
             return
         }
         if (target.key == autoConnectTargetKey) return
 
+        val generation = ++autoConnectRequestGeneration
+        revokePresenceAdmission(autoConnectAdmission)
+        val admission = PresenceConnectAdmission(sessions, token, PresenceConnectRequest(
+            runtimeSessionId, target.deviceId, target.sessionId, java.util.UUID.randomUUID().toString()
+        ))
+        autoConnectAdmission = admission
         autoConnectTargetKey = target.key
+        val clearRejected = {
+            postForSession(token) {
+                val state = orchestrator.state.value
+                if (isPresenceConnectRuntimeCurrent(token, runtimeSessionId) &&
+                    generation == autoConnectRequestGeneration && autoConnectTargetKey == target.key &&
+                    state is IntercomState.Discovering && state.runtimeSessionId == runtimeSessionId &&
+                    orchestrator.currentAttempt == null && orchestrator.activeControlAttempt == null &&
+                    orchestrator.pendingInboundRequest == null
+                ) {
+                    admission.revoke()
+                    if (autoConnectAdmission === admission) autoConnectAdmission = null
+                    autoConnectTargetKey = null
+                }
+            }
+        }
         val queued = orchestrator.dispatch(
             SessionEvent.ConnectPresenceRequested(
                 runtimeSessionId = runtimeSessionId,
                 targetDeviceId = target.deviceId,
                 targetSessionId = target.sessionId,
                 availableTransports = target.availableTransports,
-                trigger = ConnectionTrigger.AUTO_PAIRED
+                trigger = ConnectionTrigger.AUTO_PAIRED,
+                admission = admission
             )
         ) { accepted ->
-            if (!accepted) {
-                dispatchOnMain {
-                    if (autoConnectTargetKey == target.key) autoConnectTargetKey = null
-                }
-            }
+            if (!accepted) clearRejected()
         }
-        if (!queued && autoConnectTargetKey == target.key) {
-            autoConnectTargetKey = null
-        }
+        if (!queued) clearRejected()
     }
 
     private fun markDiscoveryUnavailable() {
@@ -2694,7 +2904,8 @@ internal fun canRegisterControlChannel(
     sessionCurrent: Boolean,
     currentAttempt: ConnectionAttempt?,
     session: SignalingSessionV2,
-    currentState: IntercomState? = null
+    currentState: IntercomState? = null,
+    originFollowsCurrentAttempt: Boolean = false
 ): Boolean {
     val attempt = session.originatingAttempt
     val recoveryAttempt = (currentState as? IntercomState.Recovering)?.attempt
@@ -2704,7 +2915,12 @@ internal fun canRegisterControlChannel(
             recoveryAttempt == null ||
                 (currentAttempt == recoveryAttempt && !isNonTargetRecoveryChannel(currentState, session.targetLock))
             ) &&
-        (attempt == null || currentAttempt == attempt) &&
+        (attempt == null || currentAttempt == attempt || originFollowsCurrentAttempt &&
+            currentAttempt != null && currentAttempt.runtimeSessionId == attempt.runtimeSessionId &&
+            currentAttempt.targetLock == attempt.targetLock &&
+            currentAttempt.deadlineElapsedRealtimeMs == attempt.deadlineElapsedRealtimeMs &&
+            session.requestRole == RequestRole.RESPONDER && session.wireRequestKey.attemptId == currentAttempt.id &&
+            session.channel.transport in currentAttempt.channelPlan) &&
         (attempt == null || session.channel.transport in attempt.channelPlan) &&
         (attempt == null || attempt.targetLock == session.targetLock) &&
         session.peer.isVerifiedFor(session.targetLock)
@@ -2715,9 +2931,10 @@ internal fun canInstallControlSession(
     currentAttempt: ConnectionAttempt?,
     existingSession: SignalingSessionV2?,
     session: SignalingSessionV2,
-    currentState: IntercomState? = null
+    currentState: IntercomState? = null,
+    originFollowsCurrentAttempt: Boolean = false
 ): Boolean = existingSession == null &&
-    canRegisterControlChannel(sessionCurrent, currentAttempt, session, currentState)
+    canRegisterControlChannel(sessionCurrent, currentAttempt, session, currentState, originFollowsCurrentAttempt)
 
 internal enum class ControlChannelAdmissionOutcome {
     ADMITTED,
@@ -2731,6 +2948,7 @@ internal fun admitControlSession(
     existingSession: SignalingSessionV2?,
     session: SignalingSessionV2,
     currentState: IntercomState? = null,
+    originFollowsCurrentAttempt: Boolean = false,
     onRejectedNonTargetWifiDirect: (ConnectionAttempt, TargetLock) -> Unit
 ): ControlChannelAdmissionOutcome {
     if (
@@ -2739,7 +2957,8 @@ internal fun admitControlSession(
             currentAttempt,
             existingSession,
             session,
-            currentState
+            currentState,
+            originFollowsCurrentAttempt
         )
     ) {
         return ControlChannelAdmissionOutcome.ADMITTED
@@ -2905,6 +3124,10 @@ internal fun SignalingSessionV2.toConnectionCandidateContext(
         peer = peer
     )
 }.getOrNull()
+
+internal fun SignalingSessionV2.verifiedChannel() = VerifiedControlChannel(
+    channel.channelId, channel.transport, requestRole, wireRequestKey, targetLock, peer, originatingAttempt
+)
 
 internal fun SignalingSessionV2.matchesControlHandle(
     runtimeSessionId: RuntimeSessionId,

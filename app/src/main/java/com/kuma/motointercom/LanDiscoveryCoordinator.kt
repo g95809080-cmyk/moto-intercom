@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.SystemClock
 import org.json.JSONObject
 import java.io.Closeable
 import java.io.IOException
@@ -16,6 +17,7 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -30,12 +32,12 @@ internal class LanDiscoveryCoordinator(
     private val deviceName: String,
     private val protocolVersion: Int,
     private val onDevicesChanged: (List<LanRiderDevice>) -> Unit,
-    private val onControlChannelReady: (SignalingSessionV2) -> Unit,
+    private val onControlChannelReady: (SignalingSessionV2, PendingSocketLease) -> Unit,
     private val onLog: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
     initialTargetAttempt: ConnectionAttempt? = null,
     private val monotonicClock: MonotonicClock = MonotonicClock {
-        MonotonicTimestamp(System.nanoTime() / 1_000_000L)
+        MonotonicTimestamp(SystemClock.elapsedRealtime())
     }
 ) : Closeable {
     private val context = context.applicationContext
@@ -45,6 +47,8 @@ internal class LanDiscoveryCoordinator(
     private val udpSocket = AtomicReference<DatagramSocket?>()
     private val serverSocket = AtomicReference<ServerSocket?>()
     private val targetedClientSocket = AtomicReference<Socket?>()
+    private val pendingSockets = ConcurrentHashMap<PendingSocketLease, Long>()
+    @Volatile private var pendingSocketGeneration = 0L
     private val ingressAttempt = LanAttemptLease(initialTargetAttempt)
     private val targetAttempt = LanAttemptLease()
     private val clientConnectAttempt = LanAttemptLease()
@@ -72,12 +76,15 @@ internal class LanDiscoveryCoordinator(
     }
 
     fun restrictIngress(attempt: ConnectionAttempt): Boolean {
-        if (
-            !isActive() ||
-            Transport.LAN !in attempt.channelPlan ||
-            attempt.remainingMillis(monotonicClock) <= 0L
-        ) return false
-        ingressAttempt.bind(attempt)
+        val retired = synchronized(lifecycleLock) {
+            if (!isActive() || Transport.LAN !in attempt.channelPlan ||
+                attempt.remainingMillis(monotonicClock) <= 0L
+            ) return false
+            val retired = if (ingressAttempt.current != attempt) retirePendingLocked() else emptyList()
+            ingressAttempt.bind(attempt)
+            retired
+        }
+        retired.forEach { it.close() }
         return true
     }
 
@@ -102,7 +109,7 @@ internal class LanDiscoveryCoordinator(
     }
 
     fun prepareRetry(attempt: ConnectionAttempt): Boolean {
-        synchronized(lifecycleLock) {
+        val retired = synchronized(lifecycleLock) {
             val previous = targetAttempt.current ?: ingressAttempt.current ?: return false
             if (
                 !isActive() ||
@@ -111,21 +118,28 @@ internal class LanDiscoveryCoordinator(
                 return false
             }
             retryPause.prepare(attempt)
-            closeQuietly(targetedClientSocket.getAndSet(null))
+            targetedClientSocket.set(null)
             clientConnectAttempt.clear()
             ingressAttempt.bind(attempt)
             targetAttempt.bind(attempt)
+            retirePendingLocked()
         }
+        retired.forEach { it.close() }
         return true
     }
 
     fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
-        ingressAttempt.release(completedAttempt)
-        if (targetAttempt.release(completedAttempt)) {
-            closeQuietly(targetedClientSocket.getAndSet(null))
-            clientConnectAttempt.release(completedAttempt)
-            retryPause.clear()
+        val retired = synchronized(lifecycleLock) {
+            val releasedIngress = ingressAttempt.release(completedAttempt)
+            val releasedTarget = targetAttempt.release(completedAttempt)
+            if (releasedTarget) {
+                targetedClientSocket.set(null)
+                clientConnectAttempt.release(completedAttempt)
+                retryPause.clear()
+            }
+            if (releasedIngress || releasedTarget) retirePendingLocked() else emptyList()
         }
+        retired.forEach { it.close() }
     }
 
     private fun connectTargetIfAvailable() {
@@ -256,15 +270,16 @@ internal class LanDiscoveryCoordinator(
 
     private fun runLanTcpServer() {
         var localServer: ServerSocket? = null
-        var acceptedSocket: Socket? = null
+        var acceptedLease: PendingSocketLease? = null
         try {
             val candidate = createServerSocket() ?: return
             localServer = candidate
 
             while (isActive()) {
                 val socket = candidate.accept()
-                acceptedSocket = socket
                 val attempt = ingressAttempt.current
+                val lease = registerPending(socket, attempt) ?: continue
+                acceptedLease = lease
                 val session = try {
                     SignalingSessionV2.establish(
                         socket = socket,
@@ -276,29 +291,27 @@ internal class LanDiscoveryCoordinator(
                         localNickname = riderName,
                         localDeviceName = deviceName,
                         originatingAttempt = attempt,
-                        monotonicClock = monotonicClock
+                        monotonicClock = monotonicClock,
+                        pendingSocketLease = lease
                     )
                 } catch (t: Throwable) {
                     log("Rejected LAN v2 HELLO: ${t.message}")
-                    closeQuietly(socket)
-                    acceptedSocket = null
+                    lease.close()
+                    acceptedLease = null
                     continue
                 }
                 if (!isAttemptCurrentOrPassive(attempt)) {
-                    session.close()
-                    acceptedSocket = null
+                    lease.close()
+                    acceptedLease = null
                     continue
                 }
-                if (handoff(session, attempt)) {
-                    acceptedSocket = null
-                    continue
-                }
-                acceptedSocket = null
+                handoff(session, attempt, lease)
+                acceptedLease = null
             }
         } catch (t: Throwable) {
             error(t)
         } finally {
-            closeQuietly(acceptedSocket)
+            closeQuietly(acceptedLease)
             localServer?.let { serverSocket.compareAndSet(it, null) }
             closeQuietly(localServer)
         }
@@ -390,6 +403,8 @@ internal class LanDiscoveryCoordinator(
         reportFailure: Boolean
     ) {
         var socket: Socket? = null
+        var lease: PendingSocketLease? = null
+        var handedOff = false
         try {
             if (!isAttemptCurrent(attempt)) {
                 clientConnectAttempt.release(attempt)
@@ -405,6 +420,8 @@ internal class LanDiscoveryCoordinator(
             }
             val candidate = Socket()
             socket = candidate
+            val pending = registerPending(candidate, attempt) ?: return
+            lease = pending
             if (!installTargetedClientSocket(attempt, candidate)) {
                 clientConnectAttempt.release(attempt)
                 return
@@ -421,16 +438,18 @@ internal class LanDiscoveryCoordinator(
                 localNickname = riderName,
                 localDeviceName = deviceName,
                 originatingAttempt = attempt,
-                monotonicClock = monotonicClock
+                monotonicClock = monotonicClock,
+                pendingSocketLease = pending
             )
             if (!isAttemptCurrent(attempt)) {
                 clientConnectAttempt.release(attempt)
-                session.close()
+                pending.close()
                 return
             }
-            if (handoff(session, attempt)) {
+            if (handoff(session, attempt, pending)) {
                 targetedClientSocket.compareAndSet(candidate, null)
                 socket = null
+                handedOff = true
             } else {
                 clientConnectAttempt.release(attempt)
             }
@@ -440,7 +459,10 @@ internal class LanDiscoveryCoordinator(
             else log("局域网连接失败：${t.message}")
         } finally {
             socket?.let { targetedClientSocket.compareAndSet(it, null) }
-            closeQuietly(socket)
+            if (!handedOff) {
+                lease?.close()
+                closeQuietly(socket)
+            }
         }
     }
 
@@ -507,21 +529,31 @@ internal class LanDiscoveryCoordinator(
 
     private fun handoff(
         session: SignalingSessionV2,
-        expectedAttempt: ConnectionAttempt?
+        expectedAttempt: ConnectionAttempt?,
+        lease: PendingSocketLease
     ): Boolean {
+        val generation = pendingSockets[lease]
         if (
+            generation == null ||
             !isActive() ||
             !isAttemptCurrentOrPassive(expectedAttempt) ||
             !session.peer.isVerifiedFor(session.targetLock)
         ) {
-            session.close()
+            lease.close()
+            return false
+        }
+        if (!lease.prepareAdmission({
+                pendingSocketGeneration == generation && isAttemptCurrentOrPassive(expectedAttempt)
+            })
+        ) {
+            lease.close()
             return false
         }
         return try {
-            onControlChannelReady(session)
+            onControlChannelReady(session, lease)
             true
         } catch (t: Throwable) {
-            session.close()
+            lease.close()
             error(t)
             false
         }
@@ -548,12 +580,15 @@ internal class LanDiscoveryCoordinator(
         else isAttemptCurrent(attempt)
 
     override fun close() {
-        synchronized(lifecycleLock) {
+        val resources = synchronized(lifecycleLock) {
             if (!closed.compareAndSet(false, true)) return
-            closeQuietly(udpSocket.getAndSet(null))
-            closeQuietly(serverSocket.getAndSet(null))
-            closeQuietly(targetedClientSocket.getAndSet(null))
+            val sockets = listOfNotNull<Closeable>(
+                udpSocket.getAndSet(null), serverSocket.getAndSet(null),
+                targetedClientSocket.getAndSet(null)
+            )
+            sockets + retirePendingLocked()
         }
+        resources.forEach(::closeQuietly)
         stopNsdDiscovery()
         executor.shutdownNow()
         ingressAttempt.clear()
@@ -564,13 +599,16 @@ internal class LanDiscoveryCoordinator(
         onDevicesChanged(emptyList())
     }
 
-    private fun createServerSocket(): ServerSocket? = synchronized(lifecycleLock) {
-        if (!isActive()) return@synchronized null
+    private fun createServerSocket(): ServerSocket? {
+        if (!isActive()) return null
         val candidate = ServerSocket()
         try {
             candidate.reuseAddress = true
             candidate.bind(InetSocketAddress(LAN_TCP_PORT))
-            if (serverSocket.compareAndSet(null, candidate)) candidate else {
+            val installed = synchronized(lifecycleLock) {
+                isActive() && serverSocket.compareAndSet(null, candidate)
+            }
+            return if (installed) candidate else {
                 closeQuietly(candidate)
                 null
             }
@@ -580,13 +618,16 @@ internal class LanDiscoveryCoordinator(
         }
     }
 
-    private fun createUdpSocket(): DatagramSocket? = synchronized(lifecycleLock) {
-        if (!isActive()) return@synchronized null
+    private fun createUdpSocket(): DatagramSocket? {
+        if (!isActive()) return null
         val candidate = DatagramSocket(LAN_UDP_PORT)
         try {
             candidate.broadcast = true
             candidate.soTimeout = LAN_RECEIVE_TIMEOUT_MS
-            if (udpSocket.compareAndSet(null, candidate)) candidate else {
+            val installed = synchronized(lifecycleLock) {
+                isActive() && udpSocket.compareAndSet(null, candidate)
+            }
+            return if (installed) candidate else {
                 closeQuietly(candidate)
                 null
             }
@@ -594,6 +635,28 @@ internal class LanDiscoveryCoordinator(
             closeQuietly(candidate)
             throw t
         }
+    }
+
+    private fun registerPending(socket: Socket, attempt: ConnectionAttempt?): PendingSocketLease? {
+        val lease = synchronized(lifecycleLock) {
+            if (!isAttemptCurrentOrPassive(attempt)) null else PendingSocketLease(
+                socket, attempt,
+                attempt?.deadlineElapsedRealtimeMs ?: Math.addExact(
+                    monotonicClock.now().elapsedRealtimeMs,
+                    PendingSocketLease.PASSIVE_ADMISSION_TIMEOUT_MS
+                ),
+                monotonicClock,
+                onReleased = { pendingSockets.remove(it) }
+            ).also { pendingSockets[it] = pendingSocketGeneration }
+        }
+        if (lease == null) closeQuietly(socket) else lease.armAdmissionDeadline()
+        return lease
+    }
+
+    // The caller only holds the adapter lock while detaching ownership, never while closing I/O.
+    private fun retirePendingLocked(): List<PendingSocketLease> {
+        pendingSocketGeneration += 1
+        return pendingSockets.keys.toList().also { pendingSockets.clear() }
     }
 
     private fun stopNsdDiscovery() {

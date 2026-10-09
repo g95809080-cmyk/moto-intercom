@@ -9,6 +9,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -24,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import java.util.EnumMap
+import java.util.UUID
 import java.lang.ref.WeakReference
 
 internal class MainScreen(
@@ -50,7 +52,9 @@ internal class MainScreen(
     private val onForgetPairing: (String) -> Boolean = { false },
     private val onSendFeedback: (String) -> Unit = {},
     private val onboardingPreferences: OnboardingPreferences? = null,
-    private val diagnostics: DiagnosticLogAccess? = DiagnosticLog.forContext(activity)
+    private val diagnostics: DiagnosticLogAccess? = DiagnosticLog.forContext(activity),
+    private val onConnectPresenceRequest: (RiderPresence, PresenceConnectRequest) -> Boolean =
+        { presence, _ -> onConnectPresence(presence) }
 ) {
     val root: View
 
@@ -143,6 +147,9 @@ internal class MainScreen(
     private var discoverConnectAwaitingState = false
     private var pendingPresenceSelection: PendingPresenceSelection? = null
     private var pendingPresenceExpiry: Runnable? = null
+    private var pendingPresenceMissingDeadlineMs: Long? = null
+    private var pendingConnectRequest: PresenceConnectRequest? = null
+    private var pendingConnectAdmitted = false
     private var settingsNicknameDraft = restoreNicknameDraft(
         savedState?.getString(KEY_NICKNAME_DRAFT),
         initialRiderName
@@ -270,6 +277,9 @@ internal class MainScreen(
     }
 
     fun setIntercomState(state: IntercomState, canStart: Boolean) {
+        if (pendingConnectRequest?.let { it.runtimeSessionId != state.runtimeSessionId } == true) {
+            clearPendingDiscoverConnect()
+        }
         if (state !is IntercomState.Connected) audioReady = false
         if (state !is IntercomState.Offline && supplementalStatus == permissionStatus) {
             supplementalStatus = null
@@ -288,14 +298,10 @@ internal class MainScreen(
             !navigateAfterDiscoverConnect &&
             !shouldKeepDiscoverConnectPending(state)
         ) {
-            cancelPendingPresenceExpiry()
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+            clearPendingDiscoverConnect()
         }
         if (navigateAfterDiscoverConnect) {
-            cancelPendingPresenceExpiry()
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+            clearPendingDiscoverConnect()
         }
         productState = state
         canStartIntercom = canStart
@@ -319,9 +325,7 @@ internal class MainScreen(
     }
 
     fun setIntercomError(message: String, persistLog: Boolean = true) {
-        cancelPendingPresenceExpiry()
-        discoverConnectAwaitingState = false
-        pendingPresenceSelection = null
+        clearPendingDiscoverConnect()
         permissionStatus = null
         supplementalStatus = message
         discoverCtaNeedsReselect = productState != IntercomState.Offline
@@ -385,14 +389,12 @@ internal class MainScreen(
     }
 
     fun clearServiceOwnedFacts() {
-        cancelPendingPresenceExpiry()
+        clearPendingDiscoverConnect()
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
         audioReady = false
         presences = emptyList()
         lastRealPeerName = null
-        discoverConnectAwaitingState = false
-        pendingPresenceSelection = null
         audioControlSnapshot = idleAudioControlSnapshot(audioControlSnapshot.controls)
         renderCurrentPage()
     }
@@ -452,6 +454,7 @@ internal class MainScreen(
         val pending = pendingPresenceSelection
         if (
             discoverConnectAwaitingState &&
+            !pendingConnectAdmitted &&
             pending != null &&
             presences.none { it.matchesPendingSelection(pending) }
         ) {
@@ -468,29 +471,66 @@ internal class MainScreen(
     }
 
     private fun schedulePendingPresenceExpiry(pending: PendingPresenceSelection) {
-        cancelPendingPresenceExpiry()
-        val expiry = Runnable {
+        if (pendingPresenceExpiry != null || pendingConnectAdmitted) return
+        val request = pendingConnectRequest ?: return
+        val deadline = pendingPresenceMissingDeadlineMs ?: (
+            SystemClock.uptimeMillis() + DISCOVER_CONNECT_PENDING_GRACE_MS
+        ).also { pendingPresenceMissingDeadlineMs = it }
+        lateinit var expiry: Runnable
+        expiry = Runnable {
+            if (pendingPresenceExpiry !== expiry) return@Runnable
             pendingPresenceExpiry = null
             if (
-                currentRoute != MainRoute.DISCOVER ||
+                pendingConnectRequest != request ||
                 !discoverConnectAwaitingState ||
+                pendingConnectAdmitted ||
                 pendingPresenceSelection != pending ||
                 productState !is IntercomState.Discovering ||
+                productState.runtimeSessionId != request.runtimeSessionId ||
                 presences.any { it.matchesPendingSelection(pending) }
             ) {
                 return@Runnable
             }
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
-            renderDiscover()
+            clearPendingDiscoverConnect()
+            renderCurrentPage()
         }
         pendingPresenceExpiry = expiry
-        root.postDelayed(expiry, DISCOVER_CONNECT_PENDING_GRACE_MS)
+        root.postDelayed(expiry, (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L))
     }
 
     private fun cancelPendingPresenceExpiry() {
         pendingPresenceExpiry?.let(root::removeCallbacks)
         pendingPresenceExpiry = null
+        pendingPresenceMissingDeadlineMs = null
+    }
+
+    private fun clearPendingDiscoverConnect() {
+        cancelPendingPresenceExpiry()
+        discoverConnectAwaitingState = false
+        pendingPresenceSelection = null
+        pendingConnectRequest = null
+        pendingConnectAdmitted = false
+    }
+
+    fun abandonPresenceConnectRequest() {
+        clearPendingDiscoverConnect()
+    }
+
+    fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+        if (
+            pendingConnectRequest != request || !discoverConnectAwaitingState ||
+            productState !is IntercomState.Discovering ||
+            productState.runtimeSessionId != request.runtimeSessionId
+        ) return
+        if (accepted) {
+            pendingConnectAdmitted = true
+            cancelPendingPresenceExpiry()
+        } else {
+            clearPendingDiscoverConnect()
+            permissionStatus = null
+            supplementalStatus = "连接未启动，请重新选择车友"
+        }
+        renderCurrentPage()
     }
 
     fun setAudioLevel(level: Float) {
@@ -1002,9 +1042,7 @@ internal class MainScreen(
             discoverConnectAwaitingState ||
             currentPresence == null
         ) {
-            if (currentPresence == null) {
-                discoverConnectAwaitingState = false
-                pendingPresenceSelection = null
+            if (currentPresence == null && currentRoute == MainRoute.DISCOVER) {
                 renderDiscover()
             }
             return
@@ -1013,14 +1051,23 @@ internal class MainScreen(
             deviceId = requireNotNull(currentPresence.deviceId),
             sessionId = requireNotNull(currentPresence.sessionId)
         )
+        val request = PresenceConnectRequest(
+            runtimeSessionId = requireNotNull(productState.runtimeSessionId),
+            targetDeviceId = pendingSelection.deviceId,
+            targetSessionId = pendingSelection.sessionId,
+            requestId = UUID.randomUUID().toString()
+        )
+        cancelPendingPresenceExpiry()
         discoverConnectAwaitingState = true
         pendingPresenceSelection = pendingSelection
-        val dispatched = onConnectPresence(currentPresence)
+        pendingConnectRequest = request
+        pendingConnectAdmitted = false
+        val dispatched = onConnectPresenceRequest(currentPresence, request)
         if (dispatched) {
             if (currentRoute == MainRoute.DISCOVER) renderDiscover()
-        } else {
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+        } else if (pendingConnectRequest == request && productState is IntercomState.Discovering &&
+            productState.runtimeSessionId == request.runtimeSessionId) {
+            clearPendingDiscoverConnect()
             feedbackAfterDiscoverConnect(false)?.let(::setStatus)
         }
     }
@@ -1289,7 +1336,11 @@ internal class MainScreen(
         root.removeCallbacks(logRefresh)
     }
 
-    fun closeDiagnostics() { pauseDiagnostics(); diagnosticsClosed = true }
+    fun closeDiagnostics() {
+        abandonPresenceConnectRequest()
+        pauseDiagnostics()
+        diagnosticsClosed = true
+    }
 
     private fun refreshPersistedLogs() {
         val source = diagnostics ?: return

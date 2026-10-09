@@ -111,15 +111,15 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     PrimaryIntercomAction.NONE -> Unit
                 }
             },
-            onConnectPresence = { presence ->
+            onConnectPresence = { false },
+            onConnectPresenceRequest = { presence, request ->
                 val service = intercomService
                 if (service == null) {
                     showServiceUnavailable()
                     false
                 } else {
                     try {
-                        service.connectToPresence(presence)
-                        true
+                        service.connectToPresence(presence, request)
                     } catch (error: RuntimeException) {
                         Log.e(TAG, "failed to dispatch Presence connection", error)
                         showServiceUnavailable()
@@ -245,6 +245,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     override fun onStop() {
+        screen.abandonPresenceConnectRequest()
         screen.pauseDiagnostics()
         intercomService?.setAppForeground(false)
         intercomService?.setListener(null)
@@ -350,6 +351,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onPresencesChanged(presences: List<RiderPresence>) {
         runOnUiThread {
             if (serviceConnected) screen.setPresences(presences)
+        }
+    }
+
+    override fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+        runOnUiThread {
+            if (serviceConnected) screen.onPresenceConnectAdmission(request, accepted)
         }
     }
 
