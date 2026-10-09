@@ -45,10 +45,17 @@ internal sealed interface SessionEvent {
         val targetDeviceId: String,
         val targetSessionId: RuntimeSessionId,
         val availableTransports: Set<Transport>,
-        val trigger: ConnectionTrigger = ConnectionTrigger.USER
+        val trigger: ConnectionTrigger = ConnectionTrigger.USER,
+        val admission: PresenceConnectAdmission? = null
     ) : SessionEvent
 
     data class AttemptReplaced(val attempt: ConnectionAttempt) : SessionEvent
+
+    data class PresenceConnectCanceled(
+        val attempt: ConnectionAttempt,
+        val admission: PresenceConnectAdmission,
+        val resourcesAlreadyClosing: Boolean = false
+    ) : SessionEvent
 
     data class TunnelReady(
         val attempt: ConnectionAttempt,
@@ -416,6 +423,7 @@ internal fun reduceIntercomState(
     is SessionEvent.IncomingDecisionTimedOut,
     is SessionEvent.ConfirmationSurfaceUnavailable,
     is SessionEvent.ConnectPresenceRequested,
+    is SessionEvent.PresenceConnectCanceled,
     is SessionEvent.TargetedTransportOpenFailed,
     is SessionEvent.TargetedTransportOverlapUnavailable,
     is SessionEvent.RecoveryTransportReady,

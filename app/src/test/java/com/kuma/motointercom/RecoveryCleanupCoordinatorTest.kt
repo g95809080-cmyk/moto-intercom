@@ -8,6 +8,36 @@ import org.junit.Test
 
 class RecoveryCleanupCoordinatorTest {
     @Test
+    fun actorCancellationRechecksCompletedCleanupWithoutLosingOriginalRefreshGeneration() {
+        val tasks = TaskQueue()
+        var canRestart = false
+        val restarts = mutableListOf<RecoveryCleanupRequest>()
+        val coordinator = RecoveryCleanupCoordinator(tasks::post, tasks::remove) {
+            restarts += it
+            canRestart
+        }
+        val runtime = RuntimeSessionId("runtime-cleanup")
+        val request = RecoveryCleanupRequest(runtime, null, 0L, discoveryRefreshGeneration = 23L)
+        val token = coordinator.start(request)
+        coordinator.recheckCompleted(runtime)
+        assertFalse(tasks.hasTasks())
+        coordinator.complete(token)
+        tasks.runNext()
+        assertEquals(listOf(request), restarts)
+        assertFalse(tasks.hasTasks())
+        coordinator.recheckCompleted(RuntimeSessionId("old-runtime"))
+        assertFalse(tasks.hasTasks())
+        canRestart = true
+        coordinator.recheckCompleted(runtime)
+        coordinator.recheckCompleted(runtime)
+        tasks.runNext()
+        assertEquals(listOf(request, request), restarts)
+        assertFalse(tasks.hasTasks())
+        coordinator.recheckCompleted(runtime)
+        assertFalse(tasks.hasTasks())
+    }
+
+    @Test
     fun lateDuplicateRefreshEffectCannotRestartTheNewDiscoveryGeneration() {
         val tasks = TaskQueue()
         val gate = DiscoveryRefreshGate()

@@ -79,6 +79,12 @@ internal class SessionOrchestrator(
     internal val currentAttempt: ConnectionAttempt?
         get() = signalingControl.currentAttempt
 
+    internal fun isAttemptAuthorized(attempt: ConnectionAttempt): Boolean =
+        signalingControl.isAttemptAuthorized(attempt)
+
+    internal fun isControlOriginAuthorized(channel: VerifiedControlChannel): Boolean =
+        signalingControl.isControlOriginAuthorized(channel)
+
     internal fun terminalOutcome(
         attemptId: ConnectionAttemptId
     ): ConnectionAttemptTerminalOutcome? = signalingControl.terminalOutcome(attemptId)
