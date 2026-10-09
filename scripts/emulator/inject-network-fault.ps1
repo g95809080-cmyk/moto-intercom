@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)]
     [string]$Serial,
+    [Parameter(Mandatory)]
     [ValidateSet("normal", "slow", "offline", "online")]
     [string]$Mode,
     [ValidatePattern("^[A-Za-z0-9_.-]+$")]
@@ -33,14 +34,28 @@ function Set-SharedInterfaceState {
     }
 }
 
+function Set-EmulatorNetwork {
+    param([string]$Speed, [string]$Delay)
+
+    & $Adb -s $Serial emu network speed $Speed | Out-Null
+    $speedExit = $LASTEXITCODE
+    if ($speedExit -ne 0) {
+        throw "Unable to set emulator network speed on ${Serial}: $Speed (exit $speedExit)"
+    }
+
+    & $Adb -s $Serial emu network delay $Delay | Out-Null
+    $delayExit = $LASTEXITCODE
+    if ($delayExit -ne 0) {
+        throw "Unable to set emulator network delay on ${Serial}: $Delay (exit $delayExit)"
+    }
+}
+
 switch ($Mode) {
     "normal" {
-        & $Adb -s $Serial emu network speed full | Out-Null
-        & $Adb -s $Serial emu network delay none | Out-Null
+        Set-EmulatorNetwork -Speed full -Delay none
     }
     "slow" {
-        & $Adb -s $Serial emu network speed edge | Out-Null
-        & $Adb -s $Serial emu network delay gprs | Out-Null
+        Set-EmulatorNetwork -Speed edge -Delay gprs
     }
     "offline" {
         if ([string]::IsNullOrWhiteSpace($Interface) -or $Interface -eq "wlan0") {
@@ -57,8 +72,7 @@ switch ($Mode) {
         } else {
             Set-SharedInterfaceState "up"
         }
-        & $Adb -s $Serial emu network speed full | Out-Null
-        & $Adb -s $Serial emu network delay none | Out-Null
+        Set-EmulatorNetwork -Speed full -Delay none
     }
 }
 
