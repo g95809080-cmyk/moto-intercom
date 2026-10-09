@@ -110,9 +110,9 @@ internal class AudioSessionController(
         }
         if (shouldClose) {
             try {
-                session.close()
-            } finally {
                 audioCoordinator?.endMediaSession()
+            } finally {
+                session.close()
             }
         }
     }

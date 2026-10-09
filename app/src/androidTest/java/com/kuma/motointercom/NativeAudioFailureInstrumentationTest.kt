@@ -19,6 +19,79 @@ import org.webrtc.PeerConnection
 
 @RunWith(AndroidJUnit4::class)
 class NativeAudioFailureInstrumentationTest {
+    @Test fun closingMediaRevokesOldNativeProducerBeforeDisposeAndReplacement() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
+        val failures = LinkedBlockingQueue<Throwable>()
+        val first = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val second = RiderAudioEngine(context, onEngineError = { failures.offer(it) })
+        val blocked = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        val oldErrorDelivered = CountDownLatch(1)
+        val blockNext = AtomicBoolean(false)
+        try {
+            val admField = RiderAudioEngine::class.java.getDeclaredField("audioDeviceModule").apply { isAccessible = true }
+            val deadline = SystemClock.elapsedRealtime() + 5_000
+            var module: Any? = null
+            while (module == null && SystemClock.elapsedRealtime() < deadline) {
+                module = admField.get(first)
+                if (module == null) SystemClock.sleep(10)
+            }
+            assertNotNull(module)
+            val record = module!!.javaClass.getDeclaredField("audioInput").run { isAccessible = true; get(module) }
+            val errors = record.javaClass.getDeclaredField("errorCallback").run {
+                isAccessible = true; get(record) as JavaAudioDeviceModule.AudioRecordErrorCallback
+            }
+            val field = record.javaClass.getField("motoCaptureCallback")
+            val capture = field.get(record) as AudioRecordDataCallback
+            field.set(record, AudioRecordDataCallback { format, channels, rate, frame ->
+                if (blockNext.compareAndSet(true, false)) {
+                    blocked.countDown()
+                    if (released.await(5, TimeUnit.SECONDS)) {
+                        errors.onWebRtcAudioRecordError("old media intentional teardown")
+                        oldErrorDelivered.countDown()
+                    }
+                }
+                capture.onAudioDataRecorded(format, channels, rate, frame)
+            })
+            lateinit var offerer: RiderMediaSession
+            lateinit var answerer: RiderMediaSession
+            val connected = CountDownLatch(2)
+            offerer = first.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = { answerer.createAnswer(it) },
+                onLocalIceCandidateGenerated = { answerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = { failures.offer(it) }, isSessionCurrent = { true }
+            ))
+            answerer = second.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = { offerer.setRemoteAnswer(it) },
+                onLocalIceCandidateGenerated = { offerer.addRemoteIceCandidate(it) },
+                onConnectionStateChanged = { if (it == PeerConnection.PeerConnectionState.CONNECTED) connected.countDown() },
+                onError = { failures.offer(it) }, isSessionCurrent = { true }
+            ))
+            offerer.createOffer()
+            assertTrue(connected.await(15, TimeUnit.SECONDS))
+            blockNext.set(true)
+            assertTrue(blocked.await(5, TimeUnit.SECONDS))
+            offerer.close()
+            released.countDown()
+            assertTrue(oldErrorDelivered.await(5, TimeUnit.SECONDS))
+            assertNull("Old producer stopped its online runtime", failures.poll(300, TimeUnit.MILLISECONDS))
+            val replacement = first.openSession(RiderMediaSessionCallbacks(
+                onLocalSdpGenerated = {}, onLocalIceCandidateGenerated = {}, isSessionCurrent = { true }
+            ))
+            val initialized = CountDownLatch(1)
+            val rtc = RiderAudioEngine::class.java.getDeclaredField("rtc").run {
+                isAccessible = true; get(first) as java.util.concurrent.ExecutorService
+            }
+            rtc.execute(initialized::countDown)
+            assertTrue(initialized.await(5, TimeUnit.SECONDS))
+            assertNull("Teardown permanently failed the reused engine", failures.poll())
+            replacement.close()
+        } finally { released.countDown(); first.close(); second.close() }
+    }
+
     @Test fun nativeReadFailureReportsOnceMutesFramesAndIgnoresErrorsAfterClose() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

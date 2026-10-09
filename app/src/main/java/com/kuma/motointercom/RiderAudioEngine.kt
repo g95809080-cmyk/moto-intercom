@@ -149,16 +149,20 @@ internal class RiderAudioEngine(
 
     override fun suspendAudio() {
         audioSuspended = true
-        recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
-        playoutOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, false) }
-        ioEvidence.recording(false)
-        ioEvidence.playing(false)
+        revokeNativeProducers()
         runRtc {
             peerConnection?.setAudioRecording(false)
             peerConnection?.setAudioPlayout(false)
             audioDeviceModule?.setMicrophoneMute(true)
             audioDeviceModule?.setSpeakerMute(true)
         }
+    }
+
+    private fun revokeNativeProducers() {
+        recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
+        playoutOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, false) }
+        ioEvidence.recording(false)
+        ioEvidence.playing(false)
     }
 
     override fun resumeAudio() {
@@ -204,6 +208,10 @@ internal class RiderAudioEngine(
         if (!isActiveSession(session)) return
         try {
             requireEngineReady()
+            if (!audioSuspended) {
+                recordingOwner.authorize(true)
+                playoutOwner.authorize(true)
+            }
             createPeerConnection(session)
             attachLocalAudioTrack()
             session.state = MediaSessionState.READY
@@ -264,10 +272,7 @@ internal class RiderAudioEngine(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
-        playoutOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, false) }
-        ioEvidence.recording(false)
-        ioEvidence.playing(false)
+        revokeNativeProducers()
         val session = synchronized(sessionLock) {
             activeSession.also { activeSession = null }
         }
@@ -951,17 +956,19 @@ internal class RiderAudioEngine(
             state = MediaSessionState.CLOSED
             val shouldDispose = synchronized(sessionLock) {
                 if (activeSession === this) {
+                    // Revoke native producers before dispose can stop their I/O threads.
+                    // Keep this enqueue ordered before any replacement session initialization.
+                    revokeNativeProducers()
                     activeSession = null
+                    runRtc(allowClosed = true, onFailure = ::postEngineError) {
+                        disposeMediaSessionResources()
+                    }
                     true
                 } else {
                     false
                 }
             }
-            if (shouldDispose) {
-                runRtc(allowClosed = true, onFailure = ::postEngineError) {
-                    disposeMediaSessionResources()
-                }
-            }
+            if (!shouldDispose) return
         }
 
         fun markClosed() {
