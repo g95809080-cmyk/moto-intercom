@@ -9,21 +9,8 @@ internal object AudioPlatformOwnership {
 
 internal data class RiderRtpCounters(val streamIds: Set<String>, val sent: Long, val received: Long)
 internal data class RiderMediaEvidence(val counters: RiderRtpCounters, val connected: Boolean,
-    val remoteTrack: Boolean, val audioIoEnabled: Boolean, val gateRevision: Long, val nativeRevision: Long)
-
-/** Native ADM callbacks, never merely the requested recording/playout switches. */
-internal class RiderAudioIoEvidence {
-    private var recording = false
-    private var playing = false
-    private var pcmAt = Long.MIN_VALUE
-    private var revision = 0L
-    @Synchronized fun recording(value: Boolean) { recording = value; pcmAt = Long.MIN_VALUE; revision++ }
-    @Synchronized fun playing(value: Boolean) { playing = value; revision++ }
-    @Synchronized fun pcm(now: Long) { if (recording) pcmAt = now }
-    @Synchronized fun revision() = revision
-    @Synchronized fun ready(expected: Long, now: Long) = expected == revision && recording && playing &&
-        pcmAt != Long.MIN_VALUE && now >= pcmAt && now - pcmAt <= 2_000
-}
+    val remoteTrack: Boolean, val audioIoEnabled: Boolean, val gateRevision: Long, val nativeRevision: Long,
+    val renderRevision: Long = 0)
 
 internal fun audioRtpCounters(stats: Iterable<Triple<String, String, Map<String, Any>>>): RiderRtpCounters? {
     var sent = 0L; var received = 0L

@@ -16,7 +16,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.content.res.Configuration
 import android.provider.Settings
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import java.util.UUID
@@ -81,6 +81,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             intercomService = null
             dismissIncomingConfirmation()
             screen.clearServiceOwnedFacts()
+            screen.setAudioReady(false)
             setIntercomState(IntercomState.Offline)
             screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         }
@@ -117,15 +118,15 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     PrimaryIntercomAction.NONE -> Unit
                 }
             },
-            onConnectPresence = { presence ->
+            onConnectPresence = { false },
+            onConnectPresenceRequest = { presence, request ->
                 val service = intercomService
                 if (service == null) {
                     showServiceUnavailable()
                     false
                 } else {
                     try {
-                        service.connectToPresence(presence)
-                        true
+                        service.connectToPresence(presence, request)
                     } catch (error: RuntimeException) {
                         Log.e(TAG, "failed to dispatch Presence connection", error)
                         showServiceUnavailable()
@@ -224,6 +225,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onStart() {
         super.onStart()
+        screen.resumeDiagnostics()
         if (!bindIntercomService(flags = 0)) {
             screen.clearServiceOwnedFacts()
             setIntercomState(IntercomState.Offline)
@@ -260,6 +262,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     override fun onStop() {
+        screen.abandonPresenceConnectRequest()
+        screen.pauseDiagnostics()
         intercomService?.setAppForeground(false)
         intercomService?.setListener(null)
         if (bindingRegistered) {
@@ -269,12 +273,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         bindingRegistered = false
         serviceConnected = false
         intercomService = null
+        screen.setAudioReady(false)
         dismissIncomingConfirmation()
         screen.stopAnimations()
         super.onStop()
     }
 
     override fun onDestroy() {
+        screen.closeDiagnostics()
         startupAccess.close()
         unregisterPlatformBackCallback()
         super.onDestroy()
@@ -315,8 +321,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         val replayed = replayingServiceSnapshot
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
-            Log.d(TAG, "service status running=$running status=$status")
-            screen.setStatus(status, appendLog = !replayed)
+            android.util.Log.d(TAG, "service status running=$running status=$status")
+            screen.setStatus(status, appendLog = !replayed, persistLog = false)
         }
     }
 
@@ -367,6 +373,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+        runOnUiThread {
+            if (serviceConnected) screen.onPresenceConnectAdmission(request, accepted)
+        }
+    }
+
     override fun onAudioLevelChanged(level: Float) {
         runOnUiThread {
             if (serviceConnected) screen.setAudioLevel(level)
@@ -383,7 +395,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onLog(message: String) {
         runOnUiThread {
-            if (serviceConnected) screen.appendLog(message)
+            if (serviceConnected) screen.appendLog(message, persist = false)
         }
     }
 
@@ -422,7 +434,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onError(message: String) {
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
-            screen.setIntercomError(message)
+            screen.setIntercomError(message, persistLog = false)
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }

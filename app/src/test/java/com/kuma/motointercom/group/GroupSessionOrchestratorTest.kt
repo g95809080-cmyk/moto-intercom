@@ -65,6 +65,28 @@ class GroupSessionOrchestratorTest {
     }
     private fun room(): GroupRoom = host.writer.snapshot.view as GroupRoom
 
+    @Test fun sharedInterruptionRevokesProofWithoutReplacingAnyHealthyMediaLease() {
+        host(); val peers = listOf(join(2), join(3), join(4))
+        val nodes = listOf(host) + peers
+        nodes.forEach { it.writer.dispatch(GroupSessionEvent.AudioAvailable(true)) }
+        nodes.forEach { node -> node.leases().forEach { node.evidence(it) } }
+        assertTrue(host.writer.snapshot.voiceReady)
+        val links = room().links.map { it.lease }
+        val media = host.leases()
+        val closes = nodes.map { it.seen.filterIsInstance<GroupSessionEffect.CloseMedia>().size }
+        host.writer.dispatch(GroupSessionEvent.AudioAvailable(false))
+        assertFalse(host.writer.snapshot.voiceReady)
+        assertEquals(links, room().links.map { it.lease })
+        assertEquals(media, host.leases())
+        assertTrue(room().links.filter { it.lease.pair.first == host.endpoint.deviceId }
+            .all { host.endpoint.deviceId !in it.confirmedBy })
+        host.writer.dispatch(GroupSessionEvent.AudioAvailable(true))
+        assertFalse("Requested resume reused old confirmation", host.writer.snapshot.voiceReady)
+        assertEquals(closes, nodes.map { it.seen.filterIsInstance<GroupSessionEffect.CloseMedia>().size })
+        host.leases().forEach { host.evidence(it) }
+        assertTrue(host.writer.snapshot.voiceReady)
+    }
+
     @Test fun hostNetworkRecoveryRetainsRoomCodeIntentAndOriginalReservationDeadline() {
         host(); join(2)
         val before = host.writer.snapshot
@@ -195,7 +217,8 @@ class GroupSessionOrchestratorTest {
         assertTrue(peer.writer.snapshot.participation.selfMuted)
         assertTrue(peer.writer.snapshot.participation.isBlocked(id(3)))
         peer.writer.dispatch(GroupSessionEvent.AudioAvailable(true))
-        previous.forEach { peer.evidence(it) }
+        assertEquals(previous, peer.leases())
+        previous.forEach { peer.evidence(it, io = false) }
         assertFalse(host.writer.snapshot.voiceReady)
         nodes.forEach { node -> node.leases().forEach { node.evidence(it) } }
         assertTrue(host.writer.snapshot.voiceReady)

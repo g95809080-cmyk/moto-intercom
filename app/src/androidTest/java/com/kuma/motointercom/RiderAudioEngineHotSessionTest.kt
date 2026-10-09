@@ -73,14 +73,16 @@ class RiderAudioEngineHotSessionTest {
             session.createOffer()
             assertTrue("SDP was not generated", sdp.await(10, TimeUnit.SECONDS))
             assertFalse(audioSuspended(engine))
+            val hotPeer = field(session, "peerConnection")
+            assertTrue(hotPeer != null)
 
             engine.suspendAudio()
             assertTrue("suspendAudio did not close the audio gate", audioSuspended(engine))
-            assertTrue("suspendAudio must keep the hot PeerConnection", field(session, "peerConnection") != null)
+            assertSame("suspendAudio must keep the hot PeerConnection", hotPeer, field(session, "peerConnection"))
 
             engine.resumeAudio()
             assertFalse("resumeAudio did not reopen the audio gate", audioSuspended(engine))
-            assertTrue("resumeAudio must keep the hot PeerConnection", field(session, "peerConnection") != null)
+            assertSame("resumeAudio must keep the hot PeerConnection", hotPeer, field(session, "peerConnection"))
             assertNull("unexpected media error", errors.poll(2, TimeUnit.SECONDS))
 
             session.close()
@@ -170,9 +172,8 @@ class RiderAudioEngineHotSessionTest {
         }
 
     private fun audioSuspended(engine: RiderAudioEngine): Boolean {
-        var suspended = true
-        (field(engine, "audioIoGate") as AudioIoGate).applyCurrent { suspended = !it }
-        return suspended
+        val gate = field(engine, "audioIoGate") as AudioIoGate
+        return !gate.allows(gate.revision())
     }
 
     private fun awaitPeerClosed(engine: RiderAudioEngine, session: RiderMediaSession): Boolean {

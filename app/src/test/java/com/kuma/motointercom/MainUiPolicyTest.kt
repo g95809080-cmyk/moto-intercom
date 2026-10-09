@@ -954,7 +954,7 @@ class MainUiPolicyTest {
 
     @Test
     fun logsCopyPreservesOrder() {
-        assertEquals("仅显示本次界面会话日志", LOGS_SCOPE_TEXT)
+        assertEquals("本机保留近 7 天日志，显示最近 300 条", LOGS_SCOPE_TEXT)
         assertEquals("日志已复制", LOGS_COPIED_FEEDBACK)
         assertEquals("one\ntwo\nthree", copyableLogText(listOf("one", "two", "three")))
         assertEquals("", copyableLogText(emptyList()))

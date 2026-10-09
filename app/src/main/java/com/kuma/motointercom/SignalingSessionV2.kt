@@ -130,8 +130,6 @@ internal class SignalingSessionV2 private constructor(
     }
 
     companion object {
-        private const val HELLO_READ_TIMEOUT_MS = 1_000
-
         fun establish(
             socket: Socket,
             transport: Transport,
@@ -143,10 +141,25 @@ internal class SignalingSessionV2 private constructor(
             localDeviceName: String,
             originatingAttempt: ConnectionAttempt?,
             expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
-            monotonicClock: MonotonicClock
+            monotonicClock: MonotonicClock,
+            pendingSocketLease: PendingSocketLease? = null
         ): SignalingSessionV2 {
+            val ownsTemporaryLease = pendingSocketLease == null
+            val lease = pendingSocketLease ?: PendingSocketLease(
+                socket,
+                originatingAttempt,
+                originatingAttempt?.deadlineElapsedRealtimeMs ?: Math.addExact(
+                    monotonicClock.now().elapsedRealtimeMs,
+                    PendingSocketLease.PASSIVE_ADMISSION_TIMEOUT_MS
+                ),
+                monotonicClock
+            ).also { it.armAdmissionDeadline() }
             val previousTimeout = socket.soTimeout
             try {
+                if (lease.socket !== socket || lease.originatingAttempt != originatingAttempt) {
+                    throw SignalingV2Exception("HELLO pending Socket owner does not match")
+                }
+                lease.beginHello()
                 val pendingChannel = PendingControlChannel(
                     channelId = ControlChannelId.create(),
                     transport = transport,
@@ -178,21 +191,7 @@ internal class SignalingSessionV2 private constructor(
 
                 val localDevice = DeviceId.parse(localDeviceId)
                 requireCanonicalUuid(localRuntimeSessionId.value, "localSessionId")
-                val beforeHelloRead = {
-                    val helloTimeoutMillis =
-                        if (originatingAttempt != null) {
-                            originatingAttempt.boundedTimeoutMillis(
-                                monotonicClock,
-                                HELLO_READ_TIMEOUT_MS.toLong()
-                            )
-                        } else {
-                            HELLO_READ_TIMEOUT_MS.toLong()
-                        }
-                    if (helloTimeoutMillis <= 0L) {
-                        throw SignalingV2Exception("HELLO has no remaining attempt budget")
-                    }
-                    socket.soTimeout = helloTimeoutMillis.toInt()
-                }
+                val beforeHelloRead = lease::newHelloFrameReadGuard
                 val codec = SignalingV2Codec()
                 val input = DataInputStream(socket.getInputStream())
                 val output = DataOutputStream(socket.getOutputStream())
@@ -234,7 +233,7 @@ internal class SignalingSessionV2 private constructor(
                     throw SignalingV2Exception("outbound attempt deadline expired during HELLO")
                 }
 
-                return SignalingSessionV2(
+                val session = SignalingSessionV2(
                     channel = pendingChannel.copy(requestRole = result.requestRole),
                     pinnedIdentity = result.pinnedIdentity,
                     peer = result.toVerifiedPeer(),
@@ -245,7 +244,19 @@ internal class SignalingSessionV2 private constructor(
                     input = input,
                     output = output
                 )
+                if (!lease.completeHello(session)) {
+                    session.close()
+                    throw SignalingV2Exception("HELLO completed after pending Socket expiration")
+                }
+                if (ownsTemporaryLease) {
+                    if (!lease.prepareAdmission({ true }) || !lease.tryTransfer({ true }, {})) {
+                        session.close()
+                        throw SignalingV2Exception("HELLO expired before caller admission")
+                    }
+                }
+                return session
             } catch (t: Throwable) {
+                lease.close()
                 runCatching { socket.close() }
                 throw when (t) {
                     is SignalingV2Exception -> t
@@ -266,7 +277,7 @@ internal class SignalingSessionV2 private constructor(
             localNickname: String,
             localDeviceName: String,
             attempt: ConnectionAttempt,
-            beforeHelloRead: () -> Unit
+            beforeHelloRead: () -> (() -> Unit)
         ): HelloExchangeResult {
             val expectedRemoteDevice = DeviceId.parse(attempt.targetLock.targetDeviceId)
             val localKey = WireRequestKey(
@@ -335,7 +346,7 @@ internal class SignalingSessionV2 private constructor(
             localKey: WireRequestKey,
             localPinned: PinnedChannelIdentity,
             remoteRequester: DecodedHello,
-            beforeHelloRead: () -> Unit
+            beforeHelloRead: () -> (() -> Unit)
         ): HelloExchangeResult {
             phaseMachine.onFrame(FrameDirection.INBOUND, remoteRequester.message)
             val remoteKey = remoteRequester.envelope.requesterKey()
@@ -388,7 +399,7 @@ internal class SignalingSessionV2 private constructor(
             localNickname: String,
             localDeviceName: String,
             expectedRemoteTargetLock: TargetLock?,
-            beforeHelloRead: () -> Unit
+            beforeHelloRead: () -> (() -> Unit)
         ): HelloExchangeResult {
             val requester = readHello(codec, input, beforeHelloRead)
             if (requester.message.requestRole != RequestRole.REQUESTER) {
@@ -432,10 +443,10 @@ internal class SignalingSessionV2 private constructor(
         private fun readHello(
             codec: SignalingV2Codec,
             input: DataInputStream,
-            beforeHelloRead: () -> Unit
+            beforeHelloRead: () -> (() -> Unit)
         ): DecodedHello {
-            beforeHelloRead()
-            val envelope = codec.decode(SignalingV2Framing.read(input))
+            val guard = beforeHelloRead()
+            val envelope = codec.decode(SignalingV2Framing.read(input, guard))
             val message = envelope.message as? SignalingMessageV2.Hello
                 ?: throw SignalingV2Exception("expected HELLO frame")
             return DecodedHello(envelope, message)

@@ -13,7 +13,8 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import android.os.SystemClock
+import com.kuma.motointercom.DiagnosticLog as Log
 import androidx.annotation.RequiresApi
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,11 +43,15 @@ internal class AudioRouteController(
     private var evidenceRevision = 0L
     private var verifiedDevice: String? = null
     private var invalidationPending = false
-    private fun actualDevice(): String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        audioManager.communicationDevice?.let { "${it.id}:${it.type}" }
-    } else {
+    private fun actualDevice(): String? {
+        if (closed.get() || audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) return null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return audioManager.communicationDevice?.let { "${it.id}:${it.type}" }
+        }
         @Suppress("DEPRECATION")
-        "${audioManager.isBluetoothScoOn}:${audioManager.isSpeakerphoneOn}:" +
+        if (audioManager.isBluetoothScoOn && legacyScoConnectedRevision != currentRouteRequest().revision) return null
+        @Suppress("DEPRECATION")
+        return "${audioManager.isBluetoothScoOn}:${audioManager.isSpeakerphoneOn}:" +
             audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.id }.sorted().joinToString(",")
     }
     /** Read both before and after an asynchronous stats query; checks the actual platform route. */
@@ -100,13 +105,22 @@ internal class AudioRouteController(
     private var speakerFallbackRunnable: Runnable? = null
     private var phoneRouteVerificationRunnable: Runnable? = null
 
+    private var bluetoothVerificationRunnable: Runnable? = null
+    private var bluetoothVerificationRevision: Long? = null
+    private var bluetoothVerificationAttempts = 0
+    private var bluetoothVerificationDeadline = 0L
+    private var legacyConnectRunnable: Runnable? = null
+    @Volatile private var legacyConnectingRevision: Long? = null
+    @Volatile private var legacyScoConnectedRevision: Long? = null
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED || closed.get()) return
+            val request = currentRouteRequest()
+            val sticky = isInitialStickyBroadcast
             val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
             Log.i(TAG, "legacy SCO broadcast state=$state")
             ROUTE_EXECUTOR.execute {
-                val request = currentRouteRequest()
                 if (
                     !isCurrentRouteRequest(request) ||
                     request.selection != AudioRouteSelection.BLUETOOTH ||
@@ -114,6 +128,8 @@ internal class AudioRouteController(
                 ) return@execute
                 when (state) {
                     AudioManager.SCO_AUDIO_STATE_CONNECTED -> {
+                        cancelLegacyConnect()
+                        legacyScoConnectedRevision = request.revision
                         legacyFallbackActive = false
                         scoEverConnected = true
                         @Suppress("DEPRECATION")
@@ -122,7 +138,9 @@ internal class AudioRouteController(
                     }
 
                     AudioManager.SCO_AUDIO_STATE_DISCONNECTED -> {
-                        if (legacyFallbackActive) return@execute
+                        if (sticky || legacyConnectingRevision == request.revision || legacyFallbackActive) return@execute
+                        legacyScoConnectedRevision = null
+                        invalidateEvidence()
                         if (fallbackToSpeaker) {
                             fallbackToPhone(!scoEverConnected, "legacy SCO disconnected", request)
                         } else if (scoEverConnected) {
@@ -131,7 +149,9 @@ internal class AudioRouteController(
                     }
 
                     AudioManager.SCO_AUDIO_STATE_ERROR -> {
-                        if (legacyFallbackActive) return@execute
+                        if (sticky || legacyFallbackActive) return@execute
+                        cancelLegacyConnect()
+                        legacyScoConnectedRevision = null
                         reportRouteError(request, IllegalStateException("蓝牙 SCO 通道开启失败"))
                         if (fallbackToSpeaker) fallbackToPhone(true, "legacy SCO error", request)
                     }
@@ -177,6 +197,9 @@ internal class AudioRouteController(
                 captureInitialState()
                 cancelSpeakerFallbackRetry()
                 cancelPhoneRouteVerification()
+                cancelBluetoothVerification()
+                cancelLegacyConnect()
+                legacyScoConnectedRevision = null
                 when (request.selection) {
                     AudioRouteSelection.BLUETOOTH -> selectBluetooth(request)
                     AudioRouteSelection.EARPIECE,
@@ -209,6 +232,9 @@ internal class AudioRouteController(
         }
         cancelSpeakerFallbackRetry()
         cancelPhoneRouteVerification()
+        cancelBluetoothVerification()
+        cancelLegacyConnect()
+        legacyScoConnectedRevision = null
         ROUTE_EXECUTOR.execute {
             if (!isCurrentRouteRequest(request)) return@execute
             try {
@@ -365,6 +391,10 @@ internal class AudioRouteController(
     override fun closeRoute(restoreInitialState: Boolean) {
         if (!closed.compareAndSet(false, true)) return
         wantBluetoothSco = false
+        invalidateEvidence()
+        cancelBluetoothVerification()
+        cancelLegacyConnect()
+        legacyScoConnectedRevision = null
         cancelSpeakerFallbackRetry()
         cancelPhoneRouteVerification()
         legacyFallbackActive = false
@@ -419,31 +449,34 @@ internal class AudioRouteController(
         request: VersionedAudioRouteSelection
     ) {
         if (!isCurrentRouteRequest(request) || !wantBluetoothSco) return
+        if (bluetoothVerificationRunnable != null && bluetoothVerificationRevision == request.revision) return
+        val route = modernRoute()
+        if (route.isActive(AudioRouteSelection.BLUETOOTH) && audioManager.mode == AudioManager.MODE_IN_COMMUNICATION) {
+            publishBluetoothConnected(route.currentName().orEmpty())
+            return
+        }
+        if (bluetoothVerificationRevision != request.revision) {
+            bluetoothVerificationRevision = request.revision
+            bluetoothVerificationAttempts = 0
+            bluetoothVerificationDeadline = SystemClock.elapsedRealtime() + BLUETOOTH_VERIFY_BUDGET_MS
+        }
+        if (bluetoothVerificationAttempts >= BLUETOOTH_VERIFY_ATTEMPTS ||
+            SystemClock.elapsedRealtime() >= bluetoothVerificationDeadline) {
+            cancelBluetoothVerification()
+            if (fallbackToSpeaker) fallbackToPhone(false, "Bluetooth route verification exhausted", request)
+            return
+        }
         invalidateEvidence()
         cancelSpeakerFallbackRetry()
         modernFallbackActive = false
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        val route = modernRoute()
-        Log.i(TAG, "modern route[$reason]: ${route.stateSummary()}")
-        when (route.routeTo(AudioRouteSelection.BLUETOOTH)) {
-            ModernAudioRoute.RouteResult.ROUTED -> Unit
-            ModernAudioRoute.RouteResult.NO_MATCHING_DEVICE -> {
-                Log.w(TAG, "modern route[$reason]: no Bluetooth communication device")
-                if (fallbackToSpeaker) {
-                    fallbackToPhone(true, "no communication Bluetooth", request)
-                }
-                return
-            }
-            ModernAudioRoute.RouteResult.REJECTED -> {
-                Log.w(TAG, "modern route[$reason]: setCommunicationDevice rejected")
-                if (fallbackToSpeaker) {
-                    fallbackToPhone(false, "Bluetooth route rejected", request)
-                }
-                return
-            }
-        }
-        route.currentName()?.let(::publishBluetoothConnected)
-        scheduleModernRouteVerification(reason, request)
+        if (bluetoothVerificationAttempts > 0) route.clear()
+        bluetoothVerificationAttempts++
+        val result = route.routeTo(AudioRouteSelection.BLUETOOTH)
+        Log.i(TAG, "modern route[$reason] attempt=$bluetoothVerificationAttempts result=$result ${route.stateSummary()}")
+        if (route.isActive(AudioRouteSelection.BLUETOOTH)) {
+            publishBluetoothConnected(route.currentName().orEmpty())
+        } else scheduleModernRouteVerification(reason, request)
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
@@ -469,36 +502,44 @@ internal class AudioRouteController(
         ).also { modernRoute = it }
     }
 
-    private fun scheduleModernRouteVerification(
-        reason: String,
-        request: VersionedAudioRouteSelection
-    ) {
-        mainHandler.postDelayed({
-            if (!isCurrentRouteRequest(request)) return@postDelayed
-            ROUTE_EXECUTOR.execute {
-                if (
-                    !isCurrentRouteRequest(request) ||
-                    !wantBluetoothSco ||
-                    Build.VERSION.SDK_INT < Build.VERSION_CODES.S
-                ) return@execute
-                val route = modernRoute ?: return@execute
-                Log.i(TAG, "modern route[$reason]: delayed verify ${route.stateSummary()}")
-                route.currentName()?.let(::publishBluetoothConnected)
+    private fun scheduleModernRouteVerification(reason: String, request: VersionedAudioRouteSelection) {
+        val retry = Runnable {
+            synchronized(routeRequestLock) {
+                if (!isCurrentRouteRequest(request)) return@Runnable
+                bluetoothVerificationRunnable = null
             }
-        }, MODERN_ROUTE_VERIFY_DELAY_MS)
+            ROUTE_EXECUTOR.execute { rerouteModernOnExecutor(reason, request) }
+        }
+        synchronized(routeRequestLock) {
+            if (!isCurrentRouteRequest(request)) return
+            bluetoothVerificationRunnable = retry
+            mainHandler.postDelayed(retry, BLUETOOTH_VERIFY_DELAY_MS)
+        }
+    }
+
+    private fun cancelBluetoothVerification() = synchronized(routeRequestLock) {
+        bluetoothVerificationRunnable?.let(mainHandler::removeCallbacks)
+        bluetoothVerificationRunnable = null
+        bluetoothVerificationRevision = null
+        bluetoothVerificationAttempts = 0
+    }
+
+    private fun cancelLegacyConnect() = synchronized(routeRequestLock) {
+        legacyConnectRunnable?.let(mainHandler::removeCallbacks)
+        legacyConnectRunnable = null
+        legacyConnectingRevision = null
     }
 
     private fun rerouteAfterDeviceChange(reason: String) {
         if (closed.get() || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        ROUTE_EXECUTOR.execute {
-            rerouteModernOnExecutor(reason, currentRouteRequest())
-        }
+        val request = currentRouteRequest()
+        ROUTE_EXECUTOR.execute { rerouteModernOnExecutor(reason, request) }
     }
 
     private fun retryLegacyBluetoothAfterDeviceAdded() {
         if (closed.get() || Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+        val request = currentRouteRequest()
         ROUTE_EXECUTOR.execute {
-            val request = currentRouteRequest()
             if (
                 !isCurrentRouteRequest(request) ||
                 request.selection != AudioRouteSelection.BLUETOOTH ||
@@ -546,6 +587,9 @@ internal class AudioRouteController(
             !isCurrentRouteRequest(request) ||
             request.selection != AudioRouteSelection.BLUETOOTH
         ) return
+        cancelBluetoothVerification()
+        cancelLegacyConnect()
+        legacyScoConnectedRevision = null
         Log.i(TAG, "fallback to phone: reason=$reason, noBluetooth=$noBluetooth")
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -648,7 +692,9 @@ internal class AudioRouteController(
 
     @SuppressLint("MissingPermission")
     private fun startLegacySco(request: VersionedAudioRouteSelection) {
-        if (!isCurrentRouteRequest(request) || !wantBluetoothSco) return
+        if (!isCurrentRouteRequest(request) || !wantBluetoothSco || legacyConnectingRevision == request.revision) return
+        cancelLegacyConnect()
+        legacyScoConnectedRevision = null
         Log.i(TAG, "legacy SCO route: sdk=${Build.VERSION.SDK_INT}, mode=${modeName(audioManager.mode)}")
         if (!audioManager.isBluetoothScoAvailableOffCall) {
             Log.w(TAG, "legacy SCO route: isBluetoothScoAvailableOffCall=false")
@@ -663,10 +709,26 @@ internal class AudioRouteController(
         audioManager.startBluetoothSco()
         @Suppress("DEPRECATION")
         audioManager.isBluetoothScoOn = true
+        val timeout = Runnable {
+            if (!isCurrentRouteRequest(request)) return@Runnable
+            ROUTE_EXECUTOR.execute {
+                if (!isCurrentRouteRequest(request) || legacyConnectingRevision != request.revision) return@execute
+                cancelLegacyConnect()
+                if (fallbackToSpeaker) fallbackToPhone(false, "legacy SCO connection timed out", request)
+            }
+        }
+        synchronized(routeRequestLock) {
+            if (!isCurrentRouteRequest(request)) return
+            legacyConnectingRevision = request.revision
+            legacyConnectRunnable = timeout
+            mainHandler.postDelayed(timeout, LEGACY_CONNECT_BUDGET_MS)
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun stopLegacySco() {
+        cancelLegacyConnect()
+        legacyScoConnectedRevision = null
         Log.i(TAG, "legacy SCO route: stop")
         @Suppress("DEPRECATION")
         audioManager.isBluetoothScoOn = false
@@ -681,6 +743,12 @@ internal class AudioRouteController(
             request.selection != AudioRouteSelection.BLUETOOTH ||
             !wantBluetoothSco
         ) return
+        if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (modernRoute?.isActive(AudioRouteSelection.BLUETOOTH) != true) return
+        } else if (legacyScoConnectedRevision != request.revision) return
+        cancelBluetoothVerification()
+        cancelLegacyConnect()
         cancelSpeakerFallbackRetry()
         cancelPhoneRouteVerification()
         modernFallbackActive = false
@@ -823,7 +891,10 @@ internal class AudioRouteController(
 
     companion object {
         private const val TAG = "AudioRouteController"
-        private const val MODERN_ROUTE_VERIFY_DELAY_MS = 1_500L
+        private const val BLUETOOTH_VERIFY_DELAY_MS = 500L
+        private const val BLUETOOTH_VERIFY_BUDGET_MS = 3_000L
+        private const val BLUETOOTH_VERIFY_ATTEMPTS = 7
+        private const val LEGACY_CONNECT_BUDGET_MS = 4_000L
         private const val SPEAKER_FALLBACK_RETRY_DELAY_MS = 250L
         private const val PHONE_ROUTE_VERIFY_DELAY_MS = 250L
         private const val PHONE_ROUTE_VERIFY_ATTEMPTS = 7

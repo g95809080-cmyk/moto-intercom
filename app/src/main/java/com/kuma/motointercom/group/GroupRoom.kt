@@ -168,7 +168,13 @@ internal class GroupRoom private constructor(
             is GroupEvent.AudioAvailability -> {
                 val member = membersById[event.lease.deviceId]
                 if (!valid(event.lease) || member?.status != GroupMemberStatus.ADMITTED) result(GroupResult.STALE)
-                else changeMember(member.copy(audioAvailable = event.available), clearLinks = !event.available)
+                else GroupTransition(copy(
+                    members = membersById + (event.lease.deviceId to member.copy(audioAvailable = event.available)),
+                    // Device interruption revokes proof, not the hot media lease.
+                    links = if (event.available) linksByPair else linksByPair.mapValues { (_, link) ->
+                        link.copy(confirmedBy = link.confirmedBy - event.lease.deviceId)
+                    }, revision = rosterRevision + 1
+                ), GroupResult.OK, member.lease)
             }
             is GroupEvent.RestartLink -> {
                 val local = membersById[event.actor.deviceId]

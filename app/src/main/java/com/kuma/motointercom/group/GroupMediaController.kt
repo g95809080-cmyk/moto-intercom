@@ -100,6 +100,11 @@ internal class GroupMediaController(
     fun evidence(lease: GroupMediaLease, callback: (com.kuma.motointercom.RiderMediaEvidence?) -> Unit) =
         withSession(lease) { it.queryEvidence(callback) }
 
+    fun hasCurrentAudioIo(lease: GroupMediaLease): Boolean = synchronized(lock) {
+        !closed && isLeaseCurrent(lease) && slots[lease.peer.deviceId]?.takeIf { it.lease == lease }
+            ?.session?.hasCurrentAudioIo() == true
+    }
+
     fun updateAudioControls(controls: VersionedAudioControls) = synchronized(lock) {
         if (!closed) engine.updateAudioControls(controls)
     }

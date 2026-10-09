@@ -278,7 +278,7 @@ internal class GroupBleClient(
         packetBytes = GroupBleChunks.packetBytes(mtu)
         handler.removeCallbacks(mtuFallback)
         ready = true
-        android.util.Log.i("MotoComGroupBle", "GATT ready payload=$packetBytes")
+        com.kuma.motointercom.DiagnosticLog.i("MotoComGroupBle", "GATT ready payload=$packetBytes")
         onReady()
     }
     private var reply: ((ByteArray) -> Unit)? = null

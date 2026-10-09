@@ -43,7 +43,10 @@ internal class AudioSessionController(
             preferredAudioRoute = selection
             if (activeSession != null || audioCoordinator == null) {
                 val canApply = audioCoordinator?.canApplyPreferredRoute() ?: true
-                if (canApply) route.select(selection)
+                if (canApply) {
+                    if (audioCoordinator == null) route.select(selection)
+                    else audioCoordinator.reapplyPreferredRoute(force = true)
+                }
             }
         }
     }
@@ -117,9 +120,9 @@ internal class AudioSessionController(
         }
         if (shouldClose) {
             try {
-                session.close()
-            } finally {
                 audioCoordinator?.endMediaSession()
+            } finally {
+                session.close()
             }
         }
     }
@@ -168,11 +171,12 @@ internal class AudioSessionController(
             initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
             onEarpieceActive: () -> Unit = {},
             onExternalAudioActive: (String) -> Unit = {},
-            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {}
+            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {},
+            onPlatformError: (Throwable) -> Unit = onError
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,
-                onEngineError = onError,
+                onEngineError = onPlatformError,
                 isRuntimeCurrent = isRuntimeCurrent,
                 initialAudioControls = initialAudioControls,
                 onVoxStateChanged = onVoxStateChanged
