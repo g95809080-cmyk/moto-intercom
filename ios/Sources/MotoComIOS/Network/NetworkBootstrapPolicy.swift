@@ -143,9 +143,11 @@ public final class NetworkBootstrapCoordinator {
     private var applyTask: Task<Void, Error>?
     private var applyID: UUID?
     private let join: @MainActor (HotspotCredentials) async throws -> Void
+    private let beforeApplyStart: (@MainActor () async -> Void)?
 
-    public init(join: (@MainActor (HotspotCredentials) async throws -> Void)? = nil) {
+    public init(beforeApplyStart: (@MainActor () async -> Void)? = nil, join: (@MainActor (HotspotCredentials) async throws -> Void)? = nil) {
         self.join = join ?? Self.applyHotspot
+        self.beforeApplyStart = beforeApplyStart
     }
     public func selectPath(local: RuntimeCapabilities, remote: RuntimeCapabilities, context: BootstrapContext) throws -> BootstrapDecision {
         generation += 1
@@ -171,7 +173,9 @@ public final class NetworkBootstrapCoordinator {
         if let expiresAt = hotspot.expiresAt, expiresAt <= Date() { throw MotoComError.invalidField("hotspot credentials expired") }
         currentHotspot = hotspot; state = .networkPreparing
         let id = UUID(); let join = self.join
+        let beforeApplyStart = self.beforeApplyStart
         let task = Task { @MainActor [weak self] in
+            if let beforeApplyStart { await beforeApplyStart() }
             guard let self, self.generation == operation, self.applyID == id else { throw CancellationError() }
             try await join(hotspot)
         }

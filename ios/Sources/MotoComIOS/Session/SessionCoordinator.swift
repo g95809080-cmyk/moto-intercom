@@ -335,6 +335,7 @@ public final class SessionCoordinator: ObservableObject {
             let attempt = Attempt(command: command, device: device, runtime: controller.expectedRuntimeID,
                 wireAttempt: attemptID, deadline: controller.absoluteHelloDeadline, transport: .commonLAN)
             attempt.controller = controller; owner = attempt; remoteCapabilities = remote
+            phase = .signaling; statusMessage = "正在验证控制连接"
             armDeadline(attempt)
         } else { pendingInbound[ObjectIdentifier(controller)] = controller }
         bind(controller, candidateCommand: command, deadline: controller.absoluteHelloDeadline)

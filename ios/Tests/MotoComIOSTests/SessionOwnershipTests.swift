@@ -104,13 +104,13 @@ final class SessionOwnershipTests: XCTestCase {
     func remote(_ device: String? = nil, runtime: String? = nil) throws -> NearbyPeer {
         try NearbyPeer(deviceID: device ?? remoteID, sessionID: runtime ?? remoteRuntime, nickname: "remote", deviceName: "remote", capabilities: capabilities())
     }
-    func makeSession(engine: TestWebRTCEngine = TestWebRTCEngine(), audio: TestAudioDriver = TestAudioDriver(),
-        store: PairingStoring = TestPairingStore(), clock: ManualSessionClock = ManualSessionClock(),
+    func makeSession(engine: TestWebRTCEngine = TestWebRTCEngine(), audio: TestAudioDriver? = nil,
+        store: PairingStoring = TestPairingStore(), clock: ManualSessionClock? = nil,
         transport: TestControlTransport = TestControlTransport(), ble: BLEBootstrapSource? = nil,
         bootstrap: NetworkBootstrapCoordinator? = nil,
         factory: @escaping (NWConnection) -> NWControlChannel = { NWControlChannel(connection: $0) }) throws -> SessionCoordinator {
-        try SessionCoordinator(pairingStore: store, audio: AudioSessionController(driver: audio), webRTCEngine: engine,
-            networkBootstrap: bootstrap, scheduler: clock, bleSource: ble, initialIdentity: identity(), initialCapabilities: capabilities(),
+        try SessionCoordinator(pairingStore: store, audio: AudioSessionController(driver: audio ?? TestAudioDriver()), webRTCEngine: engine,
+            networkBootstrap: bootstrap, scheduler: clock ?? ManualSessionClock(), bleSource: ble, initialIdentity: identity(), initialCapabilities: capabilities(),
             bonjourTransport: transport, peerToPeerTransport: TestControlTransport(), channelFactory: factory)
     }
     func frame(_ message: SignalingMessage, attempt: String? = nil, device: String? = nil, runtime: String? = nil) throws -> Data {
@@ -238,7 +238,9 @@ final class SessionOwnershipTests: XCTestCase {
         bCompletion(.success(bConnection))
         await fulfillment(of: [bAttached], timeout: 2)
         XCTAssertEqual(attached, [ObjectIdentifier(bConnection)])
+        XCTAssertEqual(transport.cancelled, 1)
         session.stop()
+        XCTAssertEqual(transport.cancelled, 2)
     }
     func testHotspotSourceRevokedBeforeMainDoesNotApplyAndExactDeliveryIsAcknowledged() async throws {
         let source = TestBLESource(); var joins = 0

@@ -81,7 +81,10 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/motocom-derived-data" \
             CODE_SIGNING_ALLOWED=NO \
             test \
-            -resultBundlePath "$RUNNER_TEMP/motocom-ios-tests.xcresult"
+            -resultBundlePath "$RUNNER_TEMP/motocom-ios-tests.xcresult" 2>&1 | tee "$RUNNER_TEMP/motocom-ios-test.log"
+          if [ "$MOTOCOM_NATIVE_WEBRTC_CI" = "1" ]; then
+            grep -E 'NativeWebRTCCompileGateTests.*testNativeAdapterTypeIsAvailable.*passed' "$RUNNER_TEMP/motocom-ios-test.log"
+          fi
 
       - name: Upload Xcode test result
         if: always()
@@ -91,5 +94,6 @@ jobs:
           path: |
             ${{ runner.temp }}/motocom-ios-tests.xcresult
             ${{ runner.temp }}/motocom-swift-settings.txt
+            ${{ runner.temp }}/motocom-ios-test.log
           if-no-files-found: warn
           retention-days: 14
