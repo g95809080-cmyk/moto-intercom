@@ -12,7 +12,8 @@ internal class LegacyAudioReadiness {
             return reset()
         val old = previous
         if (routeRevision != after.revision || old == null || old.gateRevision != value.gateRevision ||
-            old.nativeRevision != value.nativeRevision || old.counters.streamIds != value.counters.streamIds ||
+            old.nativeRevision != value.nativeRevision || old.renderRevision != value.renderRevision ||
+            old.counters.streamIds != value.counters.streamIds ||
             value.counters.sent < old.counters.sent || value.counters.received < old.counters.received) {
             ready = false
         } else if (value.counters.sent > old.counters.sent && value.counters.received > old.counters.received) {

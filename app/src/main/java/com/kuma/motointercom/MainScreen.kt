@@ -9,6 +9,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -24,6 +25,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import java.util.EnumMap
+import java.util.UUID
+import java.lang.ref.WeakReference
 
 internal class MainScreen(
     private val activity: Activity,
@@ -50,7 +53,10 @@ internal class MainScreen(
     private val onSendFeedback: (String) -> Unit = {},
     private val onBackgroundSettings: () -> Unit = {},
     private val onboardingPreferences: OnboardingPreferences? = null,
-    private val onOpenGroup: () -> Unit = {}
+    private val onOpenGroup: () -> Unit = {},
+    private val diagnostics: DiagnosticLogAccess? = DiagnosticLog.forContext(activity),
+    private val onConnectPresenceRequest: (RiderPresence, PresenceConnectRequest) -> Boolean =
+        { presence, _ -> onConnectPresence(presence) }
 ) {
     val root: View
 
@@ -64,6 +70,19 @@ internal class MainScreen(
     private val scrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val pendingRestoredScrollPositions = EnumMap<MainRoute, Int>(MainRoute::class.java)
     private val logBuffer = BoundedLogBuffer(300)
+    private var diagnosticsActive = true
+    private var diagnosticsClosed = false
+    private var diagnosticsGeneration = 0L
+    private var historyReadPending = false
+    private var exportPreparing = false
+    private var diagnosticError: String? = null
+    private val logRefresh = object : Runnable {
+        override fun run() {
+            if (!diagnosticsActive || diagnosticsClosed || currentRoute != MainRoute.LOGS) return
+            refreshPersistedLogs()
+            root.postDelayed(this, 2_000)
+        }
+    }
     private var onboarding: OnboardingGuide? = null
     private val guideAnchors = EnumMap<GuideTarget, GuideAnchor>(GuideTarget::class.java)
     private val homeUiState = mutableStateOf(
@@ -137,6 +156,9 @@ internal class MainScreen(
     private var discoverConnectAwaitingState = false
     private var pendingPresenceSelection: PendingPresenceSelection? = null
     private var pendingPresenceExpiry: Runnable? = null
+    private var pendingPresenceMissingDeadlineMs: Long? = null
+    private var pendingConnectRequest: PresenceConnectRequest? = null
+    private var pendingConnectAdmitted = false
     private var settingsNicknameDraft = restoreNicknameDraft(
         savedState?.getString(KEY_NICKNAME_DRAFT),
         initialRiderName
@@ -264,6 +286,9 @@ internal class MainScreen(
     }
 
     fun setIntercomState(state: IntercomState, canStart: Boolean) {
+        if (pendingConnectRequest?.let { it.runtimeSessionId != state.runtimeSessionId } == true) {
+            clearPendingDiscoverConnect()
+        }
         if (state !is IntercomState.Connected) audioReady = false
         if (state !is IntercomState.Offline && supplementalStatus == permissionStatus) {
             supplementalStatus = null
@@ -282,14 +307,10 @@ internal class MainScreen(
             !navigateAfterDiscoverConnect &&
             !shouldKeepDiscoverConnectPending(state)
         ) {
-            cancelPendingPresenceExpiry()
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+            clearPendingDiscoverConnect()
         }
         if (navigateAfterDiscoverConnect) {
-            cancelPendingPresenceExpiry()
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+            clearPendingDiscoverConnect()
         }
         productState = state
         canStartIntercom = canStart
@@ -312,21 +333,19 @@ internal class MainScreen(
         updateExpandedDetailPane()
     }
 
-    fun setIntercomError(message: String) {
-        cancelPendingPresenceExpiry()
-        discoverConnectAwaitingState = false
-        pendingPresenceSelection = null
+    fun setIntercomError(message: String, persistLog: Boolean = true) {
+        clearPendingDiscoverConnect()
         permissionStatus = null
         supplementalStatus = message
         discoverCtaNeedsReselect = productState != IntercomState.Offline
-        appendLog("错误：$message")
+        appendLog("错误：$message", persist = persistLog)
         renderCurrentPage()
     }
 
-    fun setStatus(message: String, appendLog: Boolean = true) {
+    fun setStatus(message: String, appendLog: Boolean = true, persistLog: Boolean = true) {
         permissionStatus = null
         supplementalStatus = message
-        if (appendLog) appendLog(message)
+        if (appendLog) appendLog(message, persist = persistLog)
         renderCurrentPage()
     }
 
@@ -379,14 +398,12 @@ internal class MainScreen(
     }
 
     fun clearServiceOwnedFacts() {
-        cancelPendingPresenceExpiry()
+        clearPendingDiscoverConnect()
         audioSourceText = AUDIO_SOURCE_STANDBY_TEXT
         bluetoothActive = false
         audioReady = false
         presences = emptyList()
         lastRealPeerName = null
-        discoverConnectAwaitingState = false
-        pendingPresenceSelection = null
         audioControlSnapshot = idleAudioControlSnapshot(audioControlSnapshot.controls)
         renderCurrentPage()
     }
@@ -446,6 +463,7 @@ internal class MainScreen(
         val pending = pendingPresenceSelection
         if (
             discoverConnectAwaitingState &&
+            !pendingConnectAdmitted &&
             pending != null &&
             presences.none { it.matchesPendingSelection(pending) }
         ) {
@@ -462,29 +480,66 @@ internal class MainScreen(
     }
 
     private fun schedulePendingPresenceExpiry(pending: PendingPresenceSelection) {
-        cancelPendingPresenceExpiry()
-        val expiry = Runnable {
+        if (pendingPresenceExpiry != null || pendingConnectAdmitted) return
+        val request = pendingConnectRequest ?: return
+        val deadline = pendingPresenceMissingDeadlineMs ?: (
+            SystemClock.uptimeMillis() + DISCOVER_CONNECT_PENDING_GRACE_MS
+        ).also { pendingPresenceMissingDeadlineMs = it }
+        lateinit var expiry: Runnable
+        expiry = Runnable {
+            if (pendingPresenceExpiry !== expiry) return@Runnable
             pendingPresenceExpiry = null
             if (
-                currentRoute != MainRoute.DISCOVER ||
+                pendingConnectRequest != request ||
                 !discoverConnectAwaitingState ||
+                pendingConnectAdmitted ||
                 pendingPresenceSelection != pending ||
                 productState !is IntercomState.Discovering ||
+                productState.runtimeSessionId != request.runtimeSessionId ||
                 presences.any { it.matchesPendingSelection(pending) }
             ) {
                 return@Runnable
             }
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
-            renderDiscover()
+            clearPendingDiscoverConnect()
+            renderCurrentPage()
         }
         pendingPresenceExpiry = expiry
-        root.postDelayed(expiry, DISCOVER_CONNECT_PENDING_GRACE_MS)
+        root.postDelayed(expiry, (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L))
     }
 
     private fun cancelPendingPresenceExpiry() {
         pendingPresenceExpiry?.let(root::removeCallbacks)
         pendingPresenceExpiry = null
+        pendingPresenceMissingDeadlineMs = null
+    }
+
+    private fun clearPendingDiscoverConnect() {
+        cancelPendingPresenceExpiry()
+        discoverConnectAwaitingState = false
+        pendingPresenceSelection = null
+        pendingConnectRequest = null
+        pendingConnectAdmitted = false
+    }
+
+    fun abandonPresenceConnectRequest() {
+        clearPendingDiscoverConnect()
+    }
+
+    fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+        if (
+            pendingConnectRequest != request || !discoverConnectAwaitingState ||
+            productState !is IntercomState.Discovering ||
+            productState.runtimeSessionId != request.runtimeSessionId
+        ) return
+        if (accepted) {
+            pendingConnectAdmitted = true
+            cancelPendingPresenceExpiry()
+        } else {
+            clearPendingDiscoverConnect()
+            permissionStatus = null
+            supplementalStatus = "连接未启动，请重新选择车友"
+        }
+        renderCurrentPage()
     }
 
     fun setAudioLevel(level: Float) {
@@ -492,8 +547,9 @@ internal class MainScreen(
         homeAudioLevel.floatValue = level.coerceIn(0f, 1f)
     }
 
-    fun appendLog(message: String) {
-        logBuffer.append(message)
+    fun appendLog(message: String, persist: Boolean = true) {
+        if (persist) diagnostics?.record("I", "MotoComUI", message)
+        logBuffer.append(PersistentLogStore.clean(message))
         if (shouldRenderLogAppend(currentRoute)) {
             val logText = pageContainer.findViewById<TextView?>(R.id.logs_text)
             val followBottom = logText?.let { it.isAtBottom() || logBottomFollowPending }
@@ -707,6 +763,10 @@ internal class MainScreen(
         stopAnimations()
         logBottomFollowPending = false
         currentRoute = route
+        root.removeCallbacks(logRefresh)
+        diagnosticsGeneration++
+        historyReadPending = false
+        exportPreparing = false
         closeNavigation()
         pageContainer.removeAllViews()
         guideAnchors.clear()
@@ -746,6 +806,8 @@ internal class MainScreen(
         bindCurrentPage()
         if (currentRoute == MainRoute.LOGS) {
             renderLogs()
+            refreshPersistedLogs()
+            if (diagnostics != null && diagnosticsActive) root.postDelayed(logRefresh, 2_000)
         } else {
             renderCurrentPage()
         }
@@ -990,9 +1052,7 @@ internal class MainScreen(
             discoverConnectAwaitingState ||
             currentPresence == null
         ) {
-            if (currentPresence == null) {
-                discoverConnectAwaitingState = false
-                pendingPresenceSelection = null
+            if (currentPresence == null && currentRoute == MainRoute.DISCOVER) {
                 renderDiscover()
             }
             return
@@ -1001,14 +1061,23 @@ internal class MainScreen(
             deviceId = requireNotNull(currentPresence.deviceId),
             sessionId = requireNotNull(currentPresence.sessionId)
         )
+        val request = PresenceConnectRequest(
+            runtimeSessionId = requireNotNull(productState.runtimeSessionId),
+            targetDeviceId = pendingSelection.deviceId,
+            targetSessionId = pendingSelection.sessionId,
+            requestId = UUID.randomUUID().toString()
+        )
+        cancelPendingPresenceExpiry()
         discoverConnectAwaitingState = true
         pendingPresenceSelection = pendingSelection
-        val dispatched = onConnectPresence(currentPresence)
+        pendingConnectRequest = request
+        pendingConnectAdmitted = false
+        val dispatched = onConnectPresenceRequest(currentPresence, request)
         if (dispatched) {
             if (currentRoute == MainRoute.DISCOVER) renderDiscover()
-        } else {
-            discoverConnectAwaitingState = false
-            pendingPresenceSelection = null
+        } else if (pendingConnectRequest == request && productState is IntercomState.Discovering &&
+            productState.runtimeSessionId == request.runtimeSessionId) {
+            clearPendingDiscoverConnect()
             feedbackAfterDiscoverConnect(false)?.let(::setStatus)
         }
     }
@@ -1172,6 +1241,7 @@ internal class MainScreen(
                         state = logsUiState.value,
                         onBack = { showPage(MainRoute.SETTINGS) },
                         onCopy = ::copyLogs,
+                        onExport = ::exportLogs,
                         onClose = { showPage(MainRoute.SETTINGS) }
                     )
                 }
@@ -1255,8 +1325,80 @@ internal class MainScreen(
         logsUiState.value = LogsScreenUiState(
             scopeText = LOGS_SCOPE_TEXT,
             logText = copyableLogText(snapshot).ifBlank { activity.getString(R.string.logs_empty) },
-            copyEnabled = snapshot.isNotEmpty()
+            copyEnabled = snapshot.isNotEmpty(),
+            exportEnabled = diagnostics != null && snapshot.isNotEmpty(),
+            exporting = exportPreparing,
+            errorText = diagnosticError
         )
+    }
+
+    fun resumeDiagnostics() {
+        diagnosticsActive = true
+        if (currentRoute == MainRoute.LOGS && diagnostics != null) {
+            refreshPersistedLogs()
+            root.removeCallbacks(logRefresh)
+            root.postDelayed(logRefresh, 2_000)
+        }
+    }
+
+    fun pauseDiagnostics() {
+        diagnosticsActive = false
+        diagnosticsGeneration++
+        historyReadPending = false
+        exportPreparing = false
+        root.removeCallbacks(logRefresh)
+    }
+
+    fun closeDiagnostics() {
+        abandonPresenceConnectRequest()
+        pauseDiagnostics()
+        diagnosticsClosed = true
+    }
+
+    private fun refreshPersistedLogs() {
+        val source = diagnostics ?: return
+        if (historyReadPending || !diagnosticsActive || diagnosticsClosed || currentRoute != MainRoute.LOGS) return
+        historyReadPending = true
+        val generation = diagnosticsGeneration
+        val weakScreen = WeakReference(this)
+        source.recent { result ->
+            weakScreen.get()?.root?.post {
+                val screen = weakScreen.get() ?: return@post
+                if (!screen.acceptDiagnosticResult(generation)) return@post
+                screen.historyReadPending = false
+                result.fold(
+                    onSuccess = { screen.logBuffer.replace(it); screen.diagnosticError = null },
+                    onFailure = { screen.diagnosticError = screen.activity.getString(R.string.logs_read_failed) }
+                )
+                screen.renderLogs()
+            }
+        }
+    }
+
+    private fun acceptDiagnosticResult(generation: Long): Boolean =
+        !diagnosticsClosed && diagnosticsActive && currentRoute == MainRoute.LOGS && generation == diagnosticsGeneration
+
+    private fun exportLogs() {
+        val source = diagnostics ?: return
+        if (exportPreparing || !diagnosticsActive || diagnosticsClosed) return
+        exportPreparing = true
+        diagnosticError = null
+        renderLogs()
+        val generation = diagnosticsGeneration
+        val weakScreen = WeakReference(this)
+        source.export { result ->
+            weakScreen.get()?.root?.post {
+                val screen = weakScreen.get() ?: return@post
+                if (!screen.acceptDiagnosticResult(generation)) return@post
+                screen.exportPreparing = false
+                val launched = result.mapCatching { screen.activity.startActivity(diagnosticExportChooser(screen.activity, it)) }
+                if (launched.isFailure) {
+                    screen.diagnosticError = screen.activity.getString(R.string.logs_export_failed)
+                    Toast.makeText(screen.activity, screen.diagnosticError, Toast.LENGTH_SHORT).show()
+                }
+                screen.renderLogs()
+            }
+        }
     }
 
     private fun copyLogs() {

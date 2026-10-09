@@ -194,7 +194,9 @@ class GroupRoomTest {
         assertEquals(b, lease("b")); assertEquals(GroupMemberStatus.ADMITTED, status("b"))
         event(GroupEvent.AudioAvailability(b, true))
         assertFalse(room.allVoiceReady)
-        assertEquals(GroupResult.STALE, event(GroupEvent.ConfirmLink(b, ab)).result)
+        assertEquals(ab, room.links.single().lease)
+        assertFalse(room.links.single().confirmedBy.contains(b.deviceId))
+        assertEquals(GroupResult.OK, event(GroupEvent.ConfirmLink(b, ab)).result)
         ready("a", "b"); assertTrue(room.allVoiceReady)
     }
 

@@ -11,10 +11,56 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 class WifiDirectSignalingSocketTest {
+    @Test
+    fun closeDuringActualHelloReturnsWithoutWaitingForSocketRead() {
+        val entered = CountDownLatch(1)
+        val ended = CountDownLatch(1)
+        val port = ServerSocket(0).use { it.localPort }
+        val pending = AtomicReference<PendingSocketLease>()
+        val transport = WifiDirectSignalingSocket(
+            port, 5_000, 500, 10, { true },
+            { _, role, lease ->
+                pending.set(lease)
+                entered.countDown()
+                try {
+                    SignalingSessionV2.establish(
+                        lease.socket, Transport.WIFI_DIRECT, role, 0L, DEVICE_A,
+                        RuntimeSessionId(SESSION_A), "A", "Phone A", null,
+                        monotonicClock = MonotonicClock { MonotonicTimestamp(System.nanoTime() / 1_000_000L) },
+                        pendingSocketLease = lease
+                    ).close()
+                } catch (_: SignalingV2Exception) {
+                } finally {
+                    ended.countDown()
+                }
+            }, { }
+        )
+        try {
+            val loopback = InetAddress.getLoopbackAddress()
+            transport.startServer(loopback) { true }
+            assertTrue(waitUntil(1_000) { runCatching {
+                Socket(loopback, port).also { peer = it }
+            }.isSuccess })
+            assertTrue(entered.await(1, TimeUnit.SECONDS))
+            val close = CompletableFuture.runAsync { transport.close() }
+            close.get(300, TimeUnit.MILLISECONDS)
+            assertTrue(ended.await(300, TimeUnit.MILLISECONDS))
+            assertTrue(pending.get().socket.isClosed)
+        } finally {
+            transport.close()
+            peer?.close()
+            peer = null
+        }
+    }
+
+    private var peer: Socket? = null
+
     @Test
     fun rejectedHelloClosesSocketAndRoutesCurrentGroupCleanup() {
         listOf(
@@ -130,8 +176,72 @@ class WifiDirectSignalingSocketTest {
             assertTrue(serverRole.get() == PhysicalSocketRole.ACCEPTOR)
             assertTrue(clientRole.get() == PhysicalSocketRole.OPENER)
         } finally {
-            server.close()
-            client.close()
+            try { server.close() } finally { client.close() }
+        }
+    }
+
+    @Test
+    fun closeSnapshotsPendingLeaseWhileActualReadyWorkerRemovesTheLastEntry() {
+        val ready = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val removed = CountDownLatch(1)
+        val lease = AtomicReference<PendingSocketLease>()
+        val port = ServerSocket(0).use { it.localPort }
+        val transport = WifiDirectSignalingSocket(port, 5_000, 500, 10, { true },
+            { _, _, pending ->
+                lease.set(pending)
+                ready.countDown()
+                try {
+                    check(release.await(2, TimeUnit.SECONDS))
+                    pending.close()
+                } finally { removed.countDown() }
+            }, { })
+        val registryField = WifiDirectSignalingSocket::class.java.getDeclaredField("pendingSockets").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val actualRegistry = registryField.get(transport) as MutableSet<PendingSocketLease>
+        val interleave = AtomicBoolean(false)
+        val registry = object : AbstractMutableSet<PendingSocketLease>() {
+            override val size: Int get() {
+                val observed = actualRegistry.size
+                if (interleave.compareAndSet(true, false)) {
+                    assertEquals(1, observed)
+                    release.countDown()
+                    assertTrue("Actual ready worker did not remove its lease", removed.await(2, TimeUnit.SECONDS))
+                    assertTrue(actualRegistry.isEmpty())
+                }
+                return observed
+            }
+            override fun iterator() = actualRegistry.iterator()
+            override fun add(element: PendingSocketLease) = actualRegistry.add(element)
+            override fun remove(element: PendingSocketLease) = actualRegistry.remove(element)
+        }
+        registryField.set(transport, registry)
+        val loopback = InetAddress.getLoopbackAddress()
+        val io = WifiDirectSignalingSocket::class.java.getDeclaredField("io").run { isAccessible = true; get(transport) as ExecutorService }
+        var listener: ServerSocket? = null
+        var remote: Socket? = null
+        try {
+            transport.startServer(loopback) { true }
+            assertTrue(waitUntil(1_000) { runCatching { Socket(loopback, port).also { remote = it } }.isSuccess })
+            assertTrue(ready.await(1, TimeUnit.SECONDS))
+            @Suppress("UNCHECKED_CAST")
+            val listenerRef = WifiDirectSignalingSocket::class.java.getDeclaredField("serverSocket").run {
+                isAccessible = true; get(transport) as AtomicReference<ServerSocket?>
+            }
+            listener = listenerRef.get()!!
+            interleave.set(true)
+            transport.close()
+            assertFalse(interleave.get())
+            assertTrue(lease.get().socket.isClosed)
+            assertTrue(listener.isClosed)
+            assertTrue(actualRegistry.isEmpty())
+            assertTrue(io.isShutdown)
+            transport.close()
+        } finally {
+            release.countDown()
+            try { transport.close() } finally {
+                listener?.close(); remote?.close(); io.shutdownNow()
+            }
         }
     }
 

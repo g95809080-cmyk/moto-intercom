@@ -136,6 +136,15 @@ internal class DiscoverySessionTracker {
             sessionId !in supersededSessionsByDeviceId[deviceId].orEmpty()
 
     @Synchronized
+    fun retire(identity: DiscoveryIdentityClaim) {
+        val deviceId = identity.claimedDeviceId?.takeIf(String::isNotBlank) ?: return
+        val sessionId = identity.sourceSessionId ?: return
+        if (activeSessionByDeviceId[deviceId] != sessionId) {
+            supersededSessionsByDeviceId.getOrPut(deviceId, ::linkedSetOf).add(sessionId)
+        }
+    }
+
+    @Synchronized
     fun clear() {
         activeSessionByDeviceId.clear()
         supersededSessionsByDeviceId.clear()

@@ -17,6 +17,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  emulator-script-tests:
+    name: Windows emulator fault-script regressions
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+      - name: Check native ADB exit handling with mock commands
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/emulator/test-inject-network-fault.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Emulator script regressions failed" }
+
   verify:
     name: Test, lint, assemble, and test APK
     runs-on: ubuntu-latest

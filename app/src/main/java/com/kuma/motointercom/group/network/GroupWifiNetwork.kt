@@ -179,7 +179,7 @@ internal class GroupWifiHost(
                         if (info != null && !info.groupFormed) {
                             clearAbsenceProbe()
                             created = false
-                            android.util.Log.i("MotoComGroupWifi", "GO absence confirmed after remove failure")
+                            com.kuma.motointercom.DiagnosticLog.i("MotoComGroupWifi", "GO absence confirmed after remove failure")
                             finishReleased()
                         } else {
                             if (info?.groupFormed == true) verifyAbsence = false

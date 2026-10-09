@@ -38,7 +38,12 @@ internal class GroupAudio(
     private var controlsRevision = 0L
     private val leases = mutableMapOf<String, GroupMediaLease>()
     private val previous = mutableMapOf<GroupMediaLease, RiderMediaEvidence>()
-    private val engine = RiderAudioEngine(context, onEngineError = { post { unavailable() } },
+    private val operation = snapshot().operation
+    private val engine = RiderAudioEngine(context, onEngineError = { error -> post {
+        if (operation != null && snapshot().operation == operation) {
+            dispatch(GroupSessionEvent.Failed(operation, "音频设备错误：${error.message ?: error.javaClass.simpleName}"))
+        }
+    } },
         isRuntimeCurrent = { !closed && isCurrent() }, initialAudioControls = VersionedAudioControls(0, controls),
         mediaMode = RiderMediaMode.GROUP, onDisposed = onDisposed)
     private lateinit var coordinator: CommunicationAudioCoordinator
@@ -62,7 +67,7 @@ internal class GroupAudio(
             AndroidIntercomPhoneState(context), activateRoute = {
                 invalidateRoute(); route.select(routeSelection)
             }, onStateChanged = { state ->
-                post { if (state != AudioInterruptionState.NORMAL) unavailable() }
+                post { if (state != AudioInterruptionState.NORMAL && coordinator.currentState() == state) unavailable() }
             })
         media = GroupMediaController(engine, { !closed && isCurrent() && snapshot().allows(it) },
             { coordinator.beginMediaSession() }, { invalidateRoute(); coordinator.endMediaSession() })
@@ -93,7 +98,7 @@ internal class GroupAudio(
             }, onConnectionStateChanged = {
                 if (it == PeerConnection.PeerConnectionState.FAILED || it == PeerConnection.PeerConnectionState.DISCONNECTED)
                     dispatch(GroupSessionEvent.MediaFailed(lease))
-            }, onError = { dispatch(GroupSessionEvent.MediaFailed(lease)) },
+            }, onError = { previous.remove(lease); publishAvailability(); dispatch(GroupSessionEvent.MediaFailed(lease)) },
             isSessionCurrent = { !closed && isCurrent() && snapshot().allows(lease) }))
         if (accepted) { leases[lease.peer.deviceId] = lease; if (offerer) media.offer(lease) }
     }
@@ -116,9 +121,21 @@ internal class GroupAudio(
     private fun updateControls() { media.updateAudioControls(VersionedAudioControls(++controlsRevision, controls)) }
     override fun block(peer: String, value: Boolean) = media.block(peer, value)
     override fun selectRoute(value: AudioRouteSelection) {
-        routeSelection = value; unavailable(); coordinator.reapplyPreferredRoute()
+        routeSelection = value; unavailable(); coordinator.reapplyPreferredRoute(force = true)
+    }
+    private fun publishAvailability() {
+        val current = snapshot()
+        val peers = current.view?.members.orEmpty().filter {
+            it.status == GroupMemberStatus.ADMITTED && it.lease.deviceId != current.local?.deviceId
+        }
+        val available = routeReady && route.evidence().ready && coordinator.currentState() == AudioInterruptionState.NORMAL &&
+            engine.hasCurrentCapture() && current.local != null && peers.isNotEmpty() && peers.all { peer ->
+                leases[peer.lease.deviceId]?.let { current.allows(it) && media.hasCurrentAudioIo(it) } == true
+            }
+        dispatch(GroupSessionEvent.AudioAvailable(available))
     }
     override fun poll() {
+        publishAvailability()
         val routeEvidence = route.evidence()
         val epoch = routeEpoch
         leases.values.toList().forEach { lease -> media.evidence(lease) { evidence ->
@@ -126,14 +143,14 @@ internal class GroupAudio(
             val ready = routeEvidence.ready && routeReady && coordinator.currentState() == AudioInterruptionState.NORMAL
             if (evidence != null && (!evidence.audioIoEnabled || !ready)) {
                 previous.remove(lease)
-                dispatch(GroupSessionEvent.AudioAvailable(false)); return@evidence
+                publishAvailability(); return@evidence
             }
             if (evidence == null || !ready) return@evidence
-            dispatch(GroupSessionEvent.AudioAvailable(true))
+            publishAvailability()
             if (!snapshot().allows(lease)) return@evidence
             val before = previous.put(lease, evidence) ?: return@evidence
             if (before.counters.streamIds != evidence.counters.streamIds || before.gateRevision != evidence.gateRevision ||
-                before.nativeRevision != evidence.nativeRevision) return@evidence
+                before.nativeRevision != evidence.nativeRevision || before.renderRevision != evidence.renderRevision) return@evidence
             dispatch(GroupSessionEvent.Evidence(GroupVoiceEvidence(lease, evidence.connected, evidence.remoteTrack,
                 evidence.audioIoEnabled, ready, before.counters.sent, before.counters.received, evidence.counters.sent,
                 evidence.counters.received, groupNowMs())))

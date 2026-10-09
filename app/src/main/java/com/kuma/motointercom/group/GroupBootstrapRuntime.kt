@@ -53,9 +53,9 @@ internal class GroupBootstrapHost(
                     val session = peer.session ?: GroupBootstrapHostSession(descriptor, code, network,
                         mayDiscloseTo, SystemClock::elapsedRealtime,
                         { !closed.get() && peer.valid.get() && isCurrent() }).also { peer.session = it }
-                    android.util.Log.i("MotoComGroupAuth", "host request bytes=${bytes.size}")
+                    com.kuma.motointercom.DiagnosticLog.i("MotoComGroupAuth", "host request bytes=${bytes.size}")
                     val response = session.respond(bytes)
-                    android.util.Log.i("MotoComGroupAuth", "host response bytes=${response.size}")
+                    com.kuma.motointercom.DiagnosticLog.i("MotoComGroupAuth", "host response bytes=${response.size}")
                     reply(response.takeIf { !closed.get() && peer.valid.get() && isCurrent() })
                 } catch (_: Exception) { peer.valid.set(false); reply(null) }
                 finally {
@@ -113,9 +113,9 @@ internal class GroupCandidateSearch(
                         withContext(Dispatchers.Main) {
                             check(!closed.get())
                             pending = response
-                            android.util.Log.i("MotoComGroupAuth", "client request bytes=${request.size}")
+                            com.kuma.motointercom.DiagnosticLog.i("MotoComGroupAuth", "client request bytes=${request.size}")
                             connection.exchange(request) {
-                                android.util.Log.i("MotoComGroupAuth", "client response bytes=${it.size}")
+                                com.kuma.motointercom.DiagnosticLog.i("MotoComGroupAuth", "client response bytes=${it.size}")
                                 response.complete(it)
                             }
                         }

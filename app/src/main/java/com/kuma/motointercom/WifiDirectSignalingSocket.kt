@@ -8,6 +8,8 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
@@ -18,7 +20,7 @@ internal class WifiDirectSignalingSocket(
     private val connectTimeoutMillis: Int,
     private val retryDelayMillis: Long,
     private val isSessionCurrent: () -> Boolean,
-    private val onReady: (String, PhysicalSocketRole, Socket) -> Unit,
+    private val onReady: (String, PhysicalSocketRole, PendingSocketLease) -> Unit,
     private val onFailure: (IOException) -> Unit,
     private val clock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(System.nanoTime() / 1_000_000L)
@@ -27,10 +29,12 @@ internal class WifiDirectSignalingSocket(
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val terminal = AtomicBoolean(false)
+    private val failureReported = AtomicBoolean(false)
     private val io = Executors.newCachedThreadPool()
     private val lifecycleLock = Any()
     private val serverSocket = AtomicReference<ServerSocket?>()
-    private val connectingSocket = AtomicReference<Socket?>()
+    private val connectingSocket = AtomicReference<PendingSocketLease?>()
+    private val pendingSockets = Collections.newSetFromMap(ConcurrentHashMap<PendingSocketLease, Boolean>())
 
     fun startServer(localAddress: InetAddress, remoteAllowed: (InetAddress) -> Boolean) {
         execute("signaling server failed") {
@@ -51,11 +55,13 @@ internal class WifiDirectSignalingSocket(
                         .toInt()
                     try {
                         val socket = server.accept()
+                        val lease = registerPending(socket, passiveAdmissionDeadline())
+                            ?: return@execute
                         if (isUsable() && remoteAllowed(socket.inetAddress)) {
-                            handoff(socket, PhysicalSocketRole.ACCEPTOR)
+                            handoff(lease, PhysicalSocketRole.ACCEPTOR)
                             return@execute
                         }
-                        socket.close()
+                        lease.close()
                     } catch (_: SocketTimeoutException) {
                     }
                 }
@@ -79,9 +85,11 @@ internal class WifiDirectSignalingSocket(
                 val remaining = remainingUntil(deadline)
                 if (remaining <= 0L) break
                 val candidate = Socket()
-                var socket: Socket? = candidate
+                val lease = registerPending(candidate, clientAdmissionDeadline(deadline))
+                    ?: return@execute
+                var handedOff = false
                 try {
-                    if (!publishConnecting(candidate)) return@execute
+                    if (!publishConnecting(lease)) return@execute
                     candidate.bind(InetSocketAddress(localAddress, 0))
                     val connectRemaining = remainingUntil(deadline)
                     if (connectRemaining <= 0L) return@execute
@@ -90,18 +98,15 @@ internal class WifiDirectSignalingSocket(
                         .toInt()
                     candidate.connect(InetSocketAddress(remoteAddress, port), connectTimeout)
                     if (!isUsable()) return@execute
-                    connectingSocket.compareAndSet(candidate, null)
-                    val connected = candidate
-                    socket = null
-                    handoff(connected, PhysicalSocketRole.OPENER)
+                    connectingSocket.compareAndSet(lease, null)
+                    handedOff = true
+                    handoff(lease, PhysicalSocketRole.OPENER)
                     return@execute
                 } catch (t: Throwable) {
                     last = t.asIo("signaling client failed")
                 } finally {
-                    socket?.let {
-                        connectingSocket.compareAndSet(it, null)
-                        runCatching { it.close() }
-                    }
+                    connectingSocket.compareAndSet(lease, null)
+                    if (!handedOff) lease.close()
                 }
 
                 try {
@@ -135,31 +140,57 @@ internal class WifiDirectSignalingSocket(
         return true
     }
 
-    private fun publishConnecting(socket: Socket): Boolean {
-        if (!isUsable() || !connectingSocket.compareAndSet(null, socket) || !isUsable()) {
-            runCatching { socket.close() }
-            connectingSocket.compareAndSet(socket, null)
+    private fun publishConnecting(lease: PendingSocketLease): Boolean {
+        if (!isUsable() || !connectingSocket.compareAndSet(null, lease) || !isUsable()) {
+            lease.close()
+            connectingSocket.compareAndSet(lease, null)
             return false
         }
         return true
     }
 
-    private fun handoff(socket: Socket, physicalRole: PhysicalSocketRole) {
-        synchronized(lifecycleLock) {
+    private fun handoff(lease: PendingSocketLease, physicalRole: PhysicalSocketRole) {
+        val socket = lease.socket
+        val accepted = synchronized(lifecycleLock) {
             if (!isUsable() || !socket.isConnected || socket.isClosed ||
                 !terminal.compareAndSet(false, true) || !isUsable()
-            ) {
-                socket.close()
-                return
-            }
-            try {
-                onReady(socket.inetAddress.hostAddress.orEmpty(), physicalRole, socket)
-            } catch (t: Throwable) {
-                socket.close()
-                if (isUsable()) onFailure(t.asIo("signaling handoff failed"))
-            }
+            ) false else true
+        }
+        if (!accepted) {
+            lease.close()
+            return
+        }
+        try {
+            onReady(socket.inetAddress.hostAddress.orEmpty(), physicalRole, lease)
+        } catch (t: Throwable) {
+            lease.close()
+            notifyFailure(t.asIo("signaling handoff failed"))
         }
     }
+
+    private fun registerPending(socket: Socket, deadline: Long): PendingSocketLease? {
+        val lease = synchronized(lifecycleLock) {
+            if (!isUsable()) null else PendingSocketLease(
+                socket, attemptContext?.attempt, deadline, clock,
+                onReleased = {
+                    pendingSockets.remove(it)
+                    if (it.currentStage == PendingSocketLease.Stage.CLOSED && terminal.get() && isUsable()) {
+                        notifyFailure(IOException("pending signaling Socket closed before Service admission"))
+                    }
+                }
+            ).also { pendingSockets.add(it) }
+        }
+        if (lease == null) runCatching { socket.close() }
+        else lease.armAdmissionDeadline()
+        return lease
+    }
+
+    private fun passiveAdmissionDeadline(): Long = attemptContext?.attempt?.deadlineElapsedRealtimeMs
+        ?: Math.addExact(clock.now().elapsedRealtimeMs, PendingSocketLease.PASSIVE_ADMISSION_TIMEOUT_MS)
+
+    private fun clientAdmissionDeadline(readyDeadline: Long): Long =
+        attemptContext?.attempt?.deadlineElapsedRealtimeMs
+            ?: Math.addExact(readyDeadline, PendingSocketLease.PASSIVE_ADMISSION_TIMEOUT_MS)
 
     private fun readyDeadline(): Long {
         val now = clock.now().elapsedRealtimeMs
@@ -176,20 +207,25 @@ internal class WifiDirectSignalingSocket(
             (attemptContext == null || attemptContext.attempt.remainingMillis(clock) > 0L)
 
     private fun fail(error: IOException) {
-        synchronized(lifecycleLock) {
-            if (isUsable() && terminal.compareAndSet(false, true)) onFailure(error)
-        }
+        val report = synchronized(lifecycleLock) { isUsable() && terminal.compareAndSet(false, true) }
+        if (report) notifyFailure(error)
+    }
+
+    private fun notifyFailure(error: IOException) {
+        if (isUsable() && failureReported.compareAndSet(false, true)) onFailure(error)
     }
 
     private fun Throwable.asIo(message: String): IOException =
         this as? IOException ?: IOException(message, this)
 
     override fun close() {
-        synchronized(lifecycleLock) {
+        val resources = synchronized(lifecycleLock) {
             if (!closed.compareAndSet(false, true)) return
-            serverSocket.getAndSet(null)?.let { runCatching { it.close() } }
-            connectingSocket.getAndSet(null)?.let { runCatching { it.close() } }
+            connectingSocket.set(null)
+            serverSocket.getAndSet(null) to pendingSockets.toTypedArray().toList()
         }
+        resources.first?.let { runCatching { it.close() } }
+        resources.second.forEach { it.close() }
         io.shutdownNow()
     }
 

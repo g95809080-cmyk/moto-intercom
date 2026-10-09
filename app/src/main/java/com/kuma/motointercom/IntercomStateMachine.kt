@@ -11,7 +11,12 @@ enum class WebRtcConnectionState {
 internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
-    data class AutomaticReconnectChanged(val enabled: Boolean) : SessionEvent
+    data class ConnectionLossObserved(val event: SessionEvent, val observation: ConnectionLossObservation) : SessionEvent
+
+    data class AutomaticReconnectChanged(
+        val enabled: Boolean,
+        val policyAlreadyApplied: Boolean = false
+    ) : SessionEvent
 
     data class DiscoveryRefreshRequested(
         val runtimeSessionId: RuntimeSessionId,
@@ -45,10 +50,26 @@ internal sealed interface SessionEvent {
         val targetDeviceId: String,
         val targetSessionId: RuntimeSessionId,
         val availableTransports: Set<Transport>,
-        val trigger: ConnectionTrigger = ConnectionTrigger.USER
+        val trigger: ConnectionTrigger = ConnectionTrigger.USER,
+        val admission: PresenceConnectAdmission? = null,
+        val automaticTicket: AutomaticRecoveryPolicy.Ticket? = null
     ) : SessionEvent
 
     data class AttemptReplaced(val attempt: ConnectionAttempt) : SessionEvent
+
+    data class RecoveryEpisodeRequested(val admission: RecoveryEpisodeAdmission) : SessionEvent
+
+    data class RecoveryIntentCanceled(
+        val runtimeSessionId: RuntimeSessionId,
+        val expectedIntent: RecoveryIntentRef?,
+        val expectedConnectedSource: ConnectionAttempt?
+    ) : SessionEvent
+
+    data class PresenceConnectCanceled(
+        val attempt: ConnectionAttempt,
+        val admission: PresenceConnectAdmission,
+        val resourcesAlreadyClosing: Boolean = false
+    ) : SessionEvent
 
     data class TunnelReady(
         val attempt: ConnectionAttempt,
@@ -107,7 +128,8 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
         val wireRequestKey: WireRequestKey,
-        val channelId: ControlChannelId?
+        val channelId: ControlChannelId?,
+        val cohort: SelectionCohort
     ) : SessionEvent
 
     data class SignalingMessageSent(
@@ -289,6 +311,12 @@ internal sealed interface SessionEffect {
         val attempt: ConnectionAttempt
     ) : SessionEffect
 
+    data class ProbeRecoveryDiscovery(
+        val intent: RecoveryIntentRef,
+        val resetAttemptId: ConnectionAttemptId,
+        val eligibleAfterElapsedMs: Long
+    ) : SessionEffect
+
     data class SendConnectRequest(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
@@ -415,6 +443,10 @@ internal fun reduceIntercomState(
     is SessionEvent.IncomingDecisionTimedOut,
     is SessionEvent.ConfirmationSurfaceUnavailable,
     is SessionEvent.ConnectPresenceRequested,
+    is SessionEvent.ConnectionLossObserved,
+    is SessionEvent.RecoveryEpisodeRequested,
+    is SessionEvent.RecoveryIntentCanceled,
+    is SessionEvent.PresenceConnectCanceled,
     is SessionEvent.TargetedTransportOpenFailed,
     is SessionEvent.TargetedTransportOverlapUnavailable,
     is SessionEvent.RecoveryTransportReady,
