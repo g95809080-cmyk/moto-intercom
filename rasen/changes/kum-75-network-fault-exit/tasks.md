@@ -1,4 +1,4 @@
-- [ ] 1. 原生命令逐条检查、Mode及既有设备保护
-- [ ] 2. 原实现红回归与34种native mock进程绿回归
-- [ ] 3. Windows CI接线、固定SHA架构/OCR审查和证据
+- [x] 1. 原生命令逐条检查、Mode及既有设备保护
+- [x] 2. 原实现红回归与34种native mock进程绿回归
+- [x] 3. Windows CI接线、固定SHA架构/OCR审查和证据
 - [ ] 4. 独立Draft PR与CI记录
