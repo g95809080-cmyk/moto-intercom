@@ -79,31 +79,41 @@ internal class AndroidIntercomAudioFocus(context: Context) : IntercomAudioFocus 
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
     private var listener: ((Int) -> Unit)? = null
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        DiagnosticLog.i("CommunicationAudioFocus", "focus change=$change")
-        listener?.invoke(change)
-    }
-    private val focusRequest: AudioFocusRequest? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-            .setAudioAttributes(attributes)
-            .setAcceptsDelayedFocusGain(true)
-            .setOnAudioFocusChangeListener(focusListener)
-            .build()
-    } else {
-        null
-    }
+    private val callbackHandler = Handler(Looper.getMainLooper())
+    private var requestRevision = 0L
+    private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
+    private var focusRequest: AudioFocusRequest? = null
 
     override fun setListener(listener: (Int) -> Unit) {
         this.listener = listener
     }
 
     override fun request(): AudioFocusResult {
+        // Android keys queued focus events by listener identity. A new media
+        // request must not reuse the identity of an abandoned request.
+        abandon()
+        val revision = ++requestRevision
+        val requestListener = AudioManager.OnAudioFocusChangeListener { change ->
+            if (revision != requestRevision || focusListener == null) return@OnAudioFocusChangeListener
+            DiagnosticLog.i("CommunicationAudioFocus", "focus change=$change revision=$revision")
+            listener?.invoke(change)
+        }
+        focusListener = requestListener
+        focusRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attributes)
+                .setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener(requestListener, callbackHandler)
+                .build()
+        } else {
+            null
+        }
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioManager.requestAudioFocus(requireNotNull(focusRequest))
         } else {
             @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
-                focusListener,
+                requestListener,
                 AudioManager.STREAM_VOICE_CALL,
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             )
@@ -112,17 +122,25 @@ internal class AndroidIntercomAudioFocus(context: Context) : IntercomAudioFocus 
         return when (result) {
             AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> AudioFocusResult.GRANTED
             AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> AudioFocusResult.DELAYED
-            else -> AudioFocusResult.FAILED
+            else -> {
+                abandon()
+                AudioFocusResult.FAILED
+            }
         }
     }
 
     override fun abandon() {
+        ++requestRevision
+        val abandonedRequest = focusRequest
+        val abandonedListener = focusListener
+        focusRequest = null
+        focusListener = null
         DiagnosticLog.i("CommunicationAudioFocus", "abandon focus")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            abandonedRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         } else {
             @Suppress("DEPRECATION")
-            audioManager.abandonAudioFocus(focusListener)
+            abandonedListener?.let { audioManager.abandonAudioFocus(it) }
         }
     }
 

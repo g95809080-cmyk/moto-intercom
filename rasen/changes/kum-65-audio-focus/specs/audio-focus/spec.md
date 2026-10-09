@@ -10,3 +10,7 @@
 #### Scenario: 其他应用永久持有焦点
 - **WHEN** permanent LOSS 到达
 - **THEN** 对讲 MUST 挂起且释放通信模式，不无限回抢或被迟到 GAIN 恢复
+
+#### Scenario: 旧通话回调排队后启动下一通话
+- **WHEN** A 的 LOSS/GAIN 排队，A 结束并启动 B 的新焦点请求
+- **THEN** 每轮请求 MUST 使用独立 listener identity，A 的迟到事件不得暂停或授权 B
