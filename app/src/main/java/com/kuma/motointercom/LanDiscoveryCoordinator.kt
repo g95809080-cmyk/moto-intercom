@@ -1,6 +1,9 @@
 package com.kuma.motointercom
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
@@ -39,7 +42,8 @@ internal class LanDiscoveryCoordinator(
     private val monotonicClock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(SystemClock.elapsedRealtime())
     },
-    private val onFreshObservation: (FreshDiscoveryObservation) -> Unit = {}
+    private val onFreshObservation: (FreshDiscoveryObservation) -> Unit = {},
+    private val onTargetedConnectFailure: (ConnectionAttempt, Throwable) -> Unit = { _, failure -> onError(failure) }
 ) : Closeable {
     private val context = context.applicationContext
     private val closed = AtomicBoolean(false)
@@ -53,6 +57,7 @@ internal class LanDiscoveryCoordinator(
     private val ingressAttempt = LanAttemptLease(initialTargetAttempt)
     private val targetAttempt = LanAttemptLease()
     private val clientConnectAttempt = LanAttemptLease()
+    private val failedConnectAttempt = LanAttemptLease()
     private val retryPause = RecoveryAttemptPause()
     private val deviceRegistry = LanDiscoveryDeviceRegistry()
     val observationSource = FreshDiscoverySource(Transport.LAN)
@@ -130,6 +135,7 @@ internal class LanDiscoveryCoordinator(
             retryPause.prepare(attempt)
             targetedClientSocket.set(null)
             clientConnectAttempt.clear()
+            failedConnectAttempt.clear()
             ingressAttempt.bind(attempt)
             targetAttempt.bind(attempt)
             retirePendingLocked()
@@ -145,6 +151,7 @@ internal class LanDiscoveryCoordinator(
             if (releasedTarget) {
                 targetedClientSocket.set(null)
                 clientConnectAttempt.release(completedAttempt)
+                failedConnectAttempt.release(completedAttempt)
                 retryPause.clear()
             }
             if (releasedIngress || releasedTarget) retirePendingLocked() else emptyList()
@@ -155,9 +162,13 @@ internal class LanDiscoveryCoordinator(
     private fun connectTargetIfAvailable() {
         if (retryPause.isPrepared) return
         val attempt = targetAttempt.current ?: return
-        if (!isAttemptCurrent(attempt)) return
+        if (!isAttemptCurrent(attempt) || failedConnectAttempt.current == attempt) return
         val device = deviceRegistry.find(attempt.targetLock) ?: return
-        if (!clientConnectAttempt.tryBind(attempt)) return
+        val claimed = synchronized(lifecycleLock) {
+            isAttemptCurrent(attempt) && failedConnectAttempt.current != attempt &&
+                clientConnectAttempt.tryBind(attempt)
+        }
+        if (!claimed) return
         log("正在点名连接车友：${device.name} / ${device.ip}")
         try {
             executor.execute {
@@ -169,8 +180,11 @@ internal class LanDiscoveryCoordinator(
                 )
             }
         } catch (t: Throwable) {
+            val report = markConnectFailed(attempt)
             clientConnectAttempt.release(attempt)
-            error(t)
+            if (report && isAttemptCurrent(attempt)) {
+                onTargetedConnectFailure(attempt, connectFailure(t, attempt, device.ip, device.port, "SUBMIT", "unbound"))
+            }
         }
     }
 
@@ -423,6 +437,9 @@ internal class LanDiscoveryCoordinator(
         var socket: Socket? = null
         var lease: PendingSocketLease? = null
         var handedOff = false
+        var stage = "WIFI_BIND"
+        var route = "unbound"
+        var failure: Throwable? = null
         try {
             if (!isAttemptCurrent(attempt)) {
                 clientConnectAttempt.release(attempt)
@@ -444,7 +461,23 @@ internal class LanDiscoveryCoordinator(
                 clientConnectAttempt.release(attempt)
                 return
             }
-            candidate.connect(InetSocketAddress(ip, port), connectTimeoutMillis.toInt())
+            val (network, selectedRoute) = resolveWifiSocketRoute()
+            route = selectedRoute
+            network.bindSocket(candidate)
+            log("LAN socket route: attempt=${attempt.id.value} target=$ip:$port $route")
+            if (!isAttemptCurrent(attempt)) {
+                clientConnectAttempt.release(attempt)
+                return
+            }
+            val remainingTimeoutMillis = attempt.boundedTimeoutMillis(monotonicClock, connectTimeoutMillis)
+            if (remainingTimeoutMillis <= 0L) {
+                clientConnectAttempt.release(attempt)
+                return
+            }
+            stage = "TCP"
+            candidate.connect(InetSocketAddress(ip, port), remainingTimeoutMillis.toInt())
+            log("LAN TCP connected: attempt=${attempt.id.value} local=${candidate.localSocketAddress} target=$ip:$port")
+            stage = "HELLO"
             val connected = candidate
             val session = SignalingSessionV2.establish(
                 socket = connected,
@@ -472,9 +505,12 @@ internal class LanDiscoveryCoordinator(
                 clientConnectAttempt.release(attempt)
             }
         } catch (t: Throwable) {
+            if (reportFailure && markConnectFailed(attempt)) {
+                failure = connectFailure(t, attempt, ip, port, stage, route)
+            } else {
+                log("LAN connection completion ignored: attempt=${attempt.id.value} stage=$stage target=$ip:$port: ${t.message}")
+            }
             clientConnectAttempt.release(attempt)
-            if (reportFailure && isAttemptCurrent(attempt)) error(t)
-            else log("局域网连接失败：${t.message}")
         } finally {
             socket?.let { targetedClientSocket.compareAndSet(it, null) }
             if (!handedOff) {
@@ -482,6 +518,37 @@ internal class LanDiscoveryCoordinator(
                 closeQuietly(socket)
             }
         }
+        failure?.let { if (isAttemptCurrent(attempt)) onTargetedConnectFailure(attempt, it) }
+    }
+
+    // A failed opener stays retired until the actor ends or replaces the attempt.
+    private fun markConnectFailed(attempt: ConnectionAttempt): Boolean = synchronized(lifecycleLock) {
+        if (!isAttemptCurrent(attempt) || failedConnectAttempt.current == attempt) false
+        else {
+            failedConnectAttempt.bind(attempt)
+            true
+        }
+    }
+
+    private fun connectFailure(
+        cause: Throwable, attempt: ConnectionAttempt, ip: String, port: Int, stage: String, route: String
+    ) = IOException("LAN open failed: stage=$stage runtime=${attempt.runtimeSessionId.value} " +
+        "attempt=${attempt.id.value} target=$ip:$port $route: ${cause.message ?: cause.javaClass.simpleName}", cause)
+
+    private fun resolveWifiSocketRoute(): Pair<Network, String> {
+        val localIp = localWifiIp() ?: throw IOException("Local Wi-Fi IPv4 unavailable")
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: throw IOException("ConnectivityManager unavailable for LAN")
+        for (network in connectivity.allNetworks) {
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
+            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            val link = connectivity.getLinkProperties(network) ?: continue
+            if (link.linkAddresses.none { it.address.hostAddress == localIp }) continue
+            // Local-only Wi-Fi does not need internet validation.
+            return network to "network=$network interface=${link.interfaceName ?: "unknown"} local=$localIp"
+        }
+        throw IOException("No matching Wi-Fi network for local=$localIp")
     }
 
     private fun installTargetedClientSocket(
@@ -618,6 +685,7 @@ internal class LanDiscoveryCoordinator(
         ingressAttempt.clear()
         targetAttempt.clear()
         clientConnectAttempt.clear()
+        failedConnectAttempt.clear()
         retryPause.clear()
         deviceRegistry.clear()
         observedSessions.clear()
@@ -633,7 +701,10 @@ internal class LanDiscoveryCoordinator(
             val installed = synchronized(lifecycleLock) {
                 isActive() && serverSocket.compareAndSet(null, candidate)
             }
-            return if (installed) candidate else {
+            return if (installed) {
+                log("LAN TCP listener ready: local=${candidate.localSocketAddress} runtime=${runtimeSessionId.value}")
+                candidate
+            } else {
                 closeQuietly(candidate)
                 null
             }
