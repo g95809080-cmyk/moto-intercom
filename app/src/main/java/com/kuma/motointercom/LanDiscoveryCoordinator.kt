@@ -681,7 +681,7 @@ internal class LanDiscoveryCoordinator(
     // The caller only holds the adapter lock while detaching ownership, never while closing I/O.
     private fun retirePendingLocked(): List<PendingSocketLease> {
         pendingSocketGeneration += 1
-        return pendingSockets.keys.toList().also { pendingSockets.clear() }
+        return pendingSockets.keys.toTypedArray().toList().also { pendingSockets.clear() }
     }
 
     private fun stopNsdDiscovery() {

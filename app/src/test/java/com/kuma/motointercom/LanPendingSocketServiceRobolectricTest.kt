@@ -6,8 +6,12 @@ import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
+import java.net.ServerSocket
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -23,6 +27,58 @@ import java.time.Duration
 @Config(sdk = [35])
 @LooperMode(LooperMode.Mode.PAUSED)
 class LanPendingSocketServiceRobolectricTest {
+    @Test fun closeSnapshotsPendingLeaseWhileActualHelloWorkerRemovesTheLastEntry() = runBlocking {
+        IncomingConfirmationServiceFixture().use { f ->
+            val runtime = RuntimeSessionId.create()
+            val token = f.activateRuntime(runtime)
+            val release = CountDownLatch(1)
+            val removed = CountDownLatch(1)
+            val interleave = AtomicBoolean(false)
+            AdapterFixture(f, token, runtime) { lease ->
+                try { check(release.await(2, TimeUnit.SECONDS)); lease.close() }
+                finally { removed.countDown() }
+            }.use { a ->
+                val registry = object : ConcurrentHashMap<PendingSocketLease, Long>() {
+                    private fun observed(value: Long): Long {
+                        if (interleave.compareAndSet(true, false)) {
+                            assertEquals(1L, value)
+                            release.countDown()
+                            assertTrue("Actual HELLO worker did not release its lease", removed.await(2, TimeUnit.SECONDS))
+                            assertTrue(isEmpty())
+                        }
+                        return value
+                    }
+                    override val size: Int get() = observed(super.size.toLong()).toInt()
+                    override fun mappingCount(): Long = observed(super.mappingCount())
+                }
+                field(a.adapter, "pendingSockets").set(a.adapter, registry)
+                a.connectPeer(null)
+                assertEquals(PendingSocketLease.Stage.ADMISSION_PENDING, a.lease().currentStage)
+                assertEquals(1, registry.size)
+                @Suppress("UNCHECKED_CAST")
+                val listener = (field(a.adapter, "serverSocket").get(a.adapter) as AtomicReference<ServerSocket?>).get()!!
+                val executor = field(a.adapter, "executor").get(a.adapter) as ExecutorService
+                try {
+                    interleave.set(true)
+                    a.adapter.close()
+                    assertFalse(interleave.get())
+                    assertTrue(a.session().isClosed)
+                    assertTrue(a.lease().socket.isClosed)
+                    assertTrue(listener.isClosed)
+                    assertTrue(registry.isEmpty())
+                    assertTrue(executor.isShutdown)
+                    shadowOf(Looper.getMainLooper()).idle()
+                    assertEquals(0, registeredCount(f))
+                    a.adapter.close()
+                } finally {
+                    release.countDown()
+                    listener.close()
+                    executor.shutdownNow()
+                }
+            }
+        }
+    }
+
     @Test fun stopClosesActualAcceptedHelloWaitingForServiceMainAdmission() = runBlocking {
         IncomingConfirmationServiceFixture().use { f ->
             val runtime = RuntimeSessionId.create()
@@ -36,6 +92,7 @@ class LanPendingSocketServiceRobolectricTest {
                 assertEquals(0, a.pendingCount())
                 assertEquals(0, registeredCount(f))
                 assertTrue(a.session().isClosed)
+                f.awaitMain { f.actor.state.value == IntercomState.Offline }
                 assertEquals(IntercomState.Offline, f.actor.state.value)
             }
         }
@@ -103,7 +160,8 @@ class LanPendingSocketServiceRobolectricTest {
 
     private class AdapterFixture(
         private val f: IncomingConfirmationServiceFixture, private val token: SessionGeneration.Token,
-        private val runtime: RuntimeSessionId
+        private val runtime: RuntimeSessionId,
+        private val afterReady: (PendingSocketLease) -> Unit = {}
     ) : AutoCloseable {
         private val remoteDevice = UUID.randomUUID().toString()
         private val remoteRuntime = RuntimeSessionId.create()
@@ -119,6 +177,7 @@ class LanPendingSocketServiceRobolectricTest {
                 readyLease.set(lease)
                 f.register(token, session, lease)
                 ready.countDown()
+                afterReady(lease)
             }, {}, {})
         private val serverRun = CompletableFuture.runAsync {
             LanDiscoveryCoordinator::class.java.getDeclaredMethod("runLanTcpServer")
@@ -153,10 +212,12 @@ class LanPendingSocketServiceRobolectricTest {
         fun session(): SignalingSessionV2 = requireNotNull(readySession.get())
         fun pendingCount(): Int = (field(adapter, "pendingSockets").get(adapter) as Map<*, *>).size
         override fun close() {
-            adapter.close()
-            peer?.close()
-            client?.close()
-            serverRun.get(1, TimeUnit.SECONDS)
+            try { adapter.close() } finally {
+                try { peer?.close() } finally {
+                    client?.close()
+                    serverRun.get(1, TimeUnit.SECONDS)
+                }
+            }
         }
     }
 
