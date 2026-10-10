@@ -1,0 +1,4 @@
+- [x] 1. 核实用户日志、同 Wi-Fi/同版本/均启动与稳定基线，建立 KUM-81/Rasen/独立分支
+- [ ] 2. 实际 Service/worker 基线红回归，修复 socket Wi-Fi 绑定和精确异步失败，针对性绿回归
+- [ ] 3. 完整稳定 JVM/Lint/双 APK，固定源码 SHA 只读架构审核和官方 OCR
+- [ ] 4. 独立 Draft PR、固定 SHA Android CI、Linear/Rasen 证据与验证限制

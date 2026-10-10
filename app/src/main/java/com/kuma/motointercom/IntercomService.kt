@@ -1108,7 +1108,12 @@ class IntercomService : Service() {
             onLog = { message -> postForSession(token) { publishLog(message) } },
             onError = { error -> postForSession(token) { handleError(error) } },
             initialTargetAttempt = targetAttempt,
-            onFreshObservation = { observation -> onFreshDiscoveryObservation(token, runtimeSessionId, observation) }
+            onFreshObservation = { observation -> onFreshDiscoveryObservation(token, runtimeSessionId, observation) },
+            onTargetedConnectFailure = { attempt, error ->
+                postForSession(token) {
+                    reportTargetedTransportOpenFailure(attempt, Transport.LAN, error.message ?: error.javaClass.simpleName)
+                }
+            }
         )
             },
             installLan = { lanDiscovery = it },
@@ -2408,6 +2413,11 @@ class IntercomService : Service() {
             return
         }
         val reason = result.exceptionOrNull()?.message ?: "transport adapter unavailable"
+        reportTargetedTransportOpenFailure(attempt, transport, reason)
+    }
+
+    private fun reportTargetedTransportOpenFailure(attempt: ConnectionAttempt, transport: Transport, reason: String) {
+        if (!canRunTargetedTransport(attempt)) return
         publishLog("Targeted transport open failed for ${attempt.id.value}/$transport: $reason")
         orchestrator.dispatch(
             SessionEvent.TargetedTransportOpenFailed(
