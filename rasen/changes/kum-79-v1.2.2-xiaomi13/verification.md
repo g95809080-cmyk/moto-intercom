@@ -33,4 +33,4 @@ UI自动化的 idle dump 两次失败，没有得到安装前设置XML；设置�
 
 本机证据目录：`logs/2026-10-10-xiaomi13-deploy/`。保存安装前后APK、包/授权状态、构建/Lint/签名报告、CI原始结果、有效界面截图、导出入口活动记录和应用PID日志。APK及手机原始诊断内容保存在本机，不提交到Git。
 
-KUM80独立 [Draft PR #52](https://github.com/g95809080-cmyk/moto-intercom/pull/52) 基于 KUM71；本项独立分支 `test/kum-79-v1.2.2-xiaomi13` 基于KUM80，单独提交版本与部署记录。收尾返回常驻main，保留用户两份未跟踪产品文档。
+KUM80独立 [Draft PR #52](https://github.com/g95809080-cmyk/moto-intercom/pull/52) 基于 KUM71；本项独立 [Draft PR #53](https://github.com/g95809080-cmyk/moto-intercom/pull/53) 和分支 `test/kum-79-v1.2.2-xiaomi13` 基于KUM80，单独提交版本与部署记录。收尾返回常驻main，保留用户两份未跟踪产品文档。
