@@ -31,3 +31,12 @@ LAN worker submission, binding, TCP and HELLO failures MUST report the original 
 
 ### Requirement: Distinguish diagnostic stages
 Diagnostics MUST identify the original attempt, TCP destination, selected network and failure stage, and MUST log TCP listener readiness only after bind succeeded. Missing real-device evidence MUST remain recorded as unverified.
+
+#### Scenario: A selected network fails before HELLO
+- **WHEN** network binding or TCP connect fails for the current attempt
+- **THEN** the failure diagnostic contains that attempt, destination, selected route when available, and WIFI_BIND or TCP stage
+- **AND** no successful HELLO or media connection is inferred from discovery alone
+
+#### Scenario: Listener bind completes
+- **WHEN** the actual TCP listener is bound and installed for the current runtime
+- **THEN** the diagnostic records listener readiness and its local address
