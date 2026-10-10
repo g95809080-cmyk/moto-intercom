@@ -5,7 +5,7 @@
 
 #### Scenario: 已安装1.2.1/code5
 - **WHEN** 用户明确授权部署已审查修复
-- **THEN** 部署 SHALL 为1.2.2+d095e03/code6非调试测试包，实际APK hash与构建包一致，不带入1.3群组或iOS
+- **THEN** 部署 SHALL 为1.2.2+bb0fa92/code6非调试测试包，实际APK hash与构建包一致，不带入1.3群组或iOS
 
 ### Requirement: 证据不能扩大
 部署证据 SHALL 区分包安装/启动/日志基础检查与实际骑行听音。
