@@ -21,6 +21,8 @@ Next gate allowed：完整本地自动化成功后进入 KUM-79 版本元数据�
 
 ## CI 与实机边界
 
-固定 Head 的 Android CI：[38012858535](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38012858535)，结果待收尾核验，不能提前计入通过。
+固定 Head 的 Android CI：[38012858535](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38012858535) **success**，JVM/Lint/双APK及 API36 原生两个 job 均成功。原生报告实读 27 项，0 failure/error，2 项条件跳过（SharedNetworkNsdTest.exchange、SyntheticAudioNetworkTest.exchange）；25 项实际执行通过。原始 CI JSON、原生报告与汇总保存在本机日志目录，不将跳过的双机交换算作通过。
+
+独立 [Draft PR #52](https://github.com/g95809080-cmyk/moto-intercom/pull/52) 基于 KUM71。KUM79 已包含该固定源码，打包提交 `7338a7a33a4f3dc694c3af83e14fd9b4fbb9b30a`；Release/Lint 通过，用户授权的无线覆盖安装已完成，详细包与设备结果由 KUM79 记录。
 
 音频生产路径及 AndroidTest tree 与 KUM-70/71 相同；本项仅沿用其明确未变的音频证据，不引用主线 886/32 计数。蓝牙混播、风噪及双手机验收仍按用户要求暂缓。没有 iOS、群组、版本、数据库或依赖修改。

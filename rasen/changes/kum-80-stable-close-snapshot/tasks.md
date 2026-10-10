@@ -1,4 +1,4 @@
 - [x] 1. 核对稳定线与KUM76两处生产差异，创建独立Linear/Rasen/branch
 - [x] 2. 实际producer旧源红回归与两行快照修复，两个完整类通过
 - [x] 3. 完整JVM/Lint/双APK及固定SHA只读架构审核
-- [ ] 4. 独立Draft PR/CI、证据与KUM79回补衔接
+- [x] 4. 独立Draft PR/CI、证据与KUM79回补衔接
