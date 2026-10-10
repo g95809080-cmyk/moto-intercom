@@ -1,0 +1,29 @@
+{
+  "baseSha": "1ac1e3eb42a36d5ae5557bff767f2f2374aa1072",
+  "headSha": "d2827ec1b11d923a3559a8b5bd52b4dd65116fd1",
+  "behaviorSha": "907f2c388e96c11d461a9c869310ddd36e6d41a4",
+  "result": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "reviewed": 8,
+  "skipped": 0,
+  "officialOcrSelected": 3,
+  "officialOcrExcludedManuallyReviewed": 5,
+  "nextGateAllowed": "Independent Draft PR and fixed-SHA Android CI",
+  "files": [
+    { "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt", "depth": "diff_context", "blob": "d8c659ce3095d41bd4e789d7db632dc24348d565", "scope": "Full diff, complete affected functions and ownership/admission context" },
+    { "path": "app/src/main/java/com/kuma/motointercom/LanDiscoveryCoordinator.kt", "depth": "full_source", "blob": "d3bbd9451315e6ca3c05d457610e049aff17c59f" },
+    { "path": "app/src/test/java/com/kuma/motointercom/LanConnectFailureServiceRobolectricTest.kt", "depth": "full_source", "blob": "bc2905581fe46e9fbd5c5e18cf51a279d23c92f5" },
+    { "path": "rasen/changes/kum-81-lan-network-failure/.openspec.yaml", "depth": "full_source", "blob": "a369219628ff8b409dab0cc6549c53080045fd98" },
+    { "path": "rasen/changes/kum-81-lan-network-failure/design.md", "depth": "full_source", "blob": "fb9cf0b59d4efe7f437f18a0a9d91b44e7e40fa9" },
+    { "path": "rasen/changes/kum-81-lan-network-failure/proposal.md", "depth": "full_source", "blob": "b82d5a1d4eb3b13f9adb02187f641f8e031b4df6" },
+    { "path": "rasen/changes/kum-81-lan-network-failure/specs/lan-network-failure/spec.md", "depth": "full_source", "blob": "2123fe185e92f27d453f0561fd0cd8b8ab291453" },
+    { "path": "rasen/changes/kum-81-lan-network-failure/tasks.md", "depth": "full_source", "blob": "a450d8166c20a66d31044b87da8bfd7adefd2cff" }
+  ],
+  "nonBlocking": [
+    "Network.bindSocket is shadowed in Robolectric; actual device routing and two-device connectivity remain deferred.",
+    "The field EHOSTUNREACH root cause is not established from the single-end log.",
+    "Official delegate CLI scope/rules plus independent model review were used; no remote OCR LLM service invocation is claimed."
+  ]
+}
