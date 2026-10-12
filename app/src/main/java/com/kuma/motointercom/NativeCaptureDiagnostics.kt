@@ -18,10 +18,19 @@ internal object NativeCaptureDiagnostics {
     fun isCurrentProducer(module: JavaAudioDeviceModule?, recording: Boolean, thread: Thread) =
         currentProducer(module, recording) === thread
 
+    fun routedDeviceType(module: JavaAudioDeviceModule?): Int? = runCatching {
+        recorder(module)?.routedDevice?.type
+    }.getOrNull()
+
+    private fun recorder(module: JavaAudioDeviceModule?): AudioRecord? {
+        if (module == null) return null
+        val input = module.javaClass.getDeclaredField("audioInput").run { isAccessible = true; get(module) }
+        return input.javaClass.getDeclaredField("audioRecord").run { isAccessible = true; get(input) as? AudioRecord }
+    }
+
     fun describe(module: JavaAudioDeviceModule?): String = try {
         if (module == null) "input=unavailable" else {
-            val input = module.javaClass.getDeclaredField("audioInput").run { isAccessible = true; get(module) }
-            val record = input.javaClass.getDeclaredField("audioRecord").run { isAccessible = true; get(input) as? AudioRecord }
+            val record = recorder(module)
             if (record == null) "input=not-started" else {
                 val device = record.routedDevice
                 "input source=${record.audioSource} session=${record.audioSessionId} " +

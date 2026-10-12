@@ -33,6 +33,22 @@ class AudioRouteControllerRobolectricTest {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val shadowAudioManager = shadowOf(audioManager)
 
+    @Test fun missingBluetoothPermissionDoesNotClaimThatTheHeadsetIsAbsent() {
+        shadowOf(context as Application).denyPermissions(Manifest.permission.BLUETOOTH_CONNECT)
+        val speaker = audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(speaker))
+        val fallbacks = mutableListOf<Boolean>()
+        val errors = mutableListOf<Throwable>()
+        val controller = AudioRouteController(context, onSpeakerFallback = fallbacks::add, onError = errors::add)
+        try {
+            controller.select(AudioRouteSelection.BLUETOOTH)
+            drainRouteExecutor(); shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(false), fallbacks)
+            assertTrue(errors.single() is SecurityException)
+            assertEquals(speaker, audioManager.communicationDevice)
+        } finally { controller.close(); drainRouteExecutor() }
+    }
+
     @Test fun rejectedFirstBluetoothRequestRetriesWithoutAnotherDeviceEvent() {
         shadowOf(context as Application).grantPermissions(Manifest.permission.BLUETOOTH_CONNECT)
         val route = DelayedCommunicationRoute().apply { result = ModernAudioRoute.RouteResult.REJECTED }

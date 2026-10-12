@@ -19,7 +19,7 @@ import androidx.annotation.RequiresApi
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal data class AudioRouteEvidence(val revision: Long, val ready: Boolean)
+internal data class AudioRouteEvidence(val revision: Long, val ready: Boolean, val bluetooth: Boolean = false)
 
 /** Owns the process audio mode and routes intercom audio to a headset or phone. */
 internal class AudioRouteController(
@@ -58,7 +58,10 @@ internal class AudioRouteController(
     override fun evidence(): AudioRouteEvidence {
         synchronized(evidenceLock) {
             if (verifiedDevice != null && verifiedDevice != actualDevice()) invalidateEvidence()
-            return AudioRouteEvidence(evidenceRevision, !closed.get() && verifiedDevice != null)
+            val ready = !closed.get() && verifiedDevice != null
+            val request = currentRouteRequest()
+            return AudioRouteEvidence(evidenceRevision, ready, ready && bluetoothReported &&
+                bluetoothReportRevision == request.revision && request.selection == AudioRouteSelection.BLUETOOTH)
         }
     }
     private fun invalidateEvidence() {
@@ -254,7 +257,9 @@ internal class AudioRouteController(
         if (!isCurrentRouteRequest(request) || !wantBluetoothSco) return
         legacyFallbackActive = false
         if (!hasRequiredPermissions(appContext)) {
-            throw SecurityException("缺少蓝牙音频路由运行时权限")
+            reportRouteError(request, SecurityException("缺少蓝牙音频路由运行时权限"))
+            if (fallbackToSpeaker) fallbackToPhone(false, "Bluetooth permission missing", request)
+            return
         }
         registerAudioDeviceCallback()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

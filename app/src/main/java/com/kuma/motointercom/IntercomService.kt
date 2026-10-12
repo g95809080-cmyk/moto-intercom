@@ -335,7 +335,8 @@ class IntercomService : Service() {
                 setPreferredAudioRoute(
                     audioRouteSelectionFromPersisted(
                         intent.getStringExtra(EXTRA_PREFERRED_AUDIO_ROUTE)
-                    )
+                    ),
+                    source = AudioRouteRequestSource.RUNTIME_START
                 )
                 setVoxSettings(
                     voxEnabled = intent.getBooleanExtra(
@@ -446,13 +447,18 @@ class IntercomService : Service() {
         }
     }
 
-    internal fun setPreferredAudioRoute(selection: AudioRouteSelection) {
+    internal fun setPreferredAudioRoute(
+        selection: AudioRouteSelection,
+        source: AudioRouteRequestSource = AudioRouteRequestSource.USER_SELECTION
+    ) {
         dispatchOnMain {
             val changed = selection != preferredAudioRoute
             preferredAudioRoute = selection
             if (changed) listener?.onAudioRouteSelectionChanged(selection)
             try {
-                audioSessionController?.updateAudioRoute(selection)
+                DiagnosticLog.i("IntercomService", "Audio route requested selection=$selection source=$source")
+                audioSessionController?.updateAudioRoute(selection,
+                    resetIoRecoveryBudget = source == AudioRouteRequestSource.USER_SELECTION)
             } catch (error: RuntimeException) {
                 handleError(error)
             }
