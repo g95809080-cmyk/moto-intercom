@@ -1,6 +1,14 @@
 {
   "baseSha": "717fbecc23d60b1b35280f3e895898491bf533dc",
   "headSha": "49bf4e50dbc1d4b5f7c75686cad032e10a25b9c6",
+  "formalBinding": {
+    "issue": "KUM-82",
+    "branch": "fix/kum-82-bluetooth-io-recovery",
+    "change": "kum-82-bluetooth-io-recovery",
+    "boundAt": "2026-10-12",
+    "reviewedSourceChangeName": "field-bluetooth-io-recovery",
+    "note": "files below retain exact paths and blobs at approved source Head; later renaming and binding affect only Rasen documents"
+  },
   "result": "APPROVED",
   "p0": 0,
   "p1": 0,

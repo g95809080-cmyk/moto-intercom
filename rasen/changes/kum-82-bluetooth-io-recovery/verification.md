@@ -1,4 +1,4 @@
-# 本地候选验证（2026-10-12）
+# KUM-82 验证（2026-10-12）
 
 Stable Base: `717fbecc23d60b1b35280f3e895898491bf533dc`。
 
@@ -24,7 +24,7 @@ Approved Local Source Head: `49bf4e50dbc1d4b5f7c75686cad032e10a25b9c6`。只读�
 
 ## 仍待完成
 
-- Linear 已过期授权，真实 issue 绑定、正式分支/change 命名、Draft PR 和固定 SHA Android CI 尚未执行；不伪造编号或已通过的 CI。
+- 用户已重新授权 Linear，核查重复后建立 KUM-82 并正式绑定分支/change。独立 Draft PR 与固定 SHA Android CI 正在进入下一 gate；不得提前记为通过。
 - 小米 13 仅做当前设备只读核查，安装版本仍为 1.2.2+bb0fa92；本机无活动耳机/通话复现证据。候选 APK 仅安装到自有 AVD，未部署到用户手机，未改变版本配置、main 或发布状态。
 - 两部普通蓝牙耳机首次连接、双方自动重连后的收听/说话、导航音乐共存和人工骑行听音需要双真实设备。单 AVD/JNI 元数据结果不替代这些验收。
 
