@@ -190,6 +190,11 @@ class NativeAudioIoGateInstrumentationTest {
             val before = awaitHealthyEvidence(offerer)
             val output = offerer.javaClass.getDeclaredField("playout").run { isAccessible = true; get(offerer) as DecodedAudioPlayout }
             val firstOutput = output.snapshot() ?: error("No real Android output writes")
+            val firstRoute = awaitAudioIoRoute(offerer)
+            assertEquals(NativeCaptureDiagnostics.routedDeviceType(module as JavaAudioDeviceModule), firstRoute.inputType)
+            assertNotNull("Active native recorder has no routed device", firstRoute.inputType)
+            assertEquals(firstOutput.routedDeviceType, firstRoute.outputType)
+            assertNotNull("Active Android output has no routed device", firstRoute.outputType)
             tailBlockNext.set(true)
             assertTrue(tailReached.await(5, TimeUnit.SECONDS))
             RiderAudioEngine::class.java.getDeclaredField("lastAudioLevelAt").apply { isAccessible = true }.setLong(engine, 0)
@@ -219,6 +224,9 @@ class NativeAudioIoGateInstrumentationTest {
             }
             assertTrue("Requested enable alone is insufficient: native I/O must be running", io.ready(io.revision(), SystemClock.elapsedRealtime()))
             val resumedOutput = output.snapshot() ?: error("Resumed output did not write")
+            val resumedRoute = awaitAudioIoRoute(offerer)
+            assertEquals(NativeCaptureDiagnostics.routedDeviceType(module as JavaAudioDeviceModule), resumedRoute.inputType)
+            assertEquals(resumedOutput.routedDeviceType, resumedRoute.outputType)
             assertNotSame("Resume reused the stopped output thread", firstOutput.thread, resumedOutput.thread)
             assertNotEquals("Resume reused the released Android output", firstOutput.sessionId, resumedOutput.sessionId)
             val after = awaitHealthyEvidence(offerer)
@@ -228,10 +236,15 @@ class NativeAudioIoGateInstrumentationTest {
             assertTrue("Decoded nonzero PCM never reached Android output", output.snapshot()!!.nonzeroWrittenBytes > 0)
             repeat(2) {
                 val previous = output.snapshot()!!
-                engine.suspendAudio(); assertNull(output.snapshot()); engine.resumeAudio()
+                engine.suspendAudio(); assertNull(output.snapshot())
+                val pausedRoute = queryAudioIoRoute(offerer)
+                assertFalse("Suspended native I/O still supplies routing proof", pausedRoute.fresh)
+                assertFalse(pausedRoute.bluetoothReady)
+                engine.resumeAudio()
                 awaitHealthyEvidence(offerer)
                 assertNotSame(previous.thread, output.snapshot()!!.thread)
             }
+            assertDelayedAudioRouteSampleExpires(engine, offerer)
             assertNull("Route pause/resume was reported as a fatal device error", failures.poll())
         } finally { enterTail.countDown(); release.countDown(); engine.close(); peer.close() }
     }
@@ -289,6 +302,44 @@ class NativeAudioIoGateInstrumentationTest {
             SystemClock.sleep(20)
         }
         error("Current native record/write and bidirectional RTP evidence did not recover")
+    }
+
+    private fun queryAudioIoRoute(session: RiderMediaSession): RiderAudioIoRouteSnapshot {
+        val result = LinkedBlockingQueue<RiderAudioIoRouteSnapshot>()
+        session.queryAudioIoRoute { if (it != null) result.offer(it) }
+        return result.poll(2, TimeUnit.SECONDS) ?: error("Native audio route query did not complete")
+    }
+
+    private fun assertDelayedAudioRouteSampleExpires(engine: RiderAudioEngine, session: RiderMediaSession) {
+        val blocked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val result = LinkedBlockingQueue<RiderAudioIoRouteSnapshot>()
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            blocked.countDown()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        try {
+            assertTrue("Main callback consumer did not block", blocked.await(2, TimeUnit.SECONDS))
+            session.queryAudioIoRoute { if (it != null) result.offer(it) }
+            val rtc = RiderAudioEngine::class.java.getDeclaredField("rtc").run {
+                isAccessible = true; get(engine) as ExecutorService
+            }
+            rtc.submit {}.get(2, TimeUnit.SECONDS)
+            SystemClock.sleep(2_200)
+        } finally { release.countDown() }
+        val delayed = result.poll(3, TimeUnit.SECONDS) ?: error("Delayed native sample did not arrive")
+        assertFalse("New PCM incorrectly refreshed stale RTC device metadata", delayed.fresh)
+        awaitAudioIoRoute(session)
+    }
+
+    private fun awaitAudioIoRoute(session: RiderMediaSession): RiderAudioIoRouteSnapshot {
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val result = queryAudioIoRoute(session)
+            if (result.connected && result.fresh) return result
+            SystemClock.sleep(20)
+        }
+        error("Native recorder and renderer did not produce fresh routing evidence")
     }
 
     private fun injectTone(engine: RiderAudioEngine) {

@@ -48,6 +48,19 @@ internal interface RiderMediaSession : Closeable {
     fun setRemoteAnswer(remoteSdpJson: String)
     fun addRemoteIceCandidate(candidateJson: String)
     fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
+    fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) = callback(null)
+}
+
+internal data class RiderAudioIoRouteSnapshot(
+    val connected: Boolean,
+    val fresh: Boolean,
+    val inputType: Int?,
+    val outputType: Int?,
+    val sampledAtElapsedRealtimeMs: Long
+) {
+    val bluetoothReady: Boolean get() = fresh && bluetoothAudioType(inputType) && bluetoothAudioType(outputType)
+    private fun bluetoothAudioType(type: Int?) = type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET
 }
 
 internal interface RiderMediaEngine : Closeable {
@@ -959,6 +972,30 @@ internal class RiderAudioEngine(
             }
         )
         private val statsPending = AtomicBoolean(false)
+
+        override fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) {
+            runSession(this) {
+                val sampledAt = SystemClock.elapsedRealtime()
+                val gate = audioIoGate.revision()
+                val native = ioEvidence.revision()
+                val input = NativeCaptureDiagnostics.routedDeviceType(audioDeviceModule)
+                val output = playout.snapshot()
+                val wasFresh = audioIoGate.allows(gate) && output?.revision == gate &&
+                    ioEvidence.ready(native, SystemClock.elapsedRealtime())
+                val wasConnected = connected
+                postSessionMain(this) {
+                    callback(RiderAudioIoRouteSnapshot(
+                        connected = wasConnected && audioIoGate.allows(gate),
+                        fresh = wasFresh && SystemClock.elapsedRealtime() - sampledAt in 0..2_000 &&
+                            audioIoGate.allows(gate) &&
+                            playout.isCurrentRevision(gate) && ioEvidence.ready(native, SystemClock.elapsedRealtime()),
+                        inputType = input,
+                        outputType = output?.routedDeviceType,
+                        sampledAtElapsedRealtimeMs = sampledAt
+                    ))
+                }
+            }
+        }
 
         fun detachRemoteSink() {
             remoteAudioTrack?.removeSink(playout)

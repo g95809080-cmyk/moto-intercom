@@ -12,12 +12,13 @@ import java.util.concurrent.TimeUnit
 internal interface PcmPlayback : Closeable {
     val sessionId: Int
     val playing: Boolean
+    val routedDeviceType: Int? get() = null
     fun play()
     fun write(bytes: ByteArray, offset: Int, length: Int): Int
 }
 
 internal data class PlayoutSnapshot(val revision: Long, val thread: Thread, val sessionId: Int,
-    val writtenBytes: Long, val nonzeroWrittenBytes: Long)
+    val writtenBytes: Long, val nonzeroWrittenBytes: Long, val routedDeviceType: Int? = null)
 
 /** One output device per current grant. The SDK decoder callback never waits for device I/O. */
 internal class DecodedAudioPlayout(
@@ -101,7 +102,8 @@ internal class DecodedAudioPlayout(
         return synchronized(lease.lock) {
             val playback = lease.playback
             if (lease.current() && playback?.playing == true && lease.writtenBytes > 0)
-                PlayoutSnapshot(lease.revision, lease.thread, playback.sessionId, lease.writtenBytes, lease.nonzeroWrittenBytes)
+                PlayoutSnapshot(lease.revision, lease.thread, playback.sessionId, lease.writtenBytes,
+                    lease.nonzeroWrittenBytes, playback.routedDeviceType)
             else null
         }
     }
@@ -207,6 +209,7 @@ private fun androidPcmPlayback(rate: Int, channels: Int): PcmPlayback {
     return object : PcmPlayback {
         override val sessionId get() = track.audioSessionId
         override val playing get() = track.playState == AudioTrack.PLAYSTATE_PLAYING
+        override val routedDeviceType get() = track.routedDevice?.type
         override fun play() = track.play()
         override fun write(bytes: ByteArray, offset: Int, length: Int) = track.write(bytes, offset, length, AudioTrack.WRITE_NON_BLOCKING)
         override fun close() {

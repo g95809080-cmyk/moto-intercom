@@ -38,6 +38,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var preferredAudioControls = AudioControlSettings()
     private val audioRoutePreferences by lazy { AudioRoutePreferences(this) }
     private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
+    private var bluetoothPermissionGranted: Boolean? = null
     private var automaticReconnectEnabled = true
 
     private val serviceConnection = object : ServiceConnection {
@@ -50,7 +51,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             val local = service as IntercomService.LocalBinder
             intercomService = local.service()
             serviceConnected = true
-            intercomService?.setPreferredAudioRoute(preferredAudioRoute)
+            intercomService?.setPreferredAudioRoute(preferredAudioRoute, AudioRouteRequestSource.ACTIVITY_REBIND)
             intercomService?.setAutomaticReconnectEnabled(automaticReconnectEnabled)
             intercomService?.setVoxSettings(
                 preferredAudioControls.voxEnabled,
@@ -454,7 +455,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
         preferredAudioRoute = selection
         screen.setPreferredAudioRoute(selection)
-        intercomService?.setPreferredAudioRoute(selection)
+        intercomService?.setPreferredAudioRoute(selection, AudioRouteRequestSource.USER_SELECTION)
     }
 
     private fun saveAutomaticReconnectSetting(enabled: Boolean) {
@@ -506,6 +507,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     private fun refreshOptionalPermissionPresentation() {
         val missing = PermissionPolicy.optionalPermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            !missing.contains(Manifest.permission.BLUETOOTH_CONNECT)
+        val newlyGranted = bluetoothPermissionGranted == false && granted
+        bluetoothPermissionGranted = granted
+        if (newlyGranted && preferredAudioRoute == AudioRouteSelection.BLUETOOTH) {
+            Log.i(TAG, "Bluetooth permission granted; reapply preferred Bluetooth route")
+            intercomService?.setPreferredAudioRoute(preferredAudioRoute, AudioRouteRequestSource.PERMISSION_GRANTED)
+        }
         screen.setOptionalPermissionState(
             bluetoothPermissionMissing = missing.contains(Manifest.permission.BLUETOOTH_CONNECT),
             notificationPermissionMissing = missing.contains(Manifest.permission.POST_NOTIFICATIONS)
