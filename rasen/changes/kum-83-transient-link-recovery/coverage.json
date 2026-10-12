@@ -1,0 +1,222 @@
+{
+  "issue": "KUM-83",
+  "baseSha": "fd0bcd0ff194e165216e7d2b515c0f4f52a82552",
+  "headSha": "ff19c4f152f3800b19be769f7149fbfc748e0db5",
+  "result": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "reviewed": 25,
+  "skipped": 0,
+  "fullSource": 18,
+  "diffContext": 7,
+  "officialOcrSelected": 14,
+  "officialOcrExcludedManuallyReviewed": 11,
+  "reviewer": "read-only motointercom-product-architect",
+  "nextGateAllowed": "补交真实证据并确认生产/测试blob不变；独立Draft PR、固定Source Head Android CI；CI闭合后KUM-84。",
+  "nonBlocking": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingControlCoordinator.kt",
+      "line": 1263,
+      "note": "补直接覆盖Connected观察中同peer真实RECOVERY入站；当前实际双origin HELLO主要从Connecting入场。未确认行为缺陷。"
+    }
+  ],
+  "files": [
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeTransientObservationInstrumentationTest.kt",
+      "blob": "1016719e43e2670733c4e453c6eb524cc3456c7a",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AutomaticRecoveryPolicy.kt",
+      "blob": "e26addac6becfa2c7fddf2aec842a1010614c3e5",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomManager.kt",
+      "blob": "c779f693de1ad2465d64652d5f83d0c657f8d90e",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt",
+      "blob": "8fd3ab06cf3db3daec51af341a28afc7ed1b4430",
+      "depth": "diff_context",
+      "officialSelected": true,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomStateMachine.kt",
+      "blob": "bee81b3d3290936eb7cc166fd94bcd713f4f08a3",
+      "depth": "diff_context",
+      "officialSelected": true,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/NativeConnectionObservation.kt",
+      "blob": "af408a75ecfa849fd962471b3fe7606154351c86",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PendingSocketLease.kt",
+      "blob": "4730c19b360c8d27996c6acf67b3047aeaeba2c8",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt",
+      "blob": "4d6b7a50fbdc744ac4dd19d595d31451379155f9",
+      "depth": "diff_context",
+      "officialSelected": true,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SessionOrchestrator.kt",
+      "blob": "1cdf41ae22cea23e63210ab1470adfd226bea3d1",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingControlCoordinator.kt",
+      "blob": "df3ffa6b09368c06d396a1983aa1b145187c4dac",
+      "depth": "diff_context",
+      "officialSelected": true,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingSessionV2.kt",
+      "blob": "59e41a34bf9e6096215a9dc68ad6e16804eb3d08",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectSignalingSocket.kt",
+      "blob": "f406fb64ddd0ffa57122af535443478969a21a3e",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt",
+      "blob": "38fe43b42db9977ae0e2fa2d92df625096dcb846",
+      "depth": "diff_context",
+      "officialSelected": true,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/FreshDiscoveryProducerRobolectricTest.kt",
+      "blob": "0b1d46290545ac94bccca3b912835e9a8275bdfa",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IncomingConfirmationServiceRobolectricTest.kt",
+      "blob": "fb6df3df342a8facf0be61c41795be93d4bc437e",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PresenceConnectServiceAdmissionRobolectricTest.kt",
+      "blob": "21b5be921553b9633a422cd5ff266e890af8155d",
+      "depth": "diff_context",
+      "officialSelected": false,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/SignalingControlCoordinatorTest.kt",
+      "blob": "d3d19a4cfc53bab0096b14afeb9eebba1a2759b3",
+      "depth": "diff_context",
+      "officialSelected": false,
+      "note": "全部差异、受影响函数与必要生产者/消费者上下文；不包含大型未改段全文"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/TransientLossServiceRobolectricTest.kt",
+      "blob": "8672484f3825d0678b900ef44966ec0bf89ffaeb",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/.openspec.yaml",
+      "blob": "b9ebfc72d6da2b141f153e3d48f7513ff2d0fa0b",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/README.md",
+      "blob": "20f70ce561ae9cb85810b163010cace8265b716a",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/design.md",
+      "blob": "ea438fdf60a4d3b97543feb844ef4bc16114bbcb",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/proposal.md",
+      "blob": "fc8dbbfa926525876cb048c10b5c85647656ec92",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/specs/link-recovery/spec.md",
+      "blob": "aea08ed779e3261fe009b66da46c446834703086",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/tasks.md",
+      "blob": "d8d6c38208a0bd3b0ee21bb8b4e6776ef870336b",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    },
+    {
+      "path": "rasen/changes/kum-83-transient-link-recovery/verification.md",
+      "blob": "96289f90533cd4deeb8592ca00c4d3cf558658c4",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异"
+    }
+  ],
+  "evidence": {
+    "jvm": {
+      "suites": 96,
+      "tests": 793,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "lint": {
+      "errors": 0,
+      "baselineWarnings": 70
+    },
+    "api36": {
+      "passed": 26,
+      "assumptionSkipped": 2,
+      "failed": 0
+    },
+    "nativeSelfHealMs": 52,
+    "scope": "真实JNI receipt/queue边界与实际TCP/HELLO/Service/IM/SDK集成分别验证；双手机与骑行未通过。"
+  },
+  "evidenceFollowup": "本coverage绑定固定Source Head的25路径；随后仅补Rasen证据/CI引用文档，需单独确认app、tests、构建、workflow与version blob不变。"
+}
