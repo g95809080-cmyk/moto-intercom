@@ -1,6 +1,6 @@
 # KUM-84 验证
 
-Base `9819833c81b13474609af104c8a3959f5480109d`；当前为独立WIP，无源码Head批准、PR或本问题CI通过结论。沿用前置KUM-83的固定Source及文档绑定批准，不代表本问题处理方案已验收。先补实际native A/B与确定性红绿，再进行固定Source审核及自动门禁。
+Base `9819833c81b13474609af104c8a3959f5480109d`；固定Source Head `f587472e251b59f3c25e8cad5e483c8e0afc887a` 的正式只读审查为APPROVED，P0/P1=0，12/12路径覆盖（11全文+1差异上下文，0 skipped）。[Draft PR #57](https://github.com/g95809080-cmyk/moto-intercom/pull/57) 已建立并附到当前任务，独立基于KUM-83。固定Source [Android CI 38239675696](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38239675696) 已核对headSha并启动，尚无成功结论。实机/道路验收仍未通过，iOS跳过。
 
 ## 真实 native NS/AGC 对比
 
@@ -8,10 +8,10 @@ Owned API36 AVD 四组测试已通过。首PCM等双方实际 CONNECTED 和 rece
 
 | NS | AGC | 初始噪声 RMS | 语音类混合 RMS | 返回噪声 RMS | Java gate P95 µs |
 | --- | --- | ---: | ---: | ---: | ---: |
-| off | off | 507.02 | 1188.33 | 2406.94 | 208.2 |
-| off | on | 1137.28 | 3244.93 | 3698.33 | 184.5 |
-| on | off | 62.13 | 1162.60 | 55.22 | 145.5 |
-| on | on | 95.48 | 3242.07 | 171.12 | 136.0 |
+| off | off | 501.98 | 1189.57 | 2472.09 | 202.7 |
+| off | on | 1137.28 | 3250.91 | 3698.33 | 165.2 |
+| on | off | 64.91 | 1161.53 | 55.36 | 143.9 |
+| on | on | 82.42 | 3221.24 | 171.38 | 141.9 |
 
 实际解码每段38400样本。Source采样窗口分别位于200..280、480..560、920..1000附近，receiver没有逐帧对应；不能宣称精确语音对齐、真实SNR或可懂度。P95只计Java回调，不含native APM/codec/端到端延迟。测量支持保留当前NS=true/AGC=true/AEC与高通；没有切换默认增益、SDK或叠加新降噪。
 
@@ -23,6 +23,18 @@ Owned API36 AVD 四组测试已通过。首PCM等双方实际 CONNECTED 和 rece
 
 候选只学习accepted peak回落至少18dB、距离已学floor不超过20dB、完整600ms窗口整体范围不超过1.5dB的平台；大于60ms采样缺口或逆时撤候选。峰值须经历25ms连续attack才接受。保留25ms开麦attack、120msrelease和700ms尾音；不设置最大说话总时长。初始校准上限55保持，后续已有噪声学习可至85，防止较强已知背景被旧55上限反复打开。能量歧义、突升不回落的稳态噪声和真实字头/句尾听音仍待验收。
 
-本地完整 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` 成功：96 suites / 804 JVM tests / failures=0 / errors=0 / skipped=0；Lint errors=0，70 warnings与基线一致。只读Source gate与owned API36全量原生结果尚待闭合，不能把专项/JVM通过记为全部验收。
+本地完整 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` 成功：96 suites / 804 JVM tests / failures=0 / errors=0 / skipped=0；Lint errors=0，70 warnings与基线一致。最终测试采样小调整后Lint/测试APK也通过，JVM与生产源码未再变。严格Rasen validate有效。
+
+Owned API36全量instrumentation为29 pass / 2 双机条件 assumption skip（status -4）/ 0 failure；Runner OK31包含skip。实际 native VOX强背景约1440ms后关麦，之后继续采集且30个新帧真实JNI输入清零；新前景加6帧观察97ms。活跃门控Java P95约231.8µs，不含native APM/codec或端到端延迟。旧producer竞态红转绿，现有mute/VOX bypass与撤权回归均通过。
+
+候选Debug APK只安装到本次owned AVD，未部署小米13。SHA256 `EB5F258808938957FC9226A6004EA695C1C92D93CE7534B6E0472836A022AE46`；版本、versionCode与approvedCommit均保持原权威，不作为新功能发布。
+
+## 官方OCR与固定Source审查
+
+官方 Alibaba Open Code Review 1.12.13 delegate preview/rule为12 changed paths，5 selected + 7 excluded；只读架构按官方规则加手动覆盖全部excluded的JUnit/合同/证据。实际depth为11全文+1 RiderAudioEngine差异上下文，P0/P1=0，不宣称大型未改段全文。完整path/blob/depth见 `coverage.json`；未调用远程OCR LLM，不把规则获取称为模型批准。
+
+唯一非阻断建议：现有70→58±3慢调制在18dB条件下不进入候选，可另补floor45→peak80→58±3/1秒周期直接保护整体范围规则；生产min/max实现正确，未确认行为缺陷。
+
+Next gate allowed：纯证据绑定复审、确认app/测试/构建/workflow/版本blob与Source一致；独立Draft PR及固定Source Android CI。真实两手机/蓝牙/道路听音deferred，不标记Done或发布。
 
 详细输出保留在忽略的 `logs/2026-10-12-field-review/`，包括 `kum-84-native-ab-controlled.json`、`kum-84-vox-red.log`、`kum-84-vox-window-red.log`、`kum-84-vox-peak-red.log`、`kum-84-native-owner-red.txt`。不提交原始用户日志。
