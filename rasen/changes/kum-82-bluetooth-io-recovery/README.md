@@ -7,7 +7,8 @@
 - Linear: [KUM-82](https://linear.app/kuma999/issue/KUM-82)，KUM-64 下的独立 follow-up，关联 KUM-68/KUM-81。2026-10-12 用户重新授权后核查全部子问题，确认无重复再建立；当前 In Progress。
 - 授权阻塞期间使用本地名称 `field-bluetooth-io-recovery` 准备源码和审查；现在正式更名绑定，保留 Git 历史。源码批准 Head 为 `49bf4e50dbc1d4b5f7c75686cad032e10a25b9c6`，其后只有证据和绑定文档变化。
 - 工作期间仅在 loopback 将工具旧代理端口 7890 临时转发至已运行的用户代理 7897；不记录传输内容、不改变系统代理设置，收尾停止该临时进程。
-- 下一 gate 为独立 Draft PR 和固定 Head Android CI；不自动合并、发布或部署。
+- 独立 [Draft PR #55](https://github.com/g95809080-cmyk/moto-intercom/pull/55)，Base 为 KUM-81。固定 Head `be443c4caa0df1ca43dd86b9b4945a9ab101aa39` 的 [Android CI 38209170750](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38209170750) 两项 job 均 completed/success。
+- 文档绑定复审 Base `717fbecc` / Head `be443c4c` 为 APPROVED，P0=0/P1=0；与 `49bf4e50` 的 app/.github/version blob 相同。下一组为 KUM-83；真实双机听音仍待验收。
 - 未变更版本、主分支、发布记录、协议、重连预算或 iOS；未部署候选 APK。
 - 小米 13 `192.168.1.62:37751` 只读核查：已装 1.2.2+bb0fa92，User 0 的蓝牙/录音/电话状态权限已授予，应用 stopped、MODE_NORMAL，未复现活动蓝牙会话。
 - 原始用户日志、实时设备 dump、构建日志均保留在忽略目录 `logs/2026-10-12-field-review/`，不进入 Git。
