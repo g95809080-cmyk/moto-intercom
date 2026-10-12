@@ -1,0 +1,136 @@
+{
+  "issue": "KUM-84",
+  "baseSha": "9819833c81b13474609af104c8a3959f5480109d",
+  "headSha": "f587472e251b59f3c25e8cad5e483c8e0afc887a",
+  "result": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "reviewed": 12,
+  "skipped": 0,
+  "fullSource": 11,
+  "diffContext": 1,
+  "officialOcrSelected": 5,
+  "officialOcrExcludedManuallyReviewed": 7,
+  "reviewer": "read-only motointercom-product-architect",
+  "nextGateAllowed": "补证据并确认生产/测试/构建blob不变；独立Draft PR、固定Source Android CI；实机deferred不得Done或发布。",
+  "nonBlocking": [
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/VoxGateTest.kt",
+      "line": 166,
+      "note": "慢调制70→58±3在18dB条件下未进入候选；可补floor45→peak80→58±3/1秒周期，直接保护整体范围规则。当前min/max实现正确，未确认行为缺陷。"
+    }
+  ],
+  "files": [
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeNoiseGainInstrumentationTest.kt",
+      "blob": "8598fdc1c8670bd8ebe2956c27bec56ce0857b69",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/VoxBackgroundInstrumentationTest.kt",
+      "blob": "e6ce1ce2d06d2c5492ae6b15a23c89d7eda1db7c",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt",
+      "blob": "09a02216d64965874bf8b206d4b9bbcc23b73ef2",
+      "depth": "diff_context",
+      "officialSelected": true,
+      "note": "完整差异、影响函数及record/controls/owner生命周期与发布上下文；不宣称大型未改段全文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/VoxGate.kt",
+      "blob": "6d260e40685c07fcc603f454dc85e3495f1e8667",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/VoxGateTest.kt",
+      "blob": "b55c0d434f6575f8112a0917e090a629a0430532",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/.openspec.yaml",
+      "blob": "b9ebfc72d6da2b141f153e3d48f7513ff2d0fa0b",
+      "depth": "full_source",
+      "officialSelected": true,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/README.md",
+      "blob": "bfdab7c1ac7859af98d1fbf007c9cac6e41f892c",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/design.md",
+      "blob": "37fe13576ed3166e8da2ac2e256f0c4d80de0ad7",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/proposal.md",
+      "blob": "c6b265bc718820fa2060ac2f5e44f8f9d1322cd2",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/specs/vox-road-noise/spec.md",
+      "blob": "9c5b7004e8637ea3ccab13164edfe1d268fff958",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/tasks.md",
+      "blob": "bc2fa71259fc8017cd5c54522912f9c064895245",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    },
+    {
+      "path": "rasen/changes/kum-84-vox-road-noise/verification.md",
+      "blob": "64c322f3c02c736708d42c54c0bf9f7da3651fa7",
+      "depth": "full_source",
+      "officialSelected": false,
+      "note": "全文及差异；官方excluded路径也经手动审查"
+    }
+  ],
+  "additionalContext": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/NativeAudioProducerOwner.kt",
+      "blob": "85e9fb3bbb4455d3728bab577837fc8bbf553d4f",
+      "depth": "full_source",
+      "purpose": "producer/锁序/生命周期与I/O证据边界上下文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/NativeCaptureDiagnostics.kt",
+      "blob": "fbe90cab385ddd20c26ff9e90374cc4df0ec2a08",
+      "depth": "full_source",
+      "purpose": "producer/锁序/生命周期与I/O证据边界上下文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioIoGate.kt",
+      "blob": "e20b4a982c1c845f81019a1cb0c6b3d17f36839e",
+      "depth": "full_source",
+      "purpose": "producer/锁序/生命周期与I/O证据边界上下文"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderAudioIoEvidence.kt",
+      "blob": "6fb595a83498c53de29cca0df3d5a7d4e061b70d",
+      "depth": "full_source",
+      "purpose": "producer/锁序/生命周期与I/O证据边界上下文"
+    }
+  ]
+}

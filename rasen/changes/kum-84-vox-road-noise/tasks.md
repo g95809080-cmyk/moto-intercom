@@ -1,0 +1,7 @@
+- [x] 1. 真实Linear/独立branch/change、继承KUM-83批准Source及CI
+- [x] 2. native发送→远端decoded PCM四组NS/AGC A/B、可用语音特征与开销评估
+- [x] 3. VOX活跃态底噪/有限拖尾/灵敏度实际门控红绿回归
+- [x] 4. 原生输入、mute、当前producer/settings/gate revision、持续语音与起止保护
+- [x] 5. 完整JVM/Lint/双APK/API36、官方OCR+固定Source只读APPROVED
+- [x] 6. 独立Draft PR/固定Source Android CI/Linear与Rasen证据
+- [ ] 7. 双真实手机/普通蓝牙/道路听音验收（未通过）
