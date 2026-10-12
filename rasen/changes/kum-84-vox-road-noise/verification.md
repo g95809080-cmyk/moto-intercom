@@ -23,7 +23,7 @@ Owned API36 AVD 四组测试已通过。首PCM等双方实际 CONNECTED 和 rece
 
 候选只学习accepted peak回落至少18dB、距离已学floor不超过20dB、完整600ms窗口整体范围不超过1.5dB的平台；大于60ms采样缺口或逆时撤候选。峰值须经历25ms连续attack才接受。保留25ms开麦attack、120msrelease和700ms尾音；不设置最大说话总时长。初始校准上限55保持，后续已有噪声学习可至85，防止较强已知背景被旧55上限反复打开。能量歧义、突升不回落的稳态噪声和真实字头/句尾听音仍待验收。
 
-本地完整 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` 成功：96 suites / 804 JVM tests / failures=0 / errors=0 / skipped=0；Lint errors=0，70 warnings与基线一致。最终测试采样小调整后Lint/测试APK也通过，JVM与生产源码未再变。严格Rasen validate有效。
+本地完整 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` 成功：96 suites / 804 JVM tests / failures=0 / errors=0 / skipped=0；Lint errors=0，70 warnings与基线一致。最后的测试采样调整发生在Source提交之前，之后Lint/测试APK也通过；Source提交及批准后，JVM、原生测试与生产源码均未再变。严格Rasen validate有效。
 
 Owned API36全量instrumentation为29 pass / 2 双机条件 assumption skip（status -4）/ 0 failure；Runner OK31包含skip。实际 native VOX强背景约1440ms后关麦，之后继续采集且30个新帧真实JNI输入清零；新前景加6帧观察97ms。活跃门控Java P95约231.8µs，不含native APM/codec或端到端延迟。旧producer竞态红转绿，现有mute/VOX bypass与撤权回归均通过。
 
@@ -36,5 +36,7 @@ Owned API36全量instrumentation为29 pass / 2 双机条件 assumption skip（st
 唯一非阻断建议：现有70→58±3慢调制在18dB条件下不进入候选，可另补floor45→peak80→58±3/1秒周期直接保护整体范围规则；生产min/max实现正确，未确认行为缺陷。
 
 Next gate allowed：纯证据绑定复审、确认app/测试/构建/workflow/版本blob与Source一致；独立Draft PR及固定Source Android CI。真实两手机/蓝牙/道路听音deferred，不标记Done或发布。
+
+证据绑定复核 Base `9819833c` / Docs Head `e0aff559c95e20e9da4f9c76d9a1487346c7dae6` 为APPROVED，P0/P1=0；仅4项Rasen文档变化，12项Source路径及4额外上下文blob全部匹配。允许补固定Source CI/Linear真实结果；后续纯证据文档复用原Source门禁与相同代码CI，无需重复行为CI。
 
 详细输出保留在忽略的 `logs/2026-10-12-field-review/`，包括 `kum-84-native-ab-controlled.json`、`kum-84-vox-red.log`、`kum-84-vox-window-red.log`、`kum-84-vox-peak-red.log`、`kum-84-native-owner-red.txt`。不提交原始用户日志。
