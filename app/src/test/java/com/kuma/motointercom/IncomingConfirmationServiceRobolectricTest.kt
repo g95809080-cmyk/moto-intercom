@@ -144,7 +144,7 @@ class IncomingConfirmationServiceRobolectricTest {
     }
 }
 
-internal class IncomingConfirmationServiceFixture : AutoCloseable {
+internal class IncomingConfirmationServiceFixture(val localDeviceId: String = UUID.randomUUID().toString()) : AutoCloseable {
     private val controller = Robolectric.buildService(IntercomService::class.java).create()
     val service = controller.get()
     val actor = field("orchestrator").get(service) as SessionOrchestrator
@@ -153,7 +153,6 @@ internal class IncomingConfirmationServiceFixture : AutoCloseable {
     val pairs = mutableListOf<IncomingConfirmationSocketPair>()
     private val heldEffects = mutableListOf<Runnable>()
     private val main = field("mainHandler").get(service) as Handler
-    val localDeviceId = UUID.randomUUID().toString()
 
     init {
         val app = ApplicationProvider.getApplicationContext<Application>()

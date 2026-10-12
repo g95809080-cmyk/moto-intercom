@@ -18,6 +18,7 @@ internal class PendingSocketLease(
 
     private val lock = Any()
     private var stage = Stage.CONNECTING
+    private var closureFailure: Throwable? = null
     private var closeResource: () -> Unit = { socket.close() }
     private var admissionTimer: ScheduledFuture<*>? = null
     private var helloTimer: ScheduledFuture<*>? = null
@@ -26,6 +27,7 @@ internal class PendingSocketLease(
     private var onTransferred: () -> Unit = {}
 
     val currentStage: Stage get() = synchronized(lock) { stage }
+    val failureCause: Throwable? get() = synchronized(lock) { closureFailure }
 
     // Called only after registration in the adapter's pending registry.
     fun armAdmissionDeadline() {
@@ -115,6 +117,11 @@ internal class PendingSocketLease(
         release(resource)
     }
 
+    fun closeAfterFailure(failure: Throwable) {
+        val resource = synchronized(lock) { revokeLocked(failure) } ?: return
+        release(resource)
+    }
+
     private fun expire(helloOnly: Boolean) {
         val resource = synchronized(lock) {
             if (helloOnly && stage != Stage.HELLO) return
@@ -125,13 +132,14 @@ internal class PendingSocketLease(
                 else admissionTimer = schedule(deadline) { expire(false) }
                 return
             }
-            revokeLocked()
+            revokeLocked(if (helloOnly) java.net.SocketTimeoutException("pending HELLO deadline expired") else null)
         } ?: return
         release(resource)
     }
 
-    private fun revokeLocked(): (() -> Unit)? {
+    private fun revokeLocked(failure: Throwable? = null): (() -> Unit)? {
         if (stage == Stage.TRANSFERRED || stage == Stage.CLOSED) return null
+        closureFailure = failure
         stage = Stage.CLOSED
         admissionTimer?.cancel(false)
         helloTimer?.cancel(false)

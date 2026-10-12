@@ -657,8 +657,8 @@ class PresenceConnectServiceAdmissionRobolectricTest {
             pair.sendLocal(SignalingMessageV2.Answer("{\"type\":\"answer\",\"sdp\":\"v=0\"}"))
             f.awaitMain { pair.remote.phase == SignalingPhase.MEDIA_NEGOTIATING }
             IntercomService::class.java.declaredMethods.single { it.name.startsWith("onConnectionStateChanged") &&
-                !java.lang.reflect.Modifier.isStatic(it.modifiers) && it.parameterCount == 3 }
-                .apply { isAccessible = true }.invoke(f.service, token.value, candidate, PeerConnection.PeerConnectionState.CONNECTED)
+                !java.lang.reflect.Modifier.isStatic(it.modifiers) && it.parameterCount == 4 }
+                .apply { isAccessible = true }.invoke(f.service, token.value, candidate, PeerConnection.PeerConnectionState.CONNECTED, null)
             f.awaitMain { actor.state.value is IntercomState.Connected && pair.local.phase == SignalingPhase.CONNECTED }
             recoveryBarrier()
             assertNull(graph().admission)

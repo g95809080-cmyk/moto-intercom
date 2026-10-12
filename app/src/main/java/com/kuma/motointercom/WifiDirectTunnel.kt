@@ -79,7 +79,10 @@ internal class WifiDirectTunnel(
         MonotonicTimestamp(SystemClock.elapsedRealtime())
     },
     private val onFreshObservation: (FreshDiscoveryObservation) -> Unit = {},
-    private val localP2pAddressResolver: ((String?) -> Inet4Address?)? = null
+    private val localP2pAddressResolver: ((String?) -> Inet4Address?)? = null,
+    private val captureConnectionLoss: (ConnectionAttempt) -> ConnectionLossObservation? = { null },
+    private val onSelectedGroupLost: (ConnectionAttempt, ConnectionLossObservation) -> Unit = { _, _ -> },
+    private val onTargetedTransportFailed: (ConnectionAttempt, String) -> Unit = { _, _ -> }
 ) : Closeable {
 
     val observationSource = FreshDiscoverySource(Transport.WIFI_DIRECT)
@@ -138,6 +141,15 @@ internal class WifiDirectTunnel(
     private var connectWatchdogGeneration = 0
     private var groupRemovalGeneration = 0
     private var lifecycleGeneration = 0
+    private var lossQueryGeneration = 0L
+    private var selectedAttempt: ConnectionAttempt? = null
+    private var admittedControlChannelId: ControlChannelId? = null
+    private var socketRetryCount = 0
+    private var socketRetryOwner: ConnectionAttempt? = null
+    private var groupReuseProbeGeneration: Int? = null
+    private var nativeCleanupSerial = 0L
+    private var nativeCleanupDeadlineElapsedMs: Long? = null
+    private var cleanupTimeoutReportedFor: ConnectionAttempt? = null
     private var serviceDiscoveryReady = false
     private var startupDiscoveryPending = false
     private val startupReadiness = WifiDirectStartupReadiness(
@@ -165,22 +177,7 @@ internal class WifiDirectTunnel(
                         requestConnectionInfo()
                     } else if (state == State.P2P_CONNECTING) {
                         Log.d(TAG, "ignore disconnected broadcast while connecting: $connectingAddress")
-                    } else {
-                        val taskContext = currentTargetContext()
-                        if (
-                            taskContext != null &&
-                            !isTargetedContextIdentityCurrent(taskContext)
-                        ) return
-                        cancelPendingRetry()
-                        resetTunnelOnly(taskContext)
-                        state = State.DISCOVERING
-                        if (isCapturedTaskCurrent(taskContext)) {
-                            mainHandler.post {
-                                if (isCapturedTaskCurrent(taskContext)) onDisconnected()
-                            }
-                        }
-                        if (isCapturedTaskCurrent(taskContext) && !removingGroup) discoverPeers()
-                    }
+                    } else confirmConnectionLoss()
                 }
             }
         }
@@ -248,6 +245,7 @@ internal class WifiDirectTunnel(
                     monotonicClock
                 )
             ) return false
+            adoptSocketBudget(attempt)
             resumePreparedRetry()
             return true
         }
@@ -263,7 +261,15 @@ internal class WifiDirectTunnel(
         cancelConnectWatchdog()
         targetAttemptGeneration++
         targetAttempt = attempt
+        selectedAttempt = null
+        adoptSocketBudget(attempt)
+        groupReuseProbeGeneration = null
         targetAddress = peerRegistry.findAcceptedAddress(peerClaims, attempt.targetLock)
+        if (removingGroup) {
+            state = State.DISCOVERING
+            scheduleCleanupWaitFailure(attempt)
+            return true
+        }
         if (readyState) {
             resetTunnelOnly()
             state = State.GROUP_READY
@@ -296,9 +302,11 @@ internal class WifiDirectTunnel(
             retryPause.clear()
             return false
         }
+        adoptSocketBudget(attempt)
         targetAttemptGeneration++
         targetAttempt = attempt
         targetAddress = preservedAddress
+        if (removingGroup) scheduleCleanupWaitFailure(attempt)
         groupValidationGate.cancel()
         setupRecoveryGate.cancel()
         validatingGroup = false
@@ -319,6 +327,11 @@ internal class WifiDirectTunnel(
     }
 
     private fun resumePreparedRetry() {
+        if (removingGroup) {
+            state = State.DISCOVERING
+            targetAttempt?.let(::scheduleCleanupWaitFailure)
+            return
+        }
         when (state) {
             State.GROUP_READY -> requestConnectionInfo()
             State.P2P_CONNECTING -> {
@@ -345,8 +358,17 @@ internal class WifiDirectTunnel(
         }
     }
 
+    private fun adoptSocketBudget(attempt: ConnectionAttempt) {
+        if (!attempt.hasSameImmutableIdentity(socketRetryOwner)) {
+            socketRetryOwner = attempt
+            socketRetryCount = 0
+        }
+    }
+
     fun retainPassiveIngress(completedAttempt: ConnectionAttempt) {
         if (!running) return
+        val selected = selectedAttempt
+        if (selected != null && !selected.hasSameImmutableIdentity(completedAttempt)) return
         val currentTarget = targetAttempt
         if (currentTarget != null && !currentTarget.hasSameImmutableIdentity(completedAttempt)) {
             return
@@ -355,6 +377,11 @@ internal class WifiDirectTunnel(
             targetAttemptGeneration++
             targetAttempt = null
             targetAddress = null
+        }
+        if (selected != null) {
+            selectedAttempt = null
+            targetAttemptGeneration++
+            lossQueryGeneration++
         }
         if (ingressAttempt?.hasSameImmutableIdentity(completedAttempt) == true) {
             ingressAttempt = null
@@ -374,9 +401,22 @@ internal class WifiDirectTunnel(
         removeGroupAndRediscover("transport race selected LAN")
     }
 
-    fun retainSelectedChannel(completedAttempt: ConnectionAttempt) {
-        val currentTarget = targetAttempt ?: return
-        if (!currentTarget.hasSameImmutableIdentity(completedAttempt)) return
+    fun retainSelectedChannel(completedAttempt: ConnectionAttempt, verifiedSession: SignalingSessionV2? = null): Boolean {
+        if (!running || completedAttempt.runtimeSessionId != sessionId || removingGroup) return false
+        if (verifiedSession != null && (verifiedSession.isClosed || verifiedSession.channel.transport != Transport.WIFI_DIRECT ||
+            verifiedSession.channel.channelId != admittedControlChannelId || verifiedSession.targetLock != completedAttempt.targetLock ||
+            verifiedSession.pinnedIdentity.localSessionId != sessionId || verifiedSession.wireRequestKey.attemptId != completedAttempt.id)) return false
+        val currentTarget = targetAttempt
+        val approvedGlareOrigin = verifiedSession?.originatingAttempt?.let { origin ->
+            currentTarget?.hasSameImmutableIdentity(origin) == true && verifiedSession.requestRole == RequestRole.RESPONDER &&
+                origin.runtimeSessionId == completedAttempt.runtimeSessionId && origin.targetLock == completedAttempt.targetLock &&
+                Transport.WIFI_DIRECT in origin.channelPlan && Transport.WIFI_DIRECT in completedAttempt.channelPlan &&
+                completedAttempt.deadlineElapsedRealtimeMs <= origin.deadlineElapsedRealtimeMs
+        } == true
+        if (currentTarget != null && !currentTarget.hasSameImmutableIdentity(completedAttempt) && !approvedGlareOrigin) return false
+        if (currentTarget == null && selectedAttempt?.let { !it.hasSameImmutableIdentity(completedAttempt) } == true) return false
+        selectedAttempt = completedAttempt
+        socketRetryCount = 0
         targetAttemptGeneration++
         targetAttempt = null
         ingressAttempt = null
@@ -385,6 +425,7 @@ internal class WifiDirectTunnel(
         validatingGroup = false
         cancelPendingRetry()
         cancelConnectWatchdog()
+        return true
     }
 
     fun rejectNonTargetGroup(
@@ -404,7 +445,7 @@ internal class WifiDirectTunnel(
 
     @SuppressLint("MissingPermission")
     private fun connectTarget(device: WifiP2pDevice, attempt: ConnectionAttempt) {
-        if (!isTargetedAttemptCurrent(attempt)) return
+        if (removingGroup || !isTargetedAttemptCurrent(attempt)) return
         val address = normalizedAddress(device.deviceAddress)
         if (!peerRegistry.isAccepted(address)) {
             logPeer(device, accepted = false, reason = "未发布 MotoCom DNS-SD 身份")
@@ -459,7 +500,7 @@ internal class WifiDirectTunnel(
     }
 
     private fun connectTargetIfAvailable() {
-        if (retryPause.isPrepared) return
+        if (removingGroup || retryPause.isPrepared) return
         val attempt = targetAttempt ?: return
         if (!isTargetedAttemptCurrent(attempt)) return
         val address = peerRegistry.findAcceptedAddress(peerClaims, attempt.targetLock) ?: run {
@@ -739,6 +780,7 @@ internal class WifiDirectTunnel(
 
     @SuppressLint("MissingPermission")
     private fun clearUntrustedGroupBeforeDiscovery() {
+        if (!running || removingGroup || tunnelStarted || validatingGroup || state != State.DISCOVERING) return
         if (!setupRecoveryGate.isEnabled) {
             Log.d(TAG, "startup P2P setup waiting for Wi-Fi Direct enabled state")
             return
@@ -746,9 +788,12 @@ internal class WifiDirectTunnel(
         val m = manager ?: return
         val c = channel ?: return
         val taskContext = currentTargetContext()
+        val query = ++lossQueryGeneration
+        val scopeIsCurrent = capturePlatformScope()
         try {
             m.requestGroupInfo(c) { group ->
-                if (!isCapturedTaskCurrent(taskContext)) return@requestGroupInfo
+                if (!scopeIsCurrent() || query != lossQueryGeneration || state != State.DISCOVERING ||
+                    tunnelStarted || validatingGroup || !isCapturedTaskCurrent(taskContext)) return@requestGroupInfo
                 if (group == null) {
                     cancelPendingConnectThenDiscover(taskContext)
                 } else {
@@ -760,19 +805,33 @@ internal class WifiDirectTunnel(
                 }
             }
         } catch (t: Throwable) {
-            if (isCapturedTaskCurrent(taskContext)) postError(t, taskContext)
+            if (scopeIsCurrent() && isCapturedTaskCurrent(taskContext)) postError(t, taskContext)
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun cancelPendingConnectThenDiscover(taskContext: TargetedTaskContext? = null) {
+        if (!running || removingGroup) return
         val m = manager ?: return
         val c = channel ?: return
         val removalGeneration = ++groupRemovalGeneration
+        val lifecycle = lifecycleGeneration
+        val targetGeneration = targetAttemptGeneration
         removingGroup = true
-        val finish: () -> Unit = finish@{
-            if (removalGeneration != groupRemovalGeneration) return@finish
+        nativeCleanupSerial++
+        nativeCleanupDeadlineElapsedMs = Math.addExact(monotonicClock.now().elapsedRealtimeMs, CLOSE_STEP_TIMEOUT_MS)
+        cleanupTimeoutReportedFor = null
+        targetAttempt?.let(::scheduleCleanupWaitFailure)
+        val finish: (Boolean) -> Unit = finish@{ canceled ->
+            if (removalGeneration != groupRemovalGeneration || !running || !removingGroup ||
+                manager !== m || channel !== c || lifecycleGeneration != lifecycle) return@finish
+            groupRemovalGeneration++
             removingGroup = false
+            nativeCleanupDeadlineElapsedMs = null
+            if (targetGeneration != targetAttemptGeneration) {
+                resumeCurrentAfterGroupCleanup(groupRemoved = canceled)
+                return@finish
+            }
             val delay = boundedTaskDelay(taskContext, GROUP_REMOVAL_SETTLE_MS)
             if (delay != null && isCapturedTaskCurrent(taskContext)) {
                 mainHandler.postDelayed(
@@ -785,20 +844,35 @@ internal class WifiDirectTunnel(
         try {
             m.cancelConnect(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
-                    if (removalGeneration != groupRemovalGeneration) return
-                    if (isCapturedTaskCurrent(taskContext)) finish() else removingGroup = false
+                    finish(true)
                 }
 
                 override fun onFailure(reason: Int) {
-                    if (removalGeneration != groupRemovalGeneration) return
-                    if (isCapturedTaskCurrent(taskContext)) finish() else removingGroup = false
+                    finish(false)
                 }
             })
         } catch (_: Throwable) {
-            if (removalGeneration == groupRemovalGeneration) {
-                if (isCapturedTaskCurrent(taskContext)) finish() else removingGroup = false
-            }
+            finish(false)
         }
+    }
+
+    private fun scheduleCleanupWaitFailure(attempt: ConnectionAttempt) {
+        val cleanupDeadline = nativeCleanupDeadlineElapsedMs ?: return
+        val serial = nativeCleanupSerial
+        val m = manager
+        val c = channel
+        val lifecycle = lifecycleGeneration
+        val deadline = minOf(cleanupDeadline, attempt.deadlineElapsedRealtimeMs)
+        val delay = (deadline - monotonicClock.now().elapsedRealtimeMs).coerceAtLeast(0L)
+        mainHandler.postDelayed({
+            if (running && removingGroup && serial == nativeCleanupSerial &&
+                manager === m && channel === c && lifecycleGeneration == lifecycle && !retryPause.isPrepared &&
+                cleanupDeadline == nativeCleanupDeadlineElapsedMs && attempt.hasSameImmutableIdentity(targetAttempt) &&
+                !attempt.hasSameImmutableIdentity(cleanupTimeoutReportedFor)) {
+                cleanupTimeoutReportedFor = attempt
+                onTargetedTransportFailed(attempt, "native P2P cleanup acknowledgment timed out")
+            }
+        }, delay)
     }
 
     @SuppressLint("MissingPermission")
@@ -1090,14 +1164,25 @@ internal class WifiDirectTunnel(
     }
 
     private fun requestConnectionInfo() {
-        if (!running) return
+        if (!running || removingGroup) return
         val m = manager ?: return
         val c = channel ?: return
         val taskContext = currentTargetContext()
         if (taskContext != null && !isTargetedContextCurrent(taskContext)) return
+        val lifecycle = lifecycleGeneration
+        val targetGeneration = targetAttemptGeneration
+        val transportGeneration = socketTransportGeneration
+        val query = ++lossQueryGeneration
+        groupValidationGate.cancel()
+        validatingGroup = false
 
         try {
-            m.requestConnectionInfo(c) { info -> handleConnectionInfo(info, taskContext) }
+            m.requestConnectionInfo(c) { info ->
+                if (running && !removingGroup && manager === m && channel === c &&
+                    lifecycleGeneration == lifecycle && targetAttemptGeneration == targetGeneration &&
+                    socketTransportGeneration == transportGeneration && query == lossQueryGeneration)
+                    handleConnectionInfo(info, taskContext)
+            }
         } catch (t: Throwable) {
             if (taskContext == null || isTargetedContextCurrent(taskContext)) {
                 postError(t, taskContext)
@@ -1105,11 +1190,71 @@ internal class WifiDirectTunnel(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun confirmConnectionLoss() {
+        if (!running || removingGroup || retryPause.isPrepared) return
+        val m = manager ?: return
+        val c = channel ?: return
+        val lifecycle = lifecycleGeneration
+        val targetGeneration = targetAttemptGeneration
+        val transportGeneration = socketTransportGeneration
+        val query = ++lossQueryGeneration
+        groupValidationGate.cancel()
+        validatingGroup = false
+        val selected = selectedAttempt
+        val task = currentTargetContext()
+        val mayConnectAbsentGroup = selected == null && groupReuseProbeGeneration == targetGeneration
+        val capturedLoss = selected?.let(captureConnectionLoss)
+        val observedAt = capturedLoss?.occurredAtElapsedMs ?: monotonicClock.now().elapsedRealtimeMs
+        val loss = capturedLoss?.copy(occurredAtElapsedMs = observedAt)
+        fun current() = running && !removingGroup && !retryPause.isPrepared && manager === m && channel === c &&
+            lifecycleGeneration == lifecycle && targetAttemptGeneration == targetGeneration &&
+            socketTransportGeneration == transportGeneration && query == lossQueryGeneration
+        try {
+            m.requestConnectionInfo(c) { info ->
+                if (!current()) return@requestConnectionInfo
+                try { m.requestGroupInfo(c) { group ->
+                    if (!current()) return@requestGroupInfo
+                    // A broadcast with absent/stale NetworkInfo cannot revoke an accepted Socket.
+                    if (info.groupFormed) {
+                        groupReuseProbeGeneration = null
+                        handleConnectionInfo(info, task)
+                        return@requestGroupInfo
+                    }
+                    if (group != null) return@requestGroupInfo
+                    if (mayConnectAbsentGroup && task != null && isTargetedContextCurrent(task)) {
+                        groupReuseProbeGeneration = null
+                        connectingAddress = null
+                        state = State.DISCOVERING
+                        connectTargetIfAvailable()
+                        if (!serviceDiscoveryReady) setupServiceDiscovery() else discoverPeers()
+                        return@requestGroupInfo
+                    }
+                    cancelPendingRetry()
+                    resetTunnelOnly(task)
+                    selectedAttempt = null
+                    state = State.DISCOVERING
+                    Log.w(TAG, "native group loss confirmed: runtime=$sessionId attempt=${selected?.id ?: task?.attempt?.id} at=$observedAt")
+                    if (selected != null && loss?.sourceAttempt == selected) onSelectedGroupLost(selected, loss)
+                    else if (task != null && isTargetedContextCurrent(task))
+                        onTargetedTransportFailed(task.attempt, "native P2P group lost")
+                    onDisconnected()
+                    if (running && !removingGroup) discoverPeers()
+                } } catch (t: Throwable) {
+                    if (current()) {
+                        lossQueryGeneration++
+                        postError(t, task)
+                    }
+                }
+            }
+        } catch (t: Throwable) { if (current()) postError(t, task) }
+    }
+
     private fun handleConnectionInfo(
         info: WifiP2pInfo,
         taskContext: TargetedTaskContext?
     ) {
-        if (!running) return
+        if (!running || removingGroup) return
         if (
             (taskContext == null && targetAttempt != null) ||
             (taskContext != null && !isTargetedContextCurrent(taskContext))
@@ -1124,10 +1269,7 @@ internal class WifiDirectTunnel(
         }
         cancelPendingRetry()
         if (!info.groupFormed) {
-            resetTunnelOnly(taskContext)
-            state = State.DISCOVERING
-            mainHandler.post { onDisconnected() }
-            if (isCapturedTaskCurrent(taskContext)) discoverPeers()
+            confirmConnectionLoss()
             return
         }
         if (tunnelStarted || validatingGroup) return
@@ -1350,7 +1492,7 @@ internal class WifiDirectTunnel(
         validation: WifiDirectGroupValidationGate.Session,
         taskContext: TargetedTaskContext?
     ): Boolean =
-        running &&
+        running && !removingGroup &&
             groupValidationGate.isCurrent(validation) &&
             validation.taskContext == taskContext?.attemptContext &&
             (taskContext == null || isTargetedContextCurrent(taskContext))
@@ -1432,30 +1574,45 @@ internal class WifiDirectTunnel(
         attempt: Int,
         taskContext: TargetedTaskContext?
     ) {
-        if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
+        if (!running || retryPause.isPrepared || taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         if (removingGroup) return
         val removalGeneration = ++groupRemovalGeneration
         resetTunnelOnly(taskContext)
         val m = manager ?: return recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
         val c = channel ?: return recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
+        val lifecycle = lifecycleGeneration
+        val targetGeneration = targetAttemptGeneration
         removingGroup = true
+        if (attempt == 1 || nativeCleanupDeadlineElapsedMs == null) {
+            nativeCleanupSerial++
+            nativeCleanupDeadlineElapsedMs = Math.addExact(monotonicClock.now().elapsedRealtimeMs, CLOSE_STEP_TIMEOUT_MS)
+            cleanupTimeoutReportedFor = null
+        }
+        targetAttempt?.let(::scheduleCleanupWaitFailure)
         cancelConnectWatchdog()
+        fun claimCompletion(): Boolean {
+            if (removalGeneration != groupRemovalGeneration || !removingGroup ||
+                manager !== m || channel !== c || lifecycleGeneration != lifecycle) return false
+            ++groupRemovalGeneration // A duplicate native callback cannot operate on the replacement.
+            removingGroup = false
+            return true
+        }
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
-                    if (removalGeneration != groupRemovalGeneration) return
-                    if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) {
-                        removingGroup = false
+                    if (!claimCompletion()) return
+                    if (targetGeneration != targetAttemptGeneration) {
+                        resumeCurrentAfterGroupCleanup(groupRemoved = true)
                         return
                     }
                     Log.d(TAG, "已清理误连 P2P group: $reason")
-                    finishGroupRemoval(taskContext, removalGeneration)
+                    finishGroupRemoval(taskContext, groupRemovalGeneration)
                 }
 
                 override fun onFailure(code: Int) {
-                    if (removalGeneration != groupRemovalGeneration) return
-                    if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) {
-                        removingGroup = false
+                    if (!claimCompletion()) return
+                    if (targetGeneration != targetAttemptGeneration) {
+                        resumeCurrentAfterGroupCleanup(groupRemoved = false)
                         return
                     }
                     Log.w(TAG, "removeGroup 失败: reason=$reason code=${reasonText(code)}")
@@ -1471,9 +1628,17 @@ internal class WifiDirectTunnel(
                                 "removeGroup BUSY retry attempt=${attempt + 1}/$REMOVE_GROUP_BUSY_RETRY_COUNT " +
                                     "reason=$reason"
                             )
+                            removingGroup = true
+                            val retryGeneration = groupRemovalGeneration
                             mainHandler.postDelayed(
                                 {
-                                    if (
+                                    if (retryGeneration != groupRemovalGeneration || lifecycleGeneration != lifecycle ||
+                                        manager !== m || channel !== c || !running) return@postDelayed
+                                    removingGroup = false
+                                    if (targetGeneration != targetAttemptGeneration) {
+                                        ++groupRemovalGeneration
+                                        resumeCurrentAfterGroupCleanup(groupRemoved = false)
+                                    } else if (
                                         taskContext == null ||
                                             isTargetedContextCurrent(taskContext)
                                     ) {
@@ -1496,7 +1661,7 @@ internal class WifiDirectTunnel(
                                 taskContext
                             )
                         } else {
-                            finishGroupRemoval(taskContext, removalGeneration)
+                            finishGroupRemoval(taskContext, groupRemovalGeneration)
                         }
                         return
                     }
@@ -1507,21 +1672,45 @@ internal class WifiDirectTunnel(
                             taskContext
                         )
                     }
-                    recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
+                    recoverAfterGroupRemovalFailure(taskContext, groupRemovalGeneration)
                 }
             })
         } catch (t: Throwable) {
-            if (removalGeneration != groupRemovalGeneration) return
-            if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) {
-                removingGroup = false
+            if (!claimCompletion()) return
+            if (targetGeneration != targetAttemptGeneration) {
+                resumeCurrentAfterGroupCleanup(groupRemoved = false)
                 return
             }
             removingGroup = false
             if (taskContext == null || isTargetedContextCurrent(taskContext)) {
                 postError(t, taskContext)
             }
-            recoverAfterGroupRemovalFailure(taskContext, removalGeneration)
+            recoverAfterGroupRemovalFailure(taskContext, groupRemovalGeneration)
         }
+    }
+
+    private fun resumeCurrentAfterGroupCleanup(groupRemoved: Boolean) {
+        if (!running || removingGroup) return
+        nativeCleanupDeadlineElapsedMs = null
+        connectingAddress = null
+        // ACK changes the native facts even while the replacement is paused. Its later resume
+        // must not validate a group that has just been removed or interpret that absence as loss.
+        if (retryPause.isPrepared) {
+            state = if (groupRemoved) State.DISCOVERING else State.GROUP_READY
+            groupReuseProbeGeneration = if (groupRemoved) null else targetAttemptGeneration
+            return
+        }
+        if (targetAttempt != null && !isTargetedAttemptCurrent(requireNotNull(targetAttempt))) return
+        if (!groupRemoved) {
+            state = State.GROUP_READY
+            groupReuseProbeGeneration = targetAttemptGeneration
+            requestConnectionInfo()
+            return
+        }
+        state = State.DISCOVERING
+        connectTargetIfAvailable()
+        if (!serviceDiscoveryReady) setupServiceDiscovery() else discoverPeers()
+        schedulePendingRetryIfNeeded()
     }
 
     private fun recoverAfterGroupRemovalFailure(
@@ -1531,6 +1720,7 @@ internal class WifiDirectTunnel(
         if (removalGeneration != groupRemovalGeneration) return
         if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         removingGroup = false
+        nativeCleanupDeadlineElapsedMs = null
         if (!running) return
         connectingAddress = null
         resetDiscoveryCandidates(taskContext)
@@ -1553,6 +1743,7 @@ internal class WifiDirectTunnel(
         if (removalGeneration != groupRemovalGeneration) return
         if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         removingGroup = false
+        nativeCleanupDeadlineElapsedMs = null
         if (!running) return
         connectingAddress = null
         resetDiscoveryCandidates(taskContext)
@@ -1577,6 +1768,7 @@ internal class WifiDirectTunnel(
         expectedRemoteAddress: String,
         expectedTargetLock: TargetLock
     ) {
+        if (removingGroup) return
         socketTransport?.close()
         val generation = ++socketTransportGeneration
         val transport = WifiDirectSignalingSocket(
@@ -1624,11 +1816,13 @@ internal class WifiDirectTunnel(
     private fun resetTunnelOnly(taskContext: TargetedTaskContext? = null) {
         if (taskContext != null && !isTargetedContextIdentityCurrent(taskContext)) return
         groupValidationGate.cancel()
+        lossQueryGeneration++
         tunnelStarted = false
         validatingGroup = false
         connectingAddress = null
         cancelConnectWatchdog()
         socketTransportGeneration++
+        admittedControlChannelId = null
         socketTransport?.close()
         socketTransport = null
     }
@@ -1925,20 +2119,25 @@ internal class WifiDirectTunnel(
         onFailed: () -> Unit = {},
         onSuccess: () -> Unit = {},
         taskContext: TargetedTaskContext? = currentTargetContext()
-    ) = action(
+    ): WifiP2pManager.ActionListener {
+        val scopeIsCurrent = capturePlatformScope()
+        return action(
         message = message,
         onFailed = onFailed,
         onSuccess = onSuccess,
         onBusy = {
-            if (!isCapturedTaskCurrent(taskContext)) return@action
+            if (!scopeIsCurrent() || !isCapturedTaskCurrent(taskContext) || tunnelStarted ||
+                validatingGroup || state != State.DISCOVERING) return@action
             if (setupRecoveryGate.scheduleRetry(setup)) {
                 Log.w(TAG, "setup BUSY retry setupServiceDiscovery")
                 resetTunnelOnly(taskContext)
+                val retryIsCurrent = capturePlatformScope()
                 val delay = boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS)
                     ?: return@action
                 mainHandler.postDelayed({
                     if (
                         setupRecoveryGate.takeRetry(setup) &&
+                        retryIsCurrent() &&
                         isCapturedTaskCurrent(taskContext)
                     ) {
                         setupServiceDiscovery()
@@ -1953,9 +2152,10 @@ internal class WifiDirectTunnel(
                 postDiscoveryStatus(BUSY_EXHAUSTED_STATUS, taskContext)
             }
         },
-        isCurrent = { isSetupCurrent(setup) },
+        isCurrent = { scopeIsCurrent() && isSetupCurrent(setup) },
         taskContext = taskContext
-    )
+        )
+    }
 
     private fun isSetupCurrent(setup: WifiDirectSetupRecoveryGate.Session): Boolean =
         running &&
@@ -1967,28 +2167,44 @@ internal class WifiDirectTunnel(
         onFailed: () -> Unit = {},
         onSuccess: () -> Unit = {},
         taskContext: TargetedTaskContext? = currentTargetContext()
-    ) = action(
+    ): WifiP2pManager.ActionListener {
+        val scopeIsCurrent = capturePlatformScope()
+        return action(
         message = message,
         onFailed = onFailed,
         onSuccess = onSuccess,
         onBusy = {
-            if (!isCapturedTaskCurrent(taskContext)) return@action
+            if (!scopeIsCurrent() || !isCapturedTaskCurrent(taskContext) || tunnelStarted ||
+                validatingGroup || state != State.DISCOVERING) return@action
             Log.w(TAG, "discover BUSY retry discoverServices")
             resetTunnelOnly(taskContext)
+            val retryIsCurrent = capturePlatformScope()
             val delay = boundedTaskDelay(taskContext, BUSY_RETRY_DELAY_MS) ?: return@action
             mainHandler.postDelayed(
-                { if (isCapturedTaskCurrent(taskContext)) discoverPeers() },
+                { if (retryIsCurrent() && isCapturedTaskCurrent(taskContext)) discoverPeers() },
                 delay
             )
         },
         isCurrent = {
-            running && setupRecoveryGate.isEnabled && isCapturedTaskCurrent(taskContext)
+            scopeIsCurrent() && setupRecoveryGate.isEnabled && isCapturedTaskCurrent(taskContext)
         },
         taskContext = taskContext
-    )
+        )
+    }
+
+    private fun capturePlatformScope(): () -> Boolean {
+        val m = manager
+        val c = channel
+        val lifecycle = lifecycleGeneration
+        val targetGeneration = targetAttemptGeneration
+        val transportGeneration = socketTransportGeneration
+        return { running && !removingGroup && manager === m && channel === c &&
+            lifecycleGeneration == lifecycle && targetAttemptGeneration == targetGeneration &&
+            socketTransportGeneration == transportGeneration }
+    }
 
     private fun isCapturedTaskCurrent(taskContext: TargetedTaskContext?): Boolean =
-        if (taskContext == null) targetAttempt == null
+        if (taskContext == null) running && !retryPause.isPrepared && targetAttempt == null
         else isTargetedContextCurrent(taskContext)
 
     private fun action(
@@ -2096,6 +2312,7 @@ internal class WifiDirectTunnel(
                     },
                     onTransferred = {
                         state = State.SIGNALING_READY
+                        admittedControlChannelId = session.channel.channelId
                         connectingAddress = null
                         cancelConnectWatchdog()
                     }
@@ -2144,12 +2361,34 @@ internal class WifiDirectTunnel(
                 (taskContext == null && targetAttempt != null)
             ) return@post
             postError(error, taskContext)
+            val retryable = generateSequence<Throwable>(error) { it.cause }.any {
+                it is java.io.EOFException || it is java.net.SocketException || it is java.net.SocketTimeoutException
+            }
+            if (retryable && taskContext != null && taskContext.attempt.hasSameImmutableIdentity(socketRetryOwner) &&
+                socketRetryCount < 2 && isTargetedContextCurrent(taskContext)) {
+                val delay = boundedTaskDelay(taskContext, SOCKET_RETRY_DELAY_MS)
+                if (delay != null) {
+                    socketRetryCount++
+                    resetTunnelOnly(taskContext)
+                    state = State.GROUP_READY
+                    val retryGeneration = socketTransportGeneration
+                    Log.w(TAG, "retry Socket after group validation: attempt=${taskContext.attempt.id} retry=$socketRetryCount deadline=${taskContext.attempt.deadlineElapsedRealtimeMs}")
+                    mainHandler.postDelayed({
+                        if (!removingGroup && taskContext.attempt.hasSameImmutableIdentity(socketRetryOwner) &&
+                            retryGeneration == socketTransportGeneration && isTargetedContextCurrent(taskContext))
+                            requestConnectionInfo()
+                    }, delay)
+                    return@post
+                }
+            }
+            if (taskContext != null && isTargetedContextCurrent(taskContext))
+                onTargetedTransportFailed(taskContext.attempt, "signaling Socket failed: ${error.javaClass.simpleName}")
             removeGroupAndRediscover("signaling socket failure", taskContext = taskContext)
         }
     }
 
     private fun isTransportCurrent(generation: Int): Boolean =
-        running && generation == socketTransportGeneration &&
+        running && !removingGroup && generation == socketTransportGeneration &&
             socketTransport != null && state == State.GROUP_READY
 
     private fun postError(t: Throwable, taskContext: TargetedTaskContext? = null) {

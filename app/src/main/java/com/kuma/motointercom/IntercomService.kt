@@ -197,6 +197,32 @@ class IntercomService : Service() {
             orchestrator.dispatch(SessionEvent.AttemptMilestoneElapsed(milestone))
         }
     )
+    private var connectedLossTimer: Pair<ConnectedLossWindow, Runnable>? = null
+
+    private fun cancelConnectedLossTimer(window: ConnectedLossWindow? = null) {
+        val scheduled = connectedLossTimer ?: return
+        if (window != null && scheduled.first !== window) return
+        mainHandler.removeCallbacks(scheduled.second)
+        connectedLossTimer = null
+    }
+
+    private fun scheduleConnectedLossTimer(window: ConnectedLossWindow) {
+        if (orchestrator.connectedLossWindow !== window || activeRuntimeSessionId != window.connected.runtimeSessionId) return
+        if (connectedLossTimer?.first === window) return
+        cancelConnectedLossTimer()
+        lateinit var callback: Runnable
+        callback = Runnable {
+            if (connectedLossTimer?.first !== window || connectedLossTimer?.second !== callback) return@Runnable
+            connectedLossTimer = null
+            publishLog("WebRTC transient loss observation due: runtime=${window.connected.runtimeSessionId.value} " +
+                "attempt=${window.connected.attemptId.value} channel=${window.owner.channelId.value} " +
+                "generation=${window.generation} firstLoss=${window.firstLoss.occurredAtElapsedMs} " +
+                "recoveryDeadline=${window.recoveryDeadlineElapsedMs}")
+            orchestrator.dispatch(SessionEvent.ConnectedLossObservationDue(window))
+        }
+        connectedLossTimer = window to callback
+        mainHandler.postDelayed(callback, (window.observedUntilElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+    }
     private val controlChannelCloseDeadlineScheduler = ControlChannelCloseDeadlineScheduler(
         elapsedRealtime = SystemClock::elapsedRealtime,
         postDelayed = { callback, delayMs -> mainHandler.postDelayed(callback, delayMs) },
@@ -1062,6 +1088,18 @@ class IntercomService : Service() {
             onDisconnected = {
                 postForSession(token) { publishStatus(SIGNAL_LOST_STATUS) }
             },
+            captureConnectionLoss = { attempt ->
+                orchestrator.captureConnectionLossObservation().takeIf { it.sourceAttempt == attempt }
+            },
+            onSelectedGroupLost = { attempt, observation ->
+                onSelectedWifiDirectGroupLost(token, attempt, observation)
+            },
+            onTargetedTransportFailed = { attempt, reason ->
+                postForSession(token) {
+                    orchestrator.dispatch(SessionEvent.TargetedTransportOpenFailed(
+                        attempt.runtimeSessionId, attempt.id, Transport.WIFI_DIRECT, reason))
+                }
+            },
             onTargetedOverlapUnavailable = { attempt ->
                 postForSession(token) {
                     orchestrator.dispatch(
@@ -1280,9 +1318,13 @@ class IntercomService : Service() {
             is SignalingMessageV2.Candidate -> {
                 val attempt = orchestrator.currentAttempt
                 val candidate = attempt?.let(session::toConnectionCandidateContext)
+                val awaitingAcceptCommit = candidate?.let {
+                    canBufferAcceptedMedia(isSessionCurrent(token), attempt, orchestrator.activeControlAttempt,
+                        it, session, MonotonicTimestamp(SystemClock.elapsedRealtime()))
+                } == true
                 if (
                     candidate == null ||
-                    !canUseMediaCandidate(
+                    !awaitingAcceptCommit && !canUseMediaCandidate(
                         sessionCurrent = isSessionCurrent(token),
                         currentAttempt = attempt,
                         activeAttempt = orchestrator.activeControlAttempt,
@@ -1291,6 +1333,10 @@ class IntercomService : Service() {
                     )
                 ) {
                     closeControlChannel(session)
+                    return
+                }
+                if (awaitingAcceptCommit) {
+                    pendingMediaMessages.getOrPut(candidate, ::mutableListOf) += message
                     return
                 }
                 val manager = intercomManager?.takeIf { activeMediaContext == candidate }
@@ -1531,9 +1577,13 @@ class IntercomService : Service() {
                 wifiTunnel?.retainPassiveIngress(effect.attempt)
             }.onFailure(::handleError)
         } else {
-            runCatching {
-                wifiTunnel?.retainSelectedChannel(effect.attempt)
-            }.onFailure(::handleError)
+            val retained = runCatching {
+                wifiTunnel?.retainSelectedChannel(effect.attempt, session) == true
+            }.onFailure(::handleError).getOrDefault(false)
+            if (!retained) {
+                closeControlChannel(session)
+                return
+            }
         }
 
         physicalLinkReady = true
@@ -1551,6 +1601,21 @@ class IntercomService : Service() {
             },
             onConnectionStateChanged = {
                 onConnectionStateChanged(token, candidate, it)
+            },
+            freezeConnectionLoss = {
+                orchestrator.captureConnectionLossObservation().takeIf { it.sourceAttempt == candidate.attempt }
+            },
+            freezeDisconnectedLoss = {
+                orchestrator.captureConnectionLossObservation().also { observation ->
+                    orchestrator.observeConnectionLoss(SessionEvent.SignalingDisconnected(
+                        candidate.runtimeSessionId, candidate.attemptId, candidate.channelId), observation)
+                }
+            },
+            onIntercomDisconnectedObserved = { error, observation ->
+                onIntercomDisconnected(token, candidate, error, observation)
+            },
+            onConnectionStateObserved = {
+                onConnectionStateChanged(token, candidate, it.state, it)
             },
             onAudioReadyChanged = { ready ->
                 postForMediaContext(token, candidate) { publishAudioReady(ready) }
@@ -1576,14 +1641,32 @@ class IntercomService : Service() {
         updateStageStatus()
     }
 
+    private fun onSelectedWifiDirectGroupLost(
+        token: SessionGeneration.Token,
+        attempt: ConnectionAttempt,
+        observation: ConnectionLossObservation
+    ) {
+        orchestrator.recordSelectedTransportLoss(attempt, Transport.WIFI_DIRECT, observation)
+        postForSession(token) {
+            val media = activeMediaContext
+            if (media?.attempt == attempt && media.transport == Transport.WIFI_DIRECT) {
+                orchestrator.dispatch(orchestrator.observeConnectionLoss(
+                    SessionEvent.SignalingDisconnected(attempt.runtimeSessionId, attempt.id), observation))
+            }
+        }
+    }
+
     private fun onConnectionStateChanged(
         token: SessionGeneration.Token,
         candidate: ConnectionCandidateContext,
-        state: PeerConnection.PeerConnectionState
+        state: PeerConnection.PeerConnectionState,
+        nativeObservation: NativeConnectionObservation? = null
     ) {
-        val lossObservation = orchestrator.captureConnectionLossObservation()
+        val lossObservation = if (nativeObservation == null) orchestrator.captureConnectionLossObservation()
+        else nativeObservation.firstLoss ?: ConnectionLossObservation(candidate.attempt, null, nativeObservation.elapsedMs)
         val event = orchestrator.observeConnectionLoss(SessionEvent.WebRtcStateChanged(
-            candidate.runtimeSessionId, candidate.attemptId, state.toProductState(), System.currentTimeMillis()
+            candidate.runtimeSessionId, candidate.attemptId, state.toProductState(),
+            nativeObservation?.wallMs ?: System.currentTimeMillis(), nativeObservation
         ), lossObservation)
         postForMediaContext(token, candidate) {
             publishLog("WebRTC 状态：$state")
@@ -1623,10 +1706,12 @@ class IntercomService : Service() {
     private fun onIntercomDisconnected(
         token: SessionGeneration.Token,
         candidate: ConnectionCandidateContext,
-        error: IOException
+        error: IOException,
+        observation: ConnectionLossObservation? = null
     ) {
         val event = orchestrator.observeConnectionLoss(SessionEvent.SignalingDisconnected(
-            candidate.runtimeSessionId, candidate.attemptId))
+            candidate.runtimeSessionId, candidate.attemptId, candidate.channelId),
+            observation ?: ConnectionLossObservation(candidate.attempt, null, SystemClock.elapsedRealtime()))
         postForMediaContext(token, candidate) {
             publishLog("信令通道断开：${error.message}")
             orchestrator.dispatch(
@@ -1671,6 +1756,7 @@ class IntercomService : Service() {
         cancelAllIncomingConfirmationSurfaces()
         attemptDeadlineScheduler.cancelRuntime(runtimeSessionId)
         attemptMilestoneScheduler.cancelRuntime(runtimeSessionId)
+        cancelConnectedLossTimer()
         controlChannelCloseDeadlineScheduler.cancelRuntime(runtimeSessionId)
         invalidatePresenceConnectRequests(notifyCancellation = true)
         markDiscoveryUnavailable()
@@ -1828,6 +1914,7 @@ class IntercomService : Service() {
         discoveryRefreshGate.cancel()
         attemptDeadlineScheduler.cancel()
         attemptMilestoneScheduler.cancel()
+        cancelConnectedLossTimer()
         controlChannelCloseDeadlineScheduler.cancel()
         cancelAllIncomingConfirmationSurfaces()
         sessions.invalidate()
@@ -1932,6 +2019,8 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.ScheduleConnectedLossObservation -> scheduleConnectedLossTimer(effect.window)
+            is SessionEffect.CancelConnectedLossObservation -> cancelConnectedLossTimer(effect.window)
             is SessionEffect.ProbeRecoveryDiscovery -> scheduleRecoveryDiscoveryProbe(effect)
             is SessionEffect.RefreshDiscovery -> {
                 if (!discoveryRefreshGate.accepts(effect.generation)) return
@@ -2504,15 +2593,6 @@ class IntercomService : Service() {
         }, delayMillis)
         return true
     }
-
-    private fun PeerConnection.PeerConnectionState.toProductState(): WebRtcConnectionState =
-        when (this) {
-            PeerConnection.PeerConnectionState.CONNECTED -> WebRtcConnectionState.CONNECTED
-            PeerConnection.PeerConnectionState.DISCONNECTED -> WebRtcConnectionState.DISCONNECTED
-            PeerConnection.PeerConnectionState.FAILED -> WebRtcConnectionState.FAILED
-            PeerConnection.PeerConnectionState.CLOSED -> WebRtcConnectionState.CLOSED
-            else -> WebRtcConnectionState.OTHER
-        }
 
     private fun drainSignalingSessions(): List<SignalingSessionV2> =
         signalingSessions.values.toList().also {
@@ -3289,6 +3369,22 @@ internal fun canUseMediaCandidate(
     isCurrentMediaCandidate(currentAttempt, activeAttempt, candidate) &&
     session.matchesCandidate(candidate) &&
     (expectedRole == null || session.requestRole.webRtcRole == expectedRole)
+
+internal fun canBufferAcceptedMedia(
+    sessionCurrent: Boolean,
+    currentAttempt: ConnectionAttempt?,
+    activeAttempt: AttemptChannelSet?,
+    candidate: ConnectionCandidateContext,
+    session: SignalingSessionV2,
+    now: MonotonicTimestamp
+): Boolean = sessionCurrent && session.matchesCandidate(candidate) &&
+    !candidate.attempt.isExpiredAt(now) && currentAttempt == candidate.attempt &&
+    activeAttempt?.let {
+        it.attempt == candidate.attempt && it.phase == SignalingAttemptPhase.ACCEPTING &&
+            it.terminalOutcome == null && it.mediaOwnerChannelId == candidate.channelId &&
+            candidate.channelId in it.channelIds && it.wireRequestKey == candidate.wireRequestKey && it.peer == candidate.peer
+    } == true && session.requestRole == RequestRole.RESPONDER &&
+    session.phase == SignalingPhase.READY_TO_SEND_ANSWER
 
 internal fun canStartWebRtc(
     sessionCurrent: Boolean,

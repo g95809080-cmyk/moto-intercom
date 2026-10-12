@@ -175,7 +175,8 @@ internal class WifiDirectSignalingSocket(
                 onReleased = {
                     pendingSockets.remove(it)
                     if (it.currentStage == PendingSocketLease.Stage.CLOSED && terminal.get() && isUsable()) {
-                        notifyFailure(IOException("pending signaling Socket closed before Service admission"))
+                        notifyFailure(it.failureCause?.asIo("pending signaling Socket failed")
+                            ?: IOException("pending signaling Socket closed before Service admission"))
                     }
                 }
             ).also { pendingSockets.add(it) }

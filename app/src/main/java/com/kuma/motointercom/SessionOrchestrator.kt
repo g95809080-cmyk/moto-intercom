@@ -21,7 +21,7 @@ internal class SessionOrchestrator(
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val onLog: (String) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
-    elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
+    private val elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
     attemptTimeoutMs: Long = 10_000L,
     attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
     private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy()
@@ -44,6 +44,7 @@ internal class SessionOrchestrator(
     )
     private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
     private val persistedConnectedAttempts = mutableSetOf<ConnectionAttemptId>()
+    private val lossProducerSequence = java.util.concurrent.atomic.AtomicLong()
 
     val state: StateFlow<IntercomState> = mutableState.asStateFlow()
     val effects: Flow<SessionEffect> = effectChannel.receiveAsFlow()
@@ -84,10 +85,15 @@ internal class SessionOrchestrator(
     internal val recoveryIntent: AutomaticRecoveryIntent?
         get() = signalingControl.recoveryIntent
 
+    internal val connectedLossWindow: ConnectedLossWindow?
+        get() = signalingControl.connectedLossWindow
+
     /** Capture at the actual loss producer, before the Main queue or any clock/ID factory. */
     internal fun captureConnectionLossObservation(): ConnectionLossObservation {
         val source = currentAttempt
-        return ConnectionLossObservation(source, source?.let(automaticRecoveryPolicy::captureLoss))
+        val sequence = lossProducerSequence.incrementAndGet()
+        val authorization = source?.let(automaticRecoveryPolicy::captureLoss)
+        return ConnectionLossObservation(source, authorization, elapsedRealtime(), sequence)
     }
 
     internal fun observeConnectionLoss(
@@ -98,8 +104,12 @@ internal class SessionOrchestrator(
             event is SessionEvent.SignalingDisconnected || event is SessionEvent.WebRtcStateChanged &&
             event.state in setOf(WebRtcConnectionState.DISCONNECTED, WebRtcConnectionState.FAILED, WebRtcConnectionState.CLOSED)
         if (!loss) return event
+        signalingControl.recordProducerLoss(event, observation)
         return SessionEvent.ConnectionLossObserved(event, observation)
     }
+
+    internal fun recordSelectedTransportLoss(attempt: ConnectionAttempt, transport: Transport,
+        observation: ConnectionLossObservation) = signalingControl.recordSelectedTransportLoss(attempt, transport, observation)
 
     internal fun isAttemptAuthorized(attempt: ConnectionAttempt): Boolean =
         signalingControl.isAttemptAuthorized(attempt)

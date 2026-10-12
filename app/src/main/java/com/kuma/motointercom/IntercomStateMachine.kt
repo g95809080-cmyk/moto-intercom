@@ -12,6 +12,7 @@ internal sealed interface SessionEvent {
     data class RuntimeStarted(val runtimeSessionId: RuntimeSessionId) : SessionEvent
 
     data class ConnectionLossObserved(val event: SessionEvent, val observation: ConnectionLossObservation) : SessionEvent
+    data class ConnectedLossObservationDue(val window: ConnectedLossWindow) : SessionEvent
 
     data class AutomaticReconnectChanged(
         val enabled: Boolean,
@@ -223,12 +224,14 @@ internal sealed interface SessionEvent {
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId,
         val state: WebRtcConnectionState,
-        val occurredAt: Long
+        val occurredAt: Long,
+        val nativeObservation: NativeConnectionObservation? = null
     ) : SessionEvent
 
     data class SignalingDisconnected(
         val runtimeSessionId: RuntimeSessionId,
-        val attemptId: ConnectionAttemptId
+        val attemptId: ConnectionAttemptId,
+        val selectedChannelId: ControlChannelId? = null
     ) : SessionEvent
 
     data class RecoveryExhausted(
@@ -251,6 +254,8 @@ internal sealed interface SessionEvent {
 }
 
 internal sealed interface SessionEffect {
+    data class ScheduleConnectedLossObservation(val window: ConnectedLossWindow) : SessionEffect
+    data class CancelConnectedLossObservation(val window: ConnectedLossWindow) : SessionEffect
     data class RefreshDiscovery(
         val runtimeSessionId: RuntimeSessionId,
         val generation: Long
@@ -444,6 +449,7 @@ internal fun reduceIntercomState(
     is SessionEvent.ConfirmationSurfaceUnavailable,
     is SessionEvent.ConnectPresenceRequested,
     is SessionEvent.ConnectionLossObserved,
+    is SessionEvent.ConnectedLossObservationDue,
     is SessionEvent.RecoveryEpisodeRequested,
     is SessionEvent.RecoveryIntentCanceled,
     is SessionEvent.PresenceConnectCanceled,
