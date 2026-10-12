@@ -1,0 +1,145 @@
+{
+  "baseSha": "717fbecc23d60b1b35280f3e895898491bf533dc",
+  "headSha": "49bf4e50dbc1d4b5f7c75686cad032e10a25b9c6",
+  "result": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "reviewed": 19,
+  "skipped": 0,
+  "officialOcrSelected": 10,
+  "officialOcrExcludedManuallyReviewed": 9,
+  "nextGateAllowed": "Complete local review record; restore Linear authorization and bind a real issue before formal branch/change mapping, Draft PR and fixed-SHA Android CI",
+  "files": [
+    {
+      "path": "app/src/androidTest/java/com/kuma/motointercom/NativeAudioIoGateInstrumentationTest.kt",
+      "depth": "full_source",
+      "blob": "f9d5b2b1da570b50aaa78a95049446f74666c55a",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioRouteController.kt",
+      "depth": "base_source_and_full_diff",
+      "blob": "698d2d97534146b670f8208cf9ac3a98164a8652",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioRouteState.kt",
+      "depth": "full_source",
+      "blob": "90d1855ec4a00c894f5419a96bede51619121c9e",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AudioSessionController.kt",
+      "depth": "full_source",
+      "blob": "1778e262c0a0d72a05ce7e0cd68648e0cb096955",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DecodedAudioPlayout.kt",
+      "depth": "full_source",
+      "blob": "a51255c3ba2e9a6627a8ff6c57758ec043544d2e",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt",
+      "depth": "diff_context",
+      "blob": "731d26f6f3c43f5e0aae0a6ccef0f25995c7bb5b",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainActivity.kt",
+      "depth": "diff_context",
+      "blob": "2e654269d38c65a94a021d5c0148495e9162d702",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/NativeCaptureDiagnostics.kt",
+      "depth": "full_source",
+      "blob": "fbe90cab385ddd20c26ff9e90374cc4df0ec2a08",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt",
+      "depth": "base_source_and_full_diff",
+      "blob": "e7f48ecf1ba8497bde5bf82e2a64f916bd9504ab",
+      "officialSelected": true
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AudioRouteControllerRobolectricTest.kt",
+      "depth": "full_source",
+      "blob": "ccd356c1bf45329e4dbac9ad29a49e30763d6c6f",
+      "officialSelected": false
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/BluetoothAudioIoRecoveryRobolectricTest.kt",
+      "depth": "full_source",
+      "blob": "71b52bebbf429d0765a061830ffefde9c0a4dfd9",
+      "officialSelected": false
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/BluetoothPermissionRecoveryRobolectricTest.kt",
+      "depth": "full_source",
+      "blob": "ea127343fd8979dd35720bc4b30114471a82264a",
+      "officialSelected": false
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/.openspec.yaml",
+      "depth": "full_source",
+      "blob": "b9ebfc72d6da2b141f153e3d48f7513ff2d0fa0b",
+      "officialSelected": true
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/README.md",
+      "depth": "full_source",
+      "blob": "d0c85eed334f7923d2abd3d74ae0ca7b6c4a3507",
+      "officialSelected": false
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/design.md",
+      "depth": "full_source",
+      "blob": "93e173bdf0cca06f7391f6520d0e7618bc9e81e5",
+      "officialSelected": false
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/proposal.md",
+      "depth": "full_source",
+      "blob": "f0693a3203dffd295e395667ee6326565ec4fb5e",
+      "officialSelected": false
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/specs/bluetooth-io-recovery/spec.md",
+      "depth": "full_source",
+      "blob": "cdb3a339c637d08a57e2de16f394a544fd1e3ef6",
+      "officialSelected": false
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/tasks.md",
+      "depth": "full_source",
+      "blob": "6b81d2ae3742800e29484b7694e3d1957dd895e1",
+      "officialSelected": false
+    },
+    {
+      "path": "rasen/changes/field-bluetooth-io-recovery/verification.md",
+      "depth": "full_source",
+      "blob": "ac7088d5bc9670edfc2a3ff65af3618f86d47a91",
+      "officialSelected": false
+    }
+  ],
+  "nonBlocking": [
+    "Ordinary Bluetooth two-device first connection, reconnection and human riding/listening acceptance remain deferred.",
+    "Official delegate CLI scope/rules plus independent model review were used; no remote OCR LLM service invocation is claimed."
+  ],
+  "verification": {
+    "jvmSuites": 95,
+    "jvmTests": 759,
+    "jvmFailures": 0,
+    "jvmErrors": 0,
+    "jvmSkipped": 0,
+    "lintErrors": 0,
+    "lintWarnings": 70,
+    "api36Passed": 25,
+    "api36Skipped": 2,
+    "api36Failures": 0
+  }
+}
