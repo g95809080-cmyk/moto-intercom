@@ -544,23 +544,27 @@ internal class RiderAudioEngine(
         val energy = PcmTransmitGate.approximateLevel(buffer)
         val now = SystemClock.elapsedRealtime()
         val result = synchronized(audioControlLock) {
-            if (closed.get() || !audioIoGate.allows(gateRevision)) {
-                PcmTransmitGate.silence(buffer)
-                return
+            // The owner's synchronized lifecycle cannot acknowledge replacement while this
+            // short detector/PCM update is in flight. No device operations run under either lock.
+            synchronized(recordingOwner) {
+                if (closed.get() || !audioIoGate.allows(gateRevision) || !recordingOwner.isCurrent(Thread.currentThread())) {
+                    PcmTransmitGate.silence(buffer)
+                    return
+                }
+                val decision = voxGate.update(energy, now)
+                gateState = decision.state
+                // Controls and actual frame mutation share a lock, so an acknowledged mute
+                // cannot leak a subsequent frame through a stale queued RTC task.
+                if (closed.get() || !audioIoGate.allows(gateRevision) || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
+                    PcmTransmitGate.silence(buffer)
+                }
+                VoxSampleResult(
+                    decision = decision,
+                    controls = versionedAudioControls,
+                    state = effectiveVoxRuntimeState(audioControls, decision.state),
+                    trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
+                )
             }
-            val decision = voxGate.update(energy, now)
-            gateState = decision.state
-            // Controls and the actual frame mutation share a lock, so an acknowledged mute
-            // cannot leak a subsequent frame through a stale queued RTC task.
-            if (closed.get() || !audioIoGate.allows(gateRevision) || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
-                PcmTransmitGate.silence(buffer)
-            }
-            VoxSampleResult(
-                decision = decision,
-                controls = versionedAudioControls,
-                state = effectiveVoxRuntimeState(audioControls, decision.state),
-                trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
-            )
         }
         val decision = result.decision
         if (decision.stateChanged) {
