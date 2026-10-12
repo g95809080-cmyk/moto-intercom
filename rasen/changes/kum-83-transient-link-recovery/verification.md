@@ -1,6 +1,6 @@
 # KUM-83 验证记录
 
-Base `fd0bcd0ff194e165216e7d2b515c0f4f52a82552`；固定源码 Head `ff19c4f152f3800b19be769f7149fbfc748e0db5`。正式只读架构审查 `APPROVED`，P0=0/P1=0，25/25路径覆盖、0 skipped。其后仅补证据文档，生产/测试/构建 blob 需与该 Head 相同。固定源码 [Android CI 38230913237](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38230913237) 已触发，结果尚待完成；不代表已完成双机或骑行验收。
+Base `fd0bcd0ff194e165216e7d2b515c0f4f52a82552`；固定源码 Head `ff19c4f152f3800b19be769f7149fbfc748e0db5`。正式只读架构审查 `APPROVED`，P0=0/P1=0，25/25路径覆盖、0 skipped。其后仅补证据文档，生产/测试/构建 blob 与该 Head 相同。固定源码 [Android CI 38230913237](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38230913237) completed/success：verify job `114749876580` 与 API36 job `114749876378` 均成功；不代表已完成双机或骑行验收。
 
 ## 本地自动化
 
@@ -29,6 +29,10 @@ Debug APK SHA256（仅 owned AVD 验证）：`C729C9F2B648463F97CBD55BAEADA3F94C
 官方 Alibaba Open Code Review 1.12.13 `delegate preview/rule` 固定 Base/Head：25 changed paths，14 selected / 11 excluded。只读 reviewer 使用官方规则，并手动覆盖 excluded 测试/docs：18 full_source（含7合同/证据文件）+7 diff_context；大型未改段未记作全文。固定范围 `APPROVED`，P0=0/P1=0。未调用远程OCR LLM，不把规则输出当代码批准。完整 path/blob/depth 见 `coverage.json`。
 
 Next gate allowed：补交真实证据、确认生产/测试 blob 不变；独立Draft PR及固定源码Head Android CI。CI闭合后推进KUM-84。唯一非阻断补强为 Connected 观察中 same-peer RECOVERY 入站分支的直接回归；当前真实双origin HELLO用例主要从Connecting入场，该分支未发现确认缺陷。
+
+[Draft PR #56](https://github.com/g95809080-cmyk/moto-intercom/pull/56) 已绑定KUM-83；Source之后文档Head `f259ea31cd419303fb80b02d09490bc2815b8945` 只有4项Rasen证据变化。`git diff --quiet ff19c4f HEAD -- app .github scripts version.properties` 成功，未改生产、测试、构建、workflow或版本blob。CI固定经过架构审查的Source Head；后续CI链接与任务状态文档不重复运行行为检查。
+
+证据绑定复审 Base `fd0bcd0f` / Head `f259ea31` 为 APPROVED，P0/P1=0；25 path/blob全部匹配获批Source，生产/测试/构建diff为零。已通过 GitHub API核实 run/job 两项成功并写入Linear；KUM-83进入 In Review，真实验收仍未通过。Next gate允许CI/Linear证据闭合后进入独立KUM-84，纯文档后续不重复行为CI。
 
 ## 实机限制
 

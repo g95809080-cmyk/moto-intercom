@@ -3,5 +3,5 @@
 - [x] 3. P2P group/Socket重试与原生清理屏障，实际SDK/worker/Socket顺序回归
 - [x] 4. 双角色/同时恢复/迟到事件/off/stop/三轮Reset自动化回归，完整JVM/Lint/双APK/API36（真实双机见7）
 - [x] 5. 官方OCR规则与固定SHA只读架构审查，P0/P1全部关闭
-- [ ] 6. 独立Draft PR、固定Head Android CI与Linear/Rasen证据
+- [x] 6. 独立Draft PR、固定Source Head Android CI与Linear/Rasen证据（真实验收未通过，In Review）
 - [ ] 7. 双真实手机及人工骑行验收（条件不足，未通过）
