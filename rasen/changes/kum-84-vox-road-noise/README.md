@@ -6,4 +6,4 @@
 
 原始用户日志、合成复现、A/B采样与构建输出留在忽略`logs/2026-10-12-field-review/`。无真实道路参考音频，合成结果不能作为骑行或人工听音通过结论。
 
-Source `f587472e251b59f3c25e8cad5e483c8e0afc887a` 固定审查APPROVED/P0P1=0，12/12路径；本地804 JVM、Lint0 error、原生29pass+2双机skip通过。[Draft PR #57](https://github.com/g95809080-cmyk/moto-intercom/pull/57)已建立，固定Source [Android CI 38239675696](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38239675696)运行中。纯证据文档绑定后不改变生产/测试/构建blob；最终结果以verification与实际CI为准。
+Source `f587472e251b59f3c25e8cad5e483c8e0afc887a` 固定审查APPROVED/P0P1=0，12/12路径；本地804 JVM、Lint0 error、原生29pass+2双机skip通过。[Draft PR #57](https://github.com/g95809080-cmyk/moto-intercom/pull/57)已建立，固定Source [Android CI 38239675696](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38239675696)两job均completed/success。证据文档绑定复审APPROVED且生产/测试/构建blob不变，Linear为In Review；双机/道路验收未通过，不发布或部署。

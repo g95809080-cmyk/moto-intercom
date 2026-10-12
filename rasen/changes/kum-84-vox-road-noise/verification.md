@@ -1,6 +1,6 @@
 # KUM-84 验证
 
-Base `9819833c81b13474609af104c8a3959f5480109d`；固定Source Head `f587472e251b59f3c25e8cad5e483c8e0afc887a` 的正式只读审查为APPROVED，P0/P1=0，12/12路径覆盖（11全文+1差异上下文，0 skipped）。[Draft PR #57](https://github.com/g95809080-cmyk/moto-intercom/pull/57) 已建立并附到当前任务，独立基于KUM-83。固定Source [Android CI 38239675696](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38239675696) 已核对headSha并启动，尚无成功结论。实机/道路验收仍未通过，iOS跳过。
+Base `9819833c81b13474609af104c8a3959f5480109d`；固定Source Head `f587472e251b59f3c25e8cad5e483c8e0afc887a` 的正式只读审查为APPROVED，P0/P1=0，12/12路径覆盖（11全文+1差异上下文，0 skipped）。[Draft PR #57](https://github.com/g95809080-cmyk/moto-intercom/pull/57) 已建立并附到当前任务，独立基于KUM-83。固定Source [Android CI 38239675696](https://github.com/g95809080-cmyk/moto-intercom/actions/runs/38239675696) 已核对headSha为f587472并确认completed/success，verify job `114778910524` 与API36 job `114778910314` 均成功。KUM-84已进入In Review；实机/道路验收仍未通过，iOS跳过。
 
 ## 真实 native NS/AGC 对比
 
@@ -38,5 +38,7 @@ Owned API36全量instrumentation为29 pass / 2 双机条件 assumption skip（st
 Next gate allowed：纯证据绑定复审、确认app/测试/构建/workflow/版本blob与Source一致；独立Draft PR及固定Source Android CI。真实两手机/蓝牙/道路听音deferred，不标记Done或发布。
 
 证据绑定复核 Base `9819833c` / Docs Head `e0aff559c95e20e9da4f9c76d9a1487346c7dae6` 为APPROVED，P0/P1=0；仅4项Rasen文档变化，12项Source路径及4额外上下文blob全部匹配。允许补固定Source CI/Linear真实结果；后续纯证据文档复用原Source门禁与相同代码CI，无需重复行为CI。
+
+CI与Linear证据已闭合，本问题自动化任务完成；task7双手机/普通蓝牙/道路听音保持未勾选。GitHub实际run/job结果保留在忽略 `kum-84-ci-result.json`。未自动合并main、发布或部署；source之后仅补文档且已检查app/测试/构建/workflow/version blob一致。
 
 详细输出保留在忽略的 `logs/2026-10-12-field-review/`，包括 `kum-84-native-ab-controlled.json`、`kum-84-vox-red.log`、`kum-84-vox-window-red.log`、`kum-84-vox-peak-red.log`、`kum-84-native-owner-red.txt`。不提交原始用户日志。
