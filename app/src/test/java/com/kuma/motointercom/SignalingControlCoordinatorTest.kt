@@ -23,6 +23,392 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SignalingControlCoordinatorTest {
+    @Test fun nativeLossAlreadyHealedBeforeBothActorDeliveriesCannotContaminateNextEpisode() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            val first = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.DISCONNECTED,
+                h.nowElapsedMs, 500L) { h.orchestrator.captureConnectionLossObservation() })
+            h.advanceBy(182L)
+            val healed = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 682L) { error("No ticket") })
+            assertTrue(h.orchestrator.dispatchAndAwait(h.orchestrator.observeConnectionLoss(
+                SessionEvent.WebRtcStateChanged(RUNTIME_A, connected.attemptId, WebRtcConnectionState.DISCONNECTED,
+                    first.wallMs, first), requireNotNull(first.firstLoss))))
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,
+                connected.attemptId, WebRtcConnectionState.CONNECTED, healed.wallMs, healed)))
+            assertNull(h.orchestrator.connectedLossWindow)
+            assertNull(source.decideOwnerLoss { it })
+            h.recoveryPolicy.setEnabled(false); h.recoveryPolicy.setEnabled(true)
+            h.advanceBy(5_000L)
+            val second = observeNativeLoss(h, connected, source)
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(second)))
+            assertEquals(second.firstLoss.occurredAtElapsedMs!! + 10_000L,
+                (h.orchestrator.state.value as IntercomState.Recovering).attempt.deadlineElapsedRealtimeMs)
+            assertTrue(h.orchestrator.recoveryIntent!!.authorization === second.firstLoss.authorization)
+        }
+    }
+
+    @Test fun secondNativeLossBeforeFirstHealMainDeliveryGetsItsOwnWindowWithoutMasking() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            val first = observeNativeLoss(h, connected, source)
+            h.advanceBy(182L)
+            val healed = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 682L) { error("No ticket") })
+            h.advanceBy(500L)
+            val lostAgain = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.DISCONNECTED,
+                h.nowElapsedMs, 1_182L) { h.orchestrator.captureConnectionLossObservation() })
+            assertTrue(h.orchestrator.dispatchAndAwait(h.orchestrator.observeConnectionLoss(
+                SessionEvent.WebRtcStateChanged(RUNTIME_A, connected.attemptId, WebRtcConnectionState.DISCONNECTED,
+                    lostAgain.wallMs, lostAgain), requireNotNull(lostAgain.firstLoss))))
+            val second = requireNotNull(h.orchestrator.connectedLossWindow)
+            assertTrue(first !== second)
+            assertEquals(lostAgain.elapsedMs, second.firstLoss.occurredAtElapsedMs)
+            assertFalse(h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,
+                connected.attemptId, WebRtcConnectionState.CONNECTED, healed.wallMs, healed)))
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(second)))
+            assertEquals(lostAgain.elapsedMs + 10_000L,
+                (h.orchestrator.state.value as IntercomState.Recovering).attempt.deadlineElapsedRealtimeMs)
+        }
+    }
+
+    @Test fun earlierHardProducerCanRecordWhileRecoveryFactoryIsBlocked() = runBlocking {
+        for (revokeOldTicket in listOf(false, true)) {
+            val entered = CompletableDeferred<Unit>()
+            val release = java.util.concurrent.CountDownLatch(1)
+            harness(attemptIdFactory = {
+                entered.complete(Unit); check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                ConnectionAttemptId("prepared-final-ledger-id")
+            }, dispatcher = Dispatchers.Default).use { h ->
+                try {
+                    val source = NativeConnectionObservationSource()
+                    val (connected, owner) = connectOwnedNativeSource(h, source,
+                        ChannelPlan.race(Transport.WIFI_DIRECT, Transport.LAN))
+                    val earlier = h.orchestrator.captureConnectionLossObservation()
+                    if (revokeOldTicket) { h.recoveryPolicy.setEnabled(false); h.recoveryPolicy.setEnabled(true) }
+                    h.advanceBy(500L)
+                    val window = observeNativeLoss(h, connected, source)
+                    h.advanceBy(2_000L)
+                    val due = async { h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)) }
+                    withTimeout(3_000L) { entered.await() }
+                    val delayed = withTimeout(2_000L) { async(Dispatchers.Default) {
+                        h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(RUNTIME_A,
+                            owner.channelId, owner.wireRequestKey, "earlier EOF recorded during factory"), earlier)
+                    }.await() }
+                    release.countDown()
+                    assertTrue(due.await())
+                    if (revokeOldTicket) assertTrue(h.orchestrator.state.value is IntercomState.Discovering)
+                    else {
+                        val recovery = h.orchestrator.state.value as IntercomState.Recovering
+                        assertEquals(requireNotNull(earlier.occurredAtElapsedMs) + 10_000L,
+                            recovery.attempt.deadlineElapsedRealtimeMs)
+                        val fallback = h.drainEffects().filterIsInstance<SessionEffect.ScheduleAttemptMilestone>()
+                            .map { it.milestone }.filterIsInstance<AttemptMilestone.FallbackTransport>().single()
+                        assertEquals(earlier.occurredAtElapsedMs!! + 3_000L, fallback.scheduledAt.elapsedRealtimeMs)
+                        assertTrue(h.orchestrator.recoveryIntent!!.authorization === earlier.authorization)
+                    }
+                    assertFalse(h.orchestrator.dispatchAndAwait(delayed))
+                } finally { release.countDown() }
+            }
+        }
+    }
+
+    @Test fun nonLossSnapshotAndSiblingFailureCannotPoisonSelectedOwnerLedger() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            val earlier = h.orchestrator.captureConnectionLossObservation()
+            val success = SessionEvent.SignalingMessageSent(RUNTIME_A, connected.attemptId,
+                owner.channelId, SignalingMessageTypeV2.CONNECT_ACCEPT)
+            assertTrue(h.orchestrator.observeConnectionLoss(success, earlier) === success)
+            h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(RUNTIME_A, ControlChannelId.parse(CHANNEL_B),
+                owner.wireRequestKey, "sibling EOF"), earlier)
+            h.orchestrator.observeConnectionLoss(SessionEvent.SignalingDisconnected(RUNTIME_A,
+                connected.attemptId), earlier) // Missing actual channel is never filled from the owner.
+            h.recoveryPolicy.setEnabled(false); h.recoveryPolicy.setEnabled(true)
+            h.advanceBy(500L)
+            val window = observeNativeLoss(h, connected, source)
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertEquals(window.firstLoss.occurredAtElapsedMs!! + 10_000L,
+                (h.orchestrator.state.value as IntercomState.Recovering).attempt.deadlineElapsedRealtimeMs)
+        }
+    }
+
+    @Test fun sameMillisecondOlderProducerTicketWinsOverLaterNativeTicket() = runBlocking {
+        var ids = 0
+        harness(attemptIdFactory = { ConnectionAttemptId("same-ms-${++ids}") }).use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            val earlier = h.orchestrator.captureConnectionLossObservation()
+            h.recoveryPolicy.setEnabled(false); h.recoveryPolicy.setEnabled(true)
+            val window = observeNativeLoss(h, connected, source)
+            val delayed = h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(RUNTIME_A,
+                owner.channelId, owner.wireRequestKey, "older same-ms EOF"), earlier)
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertTrue(h.orchestrator.state.value is IntercomState.Discovering)
+            assertEquals(0, ids)
+            assertFalse(h.orchestrator.dispatchAndAwait(delayed))
+        }
+    }
+
+    @Test fun hardSelectedLossCannotBeClearedByNativeHealAwaitingMain() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            val window = observeNativeLoss(h, connected, source)
+            val delayed = h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(RUNTIME_A,
+                owner.channelId, owner.wireRequestKey, "hard EOF recorded, Main delayed"))
+            h.advanceBy(182L)
+            source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED, h.nowElapsedMs, 682L) { error("No ticket") }
+            h.advanceBy(1_818L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            val replacement = h.orchestrator.state.value as IntercomState.Recovering
+            assertEquals(window.firstLoss.occurredAtElapsedMs!! + 10_000L, replacement.attempt.deadlineElapsedRealtimeMs)
+            h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(RUNTIME_A, owner.channelId,
+                owner.wireRequestKey, "retired producer"), window.firstLoss)
+            assertFalse(h.orchestrator.dispatchAndAwait(delayed))
+            assertEquals(replacement, h.orchestrator.state.value)
+            assertNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED, h.nowElapsedMs, 700L) { error("Retired") })
+        }
+    }
+
+    @Test fun earlierOtherProducerLossControlsBudgetDespiteDelayedDelivery() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            val earlier = h.orchestrator.captureConnectionLossObservation()
+            val delayedLoss = h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(
+                RUNTIME_A, owner.channelId, owner.wireRequestKey, "producer EOF before Main"), earlier)
+            h.advanceBy(500L)
+            val window = observeNativeLoss(h, connected, source)
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            val recovery = h.orchestrator.state.value as IntercomState.Recovering
+            assertEquals(requireNotNull(earlier.occurredAtElapsedMs) + 10_000L, recovery.attempt.deadlineElapsedRealtimeMs)
+            assertFalse(h.orchestrator.dispatchAndAwait(delayedLoss))
+            assertEquals(recovery, h.orchestrator.state.value)
+        }
+    }
+
+    @Test fun laterNativeObservationCannotReauthorizeEarlierProducerLossAfterOffOn() = runBlocking {
+        var ids = 0
+        harness(attemptIdFactory = { ConnectionAttemptId("unexpected-earlier-loss-${++ids}") }).use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            val earlier = h.orchestrator.captureConnectionLossObservation()
+            val delayedLoss = h.orchestrator.observeConnectionLoss(SessionEvent.ChannelClosed(
+                RUNTIME_A, owner.channelId, owner.wireRequestKey, "producer EOF before Main"), earlier)
+            h.recoveryPolicy.setEnabled(false); h.recoveryPolicy.setEnabled(true)
+            h.advanceBy(500L)
+            val window = observeNativeLoss(h, connected, source)
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertTrue(h.orchestrator.state.value is IntercomState.Discovering)
+            assertEquals(0, ids)
+            assertFalse(h.orchestrator.dispatchAndAwait(delayedLoss))
+        }
+    }
+
+    @Test fun nativeSelfHealCanRegisterWhileRecoveryFactoryIsBlocked() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = java.util.concurrent.CountDownLatch(1)
+        harness(attemptIdFactory = {
+            entered.complete(Unit)
+            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            ConnectionAttemptId("unused-after-native-heal")
+        }, dispatcher = Dispatchers.Default).use { h ->
+            try {
+                val source = NativeConnectionObservationSource()
+                val (connected, _) = connectOwnedNativeSource(h, source)
+                val window = observeNativeLoss(h, connected, source)
+                h.advanceBy(2_000L)
+                val due = async { h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)) }
+                withTimeout(3_000L) { entered.await() }
+                // JNI entered within the observation window; actor preparation must not block capture.
+                val captured = withTimeout(2_000L) { async(Dispatchers.Default) {
+                    source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                        requireNotNull(window.firstLoss.occurredAtElapsedMs) + 182L, 682L) { error("No loss ticket") }
+                }.await() }
+                assertTrue(captured != null)
+                release.countDown()
+                assertTrue(due.await())
+                assertEquals(connected, h.orchestrator.state.value)
+                assertNull(h.orchestrator.connectedLossWindow)
+                assertFalse(h.drainEffects().any { it is SessionEffect.OpenTargetedTransport || it is SessionEffect.CloseControlChannel })
+                assertEquals(ConnectionAttemptTerminalOutcome.SUCCESS, h.orchestrator.terminalOutcome(connected.attemptId))
+            } finally { release.countDown() }
+        }
+    }
+
+    @Test fun timerHonorsNativeSelfHealRegisteredBeforeDelayedMainDelivery() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            val window = observeNativeLoss(h, connected, source)
+            h.advanceBy(182L)
+            assertTrue(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 682L) { error("No loss ticket") } != null)
+            // The CONNECTED callback is still behind Main; timer is delivered much later.
+            h.advanceBy(20_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertEquals(connected, h.orchestrator.state.value)
+            assertNull(h.orchestrator.connectedLossWindow)
+            assertFalse(h.drainEffects().any { it is SessionEffect.OpenTargetedTransport || it is SessionEffect.CloseControlChannel })
+        }
+    }
+
+    @Test fun observationAndRepeatedLossConsumeOriginalRecoveryBudgetAndCloseOnlyOldOwner() = runBlocking {
+        var created = 0
+        harness(attemptIdFactory = { ConnectionAttemptId("native-recovery-${++created}") }).use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            val window = observeNativeLoss(h, connected, source)
+            val firstAt = requireNotNull(window.firstLoss.occurredAtElapsedMs)
+            h.advanceBy(1_800L)
+            val repeated = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.DISCONNECTED,
+                h.nowElapsedMs, 2_300L) { error("Repeated loss must not freeze a new ticket") })
+            assertTrue(h.orchestrator.dispatchAndAwait(h.orchestrator.observeConnectionLoss(
+                SessionEvent.WebRtcStateChanged(RUNTIME_A, connected.attemptId, WebRtcConnectionState.DISCONNECTED,
+                    repeated.wallMs, repeated), requireNotNull(repeated.firstLoss))))
+            assertTrue(h.orchestrator.connectedLossWindow === window)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ChannelClosed(RUNTIME_A,
+                owner.channelId, owner.wireRequestKey, "selected socket EOF")))
+            val recovery = h.orchestrator.state.value as IntercomState.Recovering
+            assertEquals(firstAt + 10_000L, recovery.attempt.deadlineElapsedRealtimeMs)
+            assertEquals(1, created)
+            val effects = h.drainEffects()
+            assertTrue(effects.first() is SessionEffect.CancelConnectedLossObservation)
+            assertEquals(1, effects.filterIsInstance<SessionEffect.CloseControlChannel>().size)
+            assertEquals(owner.channelId, effects.filterIsInstance<SessionEffect.CloseControlChannel>().single().channelId)
+            assertTrue(effects.indexOfFirst { it is SessionEffect.CloseControlChannel } <
+                effects.indexOfFirst { it is SessionEffect.RestartDiscovery })
+            assertFalse(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 2_301L) { error("Retired source") })
+        }
+    }
+
+    @Test fun disableThenEnableCannotRenewObservationAuthorization() = runBlocking {
+        var created = 0
+        harness(attemptIdFactory = { ConnectionAttemptId("unexpected-${++created}") }).use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            val window = observeNativeLoss(h, connected, source)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.AutomaticReconnectChanged(false)))
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.AutomaticReconnectChanged(true)))
+            h.advanceBy(2_000L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertTrue(h.orchestrator.state.value is IntercomState.Discovering)
+            assertEquals(0, created)
+        }
+    }
+
+    @Test fun disabledAutomaticRecoveryStillAllowsCurrentNativePeerToSelfHeal() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            val window = observeNativeLoss(h, connected, source)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.AutomaticReconnectChanged(false)))
+            h.advanceBy(1_643L)
+            val receipt = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 2_143L) { error("No new ticket") })
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,
+                connected.attemptId, WebRtcConnectionState.CONNECTED, receipt.wallMs, receipt)))
+            assertEquals(connected, h.orchestrator.state.value)
+            assertFalse(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+        }
+    }
+
+    @Test fun closedControlCannotBeCertifiedByAnEarlierNativeHealReceipt() = runBlocking {
+        val controlOpen = java.util.concurrent.atomic.AtomicBoolean(true)
+        harness().use { h ->
+            val source = NativeConnectionObservationSource(controlOpen::get)
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            val window = observeNativeLoss(h, connected, source)
+            h.advanceBy(182L)
+            source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED, h.nowElapsedMs, 682L) { error("No ticket") }
+            controlOpen.set(false)
+            h.advanceBy(1_818L)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertTrue(h.orchestrator.state.value is IntercomState.Recovering)
+        }
+    }
+
+    private suspend fun observeNativeLoss(h: Harness, connected: IntercomState.Connected,
+        source: NativeConnectionObservationSource): ConnectedLossWindow {
+        val receipt = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.DISCONNECTED,
+            h.nowElapsedMs, 500L) { h.orchestrator.captureConnectionLossObservation() })
+        assertTrue(h.orchestrator.dispatchAndAwait(h.orchestrator.observeConnectionLoss(
+            SessionEvent.WebRtcStateChanged(RUNTIME_A, connected.attemptId, WebRtcConnectionState.DISCONNECTED,
+                receipt.wallMs, receipt), requireNotNull(receipt.firstLoss))))
+        val window = requireNotNull(h.orchestrator.connectedLossWindow)
+        assertTrue(h.nextEffect() is SessionEffect.ScheduleConnectedLossObservation)
+        return window
+    }
+
+    @Test fun nativeTransientLossSelfHealsAfterOldHandshakeDeadlineWithoutReplacingOwner() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, owner) = connectOwnedNativeSource(h, source)
+            h.advanceBy(60_000L)
+            val lost = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.DISCONNECTED,
+                h.nowElapsedMs, 60_500L) { h.orchestrator.captureConnectionLossObservation() })
+            assertTrue(h.orchestrator.dispatchAndAwait(h.orchestrator.observeConnectionLoss(
+                SessionEvent.WebRtcStateChanged(RUNTIME_A, connected.attemptId, WebRtcConnectionState.DISCONNECTED,
+                    lost.wallMs, lost), requireNotNull(lost.firstLoss))))
+            assertEquals("A short native loss must retain the accepted peer", connected, h.orchestrator.state.value)
+            assertEquals(owner.channelId, h.orchestrator.activeControlAttempt?.mediaOwnerChannelId)
+            assertFalse(h.drainEffects().any { it is SessionEffect.RestartDiscovery || it is SessionEffect.OpenTargetedTransport })
+            h.advanceBy(1_643L)
+            val healed = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 62_143L) { error("Connected must not recapture loss authorization") })
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,
+                connected.attemptId, WebRtcConnectionState.CONNECTED, healed.wallMs, healed)))
+            assertEquals(connected, h.orchestrator.state.value)
+            assertEquals(ConnectionAttemptTerminalOutcome.SUCCESS, h.orchestrator.terminalOutcome(connected.attemptId))
+            assertEquals(owner.channelId, h.orchestrator.activeControlAttempt?.mediaOwnerChannelId)
+        }
+    }
+
+    @Test fun acceptedNativeConnectedReceiptDoesNotReuseExpiredHandshakeAdmission() = runBlocking {
+        harness().use { h ->
+            val source = NativeConnectionObservationSource()
+            val (connected, _) = connectOwnedNativeSource(h, source)
+            h.advanceBy(60_000L)
+            val receipt = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+                h.nowElapsedMs, 60_500L) { error("Unexpected loss") })
+            assertTrue("A current accepted native owner is beyond handshake timeout",
+                h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,
+                    connected.attemptId, WebRtcConnectionState.CONNECTED, receipt.wallMs, receipt)))
+            assertEquals(connected, h.orchestrator.state.value)
+            assertFalse(h.hasPendingEffect())
+        }
+    }
+
+    private suspend fun connectOwnedNativeSource(h: Harness, source: NativeConnectionObservationSource,
+        plan: ChannelPlan = ChannelPlan.single(Transport.WIFI_DIRECT)):
+        Pair<IntercomState.Connected, VerifiedControlChannel> {
+        val attempt = outboundAttempt(channelPlan = plan)
+        val owner = requesterChannel(CHANNEL_A, attempt, Transport.WIFI_DIRECT)
+        h.start(attempt)
+        assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ControlChannelVerified(RUNTIME_A, owner)))
+        assertTrue(h.nextEffect() is SessionEffect.SendConnectRequest)
+        assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.RemoteConnectAccepted(RUNTIME_A,
+            attempt.id, owner.channelId, owner.wireRequestKey)))
+        assertTrue(h.nextEffect() is SessionEffect.StartWebRtc)
+        val receipt = requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,
+            h.nowElapsedMs, 500L) { error("Unexpected loss") })
+        assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,
+            attempt.id, WebRtcConnectionState.CONNECTED, receipt.wallMs, receipt)))
+        return h.orchestrator.state.value as IntercomState.Connected to owner
+    }
+
     @Test fun cancelWhileFreshEpisodeFactoryIsBlockedPreventsAdoption() = runBlocking {
         val ids = java.util.concurrent.atomic.AtomicInteger()
         val entered = CompletableDeferred<Unit>()

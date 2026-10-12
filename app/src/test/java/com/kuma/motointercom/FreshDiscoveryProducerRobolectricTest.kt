@@ -75,6 +75,12 @@ class RecordingP2pInputShadow : ShadowWifiP2pManager() {
     val groups = ArrayDeque<WifiP2pManager.GroupInfoListener>()
     val peers = ArrayDeque<WifiP2pManager.PeerListListener>()
     var infoRequests = 0
+    var holdGroupRemoval = false
+    var holdCancelConnect = false
+    val cancellations = mutableListOf<WifiP2pManager.ActionListener>()
+    val removals = mutableListOf<WifiP2pManager.ActionListener>()
+    val connections = mutableListOf<String>()
+    var throwNextGroupQuery = false
     private fun success(listener: WifiP2pManager.ActionListener?) { Handler(Looper.getMainLooper()).post { listener?.onSuccess() } }
     @Implementation fun setDnsSdResponseListeners(channel: WifiP2pManager.Channel,
         service: WifiP2pManager.DnsSdServiceResponseListener, txt: WifiP2pManager.DnsSdTxtRecordListener) { dns += DnsListeners(service, txt) }
@@ -84,16 +90,386 @@ class RecordingP2pInputShadow : ShadowWifiP2pManager() {
     @Implementation fun addServiceRequest(channel: WifiP2pManager.Channel, request: WifiP2pServiceRequest, listener: WifiP2pManager.ActionListener?) = success(listener)
     @Implementation fun discoverServices(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ActionListener?) = success(listener)
     @Implementation fun requestConnectionInfo(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ConnectionInfoListener) { infoRequests++; infos += listener }
-    @Implementation override fun requestGroupInfo(channel: WifiP2pManager.Channel, listener: WifiP2pManager.GroupInfoListener) { groups += listener }
+    @Implementation override fun requestGroupInfo(channel: WifiP2pManager.Channel, listener: WifiP2pManager.GroupInfoListener) {
+        if (throwNextGroupQuery) { throwNextGroupQuery = false; throw IllegalStateException("fixture SDK group query failure") }
+        groups += listener
+    }
     @Implementation fun requestPeers(channel: WifiP2pManager.Channel, listener: WifiP2pManager.PeerListListener) { peers += listener }
-    @Implementation fun cancelConnect(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ActionListener?) = success(listener)
-    @Implementation override fun removeGroup(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ActionListener) = success(listener)
+    @Implementation fun cancelConnect(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ActionListener?) {
+        if (holdCancelConnect && listener != null) cancellations += listener else success(listener)
+    }
+    @Implementation override fun removeGroup(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ActionListener) {
+        if (holdGroupRemoval) removals += listener else success(listener)
+    }
+    @Implementation fun connect(channel: WifiP2pManager.Channel, config: android.net.wifi.p2p.WifiP2pConfig,
+        listener: WifiP2pManager.ActionListener?) { connections += config.deviceAddress; success(listener) }
 }
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], shadows = [RecordingNsdInputShadow::class, RecordingP2pInputShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class FreshDiscoveryProducerRobolectricTest {
+    @Test fun actualDualOriginHelloGlareAdoptsServiceMediaWinnerAndRevokesOldNativeTarget() = runBlocking {
+        val f = IncomingConfirmationServiceFixture("c0000000-0000-4000-8000-000000000003")
+        var harness: WifiHarness? = null
+        val acceptEntered = CountDownLatch(1)
+        val releaseAccept = CountDownLatch(1)
+        val pauseAccept = AtomicBoolean(true)
+        try {
+            val token = f.activateRuntime(LOCAL_RUNTIME)
+            setField(field(f.actor, "signalingControl")!!, "clock", MonotonicClock {
+                if (f.actor.activeControlAttempt?.phase == SignalingAttemptPhase.ACCEPTING && pauseAccept.compareAndSet(true, false)) {
+                    acceptEntered.countDown(); check(releaseAccept.await(10, TimeUnit.SECONDS))
+                }
+                MonotonicTimestamp(android.os.SystemClock.elapsedRealtime())
+            })
+            val serviceLogs = CopyOnWriteArrayList<String>()
+            f.service.setListener(object : IntercomService.Listener {
+                override fun onStatusChanged(status: String, running: Boolean) { serviceLogs += status }
+                override fun onLog(message: String) { serviceLogs += message }
+                override fun onError(message: String) { serviceLogs += "ERROR $message" }
+            })
+            val engine = TransientLossServiceRobolectricTest.RecordingEngine()
+            setField(f.service, "audioSessionController", AudioSessionController(engine,
+                TransientLossServiceRobolectricTest.RecordingRoute()))
+            val h = WifiHarness(withServer = true, localId = f.localDeviceId, requestRecovery = true,
+                onReady = { session, lease -> f.register(token, session, lease) },
+                captureLoss = { attempt -> f.actor.captureConnectionLossObservation().takeIf { it.sourceAttempt == attempt } },
+                onSelectedLost = { attempt, loss -> invokeServiceEntry(f.service, "onSelectedWifiDirectGroupLost", token.value, attempt, loss) })
+            harness = h
+            setField(f.service, "wifiTunnel", h.tunnel)
+            h.time.set(android.os.SystemClock.elapsedRealtime())
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            setState(h.tunnel, "GROUP_READY")
+            val origin = h.attempt("30000000-0000-4000-8000-000000000030").copy(trigger = ConnectionTrigger.USER)
+            assertTrue(f.actor.dispatchAndAwait(SessionEvent.ConnectRequested(origin)))
+            assertTrue(h.tunnel.connect(origin))
+            f.awaitMain { h.p2p.infos.isNotEmpty() }
+            val oldInfo = h.p2p.infos.removeFirst()
+            oldInfo.onConnectionInfoAvailable(h.validInfo())
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(h.validGroup())
+            f.awaitMain { acceptEntered.count == 0L && (field(f.service, "pendingMediaMessages") as Map<*, *>).isNotEmpty() }
+            assertTrue("Actual Offer must wait for the actor's send commit", engine.sessions.isEmpty())
+            assertFalse(h.installed.single().first.isClosed)
+            assertNull(field(f.service, "intercomManager"))
+            releaseAccept.countDown()
+            try { f.awaitMain { engine.sessions.size == 1 } }
+            catch (failure: Throwable) { throw AssertionError("actor=${f.actor.state.value} errors=${h.errors} installed=${h.installed.map { it.first.requestRole to it.first.phase }} logs=$serviceLogs", failure) }
+            val winner = requireNotNull(f.actor.currentAttempt)
+            assertNotEquals(origin.id, winner.id)
+            assertEquals(origin.deadlineElapsedRealtimeMs, winner.deadlineElapsedRealtimeMs)
+            val selected = h.installed.single().first
+            assertEquals(RequestRole.RESPONDER, selected.requestRole)
+            assertEquals(origin, selected.originatingAttempt)
+            assertEquals(winner, field(h.tunnel, "selectedAttempt"))
+            assertNull(field(h.tunnel, "targetAttempt"))
+            engine.sessions.single().emit(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED)
+            f.awaitMain { f.actor.state.value is IntercomState.Connected }
+            oldInfo.onConnectionInfoAvailable(WifiP2pInfo())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(selected.isClosed)
+            assertEquals(winner, field(h.tunnel, "selectedAttempt"))
+            h.time.set(android.os.SystemClock.elapsedRealtime())
+            val lossAt = h.time.get()
+            h.disconnectBroadcast()
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(WifiP2pInfo())
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(null)
+            f.awaitMain { f.actor.state.value is IntercomState.Recovering && selected.isClosed && engine.sessions.single().closed }
+            val recovery = f.actor.state.value as IntercomState.Recovering
+            assertEquals(winner.targetLock, recovery.attempt.targetLock)
+            assertEquals(lossAt + 10_000L, recovery.attempt.deadlineElapsedRealtimeMs)
+            assertTrue(selected.isClosed)
+            assertTrue(engine.sessions.single().closed)
+        } finally { releaseAccept.countDown(); try { f.close() } finally { harness?.close() } }
+    }
+
+    @Test fun asynchronousSecondSdkQueryFailureDoesNotRevokeSelectedSocket() {
+        WifiHarness(withServer = true).use { h ->
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            setState(h.tunnel, "GROUP_READY")
+            val a = h.attempt("30000000-0000-4000-8000-000000000026")
+            val selected = h.connectThroughPlatformCallbacks(a, 1).first
+            h.tunnel.retainSelectedChannel(a)
+            h.disconnectBroadcast()
+            h.p2p.throwNextGroupQuery = true
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(WifiP2pInfo())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("SIGNALING_READY", state(h.tunnel))
+            assertFalse(selected.isClosed)
+            assertTrue(h.failed.isEmpty())
+            assertEquals(1, h.errors.size)
+            h.disconnectBroadcast()
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(h.validInfo())
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(h.validGroup())
+            assertFalse(selected.isClosed)
+        }
+    }
+
+    @Test fun cancelConnectAcknowledgmentResumesReplacementExactlyOnceForSuccessAndFailure() {
+        for (success in listOf(true, false)) WifiHarness().use { h ->
+            h.p2p.holdCancelConnect = true
+            invoke(h.tunnel, "clearUntrustedGroupBeforeDiscovery")
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(null)
+            val old = h.p2p.cancellations.single()
+            val b = h.attempt("30000000-0000-4000-8000-000000000021")
+            assertTrue(h.tunnel.connect(b))
+            h.peer.status = WifiP2pDevice.AVAILABLE
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(h.p2p.connections.isEmpty())
+            if (success) old.onSuccess() else old.onFailure(WifiP2pManager.ERROR)
+            if (!success) {
+                h.p2p.infos.removeFirst().onConnectionInfoAvailable(WifiP2pInfo())
+                h.p2p.infos.removeFirst().onConnectionInfoAvailable(WifiP2pInfo())
+                h.p2p.groups.removeFirst().onGroupInfoAvailable(null)
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(h.peer.deviceAddress), h.p2p.connections)
+            assertEquals(b, field(h.tunnel, "targetAttempt"))
+            assertTrue(h.failed.isEmpty())
+            old.onFailure(WifiP2pManager.BUSY); old.onSuccess()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, h.p2p.connections.size)
+            h.p2p.holdCancelConnect = false
+        }
+    }
+
+    @Test fun exactOldPassiveReleaseCannotRemoveReplacementSelectedRealSocket() {
+        WifiHarness(withServer = true).use { h ->
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            setState(h.tunnel, "GROUP_READY")
+            val a = h.attempt("30000000-0000-4000-8000-000000000022")
+            val old = h.connectThroughPlatformCallbacks(a, 1).first
+            h.tunnel.retainSelectedChannel(a)
+            val b = h.attempt("30000000-0000-4000-8000-000000000023")
+            val selected = h.connectThroughPlatformCallbacks(b, 2).first
+            h.tunnel.retainSelectedChannel(b)
+            old.close()
+            h.p2p.holdGroupRemoval = true
+            h.tunnel.retainPassiveIngress(a)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(old.isClosed)
+            assertFalse(selected.isClosed)
+            assertEquals(b, field(h.tunnel, "selectedAttempt"))
+            assertEquals("SIGNALING_READY", state(h.tunnel))
+            assertTrue(h.p2p.removals.isEmpty())
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
+    @Test fun missingNativeCleanupAckFailsOnlyReplacementBranchWithoutIssuingConnect() {
+        WifiHarness(withServer = true, rejectHello = true).use { h ->
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            h.p2p.holdGroupRemoval = true
+            setState(h.tunnel, "GROUP_READY")
+            h.openGroupThroughPlatformCallbacks(h.attempt("30000000-0000-4000-8000-000000000024"))
+            awaitIo { h.p2p.removals.isNotEmpty() }
+            h.time.addAndGet(4_000L)
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4))
+            val b = h.attempt("30000000-0000-4000-8000-000000000025")
+            assertTrue(h.tunnel.connect(b))
+            h.peer.status = WifiP2pDevice.AVAILABLE
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            h.time.addAndGet(1_000L)
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+            assertEquals(1, h.failed.count { it.first == b })
+            assertTrue(field(h.tunnel, "removingGroup") as Boolean)
+            assertTrue(h.p2p.connections.isEmpty())
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
+    @Test fun oldStartupGroupQueryCannotRemoveNewSelectedRealSocket() {
+        WifiHarness(withServer = true).use { h ->
+            invoke(h.tunnel, "clearUntrustedGroupBeforeDiscovery")
+            val startup = h.p2p.groups.removeFirst()
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            setState(h.tunnel, "GROUP_READY")
+            val attempt = h.attempt("30000000-0000-4000-8000-000000000014")
+            val selected = h.connectThroughPlatformCallbacks(attempt, 1).first
+            h.tunnel.retainSelectedChannel(attempt)
+            h.p2p.holdGroupRemoval = true
+            startup.onGroupInfoAvailable(h.validGroup())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue("Startup cleanup is no longer authorized after selected admission", h.p2p.removals.isEmpty())
+            assertEquals("SIGNALING_READY", state(h.tunnel))
+            assertEquals(attempt, field(h.tunnel, "selectedAttempt"))
+            assertFalse(selected.isClosed)
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
+    @Test fun delayedNegativeGroupQueryCannotRevokeNewHealthyConnectionInfo() {
+        WifiHarness(withServer = true).use { h ->
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            setState(h.tunnel, "GROUP_READY")
+            val attempt = h.attempt("30000000-0000-4000-8000-000000000013")
+            val selected = h.connectThroughPlatformCallbacks(attempt, 1).first
+            h.tunnel.retainSelectedChannel(attempt)
+            h.disconnectBroadcast()
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(WifiP2pInfo())
+            val negative = h.p2p.groups.removeFirst()
+            h.connectedBroadcast()
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(h.validInfo())
+            val generation = field(h.tunnel, "socketTransportGeneration")
+            negative.onGroupInfoAvailable(null)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("SIGNALING_READY", state(h.tunnel))
+            assertEquals(generation, field(h.tunnel, "socketTransportGeneration"))
+            assertEquals(attempt, field(h.tunnel, "selectedAttempt"))
+            assertFalse(selected.isClosed)
+        }
+    }
+
+    @Test fun emptyDisconnectBroadcastQueriesNativeGroupBeforeTouchingSelectedSocket() {
+        WifiHarness(withServer = true).use { h ->
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            setState(h.tunnel, "GROUP_READY")
+            val attempt = h.attempt("30000000-0000-4000-8000-000000000011")
+            val selected = h.connectThroughPlatformCallbacks(attempt, 1).first
+            h.tunnel.retainSelectedChannel(attempt)
+            val generation = field(h.tunnel, "socketTransportGeneration")
+            h.disconnectBroadcast()
+            assertEquals("Missing NetworkInfo is not proof of radio loss", "SIGNALING_READY", state(h.tunnel))
+            assertEquals(generation, field(h.tunnel, "socketTransportGeneration"))
+            assertFalse(selected.isClosed)
+            assertTrue(h.p2p.infos.isNotEmpty())
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(h.validInfo())
+            assertTrue(h.p2p.groups.isNotEmpty())
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(h.validGroup())
+            assertEquals("SIGNALING_READY", state(h.tunnel))
+            assertFalse(selected.isClosed)
+        }
+    }
+
+    @Test fun transientRealSocketEofRetriesOnlyAfterRevalidatingCurrentGroup() {
+        WifiHarness(withServer = true, eofFirstHello = true).use { h ->
+            h.p2p.dns.last().txt.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            h.p2p.holdGroupRemoval = true
+            setState(h.tunnel, "GROUP_READY")
+            val attempt = h.attempt("30000000-0000-4000-8000-000000000012")
+            h.openGroupThroughPlatformCallbacks(attempt)
+            awaitIo { h.errors.isNotEmpty() }
+            assertTrue("EOF must retain group: ${h.errors}", h.p2p.removals.isEmpty())
+            h.time.addAndGet(500L)
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(500L))
+            assertTrue("Retry must obtain new connection info", h.p2p.infos.isNotEmpty())
+            h.p2p.infos.removeFirst().onConnectionInfoAvailable(h.validInfo())
+            assertTrue("Retry must validate group membership again", h.p2p.groups.isNotEmpty())
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(h.validGroup())
+            awaitIo { h.installed.size == 1 }
+            assertEquals(attempt, h.installed.single().first.originatingAttempt)
+            assertEquals(attempt.deadlineElapsedRealtimeMs, h.installed.single().first.originatingAttempt!!.deadlineElapsedRealtimeMs)
+            assertTrue(h.p2p.removals.isEmpty())
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
+    @Test fun actualEofBudgetCannotBeRefilledBySameAttemptReentryAndPreparedReplacementWaitsForAck() {
+        WifiHarness(withServer = true, eofHelloCount = 3).use { h ->
+            val dns = h.p2p.dns.last().txt
+            dns.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            h.p2p.holdGroupRemoval = true
+            setState(h.tunnel, "GROUP_READY")
+            val a = h.attempt("30000000-0000-4000-8000-000000000033")
+            for (n in 1..3) {
+                h.openGroupThroughPlatformCallbacks(a)
+                awaitIo { h.errors.size >= n }
+                assertEquals(minOf(n, 2), field(h.tunnel, "socketRetryCount"))
+            }
+            awaitIo { h.failed.size == 1 && h.p2p.removals.size == 1 }
+            assertEquals(a, h.failed.single().first)
+            assertEquals(a.deadlineElapsedRealtimeMs, h.failed.single().first.deadlineElapsedRealtimeMs)
+            val oldRemoval = h.p2p.removals.single()
+            val b = h.attempt("30000000-0000-4000-8000-000000000034")
+            assertTrue(h.tunnel.prepareRetry(b))
+            assertEquals(0, field(h.tunnel, "socketRetryCount"))
+            h.peer.status = WifiP2pDevice.AVAILABLE
+            dns.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(h.p2p.connections.isEmpty())
+            oldRemoval.onSuccess()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue("Prepared retry cannot issue native work before its resume", h.p2p.connections.isEmpty())
+            assertTrue(h.tunnel.connect(b))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(h.peer.deviceAddress), h.p2p.connections)
+            assertEquals(b, field(h.tunnel, "targetAttempt"))
+            assertEquals(0, field(h.tunnel, "socketRetryCount"))
+            oldRemoval.onSuccess()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, h.p2p.connections.size)
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
+    @Test fun oldBusyRemovalRetryCannotIssueAnotherRemoveAgainstReplacement() {
+        WifiHarness(withServer = true, rejectHello = true).use { h ->
+            val dns = h.p2p.dns.last().txt
+            dns.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            h.p2p.holdGroupRemoval = true
+            setState(h.tunnel, "GROUP_READY")
+            h.openGroupThroughPlatformCallbacks(h.attempt("30000000-0000-4000-8000-000000000035"))
+            awaitIo { h.p2p.removals.size == 1 }
+            h.p2p.removals.single().onFailure(WifiP2pManager.BUSY)
+            shadowOf(Looper.getMainLooper()).idle()
+            val b = h.attempt("30000000-0000-4000-8000-000000000036")
+            assertTrue(h.tunnel.connect(b))
+            h.time.addAndGet(1_000L)
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+            assertEquals("BUSY retry of A cannot remove B's group", 1, h.p2p.removals.size)
+            assertEquals(b, field(h.tunnel, "targetAttempt"))
+            assertEquals("GROUP_READY", state(h.tunnel))
+            assertFalse(field(h.tunnel, "removingGroup") as Boolean)
+            assertTrue("Replacement must freshly query the native group", h.p2p.infos.isNotEmpty())
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
+    @Test fun actualHelloFailureRemovalBlocksReplacementPlatformConnectUntilAcknowledged() {
+        WifiHarness(withServer = true, rejectHello = true).use { h ->
+            val dns = h.p2p.dns.last().txt
+            dns.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            h.p2p.holdGroupRemoval = true
+            setState(h.tunnel, "GROUP_READY") // Existing native group; HELLO below must still verify.
+            h.openGroupThroughPlatformCallbacks(h.attempt("30000000-0000-4000-8000-000000000001"))
+            awaitIo { h.p2p.removals.isNotEmpty() }
+            assertTrue("Invalid real Socket HELLO must not be admitted", h.installed.isEmpty())
+            assertTrue(field(h.tunnel, "removingGroup") as Boolean)
+            assertEquals(0, h.p2p.connections.size)
+            val removal = h.p2p.removals.single()
+            val b = h.attempt("30000000-0000-4000-8000-000000000002")
+            assertTrue(h.tunnel.connect(b))
+            h.peer.status = WifiP2pDevice.AVAILABLE
+            h.time.incrementAndGet()
+            dns.onDnsSdTxtRecordAvailable("fixture", txt(REMOTE_R1), h.peer)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("An old native removeGroup may still tear down this replacement", 0, h.p2p.connections.size)
+            val fresh = h.observed.last()
+            assertTrue(h.tunnel.observationSource.isCurrent(fresh))
+            removal.onSuccess()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(h.peer.deviceAddress), h.p2p.connections)
+            assertEquals(b, field(h.tunnel, "targetAttempt"))
+            assertTrue("Old cleanup must not clear B's discovery receipt", h.tunnel.observationSource.isCurrent(fresh))
+            removal.onSuccess()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, h.p2p.connections.size)
+            h.p2p.holdGroupRemoval = false
+        }
+    }
+
     @Test fun delayedLanSnapshotCannotRetireNewTxtRuntime() = runBlocking {
         val f = IncomingConfirmationServiceFixture()
         val ownership = requireNotNull(LegacyRuntimeOwnership.acquire())
@@ -362,27 +738,40 @@ class FreshDiscoveryProducerRobolectricTest {
     }
 
     private class WifiHarness(withServer: Boolean = false, onSnapshot: (List<WifiDirectRiderDevice>) -> Unit = {},
-        onObserved: (FreshDiscoveryObservation) -> Unit = {}) : AutoCloseable {
+        onObserved: (FreshDiscoveryObservation) -> Unit = {}, rejectHello: Boolean = false,
+        eofFirstHello: Boolean = false, localId: String = LOCAL_DEVICE, requestRecovery: Boolean = false,
+        eofHelloCount: Int = if (eofFirstHello) 1 else 0,
+        onReady: ((SignalingSessionV2, PendingSocketLease) -> Unit)? = null,
+        captureLoss: (ConnectionAttempt) -> ConnectionLossObservation? = { null },
+        onSelectedLost: (ConnectionAttempt, ConnectionLossObservation) -> Unit = { _, _ -> }) : AutoCloseable {
         val time = AtomicLong(1_000L)
         private val clock = MonotonicClock { MonotonicTimestamp(time.get()) }
         val observed = CopyOnWriteArrayList<FreshDiscoveryObservation>()
         val installed = CopyOnWriteArrayList<Pair<SignalingSessionV2, PendingSocketLease>>()
         val errors = CopyOnWriteArrayList<Throwable>()
+        val failed = CopyOnWriteArrayList<Pair<ConnectionAttempt, String>>()
         val peer = WifiP2pDevice().apply { deviceAddress = "02:00:00:00:00:02"; deviceName = "remote"; status = WifiP2pDevice.CONNECTED }
-        private val server = if (withServer) PeerServer(clock) else null
+        private val server = if (withServer) PeerServer(clock, rejectHello, eofHelloCount, localId, requestRecovery) else null
         private val context = ApplicationProvider.getApplicationContext<Context>()
         lateinit var tunnel: WifiDirectTunnel
         val p2p: RecordingP2pInputShadow
         init {
             tunnel = WifiDirectTunnel(context, onControlChannelReady = { session, lease ->
                 assertEquals(field(tunnel, "targetAttempt"), session.originatingAttempt)
-                assertTrue(lease.tryTransfer({ true }) { installed += session to lease })
-            }, signalingPort = server?.port ?: 8888, localDeviceId = LOCAL_DEVICE, localDeviceName = "fixture",
+                if (onReady == null) assertTrue(lease.tryTransfer({ true }) { installed += session to lease })
+                else { onReady(session, lease); installed += session to lease }
+            }, signalingPort = server?.port ?: 8888, localDeviceId = localId, localDeviceName = "fixture",
                 sessionId = LOCAL_RUNTIME, monotonicClock = clock, onPeersChanged = onSnapshot,
                 onFreshObservation = { observation -> observed += observation; onObserved(observation) },
-                onError = errors::add, localP2pAddressResolver = { LOOPBACK })
+                onError = errors::add, localP2pAddressResolver = { LOOPBACK },
+                onTargetedTransportFailed = { attempt, reason -> failed += attempt to reason },
+                captureConnectionLoss = captureLoss, onSelectedGroupLost = onSelectedLost)
             setField(tunnel, "running", true); invoke(tunnel, "initP2p")
             p2p = Shadow.extract(field(tunnel, "manager") as WifiP2pManager)
+            p2p.dns.clear(); p2p.infos.clear(); p2p.groups.clear(); p2p.peers.clear()
+            p2p.removals.clear(); p2p.cancellations.clear(); p2p.connections.clear()
+            p2p.holdGroupRemoval = false; p2p.holdCancelConnect = false
+            p2p.throwNextGroupQuery = false
             (field(tunnel, "setupRecoveryGate") as WifiDirectSetupRecoveryGate).updateP2pEnabled(true)
             reinstallDiscovery()
         }
@@ -390,37 +779,80 @@ class FreshDiscoveryProducerRobolectricTest {
         fun attempt(id: String) = ConnectionAttempt(ConnectionAttemptId(id), LOCAL_RUNTIME,
             TargetLock(REMOTE_DEVICE, REMOTE_R1), ConnectionTrigger.RECOVERY, ChannelPlan.single(Transport.WIFI_DIRECT), time.get() + 10_000L)
         fun connectThroughPlatformCallbacks(attempt: ConnectionAttempt, count: Int): Pair<SignalingSessionV2, PendingSocketLease> {
-            assertTrue(tunnel.connect(attempt)); assertEquals("GROUP_READY", state(tunnel))
-            assertTrue(p2p.infos.isNotEmpty())
-            p2p.infos.removeFirst().onConnectionInfoAvailable(WifiP2pInfo().apply { groupFormed = true; isGroupOwner = false; groupOwnerAddress = LOOPBACK })
-            assertTrue(p2p.groups.isNotEmpty())
-            val group = WifiP2pGroup()
-            ReflectionHelpers.setField(group, "mOwner", peer)
-            ReflectionHelpers.setField(group, "mClients", mutableListOf<WifiP2pDevice>())
-            ReflectionHelpers.setField(group, "mInterface", "fixture-p2p")
-            p2p.groups.removeFirst().onGroupInfoAvailable(group)
+            openGroupThroughPlatformCallbacks(attempt)
             awaitIo { installed.size == count }
             assertTrue(server!!.errors.toString(), server.errors.isEmpty())
             return installed.last()
         }
+        fun openGroupThroughPlatformCallbacks(attempt: ConnectionAttempt) {
+            assertTrue(tunnel.connect(attempt)); assertEquals("GROUP_READY", state(tunnel))
+            assertTrue(p2p.infos.isNotEmpty())
+            p2p.infos.removeFirst().onConnectionInfoAvailable(validInfo())
+            assertTrue(p2p.groups.isNotEmpty())
+            p2p.groups.removeFirst().onGroupInfoAvailable(validGroup())
+        }
+        fun validInfo() = WifiP2pInfo().apply { groupFormed = true; isGroupOwner = false; groupOwnerAddress = LOOPBACK }
+        fun validGroup(): WifiP2pGroup {
+            val group = WifiP2pGroup()
+            ReflectionHelpers.setField(group, "mOwner", peer)
+            ReflectionHelpers.setField(group, "mClients", mutableListOf<WifiP2pDevice>())
+            ReflectionHelpers.setField(group, "mInterface", "fixture-p2p")
+            return group
+        }
+        fun disconnectBroadcast() = (field(tunnel, "receiver") as android.content.BroadcastReceiver)
+            .onReceive(context, android.content.Intent(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION))
+        @Suppress("DEPRECATION") fun connectedBroadcast() {
+            val info = org.robolectric.shadows.ShadowNetworkInfo.newInstance(
+                android.net.NetworkInfo.DetailedState.CONNECTED, android.net.ConnectivityManager.TYPE_WIFI,
+                0, true, true)
+            (field(tunnel, "receiver") as android.content.BroadcastReceiver).onReceive(context,
+                android.content.Intent(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION).putExtra(WifiP2pManager.EXTRA_NETWORK_INFO, info))
+        }
         override fun close() { try { tunnel.close(); shadowOf(Looper.getMainLooper()).idle() } finally { installed.forEach { it.first.close() }; server?.close() } }
     }
 
-    private class PeerServer(private val clock: MonotonicClock) : AutoCloseable {
+    private class PeerServer(private val clock: MonotonicClock, private val rejectHello: Boolean = false,
+        eofHelloCount: Int = 0, private val localId: String = LOCAL_DEVICE,
+        private val requestRecovery: Boolean = false) : AutoCloseable {
         private val listener = ServerSocket(0, 8, LOOPBACK)
         val port get() = listener.localPort
         val errors = ConcurrentLinkedQueue<Throwable>()
         private val sockets = ConcurrentLinkedQueue<Socket>()
         private val sessions = ConcurrentLinkedQueue<SignalingSessionV2>()
         private val closed = AtomicBoolean(false)
+        private val remainingEofs = java.util.concurrent.atomic.AtomicInteger(eofHelloCount)
         private val executor = Executors.newCachedThreadPool()
         init { executor.execute {
             try { while (!closed.get()) {
                 val socket = listener.accept(); sockets += socket
                 executor.execute {
-                    try { sessions += SignalingSessionV2.establish(socket, Transport.WIFI_DIRECT, PhysicalSocketRole.ACCEPTOR,
-                        clock.now().elapsedRealtimeMs, REMOTE_DEVICE, REMOTE_R1, "remote", "fixture", null,
-                        TargetLock(LOCAL_DEVICE, LOCAL_RUNTIME), clock) }
+                    if (remainingEofs.getAndUpdate { if (it > 0) it - 1 else 0 } > 0) { socket.close(); return@execute }
+                    if (rejectHello) {
+                        try {
+                            socket.soTimeout = 2_000
+                            SignalingV2Framing.read(java.io.DataInputStream(socket.getInputStream()))
+                            java.io.DataOutputStream(socket.getOutputStream()).apply { writeInt(0); flush() }
+                        }
+                        finally { socket.close() }
+                        return@execute
+                    }
+                    try {
+                        val origin = if (requestRecovery) ConnectionAttempt(
+                            ConnectionAttemptId("20000000-0000-4000-8000-000000000077"), REMOTE_R1,
+                            TargetLock(localId, LOCAL_RUNTIME), ConnectionTrigger.RECOVERY,
+                            ChannelPlan.single(Transport.WIFI_DIRECT), clock.now().elapsedRealtimeMs + 10_000L) else null
+                        val session = SignalingSessionV2.establish(socket, Transport.WIFI_DIRECT, PhysicalSocketRole.ACCEPTOR,
+                            clock.now().elapsedRealtimeMs, REMOTE_DEVICE, REMOTE_R1, "remote", "fixture", origin,
+                            TargetLock(localId, LOCAL_RUNTIME), clock)
+                        sessions += session
+                        if (requestRecovery) {
+                            session.startReader({ envelope ->
+                                if (envelope.message is SignalingMessageV2.ConnectAccept) session.send(
+                                    SignalingMessageV2.Offer("{\"type\":\"offer\",\"sdp\":\"v=0\"}"))
+                            }, { if (!closed.get()) errors += it })
+                            session.send(SignalingMessageV2.ConnectRequest(RequestTrigger.RECOVERY, Transport.WIFI_DIRECT))
+                        }
+                    }
                     catch (t: Throwable) { if (!closed.get()) errors += t }
                 }
             } } catch (t: Throwable) { if (!closed.get()) errors += t }

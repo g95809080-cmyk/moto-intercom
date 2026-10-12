@@ -256,7 +256,7 @@ internal class SignalingSessionV2 private constructor(
                 }
                 return session
             } catch (t: Throwable) {
-                lease.close()
+                lease.closeAfterFailure(t)
                 runCatching { socket.close() }
                 throw when (t) {
                     is SignalingV2Exception -> t

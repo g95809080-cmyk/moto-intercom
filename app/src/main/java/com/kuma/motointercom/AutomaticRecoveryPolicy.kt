@@ -89,7 +89,9 @@ internal data class RecoveryIntentRef(val runtimeSessionId: RuntimeSessionId, va
 
 internal data class ConnectionLossObservation(
     val sourceAttempt: ConnectionAttempt?,
-    val authorization: AutomaticRecoveryPolicy.Ticket?
+    val authorization: AutomaticRecoveryPolicy.Ticket?,
+    val occurredAtElapsedMs: Long? = null,
+    val producerSequence: Long? = null
 )
 
 internal data class AutomaticRecoveryIntent(

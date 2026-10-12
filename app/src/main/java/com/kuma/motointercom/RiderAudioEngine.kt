@@ -39,7 +39,10 @@ internal data class RiderMediaSessionCallbacks(
     val onRemoteAudioTrack: (AudioTrack) -> Unit = {},
     val onAudioLevelChanged: (Float) -> Unit = {},
     val onError: (Throwable) -> Unit = {},
-    val isSessionCurrent: () -> Boolean
+    val isSessionCurrent: () -> Boolean,
+    val freezeConnectionLoss: (() -> ConnectionLossObservation?)? = null,
+    val onConnectionStateObserved: ((NativeConnectionObservation) -> Unit)? = null,
+    val controlIsOpen: () -> Boolean = { true }
 )
 
 internal interface RiderMediaSession : Closeable {
@@ -722,12 +725,41 @@ internal class RiderAudioEngine(
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
+            val elapsedMs = SystemClock.elapsedRealtime()
+            val wallMs = System.currentTimeMillis()
+            if (closed.get() || !isActiveSession(session)) return
+            val observation = session.connectionObservations.capture(newState, elapsedMs, wallMs) {
+                session.callbacks.freezeConnectionLoss?.invoke()
+            } ?: return
+            Log.i(TAG, "Native PeerConnection receipt state=$newState sequence=${observation.sequence} " +
+                "capturedElapsed=$elapsedMs firstLossElapsed=${observation.firstLoss?.occurredAtElapsedMs}")
             runSession(session) {
                 session.connected = newState == PeerConnection.PeerConnectionState.CONNECTED
                 if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "PeerConnection state=$newState")
+                if (observation.sequence == observation.firstLossSequence && newState != PeerConnection.PeerConnectionState.CLOSED) {
+                    peerConnection?.getStats { report ->
+                        runSession(session) {
+                            val pairId = report.statsMap.values.firstOrNull { it.type == "transport" }
+                                ?.members?.get("selectedCandidatePairId") as? String
+                            val pair = report.statsMap[pairId] ?: report.statsMap.values.firstOrNull {
+                                it.type == "candidate-pair" && it.members["nominated"] == true
+                            }
+                            val local = report.statsMap[pair?.members?.get("localCandidateId") as? String]
+                            val remote = report.statsMap[pair?.members?.get("remoteCandidateId") as? String]
+                            Log.i(TAG, "ICE first-loss sequence=${observation.sequence} elapsed=$elapsedMs " +
+                                "pair=${pair?.id} state=${pair?.members?.get("state")} " +
+                                "rtt=${pair?.members?.get("currentRoundTripTime")} " +
+                                "sent=${pair?.members?.get("bytesSent")} received=${pair?.members?.get("bytesReceived")} " +
+                                "localType=${local?.members?.get("candidateType")} network=${local?.members?.get("networkType")} " +
+                                "remoteType=${remote?.members?.get("candidateType")} protocol=${local?.members?.get("protocol")}")
+                        }
+                    }
+                }
                 postSessionMain(session) {
-                    session.callbacks.onConnectionStateChanged(newState)
+                    val observed = session.callbacks.onConnectionStateObserved
+                    if (observed == null) session.callbacks.onConnectionStateChanged(newState)
+                    else observed(observation)
                 }
             }
         }
@@ -956,6 +988,7 @@ internal class RiderAudioEngine(
         val callbacks: RiderMediaSessionCallbacks
     ) : RiderMediaSession {
         val closed = AtomicBoolean(false)
+        val connectionObservations = NativeConnectionObservationSource(callbacks.controlIsOpen)
         @Volatile var state = MediaSessionState.INITIALIZING
         var connected = false
         var remoteTrackObserved = false
@@ -1037,6 +1070,7 @@ internal class RiderAudioEngine(
 
         override fun close() {
             if (!closed.compareAndSet(false, true)) return
+            connectionObservations.retire()
             state = MediaSessionState.CLOSED
             // Release our renderer before removing the registry owner; this never holds sessionLock.
             playout.close()
@@ -1060,6 +1094,7 @@ internal class RiderAudioEngine(
         }
 
         fun markClosed() {
+            connectionObservations.retire()
             if (closed.compareAndSet(false, true)) { state = MediaSessionState.CLOSED; playout.close() }
         }
 

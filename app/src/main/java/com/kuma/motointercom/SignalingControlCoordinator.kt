@@ -23,6 +23,9 @@ private data class TargetedTransportRace(
     val fallbackDue: Boolean = false
 )
 
+private data class ConnectedLossProducerOwner(val attempt: ConnectionAttempt,
+    val channel: VerifiedControlChannel, val source: NativeConnectionObservationSource)
+
 internal class SignalingControlCoordinator(
     private val clock: MonotonicClock,
     private val attemptTimeoutMs: Long,
@@ -72,12 +75,44 @@ internal class SignalingControlCoordinator(
     private var automaticReconnectEnabled = true
     private var authorizedDecisionTime: MonotonicTimestamp? = null
     private var preparedLossTicket: AutomaticRecoveryPolicy.Ticket? = null
+    private var preparedLossElapsedMs: Long? = null
+    @Volatile private var connectedNativeOwner: Pair<ConnectionAttempt, NativeConnectionObservationSource>? = null
+    @Volatile private var connectedLossProducerOwner: ConnectedLossProducerOwner? = null
+    private var approvedGlareOrigin: Pair<ConnectionAttempt, ConnectionAttempt>? = null
+    private var nextConnectedLossGeneration = 0L
+    @Volatile internal var connectedLossWindow: ConnectedLossWindow? = null
+        private set
     private var nextRecoveryIntentGeneration = 0L
     @Volatile private var automaticRecoveryIntent: AutomaticRecoveryIntent? = null
     internal val recoveryIntent get() = automaticRecoveryIntent
 
     internal val currentAttempt: ConnectionAttempt?
         get() = ownedAttempt
+
+    internal fun recordProducerLoss(event: SessionEvent, observation: ConnectionLossObservation) {
+        val owner = connectedLossProducerOwner ?: return
+        if (ownedAttempt != owner.attempt || observation.sourceAttempt != owner.attempt) return
+        val exact = when (event) {
+            is SessionEvent.ChannelClosed -> event.runtimeSessionId == owner.attempt.runtimeSessionId &&
+                event.channelId == owner.channel.channelId && event.wireRequestKey == owner.channel.wireRequestKey
+            is SessionEvent.SignalingSendFailed -> event.runtimeSessionId == owner.attempt.runtimeSessionId &&
+                event.attemptId == owner.attempt.id && event.channelId == owner.channel.channelId
+            is SessionEvent.SignalingDisconnected -> event.runtimeSessionId == owner.attempt.runtimeSessionId &&
+                event.attemptId == owner.attempt.id && event.selectedChannelId == owner.channel.channelId
+            is SessionEvent.WebRtcStateChanged -> event.runtimeSessionId == owner.attempt.runtimeSessionId &&
+                event.attemptId == owner.attempt.id && event.nativeObservation?.source === owner.source
+            else -> false
+        }
+        if (exact) owner.source.recordOwnerLoss(observation,
+            event !is SessionEvent.WebRtcStateChanged || event.state != WebRtcConnectionState.DISCONNECTED)
+    }
+
+    internal fun recordSelectedTransportLoss(attempt: ConnectionAttempt, transport: Transport,
+        observation: ConnectionLossObservation) {
+        val owner = connectedLossProducerOwner ?: return
+        if (owner.attempt == attempt && ownedAttempt == attempt && owner.channel.transport == transport &&
+            observation.sourceAttempt == attempt) owner.source.recordOwnerLoss(observation, hard = true)
+    }
 
     internal fun isAttemptAuthorized(attempt: ConnectionAttempt): Boolean {
         val admission = ownedPresenceAdmission
@@ -95,7 +130,9 @@ internal class SignalingControlCoordinator(
             channel.targetLock == attempt.targetLock && channel.peer == context.peer &&
             channel.peer.isVerifiedFor(attempt.targetLock) &&
             channel.transport in attempt.channelPlan && channel.transport in origin.channelPlan &&
-            ownedPresenceAdmission?.isAuthorizedOrigin(origin, attempt) == true
+            (ownedPresenceAdmission?.isAuthorizedOrigin(origin, attempt) ?: approvedGlareOrigin?.let {
+                it.first.hasSameImmutableIdentity(origin) && it.second.hasSameImmutableIdentity(attempt)
+            } == true)
     }
 
     internal val activeAttempt: AttemptChannelSet?
@@ -121,6 +158,9 @@ internal class SignalingControlCoordinator(
             if (lossObservation == null) automaticRecoveryPolicy.captureLoss(it.attempt)
             else lossObservation.authorization.takeIf { _ -> lossObservation.sourceAttempt == it.attempt }
         }
+        preparedLossElapsedMs = lossObservation?.takeIf {
+            it.sourceAttempt == (current as? IntercomState.Connected)?.attempt
+        }?.occurredAtElapsedMs
         val admission = ownedPresenceAdmission
         val attempt = ownedAttempt
         if (admission == null || attempt == null ||
@@ -148,7 +188,8 @@ internal class SignalingControlCoordinator(
         incomingPolicy: IncomingRequestPolicy?
     ): SignalingControlDecision? {
         pruneCompleted()
-        return when (event) {
+        val cancellationWindow = connectedLossWindow
+        val decision = when (event) {
             is SessionEvent.AutomaticReconnectChanged -> {
                 if (!event.policyAlreadyApplied) automaticRecoveryPolicy.setEnabled(event.enabled)
                 automaticReconnectEnabled = event.enabled
@@ -198,12 +239,24 @@ internal class SignalingControlCoordinator(
             is SessionEvent.AttemptTimedOut -> attemptTimedOut(current, event)
             is SessionEvent.AttemptMilestoneElapsed -> attemptMilestoneElapsed(current, event)
             is SessionEvent.WebRtcStateChanged -> webRtcStateChanged(current, event)
+            is SessionEvent.ConnectedLossObservationDue -> connectedLossObservationDue(current, event.window)
             is SessionEvent.SignalingDisconnected -> signalingDisconnected(current, event)
             is SessionEvent.RecoveryExhausted -> recoveryExhausted(current, event)
             is SessionEvent.DisconnectRequested -> disconnectRequested(current, event)
             is SessionEvent.StopRequested -> stopRequested(current, event)
             else -> null
         }
+        val cancelNativeOwner = decision?.accepted == true &&
+            (event is SessionEvent.DisconnectRequested || event is SessionEvent.StopRequested)
+        if (cancelNativeOwner) {
+            connectedLossWindow = null
+            connectedNativeOwner?.second?.retire()
+            connectedNativeOwner = null
+            connectedLossProducerOwner = null
+            if (cancellationWindow != null) return decision.copy(
+                effects = listOf(SessionEffect.CancelConnectedLossObservation(cancellationWindow)) + decision.effects)
+        }
+        return decision
     }
 
     fun onProductTransition(
@@ -211,6 +264,13 @@ internal class SignalingControlCoordinator(
         next: IntercomState,
         event: SessionEvent
     ) {
+        if (approvedGlareOrigin?.second != next.connectionAttemptOrNull()) approvedGlareOrigin = null
+        connectedNativeOwner?.takeIf { it.first != next.connectionAttemptOrNull() }?.let {
+            it.second.retire()
+            connectedNativeOwner = null
+            connectedLossProducerOwner = null
+            connectedLossWindow = null
+        }
         val context = active
         if (context != null) {
             when (event) {
@@ -699,6 +759,68 @@ internal class SignalingControlCoordinator(
         val attempt = matchingOwnedAttempt(event.runtimeSessionId, event.attemptId)
             ?.takeIf { current.connectionAttemptOrNull() == it }
             ?: return rejected()
+        val receipt = event.nativeObservation
+        if (receipt != null && receipt.state.toProductState() != event.state) return rejected()
+        if (receipt != null && receipt.elapsedMs > decisionNow().elapsedRealtimeMs) return rejected()
+        if (current is IntercomState.Connected && receipt != null) {
+            if (connectedNativeOwner?.first != attempt || connectedNativeOwner?.second !== receipt.source) return rejected()
+            if (event.state == WebRtcConnectionState.CONNECTED) {
+                if (active?.let { it.attempt == attempt && it.phase == SignalingAttemptPhase.CONNECTED &&
+                        it.mediaOwnerChannelId?.let(channels::get)?.let { owner ->
+                            owner.wireRequestKey == it.wireRequestKey && owner.targetLock == attempt.targetLock &&
+                                owner.peer == current.peer
+                        } == true } != true) return rejected()
+                val window = connectedLossWindow
+                if (window == null) return accepted(state = current)
+                val observed = receipt.source.decideWindow(window.firstReceipt, window.observedUntilElapsedMs) { healed ->
+                    if (healed != null && hasLiveObservedOwner(current, window)) cancelConnectedObservation(current, window)
+                    else if (receipt.sequence <= (window.firstReceipt.firstLossSequence ?: window.firstReceipt.sequence)) rejected()
+                    else null
+                }
+                return observed ?: expireConnectedObservation(current, window)
+            }
+            if (event.state == WebRtcConnectionState.DISCONNECTED) {
+                val existing = connectedLossWindow
+                var completedWindowEffects = emptyList<SessionEffect>()
+                if (existing != null) {
+                    val now = decisionNow().elapsedRealtimeMs
+                    val observed = receipt.source.decideWindow(existing.firstReceipt, existing.observedUntilElapsedMs) { healed ->
+                        if (healed != null && hasLiveObservedOwner(current, existing)) {
+                            val canceled = cancelConnectedObservation(current, existing)
+                            if (receipt.firstLossSequence?.let { it > healed.sequence } == true) {
+                                completedWindowEffects = canceled.effects
+                                null // This receipt belongs to the next native loss, not the healed window.
+                            } else canceled
+                        }
+                        else if (now >= existing.observedUntilElapsedMs) null
+                        else accepted(state = current)
+                    }
+                    if (observed != null) return observed
+                    if (connectedLossWindow === existing) return expireConnectedObservation(current, existing)
+                }
+                val context = active?.takeIf { it.attempt == attempt && it.phase == SignalingAttemptPhase.CONNECTED }
+                val owner = context?.mediaOwnerChannelId?.let(channels::get)
+                val loss = receipt.firstLoss?.takeIf { it.sourceAttempt == attempt }
+                val firstAt = loss?.occurredAtElapsedMs
+                if (owner != null && loss != null && firstAt != null && firstAt in 0..decisionNow().elapsedRealtimeMs) {
+                    val window = ConnectedLossWindow(++nextConnectedLossGeneration, current, owner, receipt, loss,
+                        Math.addExact(firstAt, 2_000L), Math.addExact(firstAt, attemptTimeoutMs))
+                    val now = decisionNow().elapsedRealtimeMs
+                    val observed = receipt.source.decideWindow(receipt, window.observedUntilElapsedMs) { healed ->
+                        if (healed != null) {
+                            receipt.source.acknowledgeSelfHeal(healed)
+                            accepted(state = current, effects = completedWindowEffects)
+                        }
+                        else {
+                            connectedLossWindow = window
+                            if (now >= window.observedUntilElapsedMs) null
+                            else accepted(state = current, effects = completedWindowEffects + SessionEffect.ScheduleConnectedLossObservation(window))
+                        }
+                    }
+                    return observed ?: expireConnectedObservation(current, window)
+                }
+            }
+        }
         if (
             event.state == WebRtcConnectionState.CONNECTED &&
             attempt.isExpiredAt(decisionNow())
@@ -706,7 +828,7 @@ internal class SignalingControlCoordinator(
             return rejected()
         }
         return when (event.state) {
-            WebRtcConnectionState.CONNECTED -> connectWebRtc(current, attempt, event.occurredAt)
+            WebRtcConnectionState.CONNECTED -> connectWebRtc(current, attempt, event.occurredAt, receipt)
             WebRtcConnectionState.DISCONNECTED -> connectionLost(
                 current,
                 attempt,
@@ -724,10 +846,44 @@ internal class SignalingControlCoordinator(
         }
     }
 
+    private fun hasLiveObservedOwner(current: IntercomState.Connected, window: ConnectedLossWindow): Boolean =
+        current == window.connected && ownedAttempt == current.attempt &&
+            connectedNativeOwner?.second === window.firstReceipt.source &&
+            active?.let { it.attempt == current.attempt && it.phase == SignalingAttemptPhase.CONNECTED &&
+                it.mediaOwnerChannelId == window.owner.channelId && it.wireRequestKey == window.owner.wireRequestKey } == true &&
+            channels[window.owner.channelId] == window.owner
+
+    private fun cancelConnectedObservation(current: IntercomState.Connected, window: ConnectedLossWindow): SignalingControlDecision {
+        if (connectedLossWindow !== window) return rejected()
+        connectedLossWindow = null
+        window.firstReceipt.source.decideWindow(window.firstReceipt, window.observedUntilElapsedMs) { healed ->
+            if (healed != null) window.firstReceipt.source.acknowledgeSelfHeal(healed)
+        }
+        return accepted(state = current, effects = listOf(SessionEffect.CancelConnectedLossObservation(window)))
+    }
+
+    private fun expireConnectedObservation(current: IntercomState.Connected, window: ConnectedLossWindow): SignalingControlDecision =
+        if (automaticReconnectEnabled) recoverConnectedAttempt(current, ConnectionAttemptTerminalOutcome.DISCONNECTED,
+            restartConnectedDiscovery = false, allowObservedSelfHeal = true)
+        else finishConnectedAttemptWithoutRecovery(current, ConnectionAttemptTerminalOutcome.DISCONNECTED,
+            allowObservedSelfHeal = true)
+
+    private fun connectedLossObservationDue(current: IntercomState, window: ConnectedLossWindow): SignalingControlDecision {
+        val connected = current as? IntercomState.Connected ?: return rejected()
+        if (connectedLossWindow !== window || connected != window.connected || ownedAttempt != connected.attempt ||
+            decisionNow().elapsedRealtimeMs < window.observedUntilElapsedMs) return rejected()
+        val observed = window.firstReceipt.source.decideWindow(window.firstReceipt, window.observedUntilElapsedMs) { healed ->
+            if (healed != null && hasLiveObservedOwner(connected, window)) cancelConnectedObservation(connected, window)
+            else null
+        }
+        return observed ?: expireConnectedObservation(connected, window)
+    }
+
     private fun connectWebRtc(
         current: IntercomState,
         attempt: ConnectionAttempt,
-        connectedAt: Long
+        connectedAt: Long,
+        receipt: NativeConnectionObservation? = null
     ): SignalingControlDecision {
         if (terminalOutcome(attempt.id) != null) return rejected()
         val peer = when (current) {
@@ -746,6 +902,14 @@ internal class SignalingControlCoordinator(
                 targetedTransportRace = null
                 ownedPresenceAdmission = null
                 automaticRecoveryIntent = null
+                approvedGlareOrigin = null
+                connectedNativeOwner = receipt?.let { attempt to it.source }
+                connectedLossProducerOwner = receipt?.let { native ->
+                    active?.mediaOwnerChannelId?.let(channels::get)?.let { owner ->
+                        native.source.acceptConnectedOwner(attempt)
+                        ConnectedLossProducerOwner(attempt, owner, native.source)
+                    }
+                }
                 accepted(IntercomState.Connected(attempt, peer, connectedAt, winnerTransport))
             }
         }
@@ -792,23 +956,41 @@ internal class SignalingControlCoordinator(
 
     private fun finishConnectedAttemptWithoutRecovery(
         current: IntercomState.Connected,
-        outcome: ConnectionAttemptTerminalOutcome
+        outcome: ConnectionAttemptTerminalOutcome,
+        allowObservedSelfHeal: Boolean = false
     ): SignalingControlDecision {
+        val window = connectedLossWindow?.takeIf { it.connected == current }
+        if (allowObservedSelfHeal && window != null) {
+            // Cleanup is metadata-only, with its tombstone clock prepared before the native lock.
+            val preparedAt = decisionNow()
+            return window.firstReceipt.source.decideWindow(window.firstReceipt, window.observedUntilElapsedMs) { healed ->
+                if (healed != null && hasLiveObservedOwner(current, window)) cancelConnectedObservation(current, window)
+                else {
+                    val previousTime = authorizedDecisionTime
+                    authorizedDecisionTime = preparedAt
+                    try { finishConnectedAttemptWithoutRecovery(current, outcome) }
+                    finally { authorizedDecisionTime = previousTime }
+                }
+            }
+        }
+        connectedLossWindow = null
+        val cancellation = window?.let { listOf(SessionEffect.CancelConnectedLossObservation(it)) }.orEmpty()
         val context = active?.takeIf { it.attempt == current.attempt }
         if (context?.phase == SignalingAttemptPhase.TERMINATING) {
-            return finishAttemptImmediately(current, context)
+            return finishAttemptImmediately(current, context).let { it.copy(effects = cancellation + it.effects) }
         }
         if (context != null) {
             return finishActiveSessionDisconnect(
                 current = current,
                 context = context,
+                prefixEffects = cancellation,
                 logicalOutcome = outcome
             )
         }
         clearOwnedAttempt(current.attempt)
         return accepted(
             state = IntercomState.Discovering(current.runtimeSessionId),
-            effects = listOf(
+            effects = cancellation + listOf(
                 SessionEffect.ReleaseActiveSessionAndContinueDiscovery(current.attempt)
             )
         )
@@ -841,7 +1023,8 @@ internal class SignalingControlCoordinator(
     private fun recoverConnectedAttempt(
         current: IntercomState.Connected,
         outcome: ConnectionAttemptTerminalOutcome,
-        restartConnectedDiscovery: Boolean
+        restartConnectedDiscovery: Boolean,
+        allowObservedSelfHeal: Boolean = false
     ): SignalingControlDecision {
         active?.takeIf {
             it.attempt.id == current.attempt.id &&
@@ -854,62 +1037,75 @@ internal class SignalingControlCoordinator(
         ) {
             return rejected()
         }
-        val authorization = preparedLossTicket
-            ?: return finishConnectedAttemptWithoutRecovery(current, outcome)
+        val window = connectedLossWindow?.takeIf { it.connected == current }
+        val earlierProducer = window != null && preparedLossElapsedMs?.let { earlier ->
+            window.firstLoss.occurredAtElapsedMs?.let { first -> earlier in 0 until first } == true
+        } == true
+        val fallbackLoss = ConnectionLossObservation(current.attempt,
+            if (window == null || earlierProducer) preparedLossTicket else window.firstLoss.authorization,
+            (if (earlierProducer) preparedLossElapsedMs else window?.firstLoss?.occurredAtElapsedMs)
+                ?: preparedLossElapsedMs ?: decisionNow().elapsedRealtimeMs)
+        val producerSource = connectedLossProducerOwner?.takeIf { it.attempt == current.attempt }?.source
+        val preparedLoss = producerSource?.decideOwnerLoss { it } ?: fallbackLoss
+        val authorization = preparedLoss.authorization
+            ?: return finishConnectedAttemptWithoutRecovery(current, outcome, allowObservedSelfHeal)
+        if (!automaticRecoveryPolicy.isAuthorized(authorization)) return finishConnectedAttemptWithoutRecovery(current, outcome, allowObservedSelfHeal)
         val recoveryAttemptId = attemptIdFactory()
         if (recoveryAttemptId == current.attempt.id || terminalOutcome(recoveryAttemptId) != null) return rejected()
         val recoveryPlan = current.attempt.channelPlan.orderedForRecovery(current.transport)
-        val recoveryAttempt = ConnectionAttempt(
-            id = recoveryAttemptId,
-            runtimeSessionId = current.attempt.runtimeSessionId,
-            targetLock = current.attempt.targetLock,
-            trigger = ConnectionTrigger.RECOVERY,
-            channelPlan = recoveryPlan,
-            deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
-        )
-        val race = createTargetedTransportRace(
-            recoveryAttempt,
-            preferredTransportOpened = !restartConnectedDiscovery
-        )
-        val fallbackMilestone = race.fallbackMilestone
         val nextGeneration = Math.incrementExact(nextRecoveryIntentGeneration)
-        val decision = accepted(
-            state = IntercomState.Recovering(
-                recoveryAttempt,
-                current.peer,
-                consecutiveFinalFailures = 0
-            ),
-            effects = if (restartConnectedDiscovery) {
-                listOfNotNull(
-                    SessionEffect.RestartDiscovery(
-                        recoveryAttempt.runtimeSessionId,
-                        recoveryAttempt
-                    ),
-                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
-                    fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
+        val oldContext = active?.takeIf { it.attempt == current.attempt }
+        val closeOldOwner = if (connectedNativeOwner?.first == current.attempt) oldContext?.channelIds?.map {
+            closeEffect(current.runtimeSessionId, current.attemptId, it, current.attempt.targetLock)
+        }.orEmpty() else emptyList()
+        val prefixEffects = window?.let { listOf(SessionEffect.CancelConnectedLossObservation(it)) }.orEmpty() + closeOldOwner
+        val recordedAt = nowElapsedRealtimeMs()
+        val adoptFrozenLoss: (ConnectionLossObservation) -> SignalingControlDecision? = { firstLoss ->
+            val frozenTicket = firstLoss.authorization
+            if (frozenTicket == null) null else automaticRecoveryPolicy.tryConsume(frozenTicket) {
+                // Pure metadata construction uses the producer's final first loss. A producer can
+                // arrive during ID/clock preparation without changing an already-adopted deadline.
+                val recoveryAttempt = ConnectionAttempt(recoveryAttemptId, current.runtimeSessionId,
+                    current.attempt.targetLock, ConnectionTrigger.RECOVERY, recoveryPlan,
+                    deadlineAfter(requireNotNull(firstLoss.occurredAtElapsedMs), attemptTimeoutMs).elapsedRealtimeMs)
+                val race = createTargetedTransportRace(recoveryAttempt, preferredTransportOpened = !restartConnectedDiscovery)
+                val decision = accepted(IntercomState.Recovering(recoveryAttempt, current.peer, 0),
+                    prefixEffects + if (restartConnectedDiscovery) listOfNotNull(
+                        SessionEffect.RestartDiscovery(recoveryAttempt.runtimeSessionId, recoveryAttempt),
+                        SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
+                        race.fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
+                    ) else listOfNotNull(
+                        SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
+                        SessionEffect.OpenTargetedTransport(recoveryAttempt, recoveryAttempt.preferredTransport),
+                        race.fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)))
+                connectedLossWindow = null
+                if (existingOutcome == null) recordTerminal(current.attempt, outcome)
+                oldContext?.let { rememberDisconnectedIfAccepted(it, recordedAt); forgetActiveChannels(it) }
+                ownedAttempt = recoveryAttempt
+                targetedTransportRace = race
+                nextRecoveryIntentGeneration = nextGeneration
+                automaticRecoveryIntent = AutomaticRecoveryIntent(
+                    RecoveryIntentRef(current.runtimeSessionId, nextRecoveryIntentGeneration),
+                    current.attempt, current.transport, frozenTicket
                 )
-            } else {
-                listOfNotNull(
-                    SessionEffect.ScheduleAttemptDeadline(recoveryAttempt),
-                    SessionEffect.OpenTargetedTransport(
-                        recoveryAttempt,
-                        recoveryAttempt.preferredTransport
-                    ),
-                    fallbackMilestone?.let(SessionEffect::ScheduleAttemptMilestone)
-                )
+                producerSource?.retire()
+                decision
             }
-        )
-        return automaticRecoveryPolicy.tryConsume(authorization) {
-            if (existingOutcome == null) recordTerminal(current.attempt, outcome)
-            ownedAttempt = recoveryAttempt
-            targetedTransportRace = race
-            nextRecoveryIntentGeneration = nextGeneration
-            automaticRecoveryIntent = AutomaticRecoveryIntent(
-                RecoveryIntentRef(current.runtimeSessionId, nextRecoveryIntentGeneration),
-                current.attempt, current.transport, authorization
-            )
-            decision
-        } ?: finishConnectedAttemptWithoutRecovery(current, outcome)
+        }
+        val adopt = {
+            if (producerSource == null) adoptFrozenLoss(fallbackLoss)
+            else producerSource.decideOwnerLoss { first -> adoptFrozenLoss(first ?: fallbackLoss) }
+        }
+        // Receipt/first-loss -> policy -> metadata; every producer releases policy before recording.
+        // No factory, clock, Service callback or resource I/O may enter this claim.
+        val claimed = if (allowObservedSelfHeal && window != null) {
+            window.firstReceipt.source.decideWindow(window.firstReceipt, window.observedUntilElapsedMs) { healed ->
+                if (connectedLossWindow !== window) rejected()
+                else if (healed != null && hasLiveObservedOwner(current, window)) cancelConnectedObservation(current, window)
+                else adopt()
+            }
+        } else adopt()
+        return claimed ?: finishConnectedAttemptWithoutRecovery(current, outcome, allowObservedSelfHeal)
     }
 
     private fun recoveryExhausted(
@@ -1062,6 +1258,17 @@ internal class SignalingControlCoordinator(
         }
         completedAttempts[event.wireRequestKey]?.let { completed ->
             return replayCompleted(event.runtimeSessionId, channel.channelId, completed)
+        }
+
+        if (current is IntercomState.Connected && connectedLossWindow?.connected == current &&
+            event.trigger == RequestTrigger.RECOVERY && channel.targetLock == current.attempt.targetLock &&
+            channel.peer == current.peer) {
+            val recovery = recoverConnectedAttempt(current, ConnectionAttemptTerminalOutcome.DISCONNECTED,
+                restartConnectedDiscovery = false)
+            val recovering = recovery.state as? IntercomState.Recovering ?: return recovery
+            val inbound = acceptGlareWinner(recovering, channel, event.preferredTransportHint, event.occurredAtElapsedMs)
+            return if (inbound.accepted) inbound.copy(state = inbound.state ?: recovering,
+                effects = recovery.effects + inbound.effects) else recovery
         }
 
         val currentAttempt = current.connectionAttemptOrNull()
@@ -1348,6 +1555,9 @@ internal class SignalingControlCoordinator(
             }
             recordTerminal(currentAttempt, ConnectionAttemptTerminalOutcome.GLARE_LOST)
             losingChannelIds.forEach(channels::remove)
+            // An already approved responder cohort may originate from the exact losing attempt.
+            // A revoked Presence admission still takes precedence over this metadata lineage.
+            approvedGlareOrigin = currentAttempt to attempt
             ownedAttempt = attempt
             targetedTransportRace = null
             beginMediaSelection(
@@ -3109,9 +3319,9 @@ internal class SignalingControlCoordinator(
         AttemptOutcome.DISCONNECTED -> ConnectionAttemptTerminalOutcome.DISCONNECTED
     }
 
-    private fun rememberDisconnectedIfAccepted(context: AttemptChannelSet) {
+    private fun rememberDisconnectedIfAccepted(context: AttemptChannelSet, recordedAt: Long = nowElapsedRealtimeMs()) {
         if (context.terminalOutcome == AttemptOutcome.ACCEPTED) {
-            remember(context.wireRequestKey, AttemptOutcome.DISCONNECTED, null)
+            remember(context.wireRequestKey, AttemptOutcome.DISCONNECTED, null, recordedAt)
         }
     }
 
