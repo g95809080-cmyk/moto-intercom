@@ -1,6 +1,6 @@
 # KUM-85 小米13修复测试安装
 
-[KUM-85](https://linear.app/kuma999/issue/KUM-85)，branch `deploy/kum-85-xiaomi13-v1.2.3`，Base `5b369c9ebf68e2c5fd988f206782f5ee54d79906`。用户2026-10-13明确要求将已审查的Android修复安装到已开启无线调试的小米13；沿用1.2.x修复测试编号。
+[KUM-85](https://linear.app/kuma999/issue/KUM-85)，[Draft PR #58](https://github.com/g95809080-cmyk/moto-intercom/pull/58)，branch `deploy/kum-85-xiaomi13-v1.2.3`，Base `5b369c9ebf68e2c5fd988f206782f5ee54d79906`。用户2026-10-13明确要求将已审查的Android修复安装到已开启无线调试的小米13；沿用1.2.x修复测试编号。
 
 功能Source `f587472e251b59f3c25e8cad5e483c8e0afc887a` 已经只读APPROVED/P0P1=0、完整本地与固定Source CI通过，包含KUM82-84。仅调整版本权威为1.2.3+f587472/code7并补打包/安装证据；原app/src、构建、workflow不改。版本6已经实际分发，不复用。
 
