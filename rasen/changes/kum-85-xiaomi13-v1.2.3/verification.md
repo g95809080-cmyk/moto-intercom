@@ -15,3 +15,5 @@ adb install -r返回Success。安装前后user0的ceDataInode=8094856、deDataIn
 am start -W返回Status ok、COLD、TotalTime927ms、WaitTime932ms。启动后进程持续存活，目标进程crash buffer为空，启动日志未发现应用fatal。launch-after.png实际显示首页正常、原VOX灵敏度70；设备没有连接蓝牙或对端，用户尚未启动对讲，不能据此确认通话音频、VOX或自动重连修复效果。
 
 诊断页面与重启后的历史日志检查尚未完成。安装前后uiautomator无法获得idle，临时UI dump helper被系统终止且未产出XML；这些失败不计为UI验收成功。仅凭数据目录保留不证明历史日志内容完整。KUM-85保留In Review，第5项未全部勾选；双机、普通蓝牙及道路验收继续由KUM82-84跟踪。本次未合并main、创建公开Release/tag或操作iOS。
+
+手机端本次临时UI helper和XML目标已用精确路径清理。本机临时旧APK、未签名对齐包、UI helper及签名sidecar的清理被自动审批以“blocked by policy”拒绝，精确LiteralPath删除同样被拒绝，未绕过策略。文件留在忽略logs目录及output；旧包证书证明另存signature-before.txt，正式测试APK、校验文件与安装证据保留。
