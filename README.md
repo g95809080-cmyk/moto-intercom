@@ -1,14 +1,16 @@
 # 🏍️ 摩声 MotoCom
 
-**和附近车友，开口就聊。**
+**和附近车友，四人一起聊。**
 
 摩声是一款 Android 骑行对讲 App。打开 Wi-Fi，找到附近车友，连上后直接说话——不用一直按着按钮，也不需要互联网。支持双人对讲，也支持含房主最多四人的离线房间。
 
+这是独立维护的**四人版 `2.x`**，分支为 `four-person`。双人专用版在 [`main` 分支](https://github.com/g95809080-cmyk/moto-intercom/tree/main)维护，使用 `1.x`。本次将原四人版1.3.0重编号为2.0.0，功能源码保持不变，尚未完成的现场问题与实测不会因版本号变化而视为解决。
+
 ## 📦 下载体验
 
-当前正式版：**1.3.0+aee3b3f**。
+当前四人预览版：**2.0.0+aee3b3f**，Android versionCode为8。
 
-[下载最新正式版 APK](https://github.com/g95809080-cmyk/moto-intercom/releases/latest) · [查看全部版本](https://github.com/g95809080-cmyk/moto-intercom/releases)
+[下载四人 2.0 预览版](https://github.com/g95809080-cmyk/moto-intercom/releases/tag/v2.0.0%2Baee3b3f) · [双人 1.2.3 测试版](https://github.com/g95809080-cmyk/moto-intercom/releases/tag/v1.2.3%2Bf587472) · [查看全部版本](https://github.com/g95809080-cmyk/moto-intercom/releases)
 
 支持 **Android 6.0 及以上**。下载 Release 页面中的 `.apk` 文件，在手机上打开安装；系统询问时，允许当前浏览器或文件管理器安装应用。
 
@@ -20,7 +22,7 @@
 - **断开后找回原车友**：开启自动重连后，连接意外中断会尝试恢复。
 - **第一次也不迷路**：先看图文说明，再跟着高亮按钮完成准备、启动和发现车友。
 
-正式版同时提供双人对讲和四人房间。仓库里的 iOS 代码仍在开发。
+本分支提供四人房间，同时保留原双人入口。仓库里的 iOS 代码仍在开发。
 
 ## 四人房间怎么用？
 
