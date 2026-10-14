@@ -1,5 +1,13 @@
 # KUM-86 验证
 
-当前为发布准备，未宣称main已合并或Release已发布。旧main与v1.3.0标签0f5e7b7已保存至远端four-person；原Git历史保持不变。双人合并提交选用190055b树，app tree ee9b0b23f3a929db434d0ba9c4f7b12adb0bc765与Source f587472一致。iOS与旧main无差异。
+2026-10-14已完成双人main维护线切换和原1.2.3测试APK预发布。Base0f5e7b778ee0b945725c9506055d6137a7faf546，固定候选Headc0acb1447396f318292026e8a433860f3ab7b160，功能Sourcef587472e251b59f3c25e8cad5e483c8e0afc887a。候选双亲190055b与旧main0f5e7b7均保留，原四人源码先保存至four-person；没有force push或改动旧标签。
 
-原测试APK SHA256为73B910336E1357F1180CB0D5F781EE8C9A0D1A06E7831CF7C6E34C1520240B15，固定打包Head8296e24、功能Source f587472。KUM-85已有804 JVM tests、Release Lint 0/71、签名/对齐/版本和小米13启动证据；Source CI38239675696两项成功。本次只改发布文档和CI分支范围，待固定Head审查与本次CI。
+只读审查APPROVED，P0=0/P1=0，10/10本轮路径全文审查。生产、测试、Gradle、buildSrc、scripts、iOS与已审查双人Source无功能差异；app tree为ee9b0b23f3a929db434d0ba9c4f7b12adb0bc765。固定CI38527802640两项completed/success：verify115732198181、API36 instrumentation115732198758。PR #59正常merge到main，合并提交c2bd2bbcc59746be42c92b6dcecc56d6dd812ad7，Source、原打包Head8296e24和两亲历史均为main祖先。
+
+双人GitHub预发布Release ID412449490已公开，链接https://github.com/g95809080-cmyk/moto-intercom/releases/tag/v1.2.3%2Bf587472。tag指向原实际打包Head8296e24958bd143edb405c0ccf638e652f39b092。APK原样沿用小米13安装包，1.2.3+f587472/code7，SHA256=73B910336E1357F1180CB0D5F781EE8C9A0D1A06E7831CF7C6E34C1520240B15，未重编译或签发不同字节。服务器APK及校验文件digest与本地分别一致，仅两项资产；原始响应留存忽略logs/2026-10-14-release-lines。
+
+KUM85完整804 JVM tests、Release Lint0/71、签名、对齐、manifest和小米13启动证据复用，固定功能Source CI38239675696已成功。实体双机、普通蓝牙、道路和诊断页面/历史日志独立UI检查继续原问题跟踪，不因测试包发布视为全部验收。
+
+四人2.0由KUM87独立PR #60、固定Head683a38d、CI38528829906及最终签名包审查通过后合到four-person；既有四人Release ID392331516已迁v2.0.0+aee3b3f并替换正确APK，旧v1.3Git标签保留0f5e7b7。两长期线共用versioning约定：main双人1.x、four-person四人2.x，新包全局code递增，code8已分发，之后至少9。只有版本/文档/证据/分支CI调整；未改iOS。
+
+发布后收尾仅补实际证据与tasks，不改变Source、构建或workflow，原固定门禁不重复运行。用户两份原有未跟踪产品文档保留；旧四人Release元数据及资产备份也保留供恢复。

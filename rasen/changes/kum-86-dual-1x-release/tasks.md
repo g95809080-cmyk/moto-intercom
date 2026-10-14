@@ -1,5 +1,5 @@
 - [x] 1. 用户授权、Linear KUM-86、四人源码独立分支保留
 - [x] 2. 双亲历史合并、双人树及中文版本/下载/CI范围整理
-- [ ] 3. 固定Base/Head只读批准、独立PR与CI
-- [ ] 4. 正常main合并、原APK预发布与远端hash核验
-- [ ] 5. Git/Linear/发布证据同步
+- [x] 3. 固定Base/Head只读批准、独立PR与CI
+- [x] 4. 正常main合并、原APK预发布与远端hash核验
+- [x] 5. Git/Linear/发布证据同步
