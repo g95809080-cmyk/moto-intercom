@@ -1,0 +1,6 @@
+- [x] 1. 用户授权、Linear KUM-87、旧Release元数据/资产备份及hash核验
+- [x] 2. 独立分支、版本/README/CI规则与合同整理
+- [ ] 3. JVM/Release Lint/Release构建、固定Head只读审查与CI
+- [ ] 4. 同签名/版本/非debuggable/对齐/hash校验与正常分支合并
+- [ ] 5. GitHub Release迁移、正确资产上传及远端核验
+- [ ] 6. Git/Linear证据同步
