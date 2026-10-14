@@ -1,0 +1,5 @@
+# KUM-86 验证
+
+当前为发布准备，未宣称main已合并或Release已发布。旧main与v1.3.0标签0f5e7b7已保存至远端four-person；原Git历史保持不变。双人合并提交选用190055b树，app tree ee9b0b23f3a929db434d0ba9c4f7b12adb0bc765与Source f587472一致。iOS与旧main无差异。
+
+原测试APK SHA256为73B910336E1357F1180CB0D5F781EE8C9A0D1A06E7831CF7C6E34C1520240B15，固定打包Head8296e24、功能Source f587472。KUM-85已有804 JVM tests、Release Lint 0/71、签名/对齐/版本和小米13启动证据；Source CI38239675696两项成功。本次只改发布文档和CI分支范围，待固定Head审查与本次CI。

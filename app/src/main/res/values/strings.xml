@@ -7,7 +7,7 @@
     <string name="guide_finish">我知道了，自己试试</string>
     <string name="guide_replay">重新查看引导</string>
     <string name="guide_permission_title">准备 · 点这里授权</string>
-    <string name="guide_permission_body">麦克风传递你的声音；附近设备或位置权限用于发现车友；电话状态用于来电时暂停对讲。按系统提示授权后，将继续检查 Wi-Fi、位置信息和后台运行设置，并启动摩声。</string>
+    <string name="guide_permission_body">麦克风传递你的声音；附近设备或位置权限用于发现车友；电话状态用于来电时暂停对讲。按系统提示授权后回到这里。</string>
     <string name="guide_permission_settings_body">还有必要权限未开启。点这里进入系统权限设置，开启 App 需要的权限后返回；也可以先跳过教学。</string>
     <string name="guide_wifi_title">准备 · 点这里打开 Wi-Fi</string>
     <string name="guide_wifi_body">离线对讲不需要互联网，但两台手机都要打开 Wi-Fi。打开后返回摩声继续。</string>
@@ -78,8 +78,13 @@
     <string name="discover_identity_short">具备稳定 MotoCom 发现信息</string>
     <string name="discover_connected_fact">当前通道身份已核对</string>
     <string name="discover_no_available_transport">暂无可用通道</string>
-    <string name="logs_copy_all">复制全部</string>
-    <string name="logs_empty">本次界面会话还没有日志</string>
+    <string name="logs_copy_all">复制当前显示日志</string>
+    <string name="logs_empty">近 7 天还没有日志</string>
+    <string name="logs_export_all">导出近 7 天日志</string>
+    <string name="logs_export_preparing">正在准备日志…</string>
+    <string name="logs_export_chooser">导出摩声诊断日志</string>
+    <string name="logs_read_failed">暂时无法读取本机日志，请稍后重试</string>
+    <string name="logs_export_failed">日志导出失败，请稍后重试</string>
     <string name="logs_content_description">日志内容，可上下滚动</string>
     <string name="menu_button_description">打开导航</string>
     <string name="back_button_description">返回首页</string>

@@ -1,0 +1,207 @@
+{
+  "base": "579b6415496bfd8ca8700618106e16257ee9ae0a",
+  "source_head": "99fc2bc3877a5d52d69d18f36b41c6bdc15102cb",
+  "decision": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "official_selected": 12,
+  "official_reviewed": 12,
+  "extended_tests_reviewed": 9,
+  "extended_contracts_reviewed": 4,
+  "total_files": 25,
+  "reviewed_files": 25,
+  "skipped_files": 0,
+  "coverage_rate": 1,
+  "coverage_scope": "Fixed source/test/contract range with stated depths; not whole-project line coverage",
+  "reviewers": [
+    "/root/logging_architecture_review",
+    "/root/ocr_main_platform_audit",
+    "/root/ocr_app_support_audit"
+  ],
+  "verification": {
+    "build": "Debug and AndroidTest APKs; successful 2m40s",
+    "hardware": "Deferred by user; no two-device, radio, Bluetooth or listening acceptance",
+    "lint": "0 errors / 70 existing warnings",
+    "remote_ci": "Pending Draft PR dispatch",
+    "native": "Same source Head API36 OK(27)/10.143s; SharedNetworkNsdTest and SyntheticAudioNetworkTest assumption skips require two-device role",
+    "jvm": "92 suites / 710 tests / 0 failure,error,skip"
+  },
+  "files": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/AutomaticRecoveryPolicy.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiscoveryPresenceAdmission.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/FreshDiscoveryObservation.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomStateMachine.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LanDiscoveryCoordinator.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceAggregator.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceConnectAdmission.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SessionOrchestrator.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingControlCoordinator.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "rasen/changes/kum-70-automatic-recovery/.openspec.yaml",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full contract/metadata",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/AutomaticRecoveryPolicyTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DiscoveryPresenceAdmissionTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/FreshDiscoveryObservationTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/FreshDiscoveryProducerRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full source/new tests and production call context",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IntercomServiceRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainActivityRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PresenceConnectServiceAdmissionRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/SignalingControlCoordinatorTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectTunnelIdentityRobolectricTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "all fixed diff plus producer/consumer/fixture/lifecycle context; unchanged baseline reused",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "rasen/changes/kum-70-automatic-recovery/design.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full contract/metadata",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "rasen/changes/kum-70-automatic-recovery/proposal.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full contract/metadata",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "rasen/changes/kum-70-automatic-recovery/specs/automatic-recovery/spec.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full contract/metadata",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    },
+    {
+      "path": "rasen/changes/kum-70-automatic-recovery/tasks.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full contract/metadata",
+      "reason": "Root consolidation of independent policy/actor, producer/transport and Service reviews; unchanged baseline at approved KUM69 has identical blobs; depth does not claim full unchanged-file audit"
+    }
+  ]
+}

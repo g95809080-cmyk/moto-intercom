@@ -672,11 +672,22 @@ internal object SignalingV2Framing {
         output.flush()
     }
 
-    fun read(input: DataInputStream): ByteArray {
-        val length = input.readInt()
+    fun read(input: DataInputStream, beforeRead: () -> Unit = {}): ByteArray {
+        fun readExactly(bytes: ByteArray) {
+            var offset = 0
+            while (offset < bytes.size) {
+                beforeRead()
+                val count = input.read(bytes, offset, bytes.size - offset)
+                if (count < 0) throw java.io.EOFException("incomplete signaling frame")
+                offset += count
+            }
+            beforeRead()
+        }
+        val header = ByteArray(4).also(::readExactly)
+        val length = java.nio.ByteBuffer.wrap(header).int
         if (length !in 1..SignalingV2Codec.MAX_FRAME_BYTES) {
             throw SignalingV2Exception("invalid signaling frame length: $length")
         }
-        return ByteArray(length).also(input::readFully)
+        return ByteArray(length).also(::readExactly)
     }
 }

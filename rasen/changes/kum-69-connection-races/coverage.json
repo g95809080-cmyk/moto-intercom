@@ -1,0 +1,291 @@
+{
+  "base": "d0655b5ae736a9c85c0a0f92688408e411a8c8b0",
+  "source_head": "58fa051c61a2d367322c07917a09859aa94768a3",
+  "decision": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "official_selected": 16,
+  "official_reviewed": 16,
+  "extended_unit_tests_reviewed": 15,
+  "reviewed": 31,
+  "skipped": 0,
+  "coverage_rate": 1,
+  "coverage_scope": "Fixed source/test diff with stated reading depths and verified blob reuse; not whole-project coverage",
+  "reviewers": [
+    "/root/logging_architecture_review",
+    "/root/ocr_main_platform_audit"
+  ],
+  "additional_context": [
+    "app/src/main/java/com/kuma/motointercom/SessionGeneration.kt: full source and all production claimIfCurrent calls"
+  ],
+  "verification": {
+    "jvm": "88 suites / 671 tests / 0 failure,error,skip",
+    "lint": "0 errors / 70 warnings",
+    "build": "Debug and AndroidTest APKs; successful 1m48s",
+    "native": "OK (27 tests) / 10.341s from adaf06f; app/src/main and app/src/androidTest blobs identical at final source head; missing-peer network probes retain assumptions",
+    "hardware": "deferred by user; no Bluetooth, radio or two-device acceptance claim",
+    "remote_ci": "pending Draft PR dispatch"
+  },
+  "files": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomService.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reason": "Admission receipts, register guards, cleanup/restart, stale states and transport/media effects"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/IntercomStateMachine.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LanDiscoveryCoordinator.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/LegacyRuntimeOwnership.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainActivity.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/MainScreen.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PendingSocketLease.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceConnectAdmission.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/PresenceConnectRequest.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/RecoveryCleanupCoordinator.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SessionOrchestrator.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingControlCoordinator.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Atomic graph/terminal/grant transfer and completion, lock order, cohort, fallback and existing recovery"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingProtocolV2.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/SignalingSessionV2.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectSignalingSocket.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt",
+      "official_selected": true,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IncomingConfirmationServiceRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/IntercomServiceRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/LanPendingSocketServiceRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/LegacyRuntimeOwnershipServiceRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainActivityRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reason": "Full new fresh-ID/adopted revocation tests and fixture; unchanged older tests reused"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/MainScreenRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PendingSocketLeaseTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PresenceConnectLineageRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Five real TCP HELLO/actor regressions; CONNECTED media-state notification is test-injected"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/PresenceConnectServiceAdmissionRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Real TCP HELLO, actual Service lease registration, original effects collector, EOF/writer failure and delayed production Abort"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/RecoveryCleanupCoordinatorTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/SignalingControlCoordinatorTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/SignalingSessionV2Test.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectPendingAdmissionRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "full source/test and production fixture",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectSignalingSocketTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/WifiDirectTunnelIdentityRobolectricTest.kt",
+      "official_selected": false,
+      "status": "reviewed",
+      "depth": "all delta plus producer/consumer/lifecycle context",
+      "reuse_source_head": "ba78a33e68f88ea74046cafef2629cefb6464caa",
+      "reuse_reason": "Full Git blob verified identical to previously reviewed source; actual depth is stated separately",
+      "reason": "Fixed-diff architecture review with related lifecycle; no claim of whole-project line coverage"
+    }
+  ]
+}

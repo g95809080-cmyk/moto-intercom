@@ -42,6 +42,8 @@ internal class RecoveryCleanupCoordinator(
     private var nextToken = 0L
     private var active: ActiveCleanup? = null
 
+    fun hasActive(runtimeSessionId: RuntimeSessionId): Boolean = active?.request?.runtimeSessionId == runtimeSessionId
+
     fun updateIfActive(request: RecoveryCleanupRequest): Boolean {
         val current = active ?: return false
         if (current.request.runtimeSessionId != request.runtimeSessionId) return true
@@ -67,6 +69,13 @@ internal class RecoveryCleanupCoordinator(
     fun cancel() {
         active?.restartCallback?.let(removeCallbacks)
         active = null
+    }
+
+    fun recheckCompleted(runtimeSessionId: RuntimeSessionId) {
+        val current = active ?: return
+        if (current.request.runtimeSessionId == runtimeSessionId &&
+            current.cleanupComplete && current.restartCallback == null
+        ) scheduleRestart(current)
     }
 
     private fun scheduleRestart(current: ActiveCleanup) {

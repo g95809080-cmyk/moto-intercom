@@ -1,0 +1,78 @@
+{
+  "base": "0616b8f81bf5d013cc720a42b0f8407233fc086c",
+  "source_head": "d095e03e954f33c7674f1cb6553029078f17bf94",
+  "decision": "APPROVED",
+  "p0": 0,
+  "p1": 0,
+  "findings": [],
+  "official_selected": 2,
+  "official_reviewed": 2,
+  "total_files": 7,
+  "reviewed_files": 7,
+  "skipped_files": 0,
+  "coverage_rate": 1,
+  "coverage_scope": "Fixed issue range; full changed source/test/contracts with unchanged producer/consumer baseline reuse; not whole-project coverage",
+  "reviewers": [
+    "/root/ocr_main_platform_audit"
+  ],
+  "verification": {
+    "remote_ci": "Pending Draft PR dispatch",
+    "targeted": "DiagnosticLogSessionTest 7 tests /1m1s",
+    "hardware": "User deferred",
+    "jvm": "92 suites /712 tests /0 failure,error,skip",
+    "build": "Debug and AndroidTest APKs successful2m22s",
+    "native": "No new local rerun; unchanged media/JNI/androidTest blobs reuse KUM70 evidence; two two-device assumption skips",
+    "lint": "0 errors /70 existing warnings"
+  },
+  "files": [
+    {
+      "path": "app/src/main/java/com/kuma/motointercom/DiagnosticLogSession.kt",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    },
+    {
+      "path": "rasen/changes/kum-71-log-export-budget/.openspec.yaml",
+      "status": "reviewed",
+      "official_selected": true,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    },
+    {
+      "path": "app/src/test/java/com/kuma/motointercom/DiagnosticLogSessionTest.kt",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    },
+    {
+      "path": "rasen/changes/kum-71-log-export-budget/design.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    },
+    {
+      "path": "rasen/changes/kum-71-log-export-budget/proposal.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    },
+    {
+      "path": "rasen/changes/kum-71-log-export-budget/specs/log-export-budget/spec.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    },
+    {
+      "path": "rasen/changes/kum-71-log-export-budget/tasks.md",
+      "status": "reviewed",
+      "official_selected": false,
+      "depth": "full current source/test/contract and all fixed diff",
+      "reason": "Checked enumeration failure, TTL, storage budget, real worker/callback and recovery ordering; extra producer/consumer baseline reused after Git diff confirms unchanged"
+    }
+  ]
+}

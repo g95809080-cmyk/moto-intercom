@@ -1,4 +1,4 @@
-package com.kuma.motointercom
+﻿package com.kuma.motointercom
 
 import android.Manifest
 import android.os.SystemClock
@@ -8,7 +8,7 @@ import android.media.AudioFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -31,8 +31,6 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.log10
-import kotlin.math.sqrt
 
 internal data class RiderMediaSessionCallbacks(
     val onLocalSdpGenerated: (sdpJson: String) -> Unit,
@@ -42,7 +40,9 @@ internal data class RiderMediaSessionCallbacks(
     val onAudioLevelChanged: (Float) -> Unit = {},
     val onError: (Throwable) -> Unit = {},
     val isSessionCurrent: () -> Boolean,
-    val initialPlaybackMuted: Boolean = false
+    val freezeConnectionLoss: (() -> ConnectionLossObservation?)? = null,
+    val onConnectionStateObserved: ((NativeConnectionObservation) -> Unit)? = null,
+    val controlIsOpen: () -> Boolean = { true }
 )
 
 internal interface RiderMediaSession : Closeable {
@@ -50,12 +50,20 @@ internal interface RiderMediaSession : Closeable {
     fun createAnswer(remoteSdpJson: String)
     fun setRemoteAnswer(remoteSdpJson: String)
     fun addRemoteIceCandidate(candidateJson: String)
-    fun setPlaybackMuted(muted: Boolean) = Unit
     fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
+    fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) = callback(null)
 }
 
-internal enum class RiderMediaMode(val maxSessions: Int) {
-    SINGLE(1), GROUP(com.kuma.motointercom.group.GroupRoom.MAX_MEMBERS - 1)
+internal data class RiderAudioIoRouteSnapshot(
+    val connected: Boolean,
+    val fresh: Boolean,
+    val inputType: Int?,
+    val outputType: Int?,
+    val sampledAtElapsedRealtimeMs: Long
+) {
+    val bluetoothReady: Boolean get() = fresh && bluetoothAudioType(inputType) && bluetoothAudioType(outputType)
+    private fun bluetoothAudioType(type: Int?) = type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET
 }
 
 internal interface RiderMediaEngine : Closeable {
@@ -76,8 +84,7 @@ internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
 }
 
 /**
- * Online-runtime audio platform owner. Legacy mode permits one replaceable session;
- * explicit group mode permits three independent sessions sharing the audio platform.
+ * Online-runtime audio platform owner with one replaceable WebRTC media session.
  *
  * The audio device module, factory, local source/track, and VOX state stay alive
  * until the online runtime stops. PeerConnection and signaling callbacks belong
@@ -91,21 +98,26 @@ internal class RiderAudioEngine(
         revision = 0,
         settings = AudioControlSettings()
     ),
-    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
-    private val mediaMode: RiderMediaMode = RiderMediaMode.SINGLE,
-    private val onDisposed: () -> Unit = {}
+    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
-    private val platformOwnership = AudioPlatformOwnership.acquire()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val rtc: ExecutorService = Executors.newSingleThreadExecutor()
 
     private var audioDeviceModule: JavaAudioDeviceModule? = null
     private var factory: PeerConnectionFactory? = null
+    private var peerConnection: PeerConnection? = null
     private var audioSource: AudioSource? = null
     private var localAudioTrack: AudioTrack? = null
+    private var localAudioSender: RtpSender? = null
+    private var remoteDescriptionSet = false
+    private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
+    private val captureFailed = AtomicBoolean(false)
+    private val ioEvidence = RiderAudioIoEvidence()
+    private val recordingOwner = NativeAudioProducerOwner()
+    private val pcmFormatLogged = AtomicBoolean(false)
     private val audioControlLock = Any()
     private var versionedAudioControls = initialAudioControls.normalized()
     private var audioControls = versionedAudioControls.settings
@@ -119,12 +131,13 @@ internal class RiderAudioEngine(
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
     private val sessionLock = Any()
-    private val activeSessions = mutableSetOf<MediaSession>()
-    // RTC-thread resources may outlive registry removal until their queued cleanup runs.
-    private val rtcSessions = mutableSetOf<MediaSession>()
-    private val ioEvidence = RiderAudioIoEvidence()
-    private val audioIoGate = AudioIoGate(sessionLock, mediaMode == RiderMediaMode.SINGLE,
-        { action -> runRtc(allowClosed = true, block = action) }, ::applyAudioIo)
+    // Device operations may synchronously join the native PCM thread. Neither native producer
+    // takes this mutex; session registration/removal uses a separate lock.
+    private val audioIoLock = Any()
+    @Volatile private var activeSession: MediaSession? = null
+    private val audioIoGate = AudioIoGate(audioIoLock, true,
+        { work -> runRtc(allowClosed = true, block = work) }, ::applyNativeAudioIo)
+    private val audioSuspended get() = !audioIoGate.allows(audioIoGate.revision())
 
     init {
         runRtc { initializeRtc() }
@@ -141,7 +154,7 @@ internal class RiderAudioEngine(
                 audioControls.voxEnabled != normalized.settings.voxEnabled ||
                 audioControls.voxSensitivity != normalized.settings.voxSensitivity
             ) {
-                voxGate = VoxGate(
+                voxGate.updateSettings(
                     enabled = normalized.settings.voxEnabled,
                     sensitivity = normalized.settings.voxSensitivity
                 )
@@ -152,30 +165,46 @@ internal class RiderAudioEngine(
             true
         }
         if (!accepted) return
-        applyCurrentTrackVolume()
         publishCurrentVoxState()
     }
 
     override fun suspendAudio() {
-        audioIoGate.request(false)
+        synchronized(audioIoLock) {
+            audioIoGate.request(false)
+            revokeNativeProducers()
+        }
+    }
+
+    private fun revokeNativeProducers() {
+        recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
+        activeSession?.playout?.pause()
+        ioEvidence.recording(false)
+        ioEvidence.playing(false)
     }
 
     override fun resumeAudio() {
-        if (!closed.get()) audioIoGate.request(true)
+        audioIoGate.request(true)
     }
 
-    private fun applyAudioIo(enabled: Boolean) {
-        if (enabled && engineState != EngineState.READY) return
+    private fun applyNativeAudioIo(enabled: Boolean) {
+        if (engineState != EngineState.READY) return
+        Log.i(TAG, "ADM I/O apply enabled=$enabled revision=${audioIoGate.revision()}")
+        if (!enabled) revokeNativeProducers()
+        else {
+            recordingOwner.authorize(true)
+        }
+        peerConnection?.setAudioRecording(enabled)
+        // Pinned m125.4 cannot restart Android ADM playout after stopping it.
+        // Its NullAudioPoller keeps decoding/reverse AEC processing; the public sink owns output.
+        peerConnection?.setAudioPlayout(false)
+        // m125.4 SetRecording(true) does not reinitialize Android ADM after StopRecording.
+        // A real interruption toggles the sending track, whose OnMuteStreamChanged reinitializes it.
+        // VOX/manual mute still act only on PCM and never disable this track.
+        localAudioTrack?.setEnabled(enabled)
+        if (enabled) activeSession?.playout?.resume(audioIoGate.revision())
         audioDeviceModule?.setMicrophoneMute(!enabled)
         audioDeviceModule?.setSpeakerMute(!enabled)
-        rtcSessions.forEach {
-            // Some native ADM switches are shared: a closing peer must not undo a
-            // grant applied to healthy peers. Its queued disposal owns its cleanup.
-            if (!enabled || !it.closed.get()) {
-                it.peerConnection?.setAudioRecording(enabled)
-                it.peerConnection?.setAudioPlayout(enabled)
-            }
-        }
+        Log.i(TAG, "ADM I/O applied enabled=$enabled; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}")
     }
 
     private fun initializeRtc() {
@@ -195,10 +224,8 @@ internal class RiderAudioEngine(
         check(!closed.get()) { "WebRTC engine is closed" }
         val session = MediaSession(callbacks)
         synchronized(sessionLock) {
-            check(!closed.get()) { "WebRTC engine is closed" }
-            check(isRuntimeCurrent() && callbacks.isSessionCurrent()) { "media authorization is stale" }
-            check(activeSessions.size < mediaMode.maxSessions) { "WebRTC media session capacity reached" }
-            activeSessions.add(session)
+            check(activeSession == null) { "a WebRTC media session is already active" }
+            activeSession = session
         }
         runRtc(onFailure = session::postError) {
             initializeMediaSession(session)
@@ -210,14 +237,20 @@ internal class RiderAudioEngine(
         if (!isActiveSession(session)) return
         try {
             requireEngineReady()
-            createPeerConnection(session)
-            check(isActiveSession(session)) { "media authorization revoked during creation" }
-            attachLocalAudioTrack(session)
-            check(isActiveSession(session)) { "media authorization revoked during attachment" }
+            audioIoGate.applyCurrent { enabled ->
+                if (enabled) {
+                    recordingOwner.authorize(true)
+                }
+                createPeerConnection(session)
+                if (enabled) session.playout.resume(audioIoGate.revision())
+            }
+            attachLocalAudioTrack()
             session.state = MediaSessionState.READY
         } catch (t: Throwable) {
             session.state = MediaSessionState.FAILED
-            runCatching { disposeMediaSessionResources(session) }.exceptionOrNull()?.let(t::addSuppressed)
+            session.playout.close()
+            session.detachRemoteSink()
+            runCatching(::disposeMediaSessionResources).exceptionOrNull()?.let(t::addSuppressed)
             session.postError(t)
         }
     }
@@ -226,7 +259,7 @@ internal class RiderAudioEngine(
         runSession(session) {
             requireSessionReady(session)
             Log.i(TAG, "createOffer 开始")
-            peerConnectionOrThrow(session).createOffer(localSdpObserver(session), sdpConstraints())
+            peerConnectionOrThrow().createOffer(localSdpObserver(session), sdpConstraints())
         }
     }
 
@@ -236,7 +269,7 @@ internal class RiderAudioEngine(
             Log.i(TAG, "createAnswer 收到远端 Offer")
             setRemoteDescription(session, remoteSdpJson) {
                 Log.i(TAG, "createAnswer 开始")
-                peerConnectionOrThrow(session).createAnswer(localSdpObserver(session), sdpConstraints())
+                peerConnectionOrThrow().createAnswer(localSdpObserver(session), sdpConstraints())
             }
         }
     }
@@ -254,14 +287,13 @@ internal class RiderAudioEngine(
             try {
                 val candidate = candidateFromJson(candidateJson)
                 Log.i(TAG, "收到远端 ICE candidate: ${candidateSummary(candidate)}")
-                if (session.remoteDescriptionSet) {
-                    check(peerConnectionOrThrow(session).addIceCandidate(candidate)) {
+                if (remoteDescriptionSet) {
+                    check(peerConnectionOrThrow().addIceCandidate(candidate)) {
                         "addIceCandidate 返回 false"
                     }
                     Log.i(TAG, "addIceCandidate 成功")
                 } else {
-                    check(session.pendingRemoteCandidates.size < 256) { "too many pending ICE candidates" }
-                    session.pendingRemoteCandidates += candidate
+                    pendingRemoteCandidates += candidate
                     Log.i(TAG, "addIceCandidate 等待远端描述")
                 }
             } catch (t: Throwable) {
@@ -274,43 +306,34 @@ internal class RiderAudioEngine(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         audioIoGate.close()
-        val sessions = synchronized(sessionLock) {
-            activeSessions.toList().also { activeSessions.clear() }
+        revokeNativeProducers()
+        val session = synchronized(sessionLock) {
+            activeSession.also { activeSession = null }
         }
-        sessions.forEach { it.markClosed() }
+        session?.markClosed()
         runRtc(allowClosed = true, onFailure = ::postEngineError) {
             try {
                 engineState = EngineState.CLOSED
                 runAllCleanupSteps(
-                    { runAllCleanupSteps(*rtcSessions.toList().map { session ->
-                        { disposeMediaSessionResources(session) }
-                    }.toTypedArray()) },
+                    { session?.detachRemoteSink() },
+                    ::disposeMediaSessionResources,
                     ::disposePlatformResources
                 )
             } catch (t: Throwable) {
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
                 rtc.shutdown()
-                AudioPlatformOwnership.release(platformOwnership)
-                mainHandler.post { onDisposed() }
             }
         }
     }
 
-    private fun disposeMediaSessionResources(session: MediaSession) {
-        val peer = session.peerConnection
-        session.peerConnection = null
-        session.localAudioSender = null
-        session.remoteDescriptionSet = false
-        session.pendingRemoteCandidates.clear()
-        session.remoteTracks.clear()
-        rtcSessions.remove(session)
-        val last = rtcSessions.isEmpty()
-        if (peer != null) runAllCleanupSteps(
-            { if (last) peer.setAudioRecording(false) },
-            { if (last) peer.setAudioPlayout(false) },
-            peer::dispose
-        )
+    private fun disposeMediaSessionResources() {
+        val peer = peerConnection
+        peerConnection = null
+        localAudioSender = null
+        remoteDescriptionSet = false
+        pendingRemoteCandidates.clear()
+        peer?.dispose()
     }
 
     private fun disposePlatformResources() {
@@ -354,9 +377,7 @@ internal class RiderAudioEngine(
     }
 
     private fun isActiveSession(session: MediaSession): Boolean =
-        !closed.get() && !session.closed.get() &&
-            synchronized(sessionLock) { session in activeSessions } &&
-            isRuntimeCurrent() && session.callbacks.isSessionCurrent()
+        !session.closed.get() && synchronized(sessionLock) { activeSession === session }
 
     private fun runRtc(
         allowClosed: Boolean = false,
@@ -381,23 +402,27 @@ internal class RiderAudioEngine(
         initWebRtcOnce(appContext)
 
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setAudioFormat(AudioFormat.ENCODING_PCM_16BIT)
             .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
-                override fun onWebRtcAudioRecordStart() { ioEvidence.recording(true) }
-                override fun onWebRtcAudioRecordStop() { ioEvidence.recording(false) }
-            })
-            .setAudioTrackStateCallback(object : JavaAudioDeviceModule.AudioTrackStateCallback {
-                override fun onWebRtcAudioTrackStart() { ioEvidence.playing(true) }
-                override fun onWebRtcAudioTrackStop() { ioEvidence.playing(false) }
+                override fun onWebRtcAudioRecordStart() {
+                    val thread = Thread.currentThread()
+                    recordingOwner.start(thread, { NativeCaptureDiagnostics.isCurrentProducer(audioDeviceModule, true, thread) }) {
+                        ioEvidence.recording(true)
+                        pcmFormatLogged.set(false)
+                        postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=software-requested") }
+                    }
+                }
+                override fun onWebRtcAudioRecordStop() {
+                    recordingOwner.stop(Thread.currentThread()) {
+                        ioEvidence.recording(false)
+                        postRuntimeMain { Log.i(TAG, "ADM recording stopped") }
+                    }
+                }
             })
             .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
-                override fun onWebRtcAudioRecordInitError(error: String) { ioEvidence.recording(false) }
-                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode, error: String) { ioEvidence.recording(false) }
-                override fun onWebRtcAudioRecordError(error: String) { ioEvidence.recording(false) }
-            })
-            .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
-                override fun onWebRtcAudioTrackInitError(error: String) { ioEvidence.playing(false) }
-                override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode, error: String) { ioEvidence.playing(false) }
-                override fun onWebRtcAudioTrackError(error: String) { ioEvidence.playing(false) }
+                override fun onWebRtcAudioRecordInitError(error: String) = captureError("init", error)
+                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode, error: String) = captureError("start:$code", error)
+                override fun onWebRtcAudioRecordError(error: String) = recordingOwner.current(Thread.currentThread()) { captureError("read", error) }
             })
             .setAudioAttributes(
                 android.media.AudioAttributes.Builder()
@@ -407,15 +432,28 @@ internal class RiderAudioEngine(
             )
             // 低延迟优先；耳机/头盔链路里这比高保真更重要。
             .setUseLowLatency(true)
-            // 采集端 PCM 钩子：在 WebRTC 编码前做 VOX 门限判断。
-            // 注意这里只做 RMS 计算和状态翻转，避免在音频线程里执行重活。
-            .setSamplesReadyCallback(JavaAudioDeviceModule.SamplesReadyCallback { samples ->
-                ioEvidence.pcm(SystemClock.elapsedRealtime())
-                handleAudioSamplesForVox(samples)
-            })
-            // 优先启用设备硬件 AEC/NS；不支持时 WebRTC 会回退到软件处理。
+            // The build patch wires the SDK's unused public callback before native encoding.
+            // Keep native tracks active: this pinned native build stops capture when all tracks mute.
+            .setAudioRecordDataCallback { format, channels, rate, buffer ->
+                val gate = audioIoGate.revision()
+                try {
+                    if (captureFailed.get() || !audioIoGate.allows(gate) || !recordingOwner.isCurrent(Thread.currentThread())) PcmTransmitGate.silence(buffer)
+                    else {
+                        ioEvidence.pcm(SystemClock.elapsedRealtime())
+                        if (pcmFormatLogged.compareAndSet(false, true)) {
+                            postRuntimeMain { Log.i(TAG, "ADM captured PCM format=$format rate=$rate channels=$channels") }
+                        }
+                        handleCapturedPcm(format, buffer, gate)
+                    }
+                } catch (error: Throwable) {
+                    PcmTransmitGate.silence(buffer)
+                    if (captureFailed.compareAndSet(false, true)) postEngineError(error)
+                }
+            }
+            // Keep AEC; use the pinned native software NS path for every input, including SCO.
+            // Declared hardware support cannot prove the effect was created/enabled on this input.
             .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
+            .setUseHardwareNoiseSuppressor(false)
             .setUseStereoInput(false)
             .setUseStereoOutput(false)
             .createAudioDeviceModule()
@@ -425,8 +463,21 @@ internal class RiderAudioEngine(
             .createPeerConnectionFactory()
     }
 
+    private fun captureError(stage: String, error: String) {
+        recordingOwner.authorized {
+            ioEvidence.recording(false)
+            audioDeviceFailure("capture:$stage", error)
+        }
+    }
+
+    private fun audioDeviceFailure(stage: String, error: String) {
+        if (!closed.get() && !audioSuspended && captureFailed.compareAndSet(false, true)) {
+            postEngineError(IllegalStateException("ADM $stage failed: $error"))
+        }
+    }
+
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
-        check(session.peerConnection == null) { "previous PeerConnection is still active" }
+        check(peerConnection == null) { "previous PeerConnection is still active" }
         val config = PeerConnection.RTCConfiguration(emptyList()).apply {
             // 无公网、无服务器：只产出 Wi-Fi Direct 局域网 host candidate。
             iceServers = emptyList()
@@ -438,27 +489,23 @@ internal class RiderAudioEngine(
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
 
-        session.peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
+        peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
-        rtcSessions.add(session)
-        audioIoGate.applyCurrent { enabled ->
-            session.peerConnection!!.setAudioRecording(enabled)
-            session.peerConnection!!.setAudioPlayout(enabled)
-            audioDeviceModule?.setMicrophoneMute(!enabled)
-            audioDeviceModule?.setSpeakerMute(!enabled)
-        }
+        peerConnection!!.setAudioRecording(!audioSuspended)
+        peerConnection!!.setAudioPlayout(false)
+        localAudioTrack?.setEnabled(!audioSuspended)
+        audioDeviceModule?.setMicrophoneMute(audioSuspended)
+        audioDeviceModule?.setSpeakerMute(audioSuspended)
     }
 
     private fun createLocalAudioTrack() = mediaStep("local audio track 创建") {
         // 3A 开关：AEC 回声消除、ANS 噪声抑制、AGC 自动增益。
-        // Android Java API 不暴露“噪声抑制等级”；摩托车风噪要更狠时，需要自编 WebRTC
-        // 并注入 AudioProcessingFactory。这里使用官方 AAR 能稳定拿到的最高层开关。
+        // Pinned m125.4 maps software NS=true to its kHigh processing policy.
+        // This configures the processing path; real wind-noise reduction still needs listening evidence.
         val constraints = MediaConstraints().apply {
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoiseSupression", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoisesuppression2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
@@ -470,42 +517,57 @@ internal class RiderAudioEngine(
         }
         localAudioTrack = factoryOrThrow().createAudioTrack(AUDIO_TRACK_ID, audioSource).apply {
             setEnabled(true)
-            setVolume(initialApplication.trackVolume)
         }
         publishCurrentVoxState()
         Log.i(
             TAG,
             "VOX 初始化 enabled=${audioControls.voxEnabled} " +
                 "sensitivity=${audioControls.voxSensitivity} " +
-                "trackEnabled=true volume=${initialApplication.trackVolume}"
+                "transmitEnabled=${initialApplication.trackVolume > 0.0}"
         )
 
     }
 
-    private fun attachLocalAudioTrack(session: MediaSession) = mediaStep("local audio track attach") {
-        session.localAudioSender = peerConnectionOrThrow(session).addTrack(
+    private fun attachLocalAudioTrack() = mediaStep("local audio track attach") {
+        localAudioSender = peerConnectionOrThrow().addTrack(
             localAudioTrack ?: error("local audio track 尚未初始化"),
             listOf(STREAM_ID)
         )
-        setOpusBitrate(session.localAudioSender)
+        setOpusBitrate(localAudioSender)
     }
 
-    private fun handleAudioSamplesForVox(samples: JavaAudioDeviceModule.AudioSamples) {
-        val energy = calculateApproxDb(samples) ?: return
+    private fun handleCapturedPcm(format: Int, buffer: java.nio.ByteBuffer, gateRevision: Long) {
+        if (closed.get() || !audioIoGate.allows(gateRevision) || format != AudioFormat.ENCODING_PCM_16BIT) {
+            PcmTransmitGate.silence(buffer)
+            return
+        }
+        val energy = PcmTransmitGate.approximateLevel(buffer)
         val now = SystemClock.elapsedRealtime()
         val result = synchronized(audioControlLock) {
-            val decision = voxGate.update(energy, now)
-            gateState = decision.state
-            VoxSampleResult(
-                decision = decision,
-                controls = versionedAudioControls,
-                state = effectiveVoxRuntimeState(audioControls, decision.state),
-                trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
-            )
+            // The owner's synchronized lifecycle cannot acknowledge replacement while this
+            // short detector/PCM update is in flight. No device operations run under either lock.
+            synchronized(recordingOwner) {
+                if (closed.get() || !audioIoGate.allows(gateRevision) || !recordingOwner.isCurrent(Thread.currentThread())) {
+                    PcmTransmitGate.silence(buffer)
+                    return
+                }
+                val decision = voxGate.update(energy, now)
+                gateState = decision.state
+                // Controls and actual frame mutation share a lock, so an acknowledged mute
+                // cannot leak a subsequent frame through a stale queued RTC task.
+                if (closed.get() || !audioIoGate.allows(gateRevision) || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
+                    PcmTransmitGate.silence(buffer)
+                }
+                VoxSampleResult(
+                    decision = decision,
+                    controls = versionedAudioControls,
+                    state = effectiveVoxRuntimeState(audioControls, decision.state),
+                    trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
+                )
+            }
         }
         val decision = result.decision
         if (decision.stateChanged) {
-            applyCurrentTrackVolume()
             Log.i(
                 TAG,
                 String.format(
@@ -552,17 +614,6 @@ internal class RiderAudioEngine(
             trackVolume = trackVolumeForCurrentState(audioControls, gateState)
         )
 
-    private fun applyCurrentTrackVolume() {
-        runRtc {
-            val volume = synchronized(audioControlLock) {
-                currentAudioControlApplicationLocked().trackVolume
-            }
-            if (engineState == EngineState.READY) {
-                localAudioTrack?.setVolume(volume)
-            }
-        }
-    }
-
     private fun publishCurrentVoxState() {
         synchronized(audioControlLock) {
             val application = currentAudioControlApplicationLocked()
@@ -583,36 +634,10 @@ internal class RiderAudioEngine(
         if (now - lastAudioLevelAt < AUDIO_LEVEL_INTERVAL_MS) return
         lastAudioLevelAt = now
         val level = (db / PCM_DBFS_TO_APPROX_SPL_OFFSET).toFloat().coerceIn(0f, 1f)
-        synchronized(sessionLock) { activeSessions.toList() }.forEach { session ->
-            postSessionMain(session) { session.callbacks.onAudioLevelChanged(level) }
-        }
-    }
-
-    private fun calculateApproxDb(samples: JavaAudioDeviceModule.AudioSamples): Double? {
-        if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return null
-
-        val data = samples.data
-        if (data.size < 2) return null
-
-        var sumSquares = 0.0
-        var count = 0
-        var index = 0
-        while (index + 1 < data.size) {
-            val low = data[index].toInt() and 0xFF
-            val high = data[index + 1].toInt()
-            val sample = (high shl 8) or low
-            sumSquares += sample.toDouble() * sample.toDouble()
-            count++
-            index += 2
-        }
-        if (count == 0) return null
-
-        val rms = sqrt(sumSquares / count)
-        if (rms <= 0.0) return 0.0
-
-        // 手机麦克风没有统一 SPL 校准值；这是 dBFS + 固定偏移的工程能量值，不是真实 dB SPL。
-        return (20.0 * log10(rms / Short.MAX_VALUE.toDouble()) + PCM_DBFS_TO_APPROX_SPL_OFFSET)
-            .coerceAtLeast(0.0)
+        // Native stop joins this PCM thread while holding sessionLock.
+        // Snapshot without that lock; delivery still validates the exact session on main.
+        val session = activeSession ?: return
+        postSessionMain(session) { session.callbacks.onAudioLevelChanged(level) }
     }
 
     private fun localSdpObserver(session: MediaSession): SdpObserver = object : SdpObserver {
@@ -621,7 +646,7 @@ internal class RiderAudioEngine(
                 requireSessionReady(session)
                 Log.i(TAG, "${sdp.type} 创建成功: ${sdpSummary(sdp.description)}")
                 val local = SessionDescription(sdp.type, forceOpus32k(sdp.description))
-                peerConnectionOrThrow(session).setLocalDescription(object : SimpleSdpObserver() {
+                peerConnectionOrThrow().setLocalDescription(object : SimpleSdpObserver() {
                     override fun onSetSuccess() {
                         runSession(session) {
                             if (session.state != MediaSessionState.READY) return@runSession
@@ -662,20 +687,20 @@ internal class RiderAudioEngine(
         try {
             val remote = sessionDescriptionFromJson(remoteSdpJson)
             Log.i(TAG, "setRemoteDescription ${remote.type} 开始: ${sdpSummary(remote.description)}")
-            peerConnectionOrThrow(session).setRemoteDescription(object : SimpleSdpObserver() {
+            peerConnectionOrThrow().setRemoteDescription(object : SimpleSdpObserver() {
                 override fun onSetSuccess() {
                     runSession(session) {
                         if (session.state != MediaSessionState.READY) return@runSession
                         Log.i(TAG, "setRemoteDescription 成功")
-                        session.remoteDescriptionSet = true
-                        session.pendingRemoteCandidates.forEach {
-                            if (!peerConnectionOrThrow(session).addIceCandidate(it)) {
+                        remoteDescriptionSet = true
+                        pendingRemoteCandidates.forEach {
+                            if (!peerConnectionOrThrow().addIceCandidate(it)) {
                                 Log.e(TAG, "补交 ICE candidate 失败")
                             } else {
                                 Log.i(TAG, "补交 ICE candidate 成功: ${candidateSummary(it)}")
                             }
                         }
-                        session.pendingRemoteCandidates.clear()
+                        pendingRemoteCandidates.clear()
                         onSet()
                     }
                 }
@@ -704,12 +729,41 @@ internal class RiderAudioEngine(
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
+            val elapsedMs = SystemClock.elapsedRealtime()
+            val wallMs = System.currentTimeMillis()
+            if (closed.get() || !isActiveSession(session)) return
+            val observation = session.connectionObservations.capture(newState, elapsedMs, wallMs) {
+                session.callbacks.freezeConnectionLoss?.invoke()
+            } ?: return
+            Log.i(TAG, "Native PeerConnection receipt state=$newState sequence=${observation.sequence} " +
+                "capturedElapsed=$elapsedMs firstLossElapsed=${observation.firstLoss?.occurredAtElapsedMs}")
             runSession(session) {
                 session.connected = newState == PeerConnection.PeerConnectionState.CONNECTED
                 if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "PeerConnection state=$newState")
+                if (observation.sequence == observation.firstLossSequence && newState != PeerConnection.PeerConnectionState.CLOSED) {
+                    peerConnection?.getStats { report ->
+                        runSession(session) {
+                            val pairId = report.statsMap.values.firstOrNull { it.type == "transport" }
+                                ?.members?.get("selectedCandidatePairId") as? String
+                            val pair = report.statsMap[pairId] ?: report.statsMap.values.firstOrNull {
+                                it.type == "candidate-pair" && it.members["nominated"] == true
+                            }
+                            val local = report.statsMap[pair?.members?.get("localCandidateId") as? String]
+                            val remote = report.statsMap[pair?.members?.get("remoteCandidateId") as? String]
+                            Log.i(TAG, "ICE first-loss sequence=${observation.sequence} elapsed=$elapsedMs " +
+                                "pair=${pair?.id} state=${pair?.members?.get("state")} " +
+                                "rtt=${pair?.members?.get("currentRoundTripTime")} " +
+                                "sent=${pair?.members?.get("bytesSent")} received=${pair?.members?.get("bytesReceived")} " +
+                                "localType=${local?.members?.get("candidateType")} network=${local?.members?.get("networkType")} " +
+                                "remoteType=${remote?.members?.get("candidateType")} protocol=${local?.members?.get("protocol")}")
+                        }
+                    }
+                }
                 postSessionMain(session) {
-                    session.callbacks.onConnectionStateChanged(newState)
+                    val observed = session.callbacks.onConnectionStateObserved
+                    if (observed == null) session.callbacks.onConnectionStateChanged(newState)
+                    else observed(observation)
                 }
             }
         }
@@ -776,10 +830,14 @@ internal class RiderAudioEngine(
     }
 
     private fun enableRemoteTrack(session: MediaSession, track: MediaStreamTrack?) {
-        if (track is AudioTrack) {
-            session.remoteTracks.add(track)
-            track.setVolume(if (session.playbackIsMuted) 0.0 else 1.0)
+        if (track is AudioTrack && session.remoteAudioTrack?.id() != track.id()) {
+            session.playout.pause()
+            session.detachRemoteSink()
+            session.remoteAudioTrack = track
+            session.remoteTrackObserved = true
             track.setEnabled(true)
+            track.addSink(session.playout)
+            if (!audioSuspended) session.playout.resume(audioIoGate.revision())
             postSessionMain(session) { session.callbacks.onRemoteAudioTrack(track) }
         }
     }
@@ -802,7 +860,7 @@ internal class RiderAudioEngine(
             it.maxBitrateBps = OPUS_BITRATE_BPS
             it.minBitrateBps = OPUS_BITRATE_BPS
         }
-        sender.setParameters(parameters)
+        check(sender.setParameters(parameters)) { "Cannot configure Opus bitrate" }
     }
 
     private fun forceOpus32k(sdp: String): String {
@@ -849,8 +907,8 @@ internal class RiderAudioEngine(
     private fun factoryOrThrow(): PeerConnectionFactory =
         factory ?: error("PeerConnectionFactory 尚未初始化")
 
-    private fun peerConnectionOrThrow(session: MediaSession): PeerConnection =
-        session.peerConnection ?: error("PeerConnection 尚未初始化")
+    private fun peerConnectionOrThrow(): PeerConnection =
+        peerConnection ?: error("PeerConnection 尚未初始化")
 
     private fun postEngineError(t: Throwable) {
         Log.e(TAG, "WebRTC audio platform error", t)
@@ -934,15 +992,52 @@ internal class RiderAudioEngine(
         val callbacks: RiderMediaSessionCallbacks
     ) : RiderMediaSession {
         val closed = AtomicBoolean(false)
+        val connectionObservations = NativeConnectionObservationSource(callbacks.controlIsOpen)
         @Volatile var state = MediaSessionState.INITIALIZING
-        var peerConnection: PeerConnection? = null
-        var localAudioSender: RtpSender? = null
-        var remoteDescriptionSet = false
-        val pendingRemoteCandidates = mutableListOf<IceCandidate>()
-        val remoteTracks = mutableSetOf<AudioTrack>()
-        @Volatile var playbackIsMuted = callbacks.initialPlaybackMuted
         var connected = false
+        var remoteTrackObserved = false
+        var remoteAudioTrack: AudioTrack? = null // RTC queue owns attachment/removal.
+        val playout = DecodedAudioPlayout(
+            permits = { revision -> !closed.get() && activeSession === this && !this@RiderAudioEngine.closed.get() && audioIoGate.allows(revision) },
+            onPlaying = { value ->
+                if (activeSession === this && !closed.get() && (!value || !audioSuspended)) ioEvidence.playing(value)
+            },
+            onWritten = { ioEvidence.rendered(SystemClock.elapsedRealtime()) },
+            onError = { error ->
+                // Renderer invokes this only for its current lease; teardown errors cannot fail a replacement.
+                if (activeSession === this && !closed.get()) audioDeviceFailure("playout", error.message ?: error.javaClass.simpleName)
+            }
+        )
         private val statsPending = AtomicBoolean(false)
+
+        override fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) {
+            runSession(this) {
+                val sampledAt = SystemClock.elapsedRealtime()
+                val gate = audioIoGate.revision()
+                val native = ioEvidence.revision()
+                val input = NativeCaptureDiagnostics.routedDeviceType(audioDeviceModule)
+                val output = playout.snapshot()
+                val wasFresh = audioIoGate.allows(gate) && output?.revision == gate &&
+                    ioEvidence.ready(native, SystemClock.elapsedRealtime())
+                val wasConnected = connected
+                postSessionMain(this) {
+                    callback(RiderAudioIoRouteSnapshot(
+                        connected = wasConnected && audioIoGate.allows(gate),
+                        fresh = wasFresh && SystemClock.elapsedRealtime() - sampledAt in 0..2_000 &&
+                            audioIoGate.allows(gate) &&
+                            playout.isCurrentRevision(gate) && ioEvidence.ready(native, SystemClock.elapsedRealtime()),
+                        inputType = input,
+                        outputType = output?.routedDeviceType,
+                        sampledAtElapsedRealtimeMs = sampledAt
+                    ))
+                }
+            }
+        }
+
+        fun detachRemoteSink() {
+            remoteAudioTrack?.removeSink(playout)
+            remoteAudioTrack = null
+        }
 
         override fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) {
             if (!statsPending.compareAndSet(false, true)) return
@@ -954,21 +1049,16 @@ internal class RiderAudioEngine(
                 peer.getStats { report ->
                     runSession(this) {
                         val counters = audioRtpCounters(report.statsMap.values.map { Triple(it.id, it.type, it.members) })
-                        val result = counters?.let { RiderMediaEvidence(it, connected, remoteTracks.isNotEmpty(),
-                            audioIoGate.allows(gate) && ioEvidence.ready(native, SystemClock.elapsedRealtime()), gate, native) }
+                        val result = counters?.let { RiderMediaEvidence(it, connected, remoteTrackObserved,
+                            audioIoGate.allows(gate) && playout.isCurrentRevision(gate) && ioEvidence.ready(native, SystemClock.elapsedRealtime()), gate, native) }
                         postSessionMain(this) {
                             statsPending.set(false)
-                            callback(result?.copy(audioIoEnabled = result.audioIoEnabled && audioIoGate.allows(gate) &&
+                            callback(result?.copy(audioIoEnabled = result.audioIoEnabled && audioIoGate.allows(gate) && playout.isCurrentRevision(gate) &&
                                 ioEvidence.ready(native, SystemClock.elapsedRealtime())))
                         }
                     }
                 }
             }
-        }
-
-        override fun setPlaybackMuted(muted: Boolean) {
-            playbackIsMuted = muted
-            runSession(this) { remoteTracks.forEach { it.setVolume(if (playbackIsMuted) 0.0 else 1.0) } }
         }
 
         override fun createOffer() = this@RiderAudioEngine.createOffer(this)
@@ -984,23 +1074,32 @@ internal class RiderAudioEngine(
 
         override fun close() {
             if (!closed.compareAndSet(false, true)) return
+            connectionObservations.retire()
             state = MediaSessionState.CLOSED
+            // Release our renderer before removing the registry owner; this never holds sessionLock.
+            playout.close()
             val shouldDispose = synchronized(sessionLock) {
-                activeSessions.remove(this).also { removed ->
-                    if (removed && activeSessions.isEmpty() && mediaMode == RiderMediaMode.GROUP) {
-                        audioIoGate.request(false)
+                if (activeSession === this) {
+                    // Revoke native producers before dispose can stop their I/O threads.
+                    // Keep this enqueue ordered before any replacement session initialization.
+                    revokeNativeProducers()
+                    audioIoGate.invalidate()
+                    activeSession = null
+                    runRtc(allowClosed = true, onFailure = ::postEngineError) {
+                        detachRemoteSink()
+                        disposeMediaSessionResources()
                     }
+                    true
+                } else {
+                    false
                 }
             }
-            if (shouldDispose) {
-                runRtc(allowClosed = true, onFailure = ::postEngineError) {
-                    disposeMediaSessionResources(this)
-                }
-            }
+            if (!shouldDispose) return
         }
 
         fun markClosed() {
-            if (closed.compareAndSet(false, true)) state = MediaSessionState.CLOSED
+            connectionObservations.retire()
+            if (closed.compareAndSet(false, true)) { state = MediaSessionState.CLOSED; playout.close() }
         }
 
         fun postError(t: Throwable) {

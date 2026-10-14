@@ -471,7 +471,7 @@ internal fun constrainedPanelWidth(
     preferredWidth: Int
 ): Int = minOf(preferredWidth, availableWidth.coerceAtLeast(0))
 
-internal const val LOGS_SCOPE_TEXT = "仅显示本次界面会话日志"
+internal const val LOGS_SCOPE_TEXT = "本机保留近 7 天日志，显示最近 300 条"
 internal const val LOGS_COPIED_FEEDBACK = "日志已复制"
 internal const val NICKNAME_SAVE_FAILED_FEEDBACK = "保存失败，请重试"
 internal const val NICKNAME_SAVED_FEEDBACK = "已保存"

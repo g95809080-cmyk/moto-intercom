@@ -16,19 +16,13 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.content.res.Configuration
 import android.provider.Settings
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import java.util.UUID
 
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
 internal class MainActivity : ComponentActivity(), IntercomService.Listener {
-    private val startupAccess by lazy {
-        StartupAccessController(this,
-            status = { screen.setPermissionStatus(it); screen.appendLog(it) },
-            refresh = { refreshCorePermissionPresentation(); refreshOptionalPermissionPresentation(); refreshBackgroundAccess() },
-            start = { startIntercomRuntime() })
-    }
     private lateinit var screen: MainScreen
     private var intercomService: IntercomService? = null
     private var bindingRegistered = false
@@ -44,6 +38,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var preferredAudioControls = AudioControlSettings()
     private val audioRoutePreferences by lazy { AudioRoutePreferences(this) }
     private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
+    private var bluetoothPermissionGranted: Boolean? = null
     private var automaticReconnectEnabled = true
 
     private val serviceConnection = object : ServiceConnection {
@@ -56,7 +51,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             val local = service as IntercomService.LocalBinder
             intercomService = local.service()
             serviceConnected = true
-            intercomService?.setPreferredAudioRoute(preferredAudioRoute)
+            intercomService?.setPreferredAudioRoute(preferredAudioRoute, AudioRouteRequestSource.ACTIVITY_REBIND)
             intercomService?.setAutomaticReconnectEnabled(automaticReconnectEnabled)
             intercomService?.setVoxSettings(
                 preferredAudioControls.voxEnabled,
@@ -81,6 +76,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             intercomService = null
             dismissIncomingConfirmation()
             screen.clearServiceOwnedFacts()
+            screen.setAudioReady(false)
             setIntercomState(IntercomState.Offline)
             screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         }
@@ -88,7 +84,6 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        startupAccess.restore(savedInstanceState)
         preferredAudioControls = audioControlPreferences.load()
         preferredAudioRoute = audioRoutePreferences.load()
         automaticReconnectEnabled = prefs.getBoolean(KEY_AUTOMATIC_RECONNECT_ENABLED, true)
@@ -117,15 +112,15 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     PrimaryIntercomAction.NONE -> Unit
                 }
             },
-            onConnectPresence = { presence ->
+            onConnectPresence = { false },
+            onConnectPresenceRequest = { presence, request ->
                 val service = intercomService
                 if (service == null) {
                     showServiceUnavailable()
                     false
                 } else {
                     try {
-                        service.connectToPresence(presence)
-                        true
+                        service.connectToPresence(presence, request)
                     } catch (error: RuntimeException) {
                         Log.e(TAG, "failed to dispatch Presence connection", error)
                         showServiceUnavailable()
@@ -138,13 +133,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 if (service == null) {
                     showServiceUnavailable()
                 } else {
-                    if (locationEnabled(this) && hasCorePermissions()) service.requestDiscoveryRefresh()
-                    else if (!hasCorePermissions()) openAppPermissionSettings()
-                    else {
-                        screen.setStatus(StartupAccessController.LOCATION_REQUIRED)
-                        runCatching { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
-                            .onFailure { openAppPermissionSettings() }
-                    }
+                    service.requestDiscoveryRefresh()
                 }
             },
             onSaveRiderName = { name ->
@@ -204,8 +193,6 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 }
             },
             onSendFeedback = ::sendFeedback,
-            onBackgroundSettings = { startupAccess.requestBackground() },
-            onOpenGroup = { startActivity(Intent(this, GroupActivity::class.java)) },
             onboardingPreferences = OnboardingPreferences(this)
         )
         setContentView(screen.root)
@@ -217,13 +204,13 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(KEY_PROCESS_SESSION_TOKEN, PROCESS_SESSION_TOKEN)
-        startupAccess.save(outState)
         screen.saveState(outState)
         super.onSaveInstanceState(outState)
     }
 
     override fun onStart() {
         super.onStart()
+        screen.resumeDiagnostics()
         if (!bindIntercomService(flags = 0)) {
             screen.clearServiceOwnedFacts()
             setIntercomState(IntercomState.Offline)
@@ -246,7 +233,6 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onPostResume() {
         super.onPostResume()
-        startupAccess.onResume()
         // Focus restoration for an EditText can move its ScrollView after
         // onCreate's restore pass; apply the saved route position once more.
         screen.onWindowSizeChanged()
@@ -260,6 +246,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     override fun onStop() {
+        screen.abandonPresenceConnectRequest()
+        screen.pauseDiagnostics()
         intercomService?.setAppForeground(false)
         intercomService?.setListener(null)
         if (bindingRegistered) {
@@ -269,13 +257,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         bindingRegistered = false
         serviceConnected = false
         intercomService = null
+        screen.setAudioReady(false)
         dismissIncomingConfirmation()
         screen.stopAnimations()
         super.onStop()
     }
 
     override fun onDestroy() {
-        startupAccess.close()
+        screen.closeDiagnostics()
         unregisterPlatformBackCallback()
         super.onDestroy()
     }
@@ -293,7 +282,6 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (startupAccess.onPermissionsResult(requestCode)) return
         when (requestCode) {
             REQUEST_CORE_PERMISSIONS -> {
                 refreshCorePermissionPresentation()
@@ -315,8 +303,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         val replayed = replayingServiceSnapshot
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
-            Log.d(TAG, "service status running=$running status=$status")
-            screen.setStatus(status, appendLog = !replayed)
+            android.util.Log.d(TAG, "service status running=$running status=$status")
+            screen.setStatus(status, appendLog = !replayed, persistLog = false)
         }
     }
 
@@ -367,6 +355,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onPresenceConnectAdmission(request: PresenceConnectRequest, accepted: Boolean) {
+        runOnUiThread {
+            if (serviceConnected) screen.onPresenceConnectAdmission(request, accepted)
+        }
+    }
+
     override fun onAudioLevelChanged(level: Float) {
         runOnUiThread {
             if (serviceConnected) screen.setAudioLevel(level)
@@ -383,7 +377,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     override fun onLog(message: String) {
         runOnUiThread {
-            if (serviceConnected) screen.appendLog(message)
+            if (serviceConnected) screen.appendLog(message, persist = false)
         }
     }
 
@@ -422,7 +416,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onError(message: String) {
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
-            screen.setIntercomError(message)
+            screen.setIntercomError(message, persistLog = false)
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
@@ -461,7 +455,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
         preferredAudioRoute = selection
         screen.setPreferredAudioRoute(selection)
-        intercomService?.setPreferredAudioRoute(selection)
+        intercomService?.setPreferredAudioRoute(selection, AudioRouteRequestSource.USER_SELECTION)
     }
 
     private fun saveAutomaticReconnectSetting(enabled: Boolean) {
@@ -500,11 +494,27 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
     private fun requestCorePermissions() {
         screen.markPermissionRequestAttempted()
-        startupAccess.begin()
+        val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
+        if (missing.isEmpty()) {
+            refreshCorePermissionPresentation()
+            refreshOptionalPermissionPresentation()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            screen.setIntercomState(intercomState, false)
+            screen.setPermissionStatus(PERMISSION_REQUESTING_STATUS)
+            requestPermissions(missing.toTypedArray(), REQUEST_CORE_PERMISSIONS)
+        }
     }
 
     private fun refreshOptionalPermissionPresentation() {
         val missing = PermissionPolicy.optionalPermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            !missing.contains(Manifest.permission.BLUETOOTH_CONNECT)
+        val newlyGranted = bluetoothPermissionGranted == false && granted
+        bluetoothPermissionGranted = granted
+        if (newlyGranted && preferredAudioRoute == AudioRouteSelection.BLUETOOTH) {
+            Log.i(TAG, "Bluetooth permission granted; reapply preferred Bluetooth route")
+            intercomService?.setPreferredAudioRoute(preferredAudioRoute, AudioRouteRequestSource.PERMISSION_GRANTED)
+        }
         screen.setOptionalPermissionState(
             bluetoothPermissionMissing = missing.contains(Manifest.permission.BLUETOOTH_CONNECT),
             notificationPermissionMissing = missing.contains(Manifest.permission.POST_NOTIFICATIONS)
@@ -523,24 +533,27 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     private fun startIntercom(): Boolean {
-        startupAccess.begin()
-        return false // Only the actual service start consumes the debounce window.
-    }
+        val canStart = hasCorePermissions()
+        val wifiAvailable = if (canStart) {
+            @Suppress("DEPRECATION")
+            (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).isWifiEnabled
+        } else {
+            true
+        }
+        when (startPrecondition(canStart, wifiAvailable)) {
+            StartPrecondition.MISSING_CORE_PERMISSION -> {
+                screen.setPermissionStatus("启动对讲需要录音和电话状态权限")
+                requestCorePermissions()
+                return false
+            }
+            StartPrecondition.WIFI_UNAVAILABLE -> {
+                showWifiUnavailable()
+                openWifiSettings()
+                return false
+            }
+            StartPrecondition.READY -> screen.setWifiUnavailable(false)
+        }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        startupAccess.onActivityResult(requestCode)
-    }
-
-    private fun refreshBackgroundAccess() {
-        screen.setBackgroundAccess(backgroundAllowed(this))
-    }
-
-    private fun startIntercomRuntime(): Boolean {
-        if (intercomState != IntercomState.Offline) return false
-        if (!hasCorePermissions() || !locationEnabled(this)) return false
-        lastToggleElapsed = SystemClock.elapsedRealtime()
         val riderName = prefs.getString(KEY_RIDER_NAME, "").orEmpty()
         val intent = IntercomService.startIntent(
             context = this,

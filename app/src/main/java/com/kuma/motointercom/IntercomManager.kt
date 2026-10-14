@@ -2,7 +2,7 @@
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import com.google.gson.JsonParser
 import org.webrtc.PeerConnection
 import java.io.Closeable
@@ -21,7 +21,11 @@ internal class IntercomManager(
     private val onAudioReadyChanged: (Boolean) -> Unit = {},
     private val onAudioLevelChanged: (Float) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
-    private val isSessionCurrent: () -> Boolean
+    private val isSessionCurrent: () -> Boolean,
+    private val freezeConnectionLoss: (() -> ConnectionLossObservation?)? = null,
+    private val onConnectionStateObserved: ((NativeConnectionObservation) -> Unit)? = null,
+    private val freezeDisconnectedLoss: (() -> ConnectionLossObservation?)? = null,
+    private val onIntercomDisconnectedObserved: ((IOException, ConnectionLossObservation?) -> Unit)? = null
 ) : Closeable {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,6 +66,14 @@ internal class IntercomManager(
                     onConnectionStateChanged = { state ->
                         if (state != PeerConnection.PeerConnectionState.CONNECTED) publishReady(readiness.reset())
                         onConnectionStateChanged(state)
+                    },
+                    freezeConnectionLoss = freezeConnectionLoss,
+                    controlIsOpen = { !closed.get() && !signalingSession.isClosed },
+                    onConnectionStateObserved = onConnectionStateObserved?.let { observed ->
+                        { receipt ->
+                            if (receipt.state != PeerConnection.PeerConnectionState.CONNECTED) publishReady(readiness.reset())
+                            observed(receipt)
+                        }
                     },
                     onAudioLevelChanged = onAudioLevelChanged,
                     onError = ::onMediaFailure,
@@ -156,8 +168,9 @@ internal class IntercomManager(
 
     private fun notifyDisconnected(e: IOException) {
         if (!disconnectedNotified.compareAndSet(false, true)) return
+        val observation = freezeDisconnectedLoss?.invoke()
         postMain(
-            block = { onIntercomDisconnected(e) },
+            block = { onIntercomDisconnectedObserved?.invoke(e, observation) ?: onIntercomDisconnected(e) },
             after = ::close
         )
     }
@@ -167,10 +180,10 @@ internal class IntercomManager(
     }
 
     private fun onMediaFailure(t: Throwable) {
-        postError(t)
         notifyDisconnected(
             t as? IOException ?: IOException("WebRTC media failure", t)
         )
+        postError(t)
     }
 
     private fun postMain(after: () -> Unit = {}, block: () -> Unit) {

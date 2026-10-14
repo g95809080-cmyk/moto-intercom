@@ -79,47 +79,68 @@ internal class AndroidIntercomAudioFocus(context: Context) : IntercomAudioFocus 
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
     private var listener: ((Int) -> Unit)? = null
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        listener?.invoke(change)
-    }
-    private val focusRequest: AudioFocusRequest? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-            .setAudioAttributes(attributes)
-            .setAcceptsDelayedFocusGain(true)
-            .setOnAudioFocusChangeListener(focusListener)
-            .build()
-    } else {
-        null
-    }
+    private val callbackHandler = Handler(Looper.getMainLooper())
+    private var requestRevision = 0L
+    private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
+    private var focusRequest: AudioFocusRequest? = null
 
     override fun setListener(listener: (Int) -> Unit) {
         this.listener = listener
     }
 
     override fun request(): AudioFocusResult {
+        // Android keys queued focus events by listener identity. A new media
+        // request must not reuse the identity of an abandoned request.
+        abandon()
+        val revision = ++requestRevision
+        val requestListener = AudioManager.OnAudioFocusChangeListener { change ->
+            if (revision != requestRevision || focusListener == null) return@OnAudioFocusChangeListener
+            DiagnosticLog.i("CommunicationAudioFocus", "focus change=$change revision=$revision")
+            listener?.invoke(change)
+        }
+        focusListener = requestListener
+        focusRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attributes)
+                .setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener(requestListener, callbackHandler)
+                .build()
+        } else {
+            null
+        }
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioManager.requestAudioFocus(requireNotNull(focusRequest))
         } else {
             @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
-                focusListener,
+                requestListener,
                 AudioManager.STREAM_VOICE_CALL,
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             )
         }
+        DiagnosticLog.i("CommunicationAudioFocus", "request result=$result gain=TRANSIENT_MAY_DUCK usage=VOICE_COMMUNICATION")
         return when (result) {
             AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> AudioFocusResult.GRANTED
             AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> AudioFocusResult.DELAYED
-            else -> AudioFocusResult.FAILED
+            else -> {
+                abandon()
+                AudioFocusResult.FAILED
+            }
         }
     }
 
     override fun abandon() {
+        ++requestRevision
+        val abandonedRequest = focusRequest
+        val abandonedListener = focusListener
+        focusRequest = null
+        focusListener = null
+        DiagnosticLog.i("CommunicationAudioFocus", "abandon focus")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            abandonedRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         } else {
             @Suppress("DEPRECATION")
-            audioManager.abandonAudioFocus(focusListener)
+            abandonedListener?.let { audioManager.abandonAudioFocus(it) }
         }
     }
 
@@ -330,6 +351,7 @@ internal class CommunicationAudioCoordinator(
     private var mediaActive = false
     private var phoneCallState = PhoneCallState.IDLE
     private var awaitingRoute = false
+    private var awaitingFocusGain = false
     private var resumePromptPending = false
     private var state = AudioInterruptionState.NORMAL
     private var retryRunnable: Runnable? = null
@@ -374,11 +396,12 @@ internal class CommunicationAudioCoordinator(
             if (!mediaActive) return
             mediaActive = false
             awaitingRoute = false
+            awaitingFocusGain = false
             resumePromptPending = false
             cancelRetry()
-            audioFocus.abandon()
-            route.suspendForInterruption(restoreMode = false)
             engine.suspendAudio()
+            audioFocus.abandon()
+            route.suspendForInterruption(restoreMode = phoneCallState == PhoneCallState.IDLE)
             publish(
                 if (phoneCallState == PhoneCallState.IDLE) {
                     AudioInterruptionState.NORMAL
@@ -399,8 +422,11 @@ internal class CommunicationAudioCoordinator(
         phoneCallState != PhoneCallState.IDLE
     }
 
-    internal fun reapplyPreferredRoute() {
-        if (synchronized(lock) { !closed.get() && mediaActive && phoneCallState == PhoneCallState.IDLE }) requestFocusAndRoute()
+    /** A route event cannot reacquire focus or revive a phone/focus interruption. */
+    internal fun reapplyPreferredRoute(force: Boolean = false) = synchronized(lock) {
+        if (closed.get() || !canApplyPreferredRoute() || awaitingFocusGain || (!force && awaitingRoute)) return
+        publish(AudioInterruptionState.RESUMING)
+        activateAuthorizedRoute()
     }
 
     /** Called by the route after the selected device has been verified. */
@@ -444,15 +470,25 @@ internal class CommunicationAudioCoordinator(
             phoneCallState
         }
         when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                if (phoneState == PhoneCallState.IDLE) suspendForFocus(permanent = true)
+            }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 if (phoneState == PhoneCallState.IDLE) {
-                    suspendForFocus()
+                    suspendForFocus(permanent = false)
                 } else {
                     publish(phoneStateToInterruption(phoneState))
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                if (phoneState == PhoneCallState.IDLE) requestFocusAndRoute()
+                synchronized(lock) {
+                    if (phoneState == PhoneCallState.IDLE && awaitingFocusGain) {
+                        awaitingFocusGain = false
+                        cancelRetry()
+                        publish(AudioInterruptionState.RESUMING)
+                        activateAuthorizedRoute()
+                    }
+                }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> Unit
         }
@@ -462,22 +498,26 @@ internal class CommunicationAudioCoordinator(
         synchronized(lock) {
             cancelRetry()
             awaitingRoute = false
+            awaitingFocusGain = false
             resumePromptPending = true
+            engine.suspendAudio()
             audioFocus.abandon()
             route.suspendForInterruption(restoreMode = false)
-            engine.suspendAudio()
             publish(phoneStateToInterruption(callState))
         }
     }
 
-    private fun suspendForFocus() {
+    private fun suspendForFocus(permanent: Boolean) {
         synchronized(lock) {
+            if (closed.get() || !mediaActive || phoneCallState != PhoneCallState.IDLE) return
             cancelRetry()
             awaitingRoute = false
+            awaitingFocusGain = !permanent
             resumePromptPending = true
-            audioFocus.abandon()
-            route.suspendForInterruption(restoreMode = false)
             engine.suspendAudio()
+            // Transient loss stays on the focus stack so Android can grant it back.
+            if (permanent) audioFocus.abandon()
+            route.suspendForInterruption(restoreMode = true)
             publish(AudioInterruptionState.FOCUS_LOST)
         }
     }
@@ -486,6 +526,7 @@ internal class CommunicationAudioCoordinator(
         synchronized(lock) {
             if (closed.get() || !mediaActive || phoneCallState != PhoneCallState.IDLE) return
             cancelRetry()
+            awaitingFocusGain = false
             publish(AudioInterruptionState.RESUMING)
             when (val focusResult = audioFocus.request()) {
                 AudioFocusResult.GRANTED -> {
@@ -494,17 +535,29 @@ internal class CommunicationAudioCoordinator(
                         audioFocus.abandon()
                         return
                     }
-                    engine.suspendAudio()
-                    awaitingRoute = true
-                    activateRoute()
+                    activateAuthorizedRoute()
                 }
-                AudioFocusResult.DELAYED,
-                AudioFocusResult.FAILED -> {
+                AudioFocusResult.DELAYED -> {
+                    awaitingRoute = false
+                    awaitingFocusGain = true
                     engine.suspendAudio()
+                    route.suspendForInterruption(restoreMode = true)
+                }
+                AudioFocusResult.FAILED -> {
+                    awaitingRoute = false
+                    engine.suspendAudio()
+                    route.suspendForInterruption(restoreMode = true)
                     scheduleRetry()
                 }
             }
         }
+    }
+
+    private fun activateAuthorizedRoute() {
+        if (closed.get() || !mediaActive || phoneCallState != PhoneCallState.IDLE) return
+        engine.suspendAudio()
+        awaitingRoute = true
+        activateRoute()
     }
 
     private fun scheduleRetry() {
@@ -549,13 +602,14 @@ internal class CommunicationAudioCoordinator(
             mediaActive = false
             cancelRetry()
             awaitingRoute = false
+            awaitingFocusGain = false
             resumePromptPending = false
         }
+        engine.suspendAudio()
         phoneState.close()
         audioFocus.close()
         audioPrompt.close()
-        route.suspendForInterruption(restoreMode = false)
-        engine.suspendAudio()
+        route.suspendForInterruption(restoreMode = phoneCallState == PhoneCallState.IDLE)
     }
 
     companion object {

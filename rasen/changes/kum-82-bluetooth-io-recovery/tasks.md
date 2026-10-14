@@ -1,0 +1,7 @@
+- [x] 1. 恢复 Linear 授权，核查重复并绑定 KUM-82 / fix/kum-82-bluetooth-io-recovery / 同名 change（独立 PR 在任务 6）
+- [x] 2. 固定稳定基线及用户批准范围；只读核查小米 13 当前版本、权限和系统状态
+- [x] 3. 实际 RouteController 权限语义红回归；实现媒体归属的实际 native 输入/输出探针与有界自动重试
+- [x] 4. Activity/Service、媒体替换、焦点/来电、显式手机选路、真实 JNI 回归与完整 JVM/Lint/双 APK（759 JVM；API36 25 pass/2 双设备 skip）
+- [x] 5. 固定 SHA 的只读架构审查与官方 Open Code Review 范围/规则检查；修复所有 P0/P1（49bf4e50，APPROVED，P0=0/P1=0，19/19 reviewed）
+- [x] 6. 独立 Draft PR #55、be443c4c 固定 SHA Android CI 两项 success、Linear/Rasen 关联证据
+- [ ] 7. 两部普通蓝牙耳机首次/重连录放与人工骑行听音（条件不足，未记为通过）

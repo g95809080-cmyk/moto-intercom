@@ -3,7 +3,7 @@ package com.kuma.motointercom
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
-import android.util.Log
+import com.kuma.motointercom.DiagnosticLog as Log
 import androidx.annotation.RequiresApi
 import java.io.Closeable
 import java.util.concurrent.Executor
@@ -31,9 +31,10 @@ internal class ModernAudioRoute(
 
     private val initialDevice = audioManager.communicationDevice
     private val closed = AtomicBoolean(false)
-    private val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
+    private val listener = AudioManager.OnCommunicationDeviceChangedListener {
         if (closed.get()) return@OnCommunicationDeviceChangedListener
         onDeviceChanged()
+        val device = audioManager.communicationDevice
         if (isBluetooth(device)) {
             onBluetoothConnected(device?.let(::safeProductName).orEmpty())
         } else {

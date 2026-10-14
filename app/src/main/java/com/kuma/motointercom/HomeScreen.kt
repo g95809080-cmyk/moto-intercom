@@ -99,8 +99,7 @@ internal fun MotoComHomeScreen(
     onAudioSettings: () -> Unit,
     onVox: () -> Unit,
     modifier: Modifier = Modifier,
-    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
-    onOpenGroup: () -> Unit = {}
+    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> }
 ) {
     val pageHorizontalPadding = dimensionResource(R.dimen.motocom_page_horizontal_padding)
     val pageVerticalPadding = dimensionResource(R.dimen.motocom_page_vertical_padding)
@@ -125,7 +124,6 @@ internal fun MotoComHomeScreen(
                 )
         ) {
             HomeHeader()
-            Button(onClick = onOpenGroup, modifier = Modifier.fillMaxWidth().testTag("home_group")) { Text("四人离线对讲") }
             Spacer(Modifier.height(gapLarge))
             StatusCard(state = state)
             Spacer(Modifier.height(gap))

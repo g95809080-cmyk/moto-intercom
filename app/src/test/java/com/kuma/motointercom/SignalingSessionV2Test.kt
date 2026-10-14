@@ -7,12 +7,16 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataOutputStream
+import java.io.DataInputStream
+import java.io.FilterInputStream
 import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicLong
 
 class SignalingSessionV2Test {
     @Test
@@ -712,33 +716,52 @@ class SignalingSessionV2Test {
     fun glareSecondReadCannotExtendAttemptDeadline() {
         socketPair().use { sockets ->
             val attemptA = attempt(ATTEMPT_A, SESSION_A, DEVICE_B, SESSION_B)
-                .copy(deadlineElapsedRealtimeMs = 10L)
-            val attemptB = attempt(ATTEMPT_B, SESSION_B, DEVICE_A, SESSION_A)
-            var clockReads = 0
+            val now = AtomicLong(0L)
+            val secondRead = CountDownLatch(1)
+            val remoteHello = SignalingV2Codec().encode(SignalingEnvelopeV2(
+                attemptId = ConnectionAttemptId(ATTEMPT_B), sourceDeviceId = DeviceId.parse(DEVICE_B),
+                targetDeviceId = DeviceId.parse(DEVICE_A), sourceSessionId = RuntimeSessionId(SESSION_B),
+                message = SignalingMessageV2.Hello(RequestRole.REQUESTER)
+            ))
+            val actual = sockets.acceptor
+            val observingInput = object : FilterInputStream(actual.getInputStream()) {
+                var consumed = 0
+                override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                    if (consumed >= remoteHello.size + 4) secondRead.countDown()
+                    return super.read(bytes, offset, length).also { if (it > 0) consumed += it }
+                }
+            }
+            val observed = object : Socket() {
+                override fun isConnected() = actual.isConnected
+                override fun isClosed() = actual.isClosed
+                override fun getInputStream() = observingInput
+                override fun getOutputStream() = actual.getOutputStream()
+                override fun getSoTimeout() = actual.soTimeout
+                override fun setSoTimeout(value: Int) { actual.soTimeout = value }
+                override fun close() { actual.close(); super.close() }
+            }
             val sessionA = CompletableFuture.supplyAsync {
                 establish(
-                    socket = sockets.acceptor,
+                    socket = observed,
                     physicalRole = PhysicalSocketRole.ACCEPTOR,
                     localDeviceId = DEVICE_A,
                     localSessionId = SESSION_A,
                     originatingAttempt = attemptA,
-                    monotonicClock = MonotonicClock {
-                        MonotonicTimestamp(if (clockReads++ < 2) 0L else 10L)
-                    }
+                    monotonicClock = MonotonicClock { MonotonicTimestamp(now.get()) }
                 )
             }
-            val sessionB = CompletableFuture.supplyAsync {
-                establish(
-                    socket = sockets.opener,
-                    physicalRole = PhysicalSocketRole.OPENER,
-                    localDeviceId = DEVICE_B,
-                    localSessionId = SESSION_B,
-                    originatingAttempt = attemptB
-                )
-            }
-
+            val first = SignalingV2Codec().decode(SignalingV2Framing.read(DataInputStream(sockets.opener.getInputStream())))
+            assertEquals(RequestRole.REQUESTER, (first.message as SignalingMessageV2.Hello).requestRole)
+            val output = DataOutputStream(sockets.opener.getOutputStream())
+            SignalingV2Framing.write(output, remoteHello)
+            assertTrue("actual glare second read must have started", secondRead.await(1, TimeUnit.SECONDS))
+            now.set(attemptA.deadlineElapsedRealtimeMs)
+            SignalingV2Framing.write(output, SignalingV2Codec().encode(SignalingEnvelopeV2(
+                attemptId = attemptA.id, sourceDeviceId = DeviceId.parse(DEVICE_B),
+                targetDeviceId = DeviceId.parse(DEVICE_A), sourceSessionId = RuntimeSessionId(SESSION_B),
+                message = SignalingMessageV2.Hello(RequestRole.RESPONDER)
+            )))
             assertSignalingFailure(sessionA)
-            runCatching { sessionB.get(2, TimeUnit.SECONDS) }.getOrNull()?.close()
             assertTrue(sockets.acceptor.isClosed)
         }
     }

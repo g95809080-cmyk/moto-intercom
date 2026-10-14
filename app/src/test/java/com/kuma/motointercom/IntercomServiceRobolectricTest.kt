@@ -38,6 +38,47 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
+    fun currentAudioPlatformFailureStopsRuntimeAndLateOldFailureCannotStopReplacement() = runBlocking {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service = controller.get()
+        try {
+            val orchestrator = IntercomService::class.java.getDeclaredField("orchestrator").run {
+                isAccessible = true; get(service) as SessionOrchestrator
+            }
+            val errors = mutableListOf<String>()
+            service.setListener(object : IntercomService.Listener {
+                override fun onStatusChanged(status: String, running: Boolean) = Unit
+                override fun onLog(message: String) = Unit
+                override fun onError(message: String) { errors += message }
+            })
+            val runtimeA = RuntimeSessionId("audio-failed-runtime")
+            setPrivate(service, "running", true)
+            setPrivate(service, "activeRuntimeSessionId", runtimeA.value)
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtimeA)))
+            val failure = IntercomService::class.java.declaredMethods.single {
+                it.name.startsWith("onAudioPlatformError") &&
+                    !java.lang.reflect.Modifier.isStatic(it.modifiers) &&
+                    it.parameterTypes.contentEquals(arrayOf(String::class.java, Throwable::class.java))
+            }.apply { isAccessible = true }
+            failure.invoke(service, runtimeA.value, IllegalStateException("native capture failed"))
+            withTimeout(1_000) {
+                while (orchestrator.state.value != IntercomState.Offline) { shadowOf(android.os.Looper.getMainLooper()).idle(); delay(10) }
+            }
+            assertEquals(listOf("native capture failed"), errors)
+            val runtimeB = RuntimeSessionId("replacement-audio-runtime")
+            setPrivate(service, "running", true)
+            setPrivate(service, "activeRuntimeSessionId", runtimeB.value)
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtimeB)))
+            val worker = Thread { failure.invoke(service, runtimeA.value, IllegalStateException("late native error")) }
+            worker.start(); worker.join(1_000)
+            assertFalse(worker.isAlive)
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertEquals(IntercomState.Discovering(runtimeB), orchestrator.state.value)
+            assertEquals(listOf("native capture failed"), errors)
+        } finally { destroyAndAwait(controller) }
+    }
+
+    @Test
     fun manualDiscoveryRefreshWithoutReadyResourcesIsCoalescedWithCurrentStartup() = runBlocking {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
         val service = controller.get()
@@ -71,14 +112,20 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
-    fun preferredPresenceSnapshotStartsAnAutoPairedAttempt() = runBlocking {
+    fun cachedPreferredPresenceSnapshotDoesNotStartAnAutomaticAttempt() = runBlocking {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val ownership = requireNotNull(LegacyRuntimeOwnership.acquire())
         try {
             val service = controller.get()
             val runtime = RuntimeSessionId("auto-connect-runtime")
             val orchestrator = IntercomService::class.java.getDeclaredField("orchestrator").apply {
                 isAccessible = true
             }.get(service) as SessionOrchestrator
+            val sessions = IntercomService::class.java.getDeclaredField("sessions").apply {
+                isAccessible = true
+            }.get(service) as SessionGeneration
+            setPrivate(service, "activeSession", sessions.start())
+            setPrivate(service, "legacyOwnership", ownership)
             setPrivate(service, "running", true)
             setPrivate(service, "activeRuntimeSessionId", runtime.value)
             assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
@@ -95,14 +142,11 @@ class IntercomServiceRobolectricTest {
                 )
             )
 
-            withTimeout(1_000L) {
-                while (orchestrator.state.value !is IntercomState.Connecting) delay(10L)
-            }
-            val attempt = requireNotNull(orchestrator.currentAttempt)
-            assertEquals(ConnectionTrigger.AUTO_PAIRED, attempt.trigger)
-            assertEquals("preferred-device", attempt.targetDeviceId)
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.AutomaticReconnectChanged(true)))
+            assertEquals(IntercomState.Discovering(runtime), orchestrator.state.value)
+            assertNull(orchestrator.currentAttempt)
         } finally {
-            destroyAndAwait(controller)
+            try { destroyAndAwait(controller) } finally { LegacyRuntimeOwnership.release(ownership) }
         }
     }
 
@@ -315,21 +359,13 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
-    fun listenerReplaysOnlyTheCurrentInAppConfirmationAfterActivityRebind() {
-        val controller = Robolectric.buildService(IntercomService::class.java).create()
-        val service = controller.get()
-        val prompt = incomingPrompt(
-            nonce = "rebind-in-app",
-            surface = ConfirmationSurface.IN_APP,
-            deadline = SystemClock.elapsedRealtime() + 60_000L
-        )
-        setActiveIncomingPrompt(service, prompt)
-        val replayed = mutableListOf<IncomingConfirmationPrompt>()
-
-        service.setListener(recordingListener(replayed))
-
-        assertEquals(listOf(prompt), replayed)
-        destroyAndAwait(controller)
+    fun listenerReplaysOnlyTheCurrentInAppConfirmationAfterActivityRebind() = runBlocking {
+        IncomingConfirmationServiceFixture().use { f ->
+            val prompt = f.incoming()
+            val replayed = mutableListOf<IncomingConfirmationPrompt>()
+            f.service.setListener(recordingListener(replayed))
+            assertEquals(listOf(prompt), replayed)
+        }
     }
 
     @Test
