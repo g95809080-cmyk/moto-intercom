@@ -4,11 +4,13 @@
 
 摩声是一款 Android 一对一骑行对讲 App。打开 Wi-Fi，找到附近车友，连上后直接说话——不用一直按着按钮，也不需要互联网。
 
-本分支是 **1.2.1 日志修复测试版**，基于 v1.2.0，只升级本机诊断日志。到 **设置 → 日志诊断 → 导出近 7 天日志** 可以保存供开发者排查的文本；进程重启后历史仍保留。六项现场通话故障尚未修复，1.3 的群组等变更未进入本测试包。Android versionCode 为 5，后续任何分发须使用更大的 code。
+本分支维护**双人版 `1.x`**，当前为 **1.2.3+f587472 修复测试版**：包含音频混播、蓝牙录音与播放恢复、断联恢复、VOX 和本机近 7 天诊断日志相关修复。小米13已覆盖安装并正常启动，双机、蓝牙与道路效果仍需实测。
+
+四人房间版在 [`four-person` 分支](https://github.com/g95809080-cmyk/moto-intercom/tree/four-person)维护，使用 **`2.x`** 版号；首次为 **2.0.0+aee3b3f**，由原四人版1.3.0重编号。两条线的改动分别审查与发布。
 
 ## 📦 下载体验
 
-[下载最新正式版 APK](https://github.com/g95809080-cmyk/moto-intercom/releases/latest) · [查看全部版本](https://github.com/g95809080-cmyk/moto-intercom/releases)
+[下载双人 1.2.3 测试版 APK](https://github.com/g95809080-cmyk/moto-intercom/releases/tag/v1.2.3%2Bf587472) · [四人 2.0 预览版](https://github.com/g95809080-cmyk/moto-intercom/releases/tag/v2.0.0%2Baee3b3f) · [查看全部版本](https://github.com/g95809080-cmyk/moto-intercom/releases)
 
 支持 **Android 6.0 及以上**。下载 Release 页面中的 `.apk` 文件，在手机上打开安装；系统询问时，允许当前浏览器或文件管理器安装应用。
 
@@ -75,6 +77,8 @@ $env:JAVA_HOME = 'F:/Android/jbr'
 - [新用户引导设计](docs/product/2026-09-12-first-run-onboarding.md)
 - [引导功能验证记录](docs/verification/2026-09-12-onboarding.md)
 - [v1.2.0 更新说明](docs/releases/v1.2.0.md)
+- [v1.2.3 修复测试说明](docs/releases/v1.2.3.md)
+- [双人与四人版本约定](docs/releases/versioning.md)
 
 自动测试和模拟器验证不代表双真机听音、蓝牙兼容性或实际距离测试已经通过；每次版本的具体验证范围见更新说明。
 
