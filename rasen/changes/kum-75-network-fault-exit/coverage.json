@@ -1,0 +1,23 @@
+{
+  "issue": "KUM-75",
+  "base_sha": "0f5e7b778ee0b945725c9506055d6137a7faf546",
+  "source_head_sha": "65c23200d81efb44258737ed1c22f9e4258e6151",
+  "review": {"decision": "APPROVED", "p0": [], "p1": [], "findings": [], "next_gate_allowed": "Draft PR, CI, next independent checkpoint"},
+  "official_selected": 4,
+  "extended": 4,
+  "reviewed": 8,
+  "skipped": 0,
+  "files": [
+    {"path": "scripts/emulator/inject-network-fault.ps1", "status": "reviewed", "depth": "full; arguments, every native exit, branches, success evidence"},
+    {"path": "scripts/emulator/test-inject-network-fault.ps1", "status": "reviewed", "depth": "full; actual process mock, 34 cases, exact prefixes, environment and confined cleanup"},
+    {"path": ".github/workflows/android-ci.yml", "status": "reviewed", "depth": "full; Windows job, exit propagation, existing jobs and permissions"},
+    {"path": "rasen/changes/kum-75-network-fault-exit/.openspec.yaml", "status": "reviewed", "depth": "full; metadata"},
+    {"path": "rasen/changes/kum-75-network-fault-exit/proposal.md", "status": "reviewed", "depth": "full"},
+    {"path": "rasen/changes/kum-75-network-fault-exit/design.md", "status": "reviewed", "depth": "full"},
+    {"path": "rasen/changes/kum-75-network-fault-exit/specs/network-fault-evidence/spec.md", "status": "reviewed", "depth": "full"},
+    {"path": "rasen/changes/kum-75-network-fault-exit/tasks.md", "status": "reviewed", "depth": "full"}
+  ],
+  "additional_context": [{"path": "scripts/emulator/run-scenario.ps1", "depth": "actual Run-NetworkFault producer/consumer, finally cleanup, final PASS"}],
+  "validation": {"windows_powershell_native_process_cases": 34, "result": "PASS", "original_red": "normal//fail=1 emitted APPLIED after failure", "powershell_ast_errors": 0, "rasen_strict": true, "remote_ci": "pending"},
+  "limits": ["mock exit/control-flow evidence, not hardware network recovery", "product trees unchanged; no phone installation/version changes"]
+}

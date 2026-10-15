@@ -1,0 +1,3 @@
+Set-EmulatorNetwork在每条native调用之后立即读取LASTEXITCODE；失败throw发生在下一条命令及APPLIED构造之前。normal/slow/online复用，online仍先按既定接口恢复。run-scenario传播异常，既有finally恢复保留，不将清理误当故障脚本继续。
+
+测试运行真实Windows PowerShell进程，native mock.cmd返回exit17且错误仅写stdout，确保结果来自退出码检查而非stderr偏好。每个分支测试成功及每个命令位置失败，核对精确命令前缀和无APPLIED。另验证非模拟器、非法接口、root拒绝但exit0及缺少Mode。临时目录含空格、在finally还原环境；递归清理前核对绝对路径的父目录与唯一叶名称。
