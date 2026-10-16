@@ -20,7 +20,11 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Native peers invoke the patched callback immediately before handing the actual frame to JNI. */
 @RunWith(AndroidJUnit4::class)
 class VoxTransmitInstrumentationTest {
-    @Test fun mutedNativeCaptureContinuesAndVoxReopensActualPcm() {
+    @Test fun mutedNativeCaptureContinuesAndVoxReopensActualPcm() = verifyNativeCapture(false)
+
+    @Test fun rnnoisePreservesMuteAndVoxOnActualNativeCapture() = verifyNativeCapture(true)
+
+    private fun verifyNativeCapture(rnnoise: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
@@ -31,7 +35,7 @@ class VoxTransmitInstrumentationTest {
         val audibleFrames = AtomicReference(CountDownLatch(6))
         val listening = CountDownLatch(1)
         val microphoneLevel = AtomicInteger(8192)
-        val initial = VersionedAudioControls(0, AudioControlSettings(muted = true, voxEnabled = true))
+        val initial = VersionedAudioControls(0, AudioControlSettings(muted = true, voxEnabled = true, rnnoiseEnabled = rnnoise))
         val first = RiderAudioEngine(context, onEngineError = { errors.offer(it) }, initialAudioControls = initial,
             onVoxStateChanged = { controls, state ->
                 if (controls.revision == 1L && state == VoxRuntimeState.LISTENING) listening.countDown()
@@ -70,7 +74,7 @@ class VoxTransmitInstrumentationTest {
             assertTrue("Native peers did not connect: ${errors.peek()}", connected.await(15, TimeUnit.SECONDS))
             assertTrue("Initial mute did not clear actual JNI input", zeroFrames.get().await(5, TimeUnit.SECONDS))
             assertTrue("Muted sender stopped VOX input: ${errors.peek()}", captured.await(5, TimeUnit.SECONDS))
-            first.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = true)))
+            first.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = true, rnnoiseEnabled = rnnoise)))
             assertTrue("VOX failed to reopen JNI input on speech", audibleFrames.get().await(5, TimeUnit.SECONDS))
             // Nonzero quiet input must be silenced by VOX itself, with manual mute disabled.
             microphoneLevel.set(16)
@@ -81,13 +85,17 @@ class VoxTransmitInstrumentationTest {
             microphoneLevel.set(8192)
             assertTrue("VOX could not hear new speech while closed", audibleFrames.get().await(5, TimeUnit.SECONDS))
             zeroFrames.set(CountDownLatch(6))
-            first.updateAudioControls(VersionedAudioControls(2, AudioControlSettings(muted = true, voxEnabled = false)))
+            first.updateAudioControls(VersionedAudioControls(2, AudioControlSettings(muted = true, voxEnabled = false, rnnoiseEnabled = rnnoise)))
             assertTrue("Manual mute did not clear JNI input", zeroFrames.get().await(5, TimeUnit.SECONDS))
             audibleFrames.set(CountDownLatch(1))
-            first.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = false)))
+            first.updateAudioControls(VersionedAudioControls(1, AudioControlSettings(voxEnabled = false, rnnoiseEnabled = rnnoise)))
             assertFalse("Older controls reopened a muted sender", audibleFrames.get().await(200, TimeUnit.MILLISECONDS))
-            first.updateAudioControls(VersionedAudioControls(3, AudioControlSettings(voxEnabled = false)))
+            first.updateAudioControls(VersionedAudioControls(3, AudioControlSettings(voxEnabled = false, rnnoiseEnabled = rnnoise)))
             assertTrue("Disabling VOX failed to reopen JNI input", audibleFrames.get().await(5, TimeUnit.SECONDS))
+            if (rnnoise) {
+                val frames = RiderAudioEngine::class.java.getDeclaredField("rnnoiseFrames").apply { isAccessible = true }.getLong(first)
+                assertTrue("RNNoise was selected but never processed actual capture", frames > 0)
+            }
             first.close()
             val lateFrame = ByteBuffer.allocateDirect(960)
             for (index in 0 until lateFrame.capacity()) lateFrame.put(index, 32)

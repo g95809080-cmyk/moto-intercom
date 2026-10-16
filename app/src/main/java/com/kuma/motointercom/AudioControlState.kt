@@ -7,7 +7,8 @@ internal const val MAX_VOX_SENSITIVITY = 100
 internal data class AudioControlSettings(
     val muted: Boolean = false,
     val voxEnabled: Boolean = true,
-    val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY
+    val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
+    val rnnoiseEnabled: Boolean = false
 ) {
     fun normalized(): AudioControlSettings = copy(
         voxSensitivity = voxSensitivity.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)

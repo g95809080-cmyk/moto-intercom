@@ -19,6 +19,12 @@
     <string name="guide_scan_body">双方启动后，找到对方点“连接”，对方点“接受”。\n\n显示“语音通道已连接”后直接说话；首页可静音和调整耳机。\n\n没有车友也可先完成引导。</string>
     <string name="guide_image_description">摩声使用说明：一对一离线对讲，无需互联网，但要打开 Wi-Fi。第一步，双方打开 Wi-Fi 和蓝牙，授予必要权限；耳机先在系统中连接。第二步，双方点启动摩声，再查看附近车友。第三步，一方选择对方点击连接，另一方点击接受。第四步，看到语音通道已连接后直接说话，无需按住按钮。静音可暂停自己的麦克风，音频设置可选择耳机及调整 VOX 自动开麦，结束对讲可停止。找不到车友时确认双方已启动、Wi-Fi 已打开，再重新扫描；听不到声音时检查静音和音频输出。</string>
     <string name="app_name">摩声</string>
+    <string name="rnnoise_beta_section">降噪对比 · Beta</string>
+    <string name="rnnoise_beta_switch">启用 RNNoise</string>
+    <string name="rnnoise_beta_switch_description">启用 RNNoise 实验降噪；关闭后使用 WebRTC 降噪。停止摩声后可以切换。</string>
+    <string name="rnnoise_selected">当前选择：RNNoise</string>
+    <string name="webrtc_selected">当前选择：WebRTC</string>
+    <string name="rnnoise_beta_hint">停止摩声后可切换，下次启动生效。建议用同一副耳机、相同环境对比人声和背景噪声。此版本保留回声消除。</string>
     <string name="brand_name">摩声 MotoCom</string>
     <string name="brand_tagline">一对一对讲 · 无需网络</string>
     <string name="nav_home">首页</string>

@@ -15,6 +15,10 @@ require(semanticVersion.matches(Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1
 require(approvedCommit.matches(Regex("[0-9a-f]{40}")))
 val androidVersionCode = releaseVersion.getProperty("versionCode").toInt()
 require(androidVersionCode > 0)
+val betaVersion = releaseVersion.getProperty("betaVersion")
+val betaVersionCode = releaseVersion.getProperty("betaVersionCode").toInt()
+val betaCommit = releaseVersion.getProperty("betaCommit")
+require(betaCommit.matches(Regex("[0-9a-f]{40}")))
 
 android {
     namespace = "com.kuma.motointercom"
@@ -36,12 +40,43 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
+    ndkVersion = "28.2.13676358"
+    defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        buildConfigField("boolean", "RNNOISE_BETA", "false")
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    testBuildType = providers.gradleProperty("testBuildType").orElse("debug").get()
+
     buildTypes {
+        create("beta") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".rnnoise.beta"
+            matchingFallbacks += "debug"
+            buildConfigField("boolean", "RNNOISE_BETA", "true")
+        }
         getByName("release") {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+}
+
+androidComponents.beforeVariants(androidComponents.selector().withBuildType("beta")) {
+    (it as com.android.build.api.variant.HasHostTestsBuilder)
+        .hostTests.getValue(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE).enable = true
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("beta")) { variant ->
+    variant.outputs.forEach {
+        it.versionName.set("$betaVersion+${betaCommit.take(7)}")
+        it.versionCode.set(betaVersionCode)
     }
 }
 
@@ -91,6 +126,7 @@ dependencies {
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    add("betaImplementation", "androidx.compose.ui:ui-test-manifest")
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

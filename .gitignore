@@ -1,4 +1,5 @@
 .gradle/
+**/.cxx/
 .kotlin/
 .idea/
 **/build/
