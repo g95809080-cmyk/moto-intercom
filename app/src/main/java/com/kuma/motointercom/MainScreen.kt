@@ -46,6 +46,7 @@ internal class MainScreen(
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
     private val onSetVoxSensitivity: (Int) -> Unit = {},
     private val onSelectAudioRoute: (AudioRouteSelection) -> Unit = {},
+    private val onSetRnnoiseEnabled: (Boolean) -> Unit = {},
     private val onAutomaticReconnectChanged: (Boolean) -> Unit = {},
     private val onRequestDiscoveryRefresh: () -> Unit = {},
     private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
@@ -1199,6 +1200,7 @@ internal class MainScreen(
                         onVoxEnabledChanged = onSetVoxEnabled,
                         onVoxSensitivityChanged = onSetVoxSensitivity,
                         onAudioRouteSelected = onSelectAudioRoute,
+                        onRnnoiseEnabledChanged = onSetRnnoiseEnabled,
                         onAutomaticReconnectChanged = onAutomaticReconnectChanged,
                         onAudioSectionPositioned = { offset ->
                             if (audioFocusPending) {
@@ -1276,7 +1278,9 @@ internal class MainScreen(
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
             voxState = audioControlSnapshot.voxState,
             preferredAudioRoute = preferredAudioRoute,
-            automaticReconnectEnabled = automaticReconnectEnabled
+            automaticReconnectEnabled = automaticReconnectEnabled,
+            rnnoiseEnabled = audioControlSnapshot.controls.rnnoiseEnabled,
+            canChangeNoiseReduction = productState == IntercomState.Offline
         )
     }
 
