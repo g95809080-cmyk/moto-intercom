@@ -125,6 +125,7 @@ internal class RiderAudioEngine(
     private var rnnoise: RnNoiseProcessor? = null
     // Accessed only under audioControlLock, after the current-producer check.
     private var rnnoiseRevision = Long.MIN_VALUE
+    private var rnnoiseProducer: Thread? = null
     private var rnnoiseSending = false
     private var rnnoiseResetPending = true
     private var rnnoiseFrames = 0L
@@ -375,6 +376,7 @@ internal class RiderAudioEngine(
             rnnoise?.let { dispose(it::close) }
             rnnoise = null
             rnnoiseSending = false
+            rnnoiseProducer = null
         }
         failure?.let { throw it }
     }
@@ -429,7 +431,7 @@ internal class RiderAudioEngine(
                     recordingOwner.start(thread, { NativeCaptureDiagnostics.isCurrentProducer(audioDeviceModule, true, thread) }) {
                         ioEvidence.recording(true)
                         pcmFormatLogged.set(false)
-                        postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=software-requested") }
+                        postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=${if (rnnoiseEnabled) "RNNoise" else "WebRTC-software"}") }
                     }
                 }
                 override fun onWebRtcAudioRecordStop() {
@@ -470,7 +472,7 @@ internal class RiderAudioEngine(
                     if (captureFailed.compareAndSet(false, true)) postEngineError(error)
                 }
             }
-            // Keep AEC; use the pinned native software NS path for every input, including SCO.
+            // Keep AEC; software NS is selected when creating the audio source below.
             // Declared hardware support cannot prove the effect was created/enabled on this input.
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(false)
@@ -593,10 +595,13 @@ internal class RiderAudioEngine(
                     rnnoiseSending = false
                 } else if (rnnoiseEnabled) {
                     val processor = checkNotNull(rnnoise) { "RNNoise 尚未就绪" }
-                    if (rnnoiseResetPending || rnnoiseRevision != gateRevision || !rnnoiseSending) {
+                    val producer = Thread.currentThread()
+                    if (rnnoiseResetPending || rnnoiseRevision != gateRevision ||
+                        rnnoiseProducer !== producer || !rnnoiseSending) {
                         processor.reset()
                         rnnoiseResetPending = false
                         rnnoiseRevision = gateRevision
+                        rnnoiseProducer = producer
                     }
                     val started = SystemClock.elapsedRealtimeNanos()
                     processor.process(buffer, rate, channels)

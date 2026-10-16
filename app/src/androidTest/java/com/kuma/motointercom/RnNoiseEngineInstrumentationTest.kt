@@ -18,6 +18,43 @@ import org.webrtc.audio.AudioRecordDataCallback
 /** Deterministic callback injection. VoxTransmitInstrumentationTest separately uses real native producers. */
 @RunWith(AndroidJUnit4::class)
 class RnNoiseEngineInstrumentationTest {
+    @Test fun replacementProducerAtSameRevisionStartsWithFreshHistory() {
+        val errors = LinkedBlockingQueue<Throwable>()
+        val engine = engine(AudioControlSettings(voxEnabled = false, rnnoiseEnabled = true), errors)
+        try {
+            val callback = callback(engine)
+            val pcm = ByteBuffer.allocateDirect(960).order(ByteOrder.LITTLE_ENDIAN)
+            val random = Random(289)
+            repeat(40) {
+                repeat(480) { pcm.putShort(it * 2, (random.nextInt(20_001) - 10_000).toShort()) }
+                callback.onAudioDataRecorded(AudioFormat.ENCODING_PCM_16BIT, 1, 48_000, pcm)
+            }
+            assertEquals(40L, field(engine, "rnnoiseFrames"))
+            val gate = field(engine, "audioIoGate") as AudioIoGate
+            val revision = gate.revision()
+            val replacement = Thread {
+                runCatching {
+                    RnNoiseProcessor().use { reference ->
+                        repeat(12) {
+                            repeat(480) { pcm.putShort(it * 2, 0) }
+                            val expected = ByteBuffer.allocateDirect(960)
+                            reference.process(expected, 48_000, 1)
+                            callback.onAudioDataRecorded(AudioFormat.ENCODING_PCM_16BIT, 1, 48_000, pcm)
+                            repeat(960) { assertEquals("Previous producer history escaped at byte $it", expected.get(it), pcm.get(it)) }
+                        }
+                    }
+                }.onFailure { errors.offer(it) }
+            }
+            (field(engine, "recordingOwner") as NativeAudioProducerOwner).start(replacement, { true }) {}
+            replacement.start()
+            replacement.join(10_000)
+            assertFalse("Replacement capture did not return", replacement.isAlive)
+            assertEquals("Test must keep the same I/O revision", revision, gate.revision())
+            assertEquals(52L, field(engine, "rnnoiseFrames"))
+            assertNull("Replacement capture failed", errors.poll())
+        } finally { close(engine) }
+    }
+
     @Test fun muteAndVoxCloseDropHistoryBeforeReopening() {
         val errors = LinkedBlockingQueue<Throwable>()
         val settings = AudioControlSettings(voxEnabled = false, rnnoiseEnabled = true)
