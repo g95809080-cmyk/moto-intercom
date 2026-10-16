@@ -1,0 +1,6 @@
+package: name='com.kuma.motointercom.rnnoise.beta' versionCode='9' versionName='1.3.0-beta.1+dc7a45d' platformBuildVersionName='17' platformBuildVersionCode='37' compileSdkVersion='37' compileSdkVersionCodename='17'
+sdkVersion:'23'
+targetSdkVersion:'36'
+application-label:'摩声 RNNoise Beta'
+application-debuggable
+native-code: 'arm64-v8a' 'armeabi-v7a' 'x86_64'
