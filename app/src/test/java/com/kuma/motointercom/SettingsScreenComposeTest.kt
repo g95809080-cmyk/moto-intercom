@@ -271,7 +271,7 @@ class SettingsScreenComposeTest {
         }
         toggle.assertIsOn().performScrollTo().performClick()
         toggle.assertIsOff()
-        composeRule.onNodeWithTag("settings_noise_mode").assertTextContains("WebRTC")
+        composeRule.onNodeWithTag("settings_noise_mode").assertTextContains("当前选择：WebRTC")
         composeRule.runOnIdle { state.value = state.value.copy(canChangeNoiseReduction = false) }
         toggle.assertIsNotEnabled().performClick()
         composeRule.runOnIdle { assertEquals(1, requests) }
