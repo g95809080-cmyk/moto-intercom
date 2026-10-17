@@ -1193,6 +1193,14 @@ internal class WifiDirectTunnel(
     @SuppressLint("MissingPermission")
     private fun confirmConnectionLoss() {
         if (!running || removingGroup || retryPause.isPrepared) return
+        // Initial/sticky disconnected broadcasts describe an idle adapter, not a lost link.
+        // Do not revoke the startup query or an in-flight service registration in that case.
+        if (state == State.DISCOVERING && selectedAttempt == null && targetAttempt == null &&
+            connectingAddress == null && !tunnelStarted && !validatingGroup && socketTransport == null
+        ) {
+            Log.d(TAG, "ignore disconnected broadcast while discovery has no active link")
+            return
+        }
         val m = manager ?: return
         val c = channel ?: return
         val lifecycle = lifecycleGeneration

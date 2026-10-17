@@ -178,6 +178,14 @@ public abstract class WebRtcCaptureCallbackPatch
                         method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "android/media/AudioRecord", getter, "()I", false);
                     }
                     method.visitVarInsn(Opcodes.ALOAD, 2);
+                    // The pinned SDK invokes nativeDataIsRecorded only after a capacity-sized read.
+                    // Its SDK mute branch advances the original cursor to the end. Give the PCM
+                    // callback a full-frame view without changing the recorder's own cursor.
+                    method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/nio/ByteBuffer", "duplicate",
+                            "()Ljava/nio/ByteBuffer;", false);
+                    method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/nio/ByteBuffer", "clear",
+                            "()Ljava/nio/Buffer;", false);
+                    method.visitTypeInsn(Opcodes.CHECKCAST, "java/nio/ByteBuffer");
                     method.visitMethodInsn(Opcodes.INVOKEINTERFACE, "org/webrtc/audio/AudioRecordDataCallback",
                             "onAudioDataRecorded", "(IIILjava/nio/ByteBuffer;)V", true);
                     method.visitLabel(done);
