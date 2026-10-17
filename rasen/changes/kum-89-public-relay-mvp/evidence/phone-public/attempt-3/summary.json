@@ -1,0 +1,22 @@
+{
+  "nativeProbePassed": false,
+  "phoneMediaCandidateCellular": null,
+  "matchedServerSessions": 6,
+  "pcapBytes": 154982,
+  "relayPorts": [
+    "49169",
+    "49178",
+    "49185",
+    "49188",
+    "49190",
+    "49193"
+  ],
+  "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+  "sendHz": {
+    "phone": 500,
+    "emulator": 700
+  },
+  "phoneRequireCellularMedia": true,
+  "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043",
+  "summaryCorrection": "Derived summary corrected: selected cellular is independent of overall probe pass; null means no selected path recorded. Private original summary preserved."
+}

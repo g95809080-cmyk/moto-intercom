@@ -1,6 +1,6 @@
 # 固定源码审查记录
 
-审查角色：只读 `motointercom-product-architect`，主 Agent 是唯一写者。Base 始终为 `a72cea7c1ff1879a2b6175b17881d0686c22d9c4`。
+审查角色：只读 `motointercom-product-architect`，主 Agent 是唯一写者。初始 MVP Base 为 `a72cea7c1ff1879a2b6175b17881d0686c22d9c4`；增量审查另列 Base。
 
 ## 396ecfdcd1a994bd83aa6aedf911597fa54278d1
 
@@ -31,3 +31,15 @@ Base：`a72cea7c1ff1879a2b6175b17881d0686c22d9c4`。固定源码 Head：`dcb426c
 Next gate allowed：创建 Draft PR并运行 Android、Node、iOS 包 CI；本批准只覆盖开发验证 MVP。真实蜂窝/Wi-Fi Direct、端到端 P95、静默30 min、蓝牙/电话中断、iOS native SDK/后台仍未验，未授权部署/发布。
 
 Draft PR：[KUM-89 relay MVP #62](https://github.com/g95809080-cmyk/moto-intercom/pull/62)。CI结果以 [GitHub checks](https://github.com/g95809080-cmyk/moto-intercom/pull/62/checks) 为准；本地记录不替代远程运行结果。
+
+## 5f5727e89f3aa01b7eb72d328b914b1a0bc96043
+
+APPROVED。P0=0，P1=0。Base：`5684f997ab62689c302f8c44fc0ef746a87c7154`。
+
+此次源码仅修改 AndroidTest 探针：增加失败采样诊断，以及默认关闭的 `requireCellularMedia`。同一 RTC executor 内核对当前租约、session、PC 后设置原 relay 配置的蜂窝偏好，等待 native 接受配置才允许 offer/answer；拒绝或超时均失败。实际 selected `networkType==cellular` 是额外硬门槛，原 relay/RTP/当前音频 I/O/100 帧门槛保持，`everMetMediaGate` 仅作诊断。生产源码没有变化。
+
+固定提交前 `assembleDebugAndroidTest`、`lintDebug` 成功。只读复审核实配置顺序、同 session/PC、最后采样和异常清理。Non-blocking：偏好不是生产网络绑定，失败 JSON 是最近取得的采样；公网 P95、静默 30 min、Wi-Fi Direct 共存及 iOS native/后台仍未验。
+
+Next gate allowed：安装新测试 APK，在用户已授权范围内执行手机＋模拟器探针并保存双端原始证据。本批准不代表设备验收、生产集成、合并或发布通过。
+
+后续证据只读复核：APPROVED，P0=0/P1=0。核对全部五轮 JSON/instrumentation、两轮同 call 完整 PASS、每轮 6 个本窗口新 coturn session（共 30 个、无跨轮重复）、清理回执和敏感值扫描。派生摘要已将第 2 轮实际 cellular 与整体 FAIL 分开，第 3 轮未取得路径记录为 null；原始结果不改。复核仅检查本地归档，没有再操作设备或云端。Next gate allowed：提交证据并同步 PR/Linear，不签收剩余物理/生产门槛。

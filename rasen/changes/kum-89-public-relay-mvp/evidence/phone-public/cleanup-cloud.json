@@ -1,0 +1,11 @@
+{
+  "observedAtUtc": "2026-10-17T06:01:25.975517+00:00",
+  "testServiceBeforeStop": "RuntimeMaxUSec=1h\nMainPID=32177\nId=motocom-relay-validation.service\nActiveState=active\nTransient=yes\n",
+  "testServiceStopped": true,
+  "tcp443ListeningAfter": false,
+  "existingServices": "MainPID=30755\nId=coturn.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 13:33:59 CST\n\nMainPID=781\nId=sig.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:31:59 CST\n",
+  "relayUdpSocketsRemaining": [],
+  "coturnConfigSha256": "067dc599e09522a295fcfafdbb2643d03a753309f9f643b49a9ce39a5304c336",
+  "onlyVerboseAppended": true,
+  "persistentUnitInstalled": false
+}

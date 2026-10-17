@@ -17,3 +17,10 @@
 - [x] 3.3 Record observed evidence and explicitly unverified hardware/public-network/iOS gates.
 - [x] 3.4 Commit and obtain a fixed-SHA architecture review; address all P0/P1 findings.
 - [x] 3.5 Open and attach a Draft PR, update Linear and report scope, running and tests.
+
+## 4. Authorized public phone validation
+
+- [x] 4.1 Confirm the idle window, enable coturn verbose, and stage an authenticated HTTPS service as a bounded transient unit.
+- [x] 4.2 Add probe-only failure diagnostics and optional observed cellular-media gate; build, lint and fixed-SHA architecture review.
+- [x] 4.3 Record all phone/emulator attempts, repeat the passing conditions, correlate server sessions, and verify cleanup.
+- [x] 4.4 Update handoff, Draft PR and Linear with the exact scope and latest remote checks.

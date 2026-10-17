@@ -37,5 +37,35 @@
     "signaling": "authenticated local HTTPS",
     "media": "existing public coturn UDP",
     "physicalCellularAcceptance": "unverified"
+  },
+  "cellularProbeExtension": {
+    "reviewedSourceHead": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043",
+    "localChecks": [
+      "assembleDebugAndroidTest",
+      "lintDebug",
+      "isolated validation instrumentation build"
+    ],
+    "ciHead": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043",
+    "ciStatus": "4/4 SUCCESS",
+    "ciRuns": [
+      "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/39008030453",
+      "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/39008030456",
+      "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/39008030478"
+    ],
+    "evidence": "phone-public-run.md",
+    "physicalPhonePlusEmulatorPassedRuns": [
+      4,
+      5
+    ],
+    "allAttemptResults": [
+      "FAIL",
+      "FAIL",
+      "FAIL",
+      "PASS",
+      "PASS"
+    ],
+    "phoneMediaNetwork": "cellular; device reports NR_SA",
+    "publicCellularProductAcceptance": "unverified",
+    "httpsServiceAfter": "stopped; coturn verbose retained"
   }
 }

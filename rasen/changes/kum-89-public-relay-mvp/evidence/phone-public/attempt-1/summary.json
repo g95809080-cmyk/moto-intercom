@@ -1,0 +1,21 @@
+{
+  "nativeProbePassed": false,
+  "phoneMediaCandidateCellular": false,
+  "matchedServerSessions": 6,
+  "pcapBytes": 677425,
+  "relayPorts": [
+    "49160",
+    "49163",
+    "49175",
+    "49181",
+    "49189",
+    "49192"
+  ],
+  "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+  "sendHz": {
+    "phone": 500,
+    "emulator": 1000
+  },
+  "phoneRequireCellularMedia": false,
+  "sourceSha": "5684f997ab62689c302f8c44fc0ef746a87c7154"
+}
