@@ -15,5 +15,5 @@
 - [x] 3.1 Provide local TLS/coturn setup and two-device run instructions.
 - [x] 3.2 Run Android build/unit/lint gates and local two-emulator relay media verification.
 - [x] 3.3 Record observed evidence and explicitly unverified hardware/public-network/iOS gates.
-- [ ] 3.4 Commit and obtain a fixed-SHA architecture review; address all P0/P1 findings.
-- [ ] 3.5 Open and attach a Draft PR, update Linear and report scope, running and tests.
+- [x] 3.4 Commit and obtain a fixed-SHA architecture review; address all P0/P1 findings.
+- [x] 3.5 Open and attach a Draft PR, update Linear and report scope, running and tests.

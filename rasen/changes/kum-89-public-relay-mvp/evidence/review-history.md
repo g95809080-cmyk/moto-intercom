@@ -19,3 +19,15 @@ REQUEST CHANGES。P0=0，P1=1。此前三项均核查已修。814 项 Android XM
 - P1：AudioSessionController.close() 重新抛出 route/session/coordinator 清理异常时，未注册 native disposal completion，导致 owner 和 keepAlive 永久保留。
 
 修复：在 finally 中注册 completion，并覆盖 route.close 抛错且 Wi-Fi/native 两种完成顺序。下一固定 Head 需再审；此前报告不作为最终批准。
+
+## dcb426c43d227d07e00ab92503bfee1bbf0bad5a
+
+APPROVED。P0=0，P1=0。finally 注册 native completion 的异常路径、controller 与 Service 两种顺序回归已核查；测试 sink 解绑与全步骤清理没有新增阻塞。
+
+确认 98 suites / 817 tests，0 failure/error/skip，Lint 无 Error/Fatal，两个 APK 哈希与归档吻合；最终双端同 call 的 relay/relay、RTP增长、376/2736帧真实解码证据吻合。
+
+Base：`a72cea7c1ff1879a2b6175b17881d0686c22d9c4`。固定源码 Head：`dcb426c43d227d07e00ab92503bfee1bbf0bad5a`。其后的提交仅更新文档与验收记录。
+
+Next gate allowed：创建 Draft PR并运行 Android、Node、iOS 包 CI；本批准只覆盖开发验证 MVP。真实蜂窝/Wi-Fi Direct、端到端 P95、静默30 min、蓝牙/电话中断、iOS native SDK/后台仍未验，未授权部署/发布。
+
+Draft PR：[KUM-89 relay MVP #62](https://github.com/g95809080-cmyk/moto-intercom/pull/62)。CI结果以 [GitHub checks](https://github.com/g95809080-cmyk/moto-intercom/pull/62/checks) 为准；本地记录不替代远程运行结果。

@@ -19,8 +19,10 @@
     "skipped": 0
   },
   "ios": {
-    "packageCI": "pending",
+    "packageCI": "https://github.com/g95809080-cmyk/moto-intercom/pull/62/checks",
     "nativeSDK": "unverified",
     "backgroundAudio": "unverified"
-  }
+  },
+  "reviewedSourceHead": "dcb426c43d227d07e00ab92503bfee1bbf0bad5a",
+  "pullRequest": "https://github.com/g95809080-cmyk/moto-intercom/pull/62"
 }
