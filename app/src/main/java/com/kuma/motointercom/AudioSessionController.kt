@@ -174,6 +174,11 @@ internal class AudioSessionController(
         }
     }
 
+    fun closeWhenDisposed(onDisposed: () -> Unit) {
+        close()
+        engine.closeWhenDisposed(onDisposed)
+    }
+
     override fun close() {
         val session = synchronized(lock) {
             if (closed) return
@@ -289,13 +294,18 @@ internal class AudioSessionController(
             onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {},
             onPlatformError: (Throwable) -> Unit = onError
         ): AudioSessionController {
-            val engine = RiderAudioEngine(
+            val nativeReservation = LegacyRuntimeOwnership.retainAudioResources()
+            val engine = try { RiderAudioEngine(
                 context = context,
                 onEngineError = onPlatformError,
                 isRuntimeCurrent = isRuntimeCurrent,
                 initialAudioControls = initialAudioControls,
-                onVoxStateChanged = onVoxStateChanged
-            )
+                onVoxStateChanged = onVoxStateChanged,
+                onNativeDisposed = nativeReservation::close
+            ) } catch (error: Throwable) {
+                nativeReservation.close()
+                throw error
+            }
             return try {
                 var controller: AudioSessionController? = null
                 var coordinator: CommunicationAudioCoordinator? = null

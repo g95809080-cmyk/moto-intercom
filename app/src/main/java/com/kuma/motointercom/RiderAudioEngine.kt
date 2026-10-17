@@ -72,6 +72,8 @@ internal interface RiderMediaEngine : Closeable {
     fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy = MediaIcePolicy.Nearby): RiderMediaSession
     fun suspendAudio() = Unit
     fun resumeAudio() = Unit
+    /** Completion means native resources were disposed, not merely that close was requested. */
+    fun closeWhenDisposed(onDisposed: () -> Unit) { close(); onDisposed() }
 }
 
 internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
@@ -99,7 +101,8 @@ internal class RiderAudioEngine(
         revision = 0,
         settings = AudioControlSettings()
     ),
-    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
+    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
+    private val onNativeDisposed: () -> Unit = {}
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
@@ -115,6 +118,9 @@ internal class RiderAudioEngine(
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
+    private val disposalLock = Any()
+    private var disposalFinished = false
+    private val disposalCallbacks = mutableListOf<() -> Unit>()
     private val captureFailed = AtomicBoolean(false)
     private val ioEvidence = RiderAudioIoEvidence()
     private val recordingOwner = NativeAudioProducerOwner()
@@ -306,7 +312,13 @@ internal class RiderAudioEngine(
         }
     }
 
-    override fun close() {
+    override fun close() = closeWhenDisposed {}
+
+    override fun closeWhenDisposed(onDisposed: () -> Unit) {
+        val alreadyDisposed = synchronized(disposalLock) {
+            if (disposalFinished) true else { disposalCallbacks += onDisposed; false }
+        }
+        if (alreadyDisposed) { onDisposed(); return }
         if (!closed.compareAndSet(false, true)) return
         audioIoGate.close()
         revokeNativeProducers()
@@ -322,6 +334,12 @@ internal class RiderAudioEngine(
                     ::disposeMediaSessionResources,
                     ::disposePlatformResources
                 )
+                val completed = synchronized(disposalLock) {
+                    disposalFinished = true
+                    disposalCallbacks.toList().also { disposalCallbacks.clear() }
+                }
+                runCatching(onNativeDisposed).onFailure { Log.e(TAG, "Audio resource reservation release failed", it) }
+                completed.forEach { callback -> runCatching(callback).onFailure { Log.e(TAG, "Audio disposal completion failed", it) } }
             } catch (t: Throwable) {
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {

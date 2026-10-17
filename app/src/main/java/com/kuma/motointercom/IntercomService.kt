@@ -1935,14 +1935,27 @@ class IntercomService : Service() {
         }
         val wifiToClose = wifiTunnel
         wifiTunnel = null
+        val audioToClose = audioSessionController
+        val wifiDisposed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val audioDisposed = java.util.concurrent.atomic.AtomicBoolean(audioToClose == null)
+        val ownershipReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun releaseDisposedRuntime() {
+            if (wifiDisposed.get() && audioDisposed.get() && ownershipReleased.compareAndSet(false, true)) {
+                try { keepAliveToRelease?.close() } finally { ownershipToRelease?.let(LegacyRuntimeOwnership::release) }
+            }
+        }
         wifiTunnelCloseOwner.closeAll(
             additionalResources = listOfNotNull(wifiToClose),
             onError = ::handleError
         ) {
-            try { keepAliveToRelease?.close() } finally { ownershipToRelease?.let(LegacyRuntimeOwnership::release) }
+            wifiDisposed.set(true)
+            releaseDisposedRuntime()
         }
         try {
-            audioSessionController?.close()
+            audioToClose?.closeWhenDisposed {
+                audioDisposed.set(true)
+                releaseDisposedRuntime()
+            }
         } catch (t: Throwable) {
             handleError(t)
         }

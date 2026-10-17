@@ -22,8 +22,10 @@ import org.robolectric.annotation.Config
 class LegacyRuntimeOwnershipServiceRobolectricTest {
     @Test fun destroyedServiceBlocksReplacementUntilWifiCleanupFinishes() = verifyOwnership(false)
     @Test fun alreadyPendingRecoveryCleanupStillOwnsTheProcessAfterDestroy() = verifyOwnership(true)
+    @Test fun wifiCleanupCannotReleaseOwnerBeforeNativeAudioDisposal() = verifyOwnership(false, true, false)
+    @Test fun nativeAudioDisposalCannotReleaseOwnerBeforeWifiCleanup() = verifyOwnership(false, true, true)
 
-    private fun verifyOwnership(alreadyPending: Boolean) {
+    private fun verifyOwnership(alreadyPending: Boolean, pendingAudio: Boolean = false, audioFirst: Boolean = false) {
         val app = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(app).grantPermissions(*(PermissionPolicy.corePermissions(35) +
             PermissionPolicy.optionalPermissions(35)).toTypedArray())
@@ -32,6 +34,7 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
         var c: ServiceController<IntercomService>? = null
         val done = mutableListOf<() -> Unit>()
         var destroyedA = false
+        var completeNativeAudio: (() -> Unit)? = null
         try {
             val serviceA = a.get()
             val blockedIdentity = object : LocalIdentityStore {
@@ -46,6 +49,19 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
             val heldA = field(serviceA, "runtimeKeepAlive").get(serviceA) as IntercomRuntimeKeepAlive
             assertTrue(heldA.isHeld)
             val runtimeA = RuntimeSessionId(field(serviceA, "activeRuntimeSessionId").get(serviceA) as String)
+            if (pendingAudio) {
+                val engine = object : RiderMediaEngine {
+                    override fun updateAudioControls(controls: VersionedAudioControls) = Unit
+                    override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession = error("unused")
+                    override fun close() = Unit // Native disposal remains pending after the close request.
+                    override fun closeWhenDisposed(onDisposed: () -> Unit) { completeNativeAudio = onDisposed }
+                }
+                val route = object : RiderAudioRoute {
+                    override fun select(selection: AudioRouteSelection) = Unit
+                    override fun close() = Unit
+                }
+                field(serviceA, "audioSessionController").set(serviceA, AudioSessionController(engine, route))
+            }
             val tunnel = WifiDirectTunnel(serviceA, { _, _ -> },
                 localDeviceId = UUID.randomUUID().toString(), localDeviceName = "fixture", sessionId = runtimeA)
             val pending = PendingCloseOwner<WifiDirectTunnel> { resource, complete ->
@@ -70,8 +86,19 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
             assertNull(field(serviceB, "audioSessionController").get(serviceB))
             assertTrue(shadowOf(serviceB).isStoppedBySelf)
             assertTrue(LegacyRuntimeOwnership.hasOwner())
+            assertNull(LegacyRuntimeOwnership.acquire()) // Developer probe uses this same process gate.
+            if (pendingAudio && audioFirst) {
+                requireNotNull(completeNativeAudio).invoke()
+                assertTrue(heldA.isHeld)
+                assertNull(LegacyRuntimeOwnership.acquire())
+            }
             done.single().invoke()
             assertFalse(pending.hasPending)
+            if (pendingAudio && !audioFirst) {
+                assertTrue(heldA.isHeld)
+                assertNull(LegacyRuntimeOwnership.acquire())
+                requireNotNull(completeNativeAudio).invoke()
+            }
             assertFalse(heldA.isHeld)
             assertFalse(LegacyRuntimeOwnership.hasOwner())
             c = Robolectric.buildService(IntercomService::class.java).create()
@@ -83,11 +110,13 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
             assertNotSame(tokenA, tokenC)
             val heldC = field(serviceC, "runtimeKeepAlive").get(serviceC) as IntercomRuntimeKeepAlive
             done.single().invoke()
+            completeNativeAudio?.invoke()
             LegacyRuntimeOwnership.release(tokenA)
             assertTrue(LegacyRuntimeOwnership.hasOwner())
             assertTrue(heldC.isHeld)
             assertTrue(field(serviceC, "running").getBoolean(serviceC))
         } finally {
+            completeNativeAudio?.invoke()
             done.forEach { it() }
             c?.let(::destroyOnly)
             destroyOnly(b)

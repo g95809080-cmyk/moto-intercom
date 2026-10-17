@@ -2,9 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { RelayService, createRelayServer, sha256, validateConfig } from './server.mjs';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import https from 'node:https';
 
@@ -102,13 +99,15 @@ test('cursor cannot move backwards or skip nonexistent events', () => {
   rejects(() => service.events(sa, 0), 409); rejects(() => service.events(sa, 2), 409);
 });
 test('HTTPS enforces CA/hostname authentication, bearer auth and JSON limits', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'motocom-relay-tls-'));
-  // No credential or private key is checked in. Fixtures are generated for this process.
+  // Generate process-local PEM in memory; no private-key fixture or temp directory is created.
   const openssl = process.env.OPENSSL ?? (process.platform === 'win32' ? 'C:/Program Files/Git/usr/bin/openssl.exe' : 'openssl');
-  execFileSync(openssl, ['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(directory,'key.pem'),
-    '-out',join(directory,'cert.pem'),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'ignore' });
-  const cert = readFileSync(join(directory,'cert.pem'));
-  const { server, service } = createRelayServer(configuration(), { key: readFileSync(join(directory,'key.pem')), cert });
+  const pem = execFileSync(openssl, ['req','-x509','-newkey','rsa:2048','-nodes','-keyout','-',
+    '-out','-','-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const cert = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/.exec(pem)?.[0];
+  const key = /-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----/.exec(pem)?.[0];
+  assert.ok(cert && key);
+  const { server, service } = createRelayServer(configuration(), { key, cert });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { service.close(); server.closeAllConnections(); server.close(); });
   function request(path, { method = 'POST', authorization = token('a'), data = '{}', ca = cert, hostname = '127.0.0.1', servername } = {}) {
