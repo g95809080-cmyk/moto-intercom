@@ -12,6 +12,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.webrtc.AudioTrackSink
+import org.webrtc.PeerConnection
 import org.webrtc.audio.AudioRecordDataCallback
 import java.io.File
 import java.util.UUID
@@ -42,8 +43,11 @@ class RelayMediaProbeTest {
         require(deviceId != peerId)
         val runtimeId = UUID.randomUUID().toString()
         val pairId = config.getString("pairId")
+        val requireCellular = config.optBoolean("requireCellular", false)
+        val requireCellularMedia = config.optBoolean("requireCellularMedia", false)
+        val cellularRequested = requireCellular || requireCellularMedia
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
-        val network = if (config.optBoolean("requireCellular", false)) {
+        val network = if (cellularRequested) {
             connectivity.allNetworks.firstOrNull { network -> connectivity.getNetworkCapabilities(network)?.let {
                 it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             } == true } ?: error("No cellular Network available")
@@ -65,6 +69,11 @@ class RelayMediaProbeTest {
             var callId: String? = null
             var callExpiry = 0L
             var signalSequence = 0
+            val diagnostics = JSONObject().put("pass", false).put("deviceId", deviceId)
+                .put("runtimeId", runtimeId).put("signalingNetwork", network.toString())
+                .put("cellularRequested", cellularRequested).put("signalingCellularRequired", requireCellular)
+                .put("cellularMediaRequired", requireCellularMedia)
+                .put("stage", "authorizing")
             val tone = DecodedTone(config.getDouble("receiveHz"), config.getDouble("sendHz"))
             require(config.getDouble("sendHz") in 200.0..2000.0 && config.getDouble("receiveHz") in 200.0..2000.0 &&
                 config.getDouble("sendHz") != config.getDouble("receiveHz"))
@@ -90,6 +99,7 @@ class RelayMediaProbeTest {
                         server.getString("credential"), server.getLong("expiresAt"))
                 })
                 policy.rtcConfiguration() // Reject invalid credentials before creating an ADM.
+                diagnostics.put("stage", "waitingForPeer")
                 poller.execute {
                     var cursor = 0L
                     try {
@@ -126,6 +136,7 @@ class RelayMediaProbeTest {
                     UUID.fromString(peerRuntime)
                     callId = UUID.fromString(event.getString("callId")).toString()
                     callExpiry = event.getLong("expiresAt")
+                    diagnostics.put("callId", callId).put("stage", "openingMedia")
                     check(callExpiry <= grant.getLong("expiresAt") && callExpiry > System.currentTimeMillis() + 45_000)
                     val role = event.getString("role")
                     check(role == grant.getString("role") && role in listOf("offerer", "answerer"))
@@ -149,6 +160,13 @@ class RelayMediaProbeTest {
                         onError = errors::offer,
                         isSessionCurrent = { current.get() && System.currentTimeMillis() < callExpiry }
                     ), policy)
+                    if (requireCellularMedia) {
+                        diagnostics.put("networkPreferenceApplied", false)
+                        preferCellular(engine, session, policy) {
+                            current.get() && System.currentTimeMillis() < callExpiry
+                        }
+                        diagnostics.put("networkPreferenceApplied", true)
+                    }
                     if (role == "offerer") session.createOffer()
                 }
                 val active = session ?: error("Timed out waiting for authorized peer")
@@ -157,13 +175,18 @@ class RelayMediaProbeTest {
                 var lastMedia: RiderMediaEvidence? = null
                 var transport: RelayTransportEvidence? = null
                 var verified = false
+                var everVerified = false
+                diagnostics.put("stage", "checkingMedia")
                 while (SystemClock.elapsedRealtime() < deadline) {
                     errors.poll()?.let { throw it }
                     check(System.currentTimeMillis() < callExpiry) { "Call expired" }
                     val event = inbox.poll(200, TimeUnit.MILLISECONDS)
                     if (event != null) {
                         check(event.getString("callId") == callId) { "Stale call event" }
-                        if (event.getString("type") == "closed") { check(verified) { "Peer closed before media verification" }; break }
+                        if (event.getString("type") == "closed") {
+                            diagnostics.put("closeReason", event.optString("reason"))
+                            check(verified) { "Peer closed before media verification" }; break
+                        }
                         check(event.getString("type") == "signal" && event.getJSONObject("from").getString("deviceId") == peerId &&
                             event.getJSONObject("from").getString("runtimeId") == peerRuntime) { "Unexpected sender" }
                         val payload = event.getString("payload")
@@ -179,29 +202,45 @@ class RelayMediaProbeTest {
                         if (baseline == null) baseline = media
                         lastMedia = media
                     }
-                    transport = query<RelayTransportEvidence> { active.queryTransportEvidence(it) } ?: transport
+                    val queriedTransport = query<RelayTransportEvidence> { active.queryTransportEvidence(it) }
+                    transport = queriedTransport ?: transport
                     val before = baseline
                     verified = media != null && before != null && media.connected && media.remoteTrack && media.audioIoEnabled &&
                         media.counters.streamIds == before.counters.streamIds && media.counters.sent > before.counters.sent + 1000 &&
                         media.counters.received > before.counters.received + 1000 && transport?.state == "succeeded" &&
                         transport.localType == "relay" && transport.remoteType == "relay" &&
-                        SystemClock.elapsedRealtime() - transport.sampledAtElapsedMs in 0..2000 && tone.validFrames() >= 100
+                        SystemClock.elapsedRealtime() - transport.sampledAtElapsedMs in 0..2000 && tone.validFrames() >= 100 &&
+                        (!requireCellularMedia || transport.networkType == "cellular")
+                    everVerified = everVerified || verified
+                    diagnostics.put("everMetMediaGate", everVerified).put("latestMetMediaGate", verified)
+                        .put("mediaQueryReturnedNull", media == null).put("transportQueryReturnedNull", queriedTransport == null)
+                        .put("decodedPeerToneFrames", tone.validFrames())
+                        .put("media", JSONObject().put("connected", media?.connected).put("remoteTrack", media?.remoteTrack)
+                            .put("audioIoEnabled", media?.audioIoEnabled)
+                            .put("sameStreams", media?.counters?.streamIds == before?.counters?.streamIds)
+                            .put("rtpSentGrowth", if (media != null && before != null) media.counters.sent - before.counters.sent else null)
+                            .put("rtpReceivedGrowth", if (media != null && before != null) media.counters.received - before.counters.received else null))
+                    before?.let { diagnostics.put("baseline", mediaJson(it)) }
+                    lastMedia?.let { diagnostics.put("lastMedia", mediaJson(it)) }
+                    transport?.let {
+                        diagnostics.put("transport", transportJson(it))
+                            .put("transportSampleAgeMs", SystemClock.elapsedRealtime() - it.sampledAtElapsedMs)
+                    }
                 }
                 check(verified) { "Missing selected relay pair, RTP growth, active audio I/O or decoded peer tone" }
                 output.writeText(JSONObject().put("pass", true).put("deviceId", deviceId).put("callId", callId)
                     .put("runtimeId", runtimeId).put("signalingNetwork", network.toString())
-                    .put("cellularRequested", config.optBoolean("requireCellular", false))
-                    .put("transport", JSONObject().put("sessionId", transport!!.sessionId).put("pairId", transport.pairId)
-                        .put("state", transport.state).put("localType", transport.localType).put("remoteType", transport.remoteType)
-                        .put("protocol", transport.protocol).put("networkType", transport.networkType)
-                        .put("rttSeconds", transport.roundTripTimeSeconds).put("bytesSent", transport.bytesSent).put("bytesReceived", transport.bytesReceived))
+                    .put("cellularRequested", cellularRequested).put("signalingCellularRequired", requireCellular)
+                    .put("cellularMediaRequired", requireCellularMedia)
+                    .put("transport", transportJson(transport!!))
                     .put("rtpSent", lastMedia!!.counters.sent).put("rtpReceived", lastMedia.counters.received)
                     .put("rtpSentGrowth", lastMedia.counters.sent - baseline!!.counters.sent)
                     .put("rtpReceivedGrowth", lastMedia.counters.received - baseline.counters.received)
                     .put("decodedPeerToneFrames", tone.validFrames()).put("expectedPeerHz", config.getDouble("receiveHz"))
                     .put("scope", "developer native relay probe; not public cellular or latency acceptance").toString(2))
             } catch (error: Throwable) {
-                output.writeText(JSONObject().put("pass", false).put("deviceId", deviceId).put("errorClass", error.javaClass.simpleName).toString())
+                runCatching { output.writeText(diagnostics.put("errorClass", error.javaClass.simpleName).toString(2)) }
+                    .exceptionOrNull()?.let(error::addSuppressed)
                 throw error
             } finally {
                 current.set(false)
@@ -225,6 +264,35 @@ class RelayMediaProbeTest {
     private fun field(instance: Any, name: String): Any? = instance.javaClass.getDeclaredField(name).run {
         isAccessible = true; get(instance)
     }
+
+    /** Probe-only preference. The observed selected adapter remains the acceptance gate. */
+    private fun preferCellular(engine: RiderAudioEngine, session: RiderMediaSession,
+        policy: MediaIcePolicy.Relay, isCurrent: () -> Boolean) {
+        query<Throwable> { done ->
+            (field(engine, "rtc") as ExecutorService).execute {
+                done(runCatching {
+                    check(isCurrent()) { "Call no longer current before applying network preference" }
+                    val peer = field(engine, "peerConnection") as PeerConnection
+                    check(field(engine, "activeSession") === session && isCurrent()) { "Media session no longer current" }
+                    check(peer.setConfiguration(policy.rtcConfiguration().apply {
+                        networkPreference = PeerConnection.AdapterType.CELLULAR
+                    })) { "Native cellular preference rejected" }
+                }.exceptionOrNull())
+            }
+        }?.let { throw it }
+    }
+
+    private fun transportJson(value: RelayTransportEvidence) = JSONObject()
+        .put("sessionId", value.sessionId).put("pairId", value.pairId).put("state", value.state)
+        .put("localType", value.localType).put("remoteType", value.remoteType).put("protocol", value.protocol)
+        .put("networkType", value.networkType).put("rttSeconds", value.roundTripTimeSeconds)
+        .put("bytesSent", value.bytesSent).put("bytesReceived", value.bytesReceived)
+
+    private fun mediaJson(value: RiderMediaEvidence) = JSONObject()
+        .put("connected", value.connected).put("remoteTrack", value.remoteTrack).put("audioIoEnabled", value.audioIoEnabled)
+        .put("gateRevision", value.gateRevision).put("nativeRevision", value.nativeRevision)
+        .put("rtpSent", value.counters.sent).put("rtpReceived", value.counters.received)
+        .put("streamIds", org.json.JSONArray(value.counters.streamIds.toList()))
 
     private fun installTone(engine: RiderAudioEngine, hz: Double) {
         require(hz in 200.0..2000.0)

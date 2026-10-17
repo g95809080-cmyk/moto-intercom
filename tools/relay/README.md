@@ -106,6 +106,7 @@ adb -s SERIAL shell am instrument -w \
 - 租约空闲 60 s、硬期限 1 h；TURN 凭证不超过租约硬期限。当前版本不做无缝续期，过期后先关闭再建新会话。客户端打开媒体前再次验证有效期，relay 失败不退回 direct。
 - Android 复用 `LegacyRuntimeOwnership` 和完整 AudioSessionController/焦点/路由生命周期；native disposal 完成后才释放 owner。没有 activePc/standbyPc。
 - 信令可绑定指定 Network；探针 `requireCellular:true` 时要求已存在蜂窝 Network，无可用网络即失败。`networkType` 和 selected pair 用于观察媒体；信令绑定不能证明媒体走蜂窝。Wi-Fi Direct 共存的真实媒体路径还需抓包与设备验证。
+- 探针可选 `requireCellularMedia:true`（默认关闭）：在同一 PC 上设置蜂窝偏好，并增加实际 selected `networkType==cellular` 的硬门槛；native 拒绝配置、超时或媒体仍走 Wi-Fi 均失败。它同时要求蜂窝信令网络，独立记录两个选项，不代表生产媒体绑定。失败快照保留当前门槛、最后 RTP/transport 和音频 revision，`everMetMediaGate` 只作诊断。
 - iOS `SessionCoordinator` 可注入 `WebRTCSessionConfiguration(iceServers:…,hostOnlyICE:false,networkMode:.relay)`。nearby 仍要求 host-only/no-server。实际 App target 必须接入获批 WebRTC SDK、麦克风权限和 `UIBackgroundModes: audio`（见 `ios/Resources/Info.plist.example`）；本仓库没有完成原生 SDK 音频 sink/后台验收。
 - TLS 测试 CA 只在探针专用 client store 中可信，保留主机名验证。不要使用全局 trust-all 或 bindProcessToNetwork。配置/日志不应提交设备 token、私钥或共享 secret。
 
