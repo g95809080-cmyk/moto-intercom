@@ -175,8 +175,7 @@ internal class AudioSessionController(
     }
 
     fun closeWhenDisposed(onDisposed: () -> Unit) {
-        close()
-        engine.closeWhenDisposed(onDisposed)
+        try { close() } finally { engine.closeWhenDisposed(onDisposed) }
     }
 
     override fun close() {

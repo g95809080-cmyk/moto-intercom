@@ -24,8 +24,10 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
     @Test fun alreadyPendingRecoveryCleanupStillOwnsTheProcessAfterDestroy() = verifyOwnership(true)
     @Test fun wifiCleanupCannotReleaseOwnerBeforeNativeAudioDisposal() = verifyOwnership(false, true, false)
     @Test fun nativeAudioDisposalCannotReleaseOwnerBeforeWifiCleanup() = verifyOwnership(false, true, true)
+    @Test fun routeCloseErrorWithWifiFirstStillReleasesAfterNativeDisposal() = verifyOwnership(false, true, false, true)
+    @Test fun routeCloseErrorWithAudioFirstStillWaitsForWifiCleanup() = verifyOwnership(false, true, true, true)
 
-    private fun verifyOwnership(alreadyPending: Boolean, pendingAudio: Boolean = false, audioFirst: Boolean = false) {
+    private fun verifyOwnership(alreadyPending: Boolean, pendingAudio: Boolean = false, audioFirst: Boolean = false, routeCloseThrows: Boolean = false) {
         val app = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(app).grantPermissions(*(PermissionPolicy.corePermissions(35) +
             PermissionPolicy.optionalPermissions(35)).toTypedArray())
@@ -58,7 +60,7 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
                 }
                 val route = object : RiderAudioRoute {
                     override fun select(selection: AudioRouteSelection) = Unit
-                    override fun close() = Unit
+                    override fun close() { if (routeCloseThrows) error("injected route cleanup failure") }
                 }
                 field(serviceA, "audioSessionController").set(serviceA, AudioSessionController(engine, route))
             }

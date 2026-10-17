@@ -2,14 +2,14 @@
   "android": {
     "command": "gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest",
     "suites": 98,
-    "tests": 814,
+    "tests": 817,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
     "lint": "PASS (existing warnings)",
     "apksSha256": {
-      "app/build/outputs/apk/debug/app-debug.apk": "517ae69de69b164d2d4ba0094b8702fa7c26e0f5607277ccb151722d312cb917",
-      "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk": "aaf17f6d91df41d6237dde3e7b20518e1a9a4204fbcc3b8a7aad00215fd934d9"
+      "app/build/outputs/apk/debug/app-debug.apk": "49df6a9a31d61d0fd940b77f44822ceea5fc68ce681c54e5ee78ec5b4a8543f8",
+      "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk": "c406dfa38f2d485c8ae6596e9b4ecbd12618c3ba44c9a588d5b28b2968c9a7c0"
     }
   },
   "relayService": {

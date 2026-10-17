@@ -10,6 +10,27 @@ import org.webrtc.PeerConnection
 
 class AudioSessionControllerTest {
     @Test
+    fun routeCloseFailureStillRegistersNativeDisposalCompletion() {
+        var completeNative: (() -> Unit)? = null
+        var completed = false
+        val engine = object : RiderMediaEngine {
+            override fun updateAudioControls(controls: VersionedAudioControls) = Unit
+            override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession = error("unused")
+            override fun close() = Unit
+            override fun closeWhenDisposed(onDisposed: () -> Unit) { completeNative = onDisposed }
+        }
+        val route = object : RiderAudioRoute {
+            override fun select(selection: AudioRouteSelection) = Unit
+            override fun close() = error("injected route cleanup error")
+        }
+        val controller = AudioSessionController(engine, route)
+        assertThrows(IllegalStateException::class.java) { controller.closeWhenDisposed { completed = true } }
+        assertFalse(completed)
+        requireNotNull(completeNative).invoke()
+        assertTrue(completed)
+    }
+
+    @Test
     fun relayPolicyIsScopedToTheSingleReplaceableMediaSession() {
         val engine = FakeEngine()
         val controller = AudioSessionController(engine, RecordingRoute("route"))

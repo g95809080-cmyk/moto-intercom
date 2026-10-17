@@ -74,6 +74,9 @@ $env:JAVA_HOME = 'F:/Android/jbr'
 
 ## 📚 更多资料
 
+- [公网 relay 开发验证版：双模拟器运行、接口与验收](tools/relay/README.md)
+- [公网通信引擎选型 ADR（KUM-89）](docs/decisions/2026-10-16-kum-89-online-transport-engine-selection.md)
+
 - [新用户引导设计](docs/product/2026-09-12-first-run-onboarding.md)
 - [引导功能验证记录](docs/verification/2026-09-12-onboarding.md)
 - [v1.2.0 更新说明](docs/releases/v1.2.0.md)

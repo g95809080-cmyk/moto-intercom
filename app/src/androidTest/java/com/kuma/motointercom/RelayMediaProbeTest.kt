@@ -59,6 +59,7 @@ class RelayMediaProbeTest {
             var controller: AudioSessionController? = null
             var engine: RiderAudioEngine? = null
             var session: RiderMediaSession? = null
+            var observedTrack: org.webrtc.AudioTrack? = null // Main Looper owns this test-only sink attachment.
             var sessionPath: String? = null
             var leaseToken: String? = null
             var callId: String? = null
@@ -138,7 +139,13 @@ class RelayMediaProbeTest {
                     session = controller.openMediaSession(RiderMediaSessionCallbacks(
                         onLocalSdpGenerated = { payload -> publish(JSONObject(payload).getString("type"), payload) },
                         onLocalIceCandidateGenerated = { publish("ice", it) },
-                        onRemoteAudioTrack = { it.addSink(tone.sink) },
+                        onRemoteAudioTrack = { track ->
+                            if (observedTrack !== track) {
+                                observedTrack?.removeSink(tone.sink)
+                                track.addSink(tone.sink)
+                                observedTrack = track
+                            }
+                        },
                         onError = errors::offer,
                         isSessionCurrent = { current.get() && System.currentTimeMillis() < callExpiry }
                     ), policy)
@@ -201,7 +208,12 @@ class RelayMediaProbeTest {
                 publisher.shutdownNow()
                 if (sessionPath != null && leaseToken != null) runCatching { client.request("DELETE", sessionPath, leaseToken) }
                 poller.shutdownNow()
-                controller?.close()
+                runAllCleanupSteps({
+                    instrumentation.runOnMainSync {
+                        observedTrack?.removeSink(tone.sink)
+                        observedTrack = null
+                    }
+                }, { controller?.close() })
                 // close() enqueues native disposal: release the process owner only after it finishes.
                 val rtc = engine?.let { field(it, "rtc") as ExecutorService }
                 val disposed = rtc == null || rtc.awaitTermination(10, TimeUnit.SECONDS)

@@ -23,6 +23,10 @@ foreach ($entry in @(@($DeviceA, 'probe-a'), @($DeviceB, 'probe-b'))) {
     & $Adb -s $serial shell "run-as $package sh -c 'mkdir -p files && cat /data/local/tmp/$name.json > files/relay-probe.json'"
     if ($LASTEXITCODE) { throw "Private config copy failed on $serial" }
     & $Adb -s $serial shell rm -f "/data/local/tmp/$name.json"
+}
+# Prepare both devices before either join deadline starts (cold APK installs can be slow).
+foreach ($entry in @(@($DeviceA, 'probe-a'), @($DeviceB, 'probe-b'))) {
+    $serial, $name = $entry
     $jobs += Start-Job -ArgumentList $Adb, $serial, $runner, $local, $name -ScriptBlock {
         param($adbPath, $target, $testRunner, $output, $probeName)
         & $adbPath -s $target shell am instrument -w -e class com.kuma.motointercom.RelayMediaProbeTest -e relayConfig relay-probe.json $testRunner |
