@@ -10,6 +10,21 @@ import org.webrtc.PeerConnection
 
 class AudioSessionControllerTest {
     @Test
+    fun relayPolicyIsScopedToTheSingleReplaceableMediaSession() {
+        val engine = FakeEngine()
+        val controller = AudioSessionController(engine, RecordingRoute("route"))
+        val relay = MediaIcePolicy.Relay(listOf(TurnCredentials(listOf("turn:127.0.0.1:3478"), "user", "temporary", Long.MAX_VALUE)))
+        val first = controller.openMediaSession(callbacks(), relay)
+        assertSame(relay, engine.policies.single())
+        assertThrows(IllegalStateException::class.java) { controller.openMediaSession(callbacks()) }
+        assertEquals(1, engine.policies.size)
+        controller.closeMediaSession(first)
+        controller.openMediaSession(callbacks())
+        assertSame(MediaIcePolicy.Nearby, engine.policies.last())
+        controller.close()
+    }
+
+    @Test
     fun mediaReplacementReusesPlatformResourcesAndRejectsStaleCallbacks() {
         val closeOrder = mutableListOf<String>()
         val engine = FakeEngine(closeOrder)
@@ -151,12 +166,14 @@ class AudioSessionControllerTest {
         var openCount = 0
         var closeCount = 0
         val controlUpdates = mutableListOf<VersionedAudioControls>()
+        val policies = mutableListOf<MediaIcePolicy>()
 
         override fun updateAudioControls(controls: VersionedAudioControls) {
             controlUpdates += controls
         }
 
-        override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
+        override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession {
+            policies += icePolicy
             openCount++
             if (failFirstOpen && openCount == 1) error("injected open failure")
             return FakeSession(this, openCount, callbacks, closeOrder)

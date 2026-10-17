@@ -339,7 +339,7 @@ class CommunicationAudioCoordinatorTest {
 
         override fun updateAudioControls(controls: VersionedAudioControls) = Unit
 
-        override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession =
+        override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession =
             error("not used")
 
         override fun suspendAudio() {

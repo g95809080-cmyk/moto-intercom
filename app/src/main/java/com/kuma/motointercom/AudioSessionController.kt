@@ -90,7 +90,10 @@ internal class AudioSessionController(
         preferredAudioRoute
     }
 
-    fun openMediaSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
+    fun openMediaSession(
+        callbacks: RiderMediaSessionCallbacks,
+        icePolicy: MediaIcePolicy = MediaIcePolicy.Nearby
+    ): RiderMediaSession {
         val lease = Any()
         synchronized(lock) {
             check(!closed) { "audio session controller is closed" }
@@ -117,7 +120,7 @@ internal class AudioSessionController(
             }
         )
         return try {
-            engine.openSession(guardedCallbacks).also { session ->
+            engine.openSession(guardedCallbacks, icePolicy).also { session ->
                 val accepted = synchronized(lock) {
                     if (!closed && activeLease === lease && activeSession == null) {
                         activeSession = session

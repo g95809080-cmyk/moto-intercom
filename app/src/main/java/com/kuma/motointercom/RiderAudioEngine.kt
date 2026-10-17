@@ -52,6 +52,7 @@ internal interface RiderMediaSession : Closeable {
     fun addRemoteIceCandidate(candidateJson: String)
     fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
     fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) = callback(null)
+    fun queryTransportEvidence(callback: (RelayTransportEvidence?) -> Unit) = callback(null)
 }
 
 internal data class RiderAudioIoRouteSnapshot(
@@ -68,7 +69,7 @@ internal data class RiderAudioIoRouteSnapshot(
 
 internal interface RiderMediaEngine : Closeable {
     fun updateAudioControls(controls: VersionedAudioControls)
-    fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
+    fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy = MediaIcePolicy.Nearby): RiderMediaSession
     fun suspendAudio() = Unit
     fun resumeAudio() = Unit
 }
@@ -220,9 +221,11 @@ internal class RiderAudioEngine(
         }
     }
 
-    override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
+    override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession {
         check(!closed.get()) { "WebRTC engine is closed" }
-        val session = MediaSession(callbacks)
+        // Validate before reserving ownership; validate again on the RTC executor at PC creation.
+        icePolicy.rtcConfiguration()
+        val session = MediaSession(callbacks, icePolicy)
         synchronized(sessionLock) {
             check(activeSession == null) { "a WebRTC media session is already active" }
             activeSession = session
@@ -478,16 +481,7 @@ internal class RiderAudioEngine(
 
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
         check(peerConnection == null) { "previous PeerConnection is still active" }
-        val config = PeerConnection.RTCConfiguration(emptyList()).apply {
-            // 无公网、无服务器：只产出 Wi-Fi Direct 局域网 host candidate。
-            iceServers = emptyList()
-            iceTransportsType = PeerConnection.IceTransportsType.ALL
-            candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.ALL
-            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
-            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
-            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-        }
+        val config = session.icePolicy.rtcConfiguration()
 
         peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
@@ -989,8 +983,10 @@ internal class RiderAudioEngine(
     }
 
     private inner class MediaSession(
-        val callbacks: RiderMediaSessionCallbacks
+        val callbacks: RiderMediaSessionCallbacks,
+        val icePolicy: MediaIcePolicy
     ) : RiderMediaSession {
+        private val evidenceSessionId = java.util.UUID.randomUUID().toString()
         val closed = AtomicBoolean(false)
         val connectionObservations = NativeConnectionObservationSource(callbacks.controlIsOpen)
         @Volatile var state = MediaSessionState.INITIALIZING
@@ -1009,6 +1005,19 @@ internal class RiderAudioEngine(
             }
         )
         private val statsPending = AtomicBoolean(false)
+
+        override fun queryTransportEvidence(callback: (RelayTransportEvidence?) -> Unit) {
+            runSession(this) {
+                val peer = peerConnection ?: return@runSession
+                peer.getStats { report ->
+                    runSession(this) {
+                        val evidence = selectedTransportEvidence(evidenceSessionId, SystemClock.elapsedRealtime(),
+                            report.statsMap.values.map { Triple(it.id, it.type, it.members) })
+                        postSessionMain(this) { callback(evidence) }
+                    }
+                }
+            }
+        }
 
         override fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) {
             runSession(this) {

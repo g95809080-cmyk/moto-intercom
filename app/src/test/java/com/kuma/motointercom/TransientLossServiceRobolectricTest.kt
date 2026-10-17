@@ -220,7 +220,7 @@ class TransientLossServiceRobolectricTest {
     internal class RecordingEngine : RiderMediaEngine {
         val sessions = CopyOnWriteArrayList<RecordingSession>()
         override fun updateAudioControls(controls: VersionedAudioControls) = Unit
-        override fun openSession(callbacks: RiderMediaSessionCallbacks) = RecordingSession(callbacks).also { sessions += it }
+        override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy) = RecordingSession(callbacks).also { sessions += it }
         override fun close() = Unit
     }
     internal class RecordingSession(val callbacks: RiderMediaSessionCallbacks) : RiderMediaSession {
