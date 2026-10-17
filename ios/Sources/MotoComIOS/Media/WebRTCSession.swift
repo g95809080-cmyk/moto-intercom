@@ -8,19 +8,62 @@ public enum WebRTCMediaState: String, Sendable {
     case closed
 }
 
+public struct WebRTCTurnServer: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    public let urls: [String]
+    public let username: String
+    public let credential: String
+    public let expiresAt: Date
+
+    public init(urls: [String], username: String, credential: String, expiresAt: Date) {
+        self.urls = urls; self.username = username; self.credential = credential; self.expiresAt = expiresAt
+    }
+
+    public var description: String { "WebRTCTurnServer(urls: \(urls), expiresAt: \(expiresAt), credentials: redacted)" }
+    public var debugDescription: String { description }
+
+    public func validate(now: Date = Date()) throws {
+        let pattern = #"^turns?:[A-Za-z0-9.\[\]:-]+(?:\?transport=(?:udp|tcp))?$"#
+        guard !urls.isEmpty, urls.count <= 8,
+              urls.allSatisfy({ $0.range(of: pattern, options: .regularExpression) != nil }),
+              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, username.count <= 256,
+              !credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, credential.count <= 256,
+              expiresAt.timeIntervalSince(now) > 5 else {
+            throw MotoComError.invalidField("invalid or expired TURN credentials")
+        }
+    }
+}
+
+public enum WebRTCNetworkMode: Equatable, Sendable { case nearby, relay }
+
 public struct WebRTCSessionConfiguration: Equatable, Sendable {
     public let audioCodec: String
-    public let iceServers: [String]
+    public let iceServers: [WebRTCTurnServer]
     public let hostOnlyICE: Bool
+    public let networkMode: WebRTCNetworkMode
 
     public init(
         audioCodec: String = "opus",
-        iceServers: [String] = [],
-        hostOnlyICE: Bool = true
+        iceServers: [WebRTCTurnServer] = [],
+        hostOnlyICE: Bool = true,
+        networkMode: WebRTCNetworkMode = .nearby
     ) {
         self.audioCodec = audioCodec
         self.iceServers = iceServers
         self.hostOnlyICE = hostOnlyICE
+        self.networkMode = networkMode
+    }
+
+    public func validate(now: Date = Date()) throws {
+        guard audioCodec.lowercased() == "opus" else { throw MotoComError.invalidField("audioCodec must be opus") }
+        switch networkMode {
+        case .nearby:
+            guard hostOnlyICE, iceServers.isEmpty else { throw MotoComError.invalidField("nearby requires host-only ICE") }
+        case .relay:
+            guard !hostOnlyICE, !iceServers.isEmpty, iceServers.count <= 8 else {
+                throw MotoComError.invalidField("relay requires authenticated TURN servers")
+            }
+            try iceServers.forEach { try $0.validate(now: now) }
+        }
     }
 }
 
@@ -293,6 +336,18 @@ public enum WebRTCEngineFactory {
 }
 
 @MainActor
+public protocol WebRTCSessionAudio: AnyObject {
+    func activate() throws
+    func deactivate()
+    func clearRemoteAudio()
+    func markRemoteTrackPresent()
+    func markRemoteFirstFrameReceived()
+    var isAudioReady: Bool { get }
+}
+
+extension AudioSessionController: WebRTCSessionAudio {}
+
+@MainActor
 public final class WebRTCSessionCoordinator {
     public private(set) var state: WebRTCMediaState = .idle
     public let configuration: WebRTCSessionConfiguration
@@ -302,52 +357,72 @@ public final class WebRTCSessionCoordinator {
     public var onAudioReadinessChanged: (@MainActor () -> Void)?
 
     private let engine: WebRTCEngine
-    private let audio: AudioSessionController
+    private let audio: WebRTCSessionAudio
+    private var activeGeneration: UUID?
 
     public init(
         engine: WebRTCEngine = UnavailableWebRTCEngine(),
-        audio: AudioSessionController,
+        audio: WebRTCSessionAudio,
         configuration: WebRTCSessionConfiguration = WebRTCSessionConfiguration()
     ) {
         self.engine = engine
         self.audio = audio
         self.configuration = configuration
+    }
+
+    private func bindCallbacks(generation: UUID) {
         engine.onStateChanged = { [weak self] state in
             Task { @MainActor [weak self] in
+                guard self?.activeGeneration == generation else { return }
                 self?.state = state
                 self?.onAudioReadinessChanged?()
             }
         }
         engine.onRemoteAudioTrack = { [weak self] in
             Task { @MainActor [weak self] in
+                guard self?.activeGeneration == generation else { return }
                 self?.audio.markRemoteTrackPresent()
                 self?.onAudioReadinessChanged?()
             }
         }
         engine.onRemoteAudioFrame = { [weak self] in
             Task { @MainActor [weak self] in
+                guard self?.activeGeneration == generation else { return }
                 self?.audio.markRemoteFirstFrameReceived()
                 self?.onAudioReadinessChanged?()
             }
         }
         engine.onLocalOffer = { [weak self] offer in
-            Task { @MainActor [weak self] in self?.onLocalOffer?(offer) }
+            Task { @MainActor [weak self] in
+                guard self?.activeGeneration == generation else { return }
+                self?.onLocalOffer?(offer) }
         }
         engine.onLocalAnswer = { [weak self] answer in
-            Task { @MainActor [weak self] in self?.onLocalAnswer?(answer) }
+            Task { @MainActor [weak self] in
+                guard self?.activeGeneration == generation else { return }
+                self?.onLocalAnswer?(answer) }
         }
         engine.onLocalCandidate = { [weak self] candidate in
-            Task { @MainActor [weak self] in self?.onLocalCandidate?(candidate) }
+            Task { @MainActor [weak self] in
+                guard self?.activeGeneration == generation else { return }
+                self?.onLocalCandidate?(candidate) }
         }
     }
 
     public func start(offerer: Bool) throws {
+        guard activeGeneration == nil else { throw MotoComError.invalidField("media session already active") }
+        try configuration.validate()
+        let generation = UUID()
+        activeGeneration = generation
+        bindCallbacks(generation: generation)
         audio.clearRemoteAudio()
-        try audio.activate()
         state = .negotiating
         do {
+            try audio.activate()
             try engine.start(configuration: configuration, offerer: offerer)
         } catch {
+            activeGeneration = nil
+            engine.close()
             audio.deactivate()
             state = .failed
             throw error
@@ -376,6 +451,7 @@ public final class WebRTCSessionCoordinator {
     }
 
     public func close() {
+        activeGeneration = nil
         engine.close()
         audio.clearRemoteAudio()
         audio.deactivate()

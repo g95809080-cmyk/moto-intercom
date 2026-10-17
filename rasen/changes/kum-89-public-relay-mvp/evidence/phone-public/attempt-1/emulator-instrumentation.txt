@@ -1,0 +1,21 @@
+
+com.kuma.motointercom.RelayMediaProbeTest:
+Error in twoDeviceNativeRelay(com.kuma.motointercom.RelayMediaProbeTest):
+java.lang.IllegalStateException: Missing selected relay pair, RTP growth, active audio I/O or decoded peer tone
+	at com.kuma.motointercom.RelayMediaProbeTest.twoDeviceNativeRelay$lambda$34(RelayMediaProbeTest.kt:190)
+	at com.kuma.motointercom.RelayMediaProbeTest$$ExternalSyntheticLambda2.invoke(D8$$SyntheticClass:0)
+	at com.kuma.motointercom.LegacyRuntimeOwnership.withOwner(LegacyRuntimeOwnership.kt:34)
+	at com.kuma.motointercom.RelayMediaProbeTest.twoDeviceNativeRelay(RelayMediaProbeTest.kt:53)
+
+
+Time: 30.824
+There was 1 failure:
+1) twoDeviceNativeRelay(com.kuma.motointercom.RelayMediaProbeTest)
+java.lang.IllegalStateException: Missing selected relay pair, RTP growth, active audio I/O or decoded peer tone
+	at com.kuma.motointercom.RelayMediaProbeTest.twoDeviceNativeRelay$lambda$34(RelayMediaProbeTest.kt:190)
+	at com.kuma.motointercom.RelayMediaProbeTest$$ExternalSyntheticLambda2.invoke(D8$$SyntheticClass:0)
+	at com.kuma.motointercom.LegacyRuntimeOwnership.withOwner(LegacyRuntimeOwnership.kt:34)
+	at com.kuma.motointercom.RelayMediaProbeTest.twoDeviceNativeRelay(RelayMediaProbeTest.kt:53)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1

@@ -1,0 +1,6 @@
+
+com.kuma.motointercom.RelayMediaProbeTest:.
+
+Time: 31.252
+
+OK (1 test)

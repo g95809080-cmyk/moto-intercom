@@ -52,6 +52,7 @@ internal interface RiderMediaSession : Closeable {
     fun addRemoteIceCandidate(candidateJson: String)
     fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
     fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) = callback(null)
+    fun queryTransportEvidence(callback: (RelayTransportEvidence?) -> Unit) = callback(null)
 }
 
 internal data class RiderAudioIoRouteSnapshot(
@@ -68,9 +69,11 @@ internal data class RiderAudioIoRouteSnapshot(
 
 internal interface RiderMediaEngine : Closeable {
     fun updateAudioControls(controls: VersionedAudioControls)
-    fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
+    fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy = MediaIcePolicy.Nearby): RiderMediaSession
     fun suspendAudio() = Unit
     fun resumeAudio() = Unit
+    /** Completion means native resources were disposed, not merely that close was requested. */
+    fun closeWhenDisposed(onDisposed: () -> Unit) { close(); onDisposed() }
 }
 
 internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
@@ -98,7 +101,8 @@ internal class RiderAudioEngine(
         revision = 0,
         settings = AudioControlSettings()
     ),
-    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
+    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
+    private val onNativeDisposed: () -> Unit = {}
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
@@ -114,6 +118,9 @@ internal class RiderAudioEngine(
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
+    private val disposalLock = Any()
+    private var disposalFinished = false
+    private val disposalCallbacks = mutableListOf<() -> Unit>()
     private val captureFailed = AtomicBoolean(false)
     private val ioEvidence = RiderAudioIoEvidence()
     private val recordingOwner = NativeAudioProducerOwner()
@@ -220,9 +227,11 @@ internal class RiderAudioEngine(
         }
     }
 
-    override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
+    override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession {
         check(!closed.get()) { "WebRTC engine is closed" }
-        val session = MediaSession(callbacks)
+        // Validate before reserving ownership; validate again on the RTC executor at PC creation.
+        icePolicy.rtcConfiguration()
+        val session = MediaSession(callbacks, icePolicy)
         synchronized(sessionLock) {
             check(activeSession == null) { "a WebRTC media session is already active" }
             activeSession = session
@@ -303,7 +312,13 @@ internal class RiderAudioEngine(
         }
     }
 
-    override fun close() {
+    override fun close() = closeWhenDisposed {}
+
+    override fun closeWhenDisposed(onDisposed: () -> Unit) {
+        val alreadyDisposed = synchronized(disposalLock) {
+            if (disposalFinished) true else { disposalCallbacks += onDisposed; false }
+        }
+        if (alreadyDisposed) { onDisposed(); return }
         if (!closed.compareAndSet(false, true)) return
         audioIoGate.close()
         revokeNativeProducers()
@@ -319,6 +334,12 @@ internal class RiderAudioEngine(
                     ::disposeMediaSessionResources,
                     ::disposePlatformResources
                 )
+                val completed = synchronized(disposalLock) {
+                    disposalFinished = true
+                    disposalCallbacks.toList().also { disposalCallbacks.clear() }
+                }
+                runCatching(onNativeDisposed).onFailure { Log.e(TAG, "Audio resource reservation release failed", it) }
+                completed.forEach { callback -> runCatching(callback).onFailure { Log.e(TAG, "Audio disposal completion failed", it) } }
             } catch (t: Throwable) {
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
@@ -478,16 +499,7 @@ internal class RiderAudioEngine(
 
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
         check(peerConnection == null) { "previous PeerConnection is still active" }
-        val config = PeerConnection.RTCConfiguration(emptyList()).apply {
-            // 无公网、无服务器：只产出 Wi-Fi Direct 局域网 host candidate。
-            iceServers = emptyList()
-            iceTransportsType = PeerConnection.IceTransportsType.ALL
-            candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.ALL
-            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
-            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
-            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-        }
+        val config = session.icePolicy.rtcConfiguration()
 
         peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
@@ -989,8 +1001,10 @@ internal class RiderAudioEngine(
     }
 
     private inner class MediaSession(
-        val callbacks: RiderMediaSessionCallbacks
+        val callbacks: RiderMediaSessionCallbacks,
+        val icePolicy: MediaIcePolicy
     ) : RiderMediaSession {
+        private val evidenceSessionId = java.util.UUID.randomUUID().toString()
         val closed = AtomicBoolean(false)
         val connectionObservations = NativeConnectionObservationSource(callbacks.controlIsOpen)
         @Volatile var state = MediaSessionState.INITIALIZING
@@ -1009,6 +1023,19 @@ internal class RiderAudioEngine(
             }
         )
         private val statsPending = AtomicBoolean(false)
+
+        override fun queryTransportEvidence(callback: (RelayTransportEvidence?) -> Unit) {
+            runSession(this) {
+                val peer = peerConnection ?: return@runSession
+                peer.getStats { report ->
+                    runSession(this) {
+                        val evidence = selectedTransportEvidence(evidenceSessionId, SystemClock.elapsedRealtime(),
+                            report.statsMap.values.map { Triple(it.id, it.type, it.members) })
+                        postSessionMain(this) { callback(evidence) }
+                    }
+                }
+            }
+        }
 
         override fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) {
             runSession(this) {

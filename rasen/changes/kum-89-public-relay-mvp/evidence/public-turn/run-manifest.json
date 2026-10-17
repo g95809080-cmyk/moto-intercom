@@ -1,0 +1,16 @@
+{
+  "recordedAtUtc": "2026-10-17T04:36:12.171382+00:00",
+  "apkSha256": {
+    "app/build/outputs/apk/debug/app-debug.apk": "49df6a9a31d61d0fd940b77f44822ceea5fc68ce681c54e5ee78ec5b4a8543f8",
+    "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk": "c406dfa38f2d485c8ae6596e9b4ecbd12618c3ba44c9a588d5b28b2968c9a7c0"
+  },
+  "repositoryHeadAtRun": "7dbc52eeb49367f51cbb5016b0aff9ed09a2a365",
+  "reviewedSourceHead": "dcb426c43d227d07e00ab92503bfee1bbf0bad5a",
+  "publicTurnHost": "101.33.205.188",
+  "coturnVersion": "4.5.2-3.1~ubuntu22.04.1",
+  "signalingEndpoint": "https://10.0.2.2:8443",
+  "signalingScope": "Windows local authenticated HTTPS; cloud sig unchanged",
+  "turnCredentialScope": "server-only shared secret; one-hour per-device credentials issued by existing server",
+  "cloudServicesBefore": "MainPID=761\nId=coturn.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:32:00 CST\n\nMainPID=781\nId=sig.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:31:59 CST",
+  "sourceBehaviorChanges": false
+}
