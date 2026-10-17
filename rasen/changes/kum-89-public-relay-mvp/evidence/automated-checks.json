@@ -24,5 +24,18 @@
     "backgroundAudio": "unverified"
   },
   "reviewedSourceHead": "dcb426c43d227d07e00ab92503bfee1bbf0bad5a",
-  "pullRequest": "https://github.com/g95809080-cmyk/moto-intercom/pull/62"
+  "pullRequest": "https://github.com/g95809080-cmyk/moto-intercom/pull/62",
+  "publicTurnProbe": {
+    "pass": true,
+    "evidence": "public-turn-run.md",
+    "devices": 2,
+    "selectedPair": "relay/relay",
+    "decodedPeerToneFrames": [
+      106,
+      2179
+    ],
+    "signaling": "authenticated local HTTPS",
+    "media": "existing public coturn UDP",
+    "physicalCellularAcceptance": "unverified"
+  }
 }

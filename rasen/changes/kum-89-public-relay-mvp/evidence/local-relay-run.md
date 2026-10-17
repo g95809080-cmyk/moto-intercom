@@ -13,7 +13,7 @@
 
 原始无凭证 JSON 和 instrumentation 输出在本目录。`networkType=cellular` 是模拟器虚拟网络枚举，`cellularRequested=false`；它不能证明手机蜂窝或 Wi-Fi Direct 双网选路。RTT 是 ICE 传输往返统计，不能作为音频端到端 P95。
 
-尚未验证：真实公网/蜂窝+Wi-Fi Direct 共存、端到端音频 P95 ≤300 ms、断线恢复 P95 ≤3 s、10次重连≥9次、静默30 min后首包≤500 ms无吞字、自动切换静默、蓝牙/电话中断、iOS原生SDK与后台audio。这些不由本机开发探针签收。
+本地运行时尚未验证公网；随后复用既有云端 coturn 的实测见 [公网 TURN 记录](public-turn-run.md)。真实蜂窝+Wi-Fi Direct 共存、端到端音频 P95 ≤300 ms、断线恢复 P95 ≤3 s、10次重连≥9次、静默30 min后首包≤500 ms无吞字、自动切换静默、蓝牙/电话中断、iOS原生SDK与后台audio仍未验证。这些不由本机开发探针签收。
 
 ## 工具清理限制
 

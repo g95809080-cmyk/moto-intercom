@@ -4,6 +4,8 @@
 
 这是 KUM-89 的开发验证入口。生产公网按钮、目标锁/coordinator 接入和近场自动切换要在本阶段证据通过后另行实现。四人/SFU 不在本次范围。
 
+已完成本地 coturn 和既有公网 coturn 的双模拟器原生音频验证。公网一轮两端均选中 relay/relay，并通过 RTP 与对端解码 PCM 检查，详见 [公网验证记录](../../rasen/changes/kum-89-public-relay-mvp/evidence/public-turn-run.md)。该轮信令运行在本机，真机蜂窝与设备验收仍待完成。
+
 ## 技术栈与模块
 
 | 模块 | 实现与职责 |
