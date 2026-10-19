@@ -235,18 +235,17 @@ internal class LanDiscoveryCoordinator(
             }
         }
 
-        val serviceInfo = NsdServiceInfo().apply {
-            serviceName = nsdServiceName
-            serviceType = NSD_SERVICE_TYPE
-            port = LAN_TCP_PORT
-            setAttribute("id", nodeId)
-            setAttribute("sessionId", runtimeSessionId.value)
-            setAttribute("name", riderName)
-            setAttribute("deviceName", deviceName)
-            setAttribute("protocolVersion", protocolVersion.toString())
-        }
-
         try {
+            val serviceInfo = NsdServiceInfo().apply {
+                serviceName = nsdServiceName
+                serviceType = NSD_SERVICE_TYPE
+                port = LAN_TCP_PORT
+                setAttribute("id", nodeId)
+                setAttribute("sessionId", runtimeSessionId.value)
+                setAttribute("name", boundedDiscoveryTxtValue("name", riderName))
+                setAttribute("deviceName", boundedDiscoveryTxtValue("deviceName", deviceName))
+                setAttribute("protocolVersion", protocolVersion.toString())
+            }
             val registration = nsdRegistrationListener ?: return
             val discovery = nsdDiscoveryListener ?: return
             manager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registration)

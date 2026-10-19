@@ -929,24 +929,23 @@ internal class WifiDirectTunnel(
             }
         )
 
-        val record = mapOf(
-            TXT_APP_ID to APP_ID,
-            TXT_PROTOCOL_VERSION to PROTOCOL_VERSION,
-            TXT_DEVICE_ID to localDeviceId,
-            TXT_NICKNAME to localNickname.ifBlank { "骑士" },
-            TXT_DEVICE_NAME to localDeviceName,
-            TXT_SESSION_ID to sessionId.value
-        )
-        val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
-            P2pServiceInstanceCodec.encode(localDeviceId, sessionId),
-            SERVICE_TYPE,
-            record
-        )
-        localServiceInfo = serviceInfo
-        val request = WifiP2pDnsSdServiceRequest.newInstance(SERVICE_TYPE)
-        serviceRequest = request
-
         try {
+            val record = mapOf(
+                TXT_APP_ID to APP_ID,
+                TXT_PROTOCOL_VERSION to PROTOCOL_VERSION,
+                TXT_DEVICE_ID to localDeviceId,
+                TXT_NICKNAME to boundedDiscoveryTxtValue(TXT_NICKNAME, localNickname.ifBlank { "骑士" }),
+                TXT_DEVICE_NAME to boundedDiscoveryTxtValue(TXT_DEVICE_NAME, localDeviceName),
+                TXT_SESSION_ID to sessionId.value
+            )
+            val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
+                P2pServiceInstanceCodec.encode(localDeviceId, sessionId),
+                SERVICE_TYPE,
+                record
+            )
+            localServiceInfo = serviceInfo
+            val request = WifiP2pDnsSdServiceRequest.newInstance(SERVICE_TYPE)
+            serviceRequest = request
             m.clearLocalServices(c, setupAction(setup, "清理本机 P2P 服务失败", onSuccess = {
                 m.addLocalService(c, serviceInfo, setupAction(setup, "发布 MotoCom P2P 服务失败", onSuccess = {
                     Log.d(TAG, "local service publish success: $record")
