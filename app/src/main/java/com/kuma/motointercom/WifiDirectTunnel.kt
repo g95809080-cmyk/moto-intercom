@@ -822,9 +822,11 @@ internal class WifiDirectTunnel(
         nativeCleanupDeadlineElapsedMs = Math.addExact(monotonicClock.now().elapsedRealtimeMs, CLOSE_STEP_TIMEOUT_MS)
         cleanupTimeoutReportedFor = null
         targetAttempt?.let(::scheduleCleanupWaitFailure)
+        lateinit var cleanupTimeout: Runnable
         val finish: (Boolean) -> Unit = finish@{ canceled ->
             if (removalGeneration != groupRemovalGeneration || !running || !removingGroup ||
                 manager !== m || channel !== c || lifecycleGeneration != lifecycle) return@finish
+            mainHandler.removeCallbacks(cleanupTimeout)
             groupRemovalGeneration++
             removingGroup = false
             nativeCleanupDeadlineElapsedMs = null
@@ -841,6 +843,7 @@ internal class WifiDirectTunnel(
             }
             Unit
         }
+        cleanupTimeout = schedulePassiveCleanupTimeout("cancelConnect", removalGeneration) { finish(false) }
         try {
             m.cancelConnect(c, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
@@ -854,6 +857,30 @@ internal class WifiDirectTunnel(
         } catch (_: Throwable) {
             finish(false)
         }
+    }
+
+    private fun schedulePassiveCleanupTimeout(
+        label: String,
+        removalGeneration: Int,
+        onTimeout: () -> Unit
+    ): Runnable {
+        val m = manager
+        val c = channel
+        val lifecycle = lifecycleGeneration
+        val deadline = checkNotNull(nativeCleanupDeadlineElapsedMs)
+        val timeout = Runnable {
+            if (running && removingGroup && removalGeneration == groupRemovalGeneration &&
+                manager === m && channel === c && lifecycleGeneration == lifecycle &&
+                deadline == nativeCleanupDeadlineElapsedMs &&
+                targetAttempt == null && selectedAttempt == null) {
+                // Targeted work keeps its existing fail-closed ACK barrier. Passive startup also
+                // needs an execution timeout, then follows the failure/revalidation path.
+                Log.w(TAG, "native P2P $label acknowledgment timed out during passive cleanup")
+                onTimeout()
+            }
+        }
+        mainHandler.postDelayed(timeout, (deadline - monotonicClock.now().elapsedRealtimeMs).coerceAtLeast(0L))
+        return timeout
     }
 
     private fun scheduleCleanupWaitFailure(attempt: ConnectionAttempt) {
@@ -1592,12 +1619,17 @@ internal class WifiDirectTunnel(
         }
         targetAttempt?.let(::scheduleCleanupWaitFailure)
         cancelConnectWatchdog()
+        lateinit var cleanupTimeout: Runnable
         fun claimCompletion(): Boolean {
             if (removalGeneration != groupRemovalGeneration || !removingGroup ||
                 manager !== m || channel !== c || lifecycleGeneration != lifecycle) return false
+            mainHandler.removeCallbacks(cleanupTimeout)
             ++groupRemovalGeneration // A duplicate native callback cannot operate on the replacement.
             removingGroup = false
             return true
+        }
+        cleanupTimeout = schedulePassiveCleanupTimeout("removeGroup", removalGeneration) {
+            if (claimCompletion()) recoverAfterGroupRemovalFailure(taskContext, groupRemovalGeneration)
         }
         try {
             m.removeGroup(c, object : WifiP2pManager.ActionListener {
