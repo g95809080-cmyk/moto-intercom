@@ -138,7 +138,10 @@ class C04AmsProbeTest {
         val missing = PermissionPolicy.corePermissions(Build.VERSION.SDK_INT).filter {
             context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }
-        check(missing == if (permissionMissing) listOf(Manifest.permission.READ_PHONE_STATE) else emptyList<String>()) {
+        val expectedMissing = InstrumentationRegistry.getArguments().getString("missingPermission")
+            ?: Manifest.permission.READ_PHONE_STATE
+        require(expectedMissing in listOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.RECORD_AUDIO))
+        check(missing == if (permissionMissing) listOf(expectedMissing) else emptyList<String>()) {
             "Unexpected missing permissions: $missing"
         }
         marker("PRECONDITIONS sdk=${Build.VERSION.SDK_INT} debugger=false missing=$missing package=${context.packageName}")

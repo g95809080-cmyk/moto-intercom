@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^emulator-[0-9]+$')][string]$Serial,
     [Parameter(Mandatory)][ValidateSet('positive','busy-unbound','busy-bound','permission-unbound','permission-bound')][string]$Scenario,
     [string]$Package = 'com.kuma.motointercom',
+    [ValidateSet('phone','microphone')][string]$MissingPermission = 'phone',
     [string]$AdbPath = 'C:\Users\kuma\AppData\Local\Android\Sdk\platform-tools\adb.exe',
     [Parameter(Mandatory)][string]$OutputRoot
 )
@@ -28,6 +29,7 @@ if ($sdk -ge 30) {
 $windowMs = 2 * $fgTimeout + $anrDelay + 15000
 $watchdogMs = $windowMs + 80000
 $runId = (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + $Scenario
+if ($MissingPermission -eq 'microphone') { $runId += '-microphone' }
 $runDirectory = Join-Path $OutputRoot $runId
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $settings | Set-Content (Join-Path $runDirectory 'activity-settings-before.txt') -Encoding utf8
@@ -41,9 +43,8 @@ else {
 }
 if ($sdk -ge 31) { $permissions += 'android.permission.BLUETOOTH_CONNECT' }
 foreach ($permission in $permissions) { Invoke-TargetAdb @('shell','pm','grant',$Package,$permission) | Out-Null }
-if ($Scenario.StartsWith('permission-')) {
-    Invoke-TargetAdb @('shell','pm','revoke',$Package,'android.permission.READ_PHONE_STATE') | Out-Null
-}
+$missingPermissionName = if ($MissingPermission -eq 'microphone') { 'android.permission.RECORD_AUDIO' } else { 'android.permission.READ_PHONE_STATE' }
+if ($Scenario.StartsWith('permission-')) { Invoke-TargetAdb @('shell','pm','revoke',$Package,$missingPermissionName) | Out-Null }
 Invoke-TargetAdb @('shell','dumpsys','package',$Package) | Set-Content (Join-Path $runDirectory 'package-before.txt') -Encoding utf8
 Invoke-TargetAdb @('shell','settings','get','global','debug_app') | Set-Content (Join-Path $runDirectory 'debug-app.txt') -Encoding utf8
 Invoke-TargetAdb @('shell','settings','get','global','wait_for_debugger') | Set-Content (Join-Path $runDirectory 'wait-debugger.txt') -Encoding utf8
@@ -76,7 +77,7 @@ try {
     while ((!(Test-Path $logPath) -or (Get-Item $logPath).Length -eq 0) -and $timer.ElapsedMilliseconds -lt $readyUntil -and !$logProcess.HasExited) { Start-Sleep -Milliseconds 100 }
     if ($logProcess.HasExited -or !(Test-Path $logPath) -or (Get-Item $logPath).Length -eq 0) { throw 'Log observer failed before probe' }
     $runner = 'com.kuma.motointercom.instrumentation/androidx.test.runner.AndroidJUnitRunner'
-    $instrumentProcess = Start-Process $AdbPath -ArgumentList @('-s',$Serial,'shell','am','instrument','-w','-e','runId',$runId,'-e','observationMs',"$windowMs",'-e','class',"com.kuma.motointercom.C04AmsProbeTest#$method",$runner) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runDirectory 'instrumentation.txt') -RedirectStandardError (Join-Path $runDirectory 'instrumentation-stderr.txt')
+    $instrumentProcess = Start-Process $AdbPath -ArgumentList @('-s',$Serial,'shell','am','instrument','-w','-e','runId',$runId,'-e','observationMs',"$windowMs",'-e','missingPermission',$missingPermissionName,'-e','class',"com.kuma.motointercom.C04AmsProbeTest#$method",$runner) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runDirectory 'instrumentation.txt') -RedirectStandardError (Join-Path $runDirectory 'instrumentation-stderr.txt')
     $nextSample = 0L
     while (!$instrumentProcess.HasExited -and $timer.ElapsedMilliseconds -lt $watchdogMs) {
         if ($timer.ElapsedMilliseconds -ge $nextSample) {
@@ -110,7 +111,7 @@ $runLines = @($logs -split "`n" | Where-Object { $_.Contains("C04 run=$runId ") 
 $runLines | Set-Content (Join-Path $runDirectory 'probe-markers.txt') -Encoding utf8
 @($logs -split "`n" | Where-Object { $_ -match 'ANR in |Reason:|ForegroundServiceDidNotStartInTimeException|did not then call Service.startForeground|Bringing down service|FATAL EXCEPTION|Process:|Killing .*motointercom|stopSelf|网络正在释放|缺少必要权限' }) | Set-Content (Join-Path $runDirectory 'system-signatures.txt') -Encoding utf8
 [ordered]@{
-    runId=$runId; serial=$Serial; sdk=$sdk; package=$Package; scenario=$Scenario
+    runId=$runId; serial=$Serial; sdk=$sdk; package=$Package; scenario=$Scenario; missingPermission=$missingPermissionName
     fgTimeoutMs=$fgTimeout; anrDelayMs=$anrDelay; nativeExtensionBudgetMs=$fgTimeout
     observationWindowMs=$windowMs; watchdogMs=$watchdogMs; observerForcedStop=$forcedStop
     hostDurationMs=$timer.ElapsedMilliseconds; snapshotIntervals=$samples
