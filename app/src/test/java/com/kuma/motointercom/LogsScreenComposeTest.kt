@@ -4,6 +4,14 @@ import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -16,6 +24,47 @@ import org.robolectric.annotation.Config
 class LogsScreenComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun followsNewLogsOnlyWhileAtBottomAndResumesAfterReturningToBottom() {
+        val lines = mutableStateOf((1..100).joinToString("\n") { "line $it" })
+        composeRule.setContent {
+            MotoComTheme {
+                Box(Modifier.size(360.dp, 800.dp)) {
+                    MotoComLogsScreen(LogsScreenUiState("scope", lines.value, true), {}, {}, {})
+                }
+            }
+        }
+        val node = composeRule.onNodeWithTag("logs_text")
+        fun range() = node.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        fun scroll(delta: Float) {
+            node.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
+            composeRule.waitForIdle()
+        }
+        fun append(first: Int) {
+            composeRule.runOnIdle { lines.value += (first until first + 50).joinToString("\n", prefix = "\n") { "line $it" } }
+            composeRule.waitForIdle()
+        }
+        composeRule.waitForIdle()
+        scroll(100_000f)
+        val initialBottom = range().value()
+        assertTrue(initialBottom > 0f)
+        append(101)
+        assertTrue(range().maxValue() > initialBottom + 1)
+        assertEquals(range().maxValue(), range().value(), 1f)
+        scroll(-500f)
+        val readingOffset = range().value()
+        assertTrue(readingOffset < range().maxValue() - 1)
+        append(151)
+        assertEquals(readingOffset, range().value(), 1f)
+        scroll(100_000f)
+        append(201)
+        assertEquals(range().maxValue(), range().value(), 1f)
+        composeRule.runOnIdle { lines.value = "cleared" }
+        composeRule.waitForIdle()
+        append(251)
+        assertEquals(range().maxValue(), range().value(), 1f)
+    }
 
     @Test
     fun logViewportAndActionsAreAvailable() {
