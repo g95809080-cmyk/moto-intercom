@@ -1239,7 +1239,9 @@ internal class WifiDirectTunnel(
                     else if (task != null && isTargetedContextCurrent(task))
                         onTargetedTransportFailed(task.attempt, "native P2P group lost")
                     onDisconnected()
-                    if (running && !removingGroup) discoverPeers()
+                    if (isCapturedTaskCurrent(task) && !removingGroup) {
+                        if (!serviceDiscoveryReady) setupServiceDiscovery() else discoverPeers()
+                    }
                 } } catch (t: Throwable) {
                     if (current()) {
                         lossQueryGeneration++
