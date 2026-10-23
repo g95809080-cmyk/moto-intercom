@@ -10,4 +10,4 @@
 - [x] 固定 Base d7800c1 / Head 9666ef1 架构审查 APPROVED，无 P0/P1；完整 SHA 与证据见验证报告。
 - [x] 新版本身份 beta.3/code11 与 APK 身份、签名、对齐、hash 核验。
 - [ ] 两台手机原生采集、发现及断开/重扫/重连回归。用户 2026-10-23 明确本轮无设备，保留待办；人工听音、蓝牙及道路效果未执行。
-- [ ] 独立提交与 Draft PR，记录修复证据。
+- [x] 独立提交与 [Draft PR #63](https://github.com/g95809080-cmyk/moto-intercom/pull/63)，修复证据已入库；Linear In Review，未合并或发布。

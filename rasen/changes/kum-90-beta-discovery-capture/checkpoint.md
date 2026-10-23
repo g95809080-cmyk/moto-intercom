@@ -34,3 +34,12 @@ Next gate allowed: 修复并补充回归后，以新固定 Head 重审。
 历史 beta.2/code10 APK 已装两机，SHA256 `a5ababde847991c4bd13faf9c7a2da2eb95ac6ca0d82ab19dfa0d37b848f17f2`。本轮新包必须递增身份，正式版字段及 code9/code10 既有身份不复用。
 
 本轮最终验证与剩余门禁见 `docs/verification/2026-10-23-kum-90.md`。
+
+## 本轮交付检查点
+
+- 功能 Source `5e438402c8858571d897327e24a3060d0dfd6e5a` 补齐 SDK mute 回写边界；Beta 身份为 beta.3/code11。
+- 固定 Base `d7800c1701e06b9708decba1ad0c514c4c52f518` / Head `9666ef123fa6be8c6a76f0cf3d79485d3d5e3ddd` 最终架构审查 APPROVED，P0/P1 为 0；其后仅文档批准及交付链接，无源码变更。
+- Debug/Beta 各 816 项单测、两种 Lint/构建、API 36 Beta 27 项原生回归通过；原始 XML 与 red/green 均归档。
+- 分支已正常推送；[Draft PR #63](https://github.com/g95809080-cmyk/moto-intercom/pull/63) 基于 `feat/kum-88-rnnoise-beta`。Linear 已更新 In Review，不 Done；未启动云端 CI。
+- 下一步只有用户明确保留的实机验收：MI 6 / 小米 13 当前 Source 的原生采集、发现初始化、双机断开/重扫/重连，记录各自 LAN/P2P 路径。人工听音、蓝牙和道路效果仍未执行。
+- main 与远端 main 保持 `a72cea7c1ff1879a2b6175b17881d0686c22d9c4`；没有签名密钥使用、发布、部署或 main 合并。
