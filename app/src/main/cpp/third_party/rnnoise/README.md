@@ -20,6 +20,6 @@
 
 上级 `CMakeLists.txt` 输出 `libmoto_rnnoise.so`，使用官方默认 `DISABLE_DEBUG_FLOAT=1` 量化 DNN 路径和对应架构的 NEON / SSE2 向量实现；信号处理使用浮点。模型编译进动态库，无外部文件加载。
 
-JNI 为每个 `RnNoiseProcessor` 分配独立状态与工作缓冲，在初始化阶段完成分配。音频回调原位处理 direct ByteBuffer，不写录音文件，不在成功路径分配对象或原生堆内存。`reset()` 通过官方 `rnnoise_init()` 清除完整模型和音频历史。处理保留官方模型的帧延迟；Beta 对比时应同时观察听感和端到端延迟。
+JNI 为每个 `RnNoiseProcessor` 分配独立状态与工作缓冲，在初始化阶段完成分配。JNI 处理器原位处理 direct ByteBuffer，不写录音文件，成功处理路径不分配 Java 对象或原生堆内存。上游 SDK 捕获桥每帧通过 `duplicate().clear()` 创建 Java 缓冲区视图，共享原 PCM 内存并保留 SDK 游标。`reset()` 通过官方 `rnnoise_init()` 清除完整模型和音频历史。处理保留官方模型的帧延迟；Beta 对比时应同时观察听感和端到端延迟。
 
 许可证见本目录 `COPYING`（BSD-3-Clause）。APK 同时包含 `assets/rnnoise-license.txt`。

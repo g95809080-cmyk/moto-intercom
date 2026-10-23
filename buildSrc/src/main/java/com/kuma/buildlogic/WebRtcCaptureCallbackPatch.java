@@ -35,11 +35,13 @@ public abstract class WebRtcCaptureCallbackPatch
             int constructors;
             int stops;
             int stopThreads;
+            int muteReads;
             @Override public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
                 if (name.startsWith("moto")) throw new IllegalStateException("Duplicate WebRTC capture patch");
                 if (type.equals(RECORD) && ((name.equals("byteBuffer") && descriptor.equals("Ljava/nio/ByteBuffer;"))
                         || (name.equals("audioRecord") && descriptor.equals("Landroid/media/AudioRecord;"))
-                        || (name.equals("audioThread") && descriptor.equals("L" + THREAD + ";")))) fields++;
+                        || (name.equals("audioThread") && descriptor.equals("L" + THREAD + ";"))
+                        || (name.equals("microphoneMute") && descriptor.equals("Z") && (access & Opcodes.ACC_VOLATILE) != 0))) fields++;
                 if (type.equals(RECORD) && name.equals("audioThread")) access |= Opcodes.ACC_VOLATILE;
                 if (type.equals(THREAD) && ((name.equals("keepAlive") && descriptor.equals("Z") && (access & Opcodes.ACC_VOLATILE) != 0)
                         || (name.equals("this$0") && descriptor.equals("L" + RECORD + ";")))) fields++;
@@ -65,6 +67,18 @@ public abstract class WebRtcCaptureCallbackPatch
                 if (!builder && !thread && !constructor) return delegate;
                 return new MethodVisitor(Opcodes.ASM9, delegate) {
                     @Override public void visitFieldInsn(int opcode, String owner, String field, String fieldType) {
+                        if (thread && opcode == Opcodes.GETFIELD && owner.equals(RECORD)
+                                && field.equals("microphoneMute") && fieldType.equals("Z")) {
+                            // Save the exact decision used by this frame's SDK mute branch.
+                            // A later unmute must not expose a denoiser's history for this frame.
+                            super.visitFieldInsn(opcode, owner, field, fieldType);
+                            super.visitInsn(Opcodes.DUP);
+                            super.visitVarInsn(Opcodes.ALOAD, 0);
+                            super.visitInsn(Opcodes.SWAP);
+                            super.visitFieldInsn(Opcodes.PUTFIELD, THREAD, "motoFrameMuted", "Z");
+                            muteReads++;
+                            return;
+                        }
                         if (thread && opcode == Opcodes.GETFIELD && owner.equals(RECORD)
                                 && (field.equals("audioRecord") || field.equals("byteBuffer"))) {
                             // A timed-out old read must never clear, timestamp, sample or stop a replacement's buffers.
@@ -97,8 +111,10 @@ public abstract class WebRtcCaptureCallbackPatch
                             super.visitFieldInsn(Opcodes.GETFIELD, THREAD, "motoOwnedRecord", "Landroid/media/AudioRecord;");
                             super.visitVarInsn(Opcodes.ALOAD, 0);
                             super.visitFieldInsn(Opcodes.GETFIELD, THREAD, "motoOwnedBuffer", "Ljava/nio/ByteBuffer;");
+                            super.visitVarInsn(Opcodes.ALOAD, 0);
+                            super.visitFieldInsn(Opcodes.GETFIELD, THREAD, "motoFrameMuted", "Z");
                             super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, RECORD, "motoBeforeNativeRecord",
-                                    "(Landroid/media/AudioRecord;Ljava/nio/ByteBuffer;)V", false);
+                                    "(Landroid/media/AudioRecord;Ljava/nio/ByteBuffer;Z)V", false);
                             super.visitVarInsn(Opcodes.ALOAD, 0);
                             super.visitVarInsn(Opcodes.ALOAD, 37);
                             super.visitVarInsn(Opcodes.LLOAD, 35);
@@ -154,9 +170,9 @@ public abstract class WebRtcCaptureCallbackPatch
             }
 
             @Override public void visitEnd() {
-                if (type.equals(RECORD) && (fields != 3 || nativeDeclarations != 1)
+                if (type.equals(RECORD) && (fields != 4 || nativeDeclarations != 1)
                         || type.equals(BUILDER) && fields != 1
-                        || type.equals(THREAD) && (fields != 2 || constructors != 1 || stops != 1 || stopThreads != 1)) {
+                        || type.equals(THREAD) && (fields != 2 || constructors != 1 || stops != 1 || stopThreads != 1 || muteReads != 1)) {
                     throw new IllegalStateException("Unsupported WebRTC recorder layout in " + type);
                 }
                 if (!type.equals(RECORD) && sites != 1) {
@@ -165,7 +181,7 @@ public abstract class WebRtcCaptureCallbackPatch
                 if (type.equals(RECORD)) {
                     super.visitField(Opcodes.ACC_PUBLIC, FIELD, CALLBACK, null, null).visitEnd();
                     MethodVisitor method = super.visitMethod(Opcodes.ACC_PUBLIC, "motoBeforeNativeRecord",
-                            "(Landroid/media/AudioRecord;Ljava/nio/ByteBuffer;)V", null, null);
+                            "(Landroid/media/AudioRecord;Ljava/nio/ByteBuffer;Z)V", null, null);
                     method.visitCode();
                     Label done = new Label();
                     method.visitVarInsn(Opcodes.ALOAD, 0);
@@ -188,12 +204,37 @@ public abstract class WebRtcCaptureCallbackPatch
                     method.visitTypeInsn(Opcodes.CHECKCAST, "java/nio/ByteBuffer");
                     method.visitMethodInsn(Opcodes.INVOKEINTERFACE, "org/webrtc/audio/AudioRecordDataCallback",
                             "onAudioDataRecorded", "(IIILjava/nio/ByteBuffer;)V", true);
+                    // Stateful processing may write nonzero history into an SDK-muted frame.
+                    // Preserve its captured mute decision, plus any mute applied during callback.
+                    Label silence = new Label();
+                    method.visitVarInsn(Opcodes.ILOAD, 3);
+                    method.visitJumpInsn(Opcodes.IFNE, silence);
+                    method.visitVarInsn(Opcodes.ALOAD, 0);
+                    method.visitFieldInsn(Opcodes.GETFIELD, RECORD, "microphoneMute", "Z");
+                    method.visitJumpInsn(Opcodes.IFEQ, done);
+                    method.visitLabel(silence);
+                    method.visitInsn(Opcodes.ICONST_0);
+                    method.visitVarInsn(Opcodes.ISTORE, 4);
+                    Label loop = new Label();
+                    method.visitLabel(loop);
+                    method.visitVarInsn(Opcodes.ILOAD, 4);
+                    method.visitVarInsn(Opcodes.ALOAD, 2);
+                    method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/nio/ByteBuffer", "capacity", "()I", false);
+                    method.visitJumpInsn(Opcodes.IF_ICMPGE, done);
+                    method.visitVarInsn(Opcodes.ALOAD, 2);
+                    method.visitVarInsn(Opcodes.ILOAD, 4);
+                    method.visitInsn(Opcodes.ICONST_0);
+                    method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/nio/ByteBuffer", "put", "(IB)Ljava/nio/ByteBuffer;", false);
+                    method.visitInsn(Opcodes.POP);
+                    method.visitIincInsn(4, 1);
+                    method.visitJumpInsn(Opcodes.GOTO, loop);
                     method.visitLabel(done);
                     method.visitInsn(Opcodes.RETURN);
-                    method.visitMaxs(5, 3);
+                    method.visitMaxs(5, 5);
                     method.visitEnd();
                 }
                 if (type.equals(THREAD)) {
+                    super.visitField(Opcodes.ACC_PRIVATE, "motoFrameMuted", "Z", null, null).visitEnd();
                     super.visitField(Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL, "motoOwnedRecord", "Landroid/media/AudioRecord;", null, null).visitEnd();
                     super.visitField(Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL, "motoOwnedBuffer", "Ljava/nio/ByteBuffer;", null, null).visitEnd();
                     MethodVisitor record = super.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_SYNCHRONIZED,

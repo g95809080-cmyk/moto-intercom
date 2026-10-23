@@ -18,9 +18,20 @@ import org.robolectric.annotation.LooperMode
 import org.robolectric.shadow.api.Shadow
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], shadows = [RecordingP2pInputShadow::class])
+@Config(sdk = [28, 35], shadows = [RecordingP2pInputShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class WifiDirectStartupRegressionTest {
+    @Test fun cleanStartupRegistersDiscoveryOnce() {
+        Harness().use { h ->
+            h.startStartup()
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(null)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+            assertTrue(h.ready())
+            assertEquals(1, h.p2p.dns.size)
+            assertEquals(0, h.disconnections)
+        }
+    }
+
     @Test fun disconnectedBroadcastPreservesOutstandingStartupQuery() {
         Harness().use { h ->
             h.startStartup()

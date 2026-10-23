@@ -29,3 +29,8 @@ The pinned SDK capture bridge SHALL expose its complete capacity-sized captured 
 #### Scenario: Invalid format or revoked producer
 - **WHEN** actual PCM format is unsupported or producer/revision ownership is revoked
 - **THEN** existing silence, model isolation and error handling remain enforced.
+
+#### Scenario: Processing writes nonzero history into an SDK-muted frame
+- **WHEN** the SDK muted the complete frame before invoking the callback, or mute is enabled during the callback
+- **THEN** the bridge restores all original PCM bytes to zero before native delivery without changing the original position or limit.
+- **AND** unmuting during the callback cannot expose the already-muted frame; a frame that remains unmuted preserves callback output.
