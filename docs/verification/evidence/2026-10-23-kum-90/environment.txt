@@ -1,0 +1,17 @@
+Base=d7800c1701e06b9708decba1ad0c514c4c52f518
+Source=5e438402c8858571d897327e24a3060d0dfd6e5a
+Workspace=C:\Users\kuma\Documents\摩托对讲机\MotoIntercomApp
+BuildPath=S:\
+PhysicalDevices=none; user deferred 2026-10-23
+Emulator=emulator-5560 / MotoIntercom_Graphics_API36 / API36 x86_64
+openjdk version "21.0.10" 2026-01-20
+OpenJDK Runtime Environment (build 21.0.10+-14961533-b1163.108)
+OpenJDK 64-Bit Server VM (build 21.0.10+-14961533-b1163.108, mixed mode)
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.5.0-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+36

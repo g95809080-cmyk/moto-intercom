@@ -21,7 +21,11 @@
 
 ## 版本和构建
 
-正式版本字段保留原值。实验包身份也统一保存在 `version.properties`：`betaVersion`、`betaVersionCode`、`betaCommit`，Beta variant 输出 `betaVersion+短betaCommit`。本轮为 `1.3.0-beta.1` / code9；固定功能提交由最终审查与验证记录指定。
+正式版本字段保留原值。实验包身份也统一保存在 `version.properties`：`betaVersion`、`betaVersionCode`、`betaCommit`，Beta variant 输出 `betaVersion+短betaCommit`。本轮为 `1.3.0-beta.3+5e43840` / code11，功能提交为 `5e438402c8858571d897327e24a3060d0dfd6e5a`。code9/code10 的历史身份不复用；该构建只用于验证，未发布。
+
+Beta.2 修复两个问题：Wi-Fi Direct 初始化期间，空闲断线广播会中断服务注册，导致重新扫描也找不到设备；SDK 静音填充推进缓冲区游标后，RNNoise 会把完整帧误判为空帧并停止对讲。捕获桥现在提供完整帧视图，SDK 原游标、格式检查、静音和 VOX 门控继续保留。
+
+Beta.3 补齐 SDK 静音边界：保存本帧原始静音决定，回调处理后重新清零，避免模型历史输出重新写入静音帧。回调期间开启静音立即清零，取消静音从后续帧生效。本轮无手机，实机复测、人工听音、蓝牙及道路效果仍为待办；详见 `docs/verification/2026-10-23-kum-90.md`。
 
 ```powershell
 $env:JAVA_HOME = 'F:/Android/jbr'
