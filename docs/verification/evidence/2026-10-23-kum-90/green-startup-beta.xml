@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.kuma.motointercom.WifiDirectStartupRegressionTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-10-23T08:44:40.916Z" hostname="DESKTOP-BGCFG9P" time="14.891">
+  <properties/>
+  <testcase name="closedStartupQueryCannotPublishAfterClose[28]" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="7.401"/>
+  <testcase name="closedStartupQueryCannotPublishAfterClose" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="6.925"/>
+  <testcase name="targetedAttemptStillConfirmsActualGroupLoss[28]" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.125"/>
+  <testcase name="targetedAttemptStillConfirmsActualGroupLoss" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.132"/>
+  <testcase name="cleanStartupRegistersDiscoveryOnce[28]" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.053"/>
+  <testcase name="cleanStartupRegistersDiscoveryOnce" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.055"/>
+  <testcase name="disconnectedBroadcastPreservesQueuedServiceRegistration[28]" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.051"/>
+  <testcase name="disconnectedBroadcastPreservesQueuedServiceRegistration" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.053"/>
+  <testcase name="disconnectedBroadcastPreservesOutstandingStartupQuery[28]" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.042"/>
+  <testcase name="disconnectedBroadcastPreservesOutstandingStartupQuery" classname="com.kuma.motointercom.WifiDirectStartupRegressionTest" time="0.047"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

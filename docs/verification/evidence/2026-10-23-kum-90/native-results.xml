@@ -1,0 +1,79 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="27" failures="0" errors="0" skipped="0" time="20.26" timestamp="2026-10-23T08:52:10" hostname="localhost">
+  <testsuite name="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" tests="6" failures="0" errors="0" skipped="0" time="2.258" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="webRtcKeepsProcessingSdkMutedNativeFrames" classname="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" time="1.418" />
+    <testcase name="sdkMuteSurvivesCallbackWritingNonzeroPcm" classname="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" time="0.03" />
+    <testcase name="muteDuringCallbackClearsCurrentFrame" classname="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" time="0.054" />
+    <testcase name="unmuteDuringCallbackCannotExposeSdkMutedFrame" classname="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" time="0.03" />
+    <testcase name="unmutedCallbackPreservesPcmAndSdkCursor" classname="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" time="0.031" />
+    <testcase name="rnnoiseKeepsProcessingSdkMutedNativeFrames" classname="com.kuma.motointercom.NativeCaptureCursorInstrumentationTest" time="0.695" />
+  </testsuite>
+  <testsuite name="com.kuma.motointercom.RnNoiseInstrumentationTest" tests="8" failures="0" errors="0" skipped="0" time="0.411" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="fullScalePcmAndUnalignedFrameRespectBufferBounds" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.028" />
+    <testcase name="resetProducesExactlyTheSameStreamAsFreshInstance" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.031" />
+    <testcase name="unsupportedFormatsAndFramesFailExplicitly" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.003" />
+    <testcase name="stationaryNoiseIsChangedAndReducedAfterWarmup" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.081" />
+    <testcase name="slicedDirectBufferProcessesOnlyItsOwnFrame" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.004" />
+    <testcase name="reportsStreamingProcessingCostWithoutLoggingAudio" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.258" />
+    <testcase name="closeIsIdempotentAndSerializesWithProcessing" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.003" />
+    <testcase name="freshSilenceStaysSilent" classname="com.kuma.motointercom.RnNoiseInstrumentationTest" time="0.003" />
+  </testsuite>
+  <testsuite name="com.kuma.motointercom.RnNoiseEngineInstrumentationTest" tests="3" failures="0" errors="0" skipped="0" time="0.34" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="wrongActualFormatIsSilencedAndReportedOnceWithoutAdvancingTheModel" classname="com.kuma.motointercom.RnNoiseEngineInstrumentationTest" time="0.182" />
+    <testcase name="replacementProducerAtSameRevisionStartsWithFreshHistory" classname="com.kuma.motointercom.RnNoiseEngineInstrumentationTest" time="0.054" />
+    <testcase name="muteAndVoxCloseDropHistoryBeforeReopening" classname="com.kuma.motointercom.RnNoiseEngineInstrumentationTest" time="0.104" />
+  </testsuite>
+  <testsuite name="com.kuma.motointercom.VoxTransmitInstrumentationTest" tests="2" failures="0" errors="0" skipped="0" time="3.689" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="rnnoisePreservesMuteAndVoxOnActualNativeCapture" classname="com.kuma.motointercom.VoxTransmitInstrumentationTest" time="1.427" />
+    <testcase name="mutedNativeCaptureContinuesAndVoxReopensActualPcm" classname="com.kuma.motointercom.VoxTransmitInstrumentationTest" time="2.262" />
+  </testsuite>
+  <testsuite name="com.kuma.motointercom.VoxBackgroundInstrumentationTest" tests="3" failures="0" errors="0" skipped="0" time="3.735" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="producerReplacedWhilePcmWaitsCannotAdvanceRnnoise" classname="com.kuma.motointercom.VoxBackgroundInstrumentationTest" time="0.054" />
+    <testcase name="strongerStationaryBackgroundClosesActualPcmWithoutStoppingCapture" classname="com.kuma.motointercom.VoxBackgroundInstrumentationTest" time="3.627" />
+    <testcase name="producerReplacedWhilePcmWaitsForControlsCannotChangeDetector" classname="com.kuma.motointercom.VoxBackgroundInstrumentationTest" time="0.054" />
+  </testsuite>
+  <testsuite name="com.kuma.motointercom.NativeAudioIoGateInstrumentationTest" tests="3" failures="0" errors="0" skipped="0" time="6.397" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="immediateResumeCannotRevivePausedProducerAndRealCaptureRestarts" classname="com.kuma.motointercom.NativeAudioIoGateInstrumentationTest" time="2.821" />
+    <testcase name="delayedSdkReadCannotClearOrStopReplacementRecorder" classname="com.kuma.motointercom.NativeAudioIoGateInstrumentationTest" time="3.181" />
+    <testcase name="publicAudioSinkStillReceivesDecodedFramesAfterSdkPlayoutStops" classname="com.kuma.motointercom.NativeAudioIoGateInstrumentationTest" time="0.395" />
+  </testsuite>
+  <testsuite name="com.kuma.motointercom.RiderAudioEngineHotSessionTest" tests="2" failures="0" errors="0" skipped="0" time="2.175" timestamp="2026-10-23T08:52:10" hostname="localhost">
+    <properties>
+      <property name="device" value="MotoIntercom_Graphics_API36(AVD) - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="suspendAndResumeToggleAudioGateWithoutClosingHotSession" classname="com.kuma.motointercom.RiderAudioEngineHotSessionTest" time="2.07" />
+    <testcase name="sequentialPeerConnectionsReuseHotAudioPlatformResources" classname="com.kuma.motointercom.RiderAudioEngineHotSessionTest" time="0.105" />
+  </testsuite>
+</testsuites>
