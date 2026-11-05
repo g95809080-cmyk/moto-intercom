@@ -67,7 +67,7 @@ internal class IncomingConfirmationSurface(
         scheduler.cancel()
         val nonce = activePrompt?.actionNonce
         activePrompt = null
-        host.notificationManager()?.cancel(INCOMING_NOTIFICATION_ID)
+        host.notificationManager()?.cancel(SessionNotificationFactory.INCOMING_NOTIFICATION_ID)
         if (nonce != null) host.cancelInApp(nonce)
     }
 
@@ -81,7 +81,7 @@ internal class IncomingConfirmationSurface(
     }
 
     private fun dismiss(nonce: String) {
-        host.notificationManager()?.cancel(INCOMING_NOTIFICATION_ID)
+        host.notificationManager()?.cancel(SessionNotificationFactory.INCOMING_NOTIFICATION_ID)
         activePrompt = null
         host.cancelInApp(nonce)
     }
@@ -108,7 +108,10 @@ internal class IncomingConfirmationSurface(
         try {
             val manager = host.notificationManager()
                 ?: throw IllegalStateException("NotificationManager is unavailable")
-            manager.notify(INCOMING_NOTIFICATION_ID, host.buildNotification(prompt))
+            manager.notify(
+                SessionNotificationFactory.INCOMING_NOTIFICATION_ID,
+                host.buildNotification(prompt)
+            )
         } catch (t: Throwable) {
             host.onError(t)
             reportUnavailable(prompt)
@@ -118,9 +121,5 @@ internal class IncomingConfirmationSurface(
     private fun reportUnavailable(prompt: IncomingConfirmationPrompt) {
         if (!host.isPromptCurrent(prompt)) return
         host.onSurfaceUnavailable(prompt)
-    }
-
-    companion object {
-        const val INCOMING_NOTIFICATION_ID = SessionNotificationFactory.INCOMING_NOTIFICATION_ID
     }
 }
