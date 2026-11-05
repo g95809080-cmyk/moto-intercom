@@ -620,16 +620,16 @@ class IntercomServiceRobolectricTest {
         service: IntercomService,
         prompt: IncomingConfirmationPrompt?
     ) {
-        IntercomService::class.java.getDeclaredField("activeIncomingPrompt").apply {
-            isAccessible = true
-            set(service, prompt)
-        }
+        confirmationSurface(service).activePrompt = prompt
     }
 
     private fun activeIncomingPrompt(service: IntercomService): IncomingConfirmationPrompt? =
-        IntercomService::class.java.getDeclaredField("activeIncomingPrompt").apply {
+        confirmationSurface(service).activePrompt
+
+    private fun confirmationSurface(service: IntercomService): IncomingConfirmationSurface =
+        IntercomService::class.java.getDeclaredField("incomingConfirmationSurface").apply {
             isAccessible = true
-        }.get(service) as IncomingConfirmationPrompt?
+        }.get(service) as IncomingConfirmationSurface
 
     private fun incomingPrompt(
         nonce: String,

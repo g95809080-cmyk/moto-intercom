@@ -158,6 +158,7 @@ class IntercomService : Service() {
 
     private val binder = LocalBinder()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val notifications by lazy { SessionNotificationFactory(this) }
     private val sessions = SessionGeneration()
     private val automaticRecoveryPolicy = AutomaticRecoveryPolicy()
     private val recoveryCleanupCoordinator = RecoveryCleanupCoordinator(
@@ -267,6 +268,39 @@ class IntercomService : Service() {
         }
     )
 
+    private val confirmationHost = object : IncomingConfirmationHost {
+        override fun isPromptCurrent(prompt: IncomingConfirmationPrompt): Boolean =
+            isCurrentIncomingConfirmation(prompt)
+
+        override fun isAppForeground(): Boolean = appInForeground
+
+        override fun showInApp(prompt: IncomingConfirmationPrompt): Boolean {
+            val current = listener ?: return false
+            current.onIncomingConfirmation(prompt)
+            return true
+        }
+
+        override fun cancelInApp(nonce: String) {
+            listener?.onIncomingConfirmationCanceled(nonce)
+        }
+
+        override fun notificationAvailable(): Boolean = isIncomingNotificationAvailable()
+
+        override fun notificationManager(): NotificationManager? =
+            getSystemService(NotificationManager::class.java)
+
+        override fun buildNotification(prompt: IncomingConfirmationPrompt): Notification =
+            buildIncomingConfirmationNotification(prompt)
+
+        override fun onSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
+            reportConfirmationSurfaceUnavailable(prompt)
+        }
+
+        override fun onError(error: Throwable) = handleError(error)
+    }
+
+    private lateinit var incomingConfirmationSurface: IncomingConfirmationSurface
+
     private var listener: Listener? = null
     private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
@@ -298,7 +332,6 @@ class IntercomService : Service() {
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
     private var appInForeground = false
-    private var activeIncomingPrompt: IncomingConfirmationPrompt? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var legacyOwnership: Any? = null
@@ -320,6 +353,10 @@ class IntercomService : Service() {
             onError = ::handleError,
             elapsedRealtime = SystemClock::elapsedRealtime,
             automaticRecoveryPolicy = automaticRecoveryPolicy
+        )
+        incomingConfirmationSurface = IncomingConfirmationSurface(
+            incomingConfirmationScheduler,
+            confirmationHost
         )
         serviceScope.launch {
             orchestrator.state.collect { state ->
@@ -438,14 +475,12 @@ class IntercomService : Service() {
     }
 
     private fun replayActiveIncomingConfirmation(target: Listener) {
-        val prompt = activeIncomingPrompt
-            ?.takeIf { it.surface == ConfirmationSurface.IN_APP }
-            ?.takeIf(::isCurrentIncomingConfirmation)
-            ?: return
-        try {
-            target.onIncomingConfirmation(prompt)
-        } catch (t: Throwable) {
-            handleError(t)
+        incomingConfirmationSurface.replay { prompt ->
+            try {
+                target.onIncomingConfirmation(prompt)
+            } catch (t: Throwable) {
+                handleError(t)
+            }
         }
     }
 
@@ -2291,65 +2326,19 @@ class IntercomService : Service() {
     }
 
     private fun publishIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
-        if (!isCurrentIncomingConfirmation(prompt)) return
-        activeIncomingPrompt = prompt
-        incomingConfirmationScheduler.schedule(prompt)
-        when (prompt.surface) {
-            ConfirmationSurface.IN_APP -> {
-                val currentListener = listener
-                if (!appInForeground || currentListener == null) {
-                    reportConfirmationSurfaceUnavailable(prompt)
-                    return
-                }
-                try {
-                    currentListener.onIncomingConfirmation(prompt)
-                } catch (t: Throwable) {
-                    handleError(t)
-                    reportConfirmationSurfaceUnavailable(prompt)
-                }
-            }
-            ConfirmationSurface.NOTIFICATION -> {
-                if (!isIncomingNotificationAvailable()) {
-                    reportConfirmationSurfaceUnavailable(prompt)
-                    return
-                }
-                try {
-                    val manager = getSystemService(NotificationManager::class.java)
-                        ?: throw IllegalStateException("NotificationManager is unavailable")
-                    manager.notify(
-                        INCOMING_NOTIFICATION_ID,
-                        buildIncomingConfirmationNotification(prompt)
-                    )
-                } catch (t: Throwable) {
-                    handleError(t)
-                    reportConfirmationSurfaceUnavailable(prompt)
-                }
-            }
-        }
+        incomingConfirmationSurface.publish(prompt)
     }
 
     private fun cancelIncomingConfirmation(effect: SessionEffect.CancelIncomingConfirmation) {
-        incomingConfirmationScheduler.cancel(
+        incomingConfirmationSurface.cancel(
             effect.runtimeSessionId,
             effect.attemptId,
             effect.actionNonce
         )
-        activeIncomingPrompt
-            ?.takeIf { it.runtimeSessionId == effect.runtimeSessionId }
-            ?.takeIf { it.attemptId == effect.attemptId }
-            ?.takeIf { it.actionNonce == effect.actionNonce }
-            ?: return
-        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
-        activeIncomingPrompt = null
-        listener?.onIncomingConfirmationCanceled(effect.actionNonce)
     }
 
     private fun cancelAllIncomingConfirmationSurfaces() {
-        val nonce = activeIncomingPrompt?.actionNonce
-        incomingConfirmationScheduler.cancel()
-        activeIncomingPrompt = null
-        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
-        if (nonce != null) listener?.onIncomingConfirmationCanceled(nonce)
+        incomingConfirmationSurface.cancelAll()
     }
 
     private fun reportConfirmationSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
@@ -2844,26 +2833,8 @@ class IntercomService : Service() {
         }
     }
 
-    private fun isIncomingNotificationAvailable(): Boolean {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return false
-        }
-        val manager = getSystemService(NotificationManager::class.java) ?: return false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !manager.areNotificationsEnabled()) {
-            return false
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = manager.getNotificationChannel(INCOMING_CHANNEL_ID)
-            if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
-                return false
-            }
-        }
-        return true
-    }
+    private fun isIncomingNotificationAvailable(): Boolean =
+        notifications.incomingConfirmationAvailable()
 
     private fun updateNotification() {
         val notification = buildNotification()
@@ -2882,73 +2853,28 @@ class IntercomService : Service() {
             ?.notify(NOTIFICATION_ID, notification)
     }
 
-    private fun buildNotification(): Notification {
-        ensureNotificationChannel()
-        val notificationText = foregroundNotificationText(
-            orchestrator.state.value,
-            lastStatus,
-            audioInterruptionState
-        )
-
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("摩声")
-            .setContentText(notificationText)
-            .setStyle(Notification.BigTextStyle().bigText(notificationText))
-            .setOngoing(running)
-            .setContentIntent(contentIntent)
-            .build()
-    }
+    private fun buildNotification(): Notification = notifications.statusNotification(
+        orchestrator.state.value,
+        lastStatus,
+        audioInterruptionState,
+        running
+    )
 
     private fun buildIncomingConfirmationNotification(
         prompt: IncomingConfirmationPrompt
     ): Notification {
-        ensureIncomingNotificationChannel()
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val acceptIntent = incomingConfirmationPendingIntent(prompt, accepted = true)
-        val rejectIntent = incomingConfirmationPendingIntent(prompt, accepted = false)
-        val riderName = prompt.peer.nickname.ifBlank { "附近车友" }
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, INCOMING_CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        return builder
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("$riderName 请求加入对讲")
-            .setContentText("请在 15 秒内接受或拒绝")
-            .setStyle(
-                Notification.BigTextStyle().bigText(
-                    incomingConfirmationNotificationMessage(prompt.peer.deviceName)
-                )
-            )
-            .setCategory(Notification.CATEGORY_CALL)
-            .setPriority(Notification.PRIORITY_HIGH)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setOngoing(false)
-            .setAutoCancel(false)
-            .setContentIntent(contentIntent)
-            .addAction(0, "拒绝本次", rejectIntent)
-            .addAction(0, "接受", acceptIntent)
-            .build()
+        return notifications.incomingConfirmationNotification(
+            prompt = prompt,
+            contentIntent = contentIntent,
+            acceptIntent = incomingConfirmationPendingIntent(prompt, accepted = true),
+            rejectIntent = incomingConfirmationPendingIntent(prompt, accepted = false)
+        )
     }
 
     private fun incomingConfirmationPendingIntent(
@@ -2960,37 +2886,6 @@ class IntercomService : Service() {
             0,
             incomingConfirmationActionIntent(this, prompt, accepted),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "对讲状态提示",
-                NotificationManager.IMPORTANCE_LOW
-            )
-        )
-    }
-
-    private fun ensureIncomingNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(INCOMING_CHANNEL_ID) != null) return
-        manager.createNotificationChannel(
-            NotificationChannel(
-                INCOMING_CHANNEL_ID,
-                "车友连接请求",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "陌生车友的接受与拒绝操作"
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
         )
     }
 
@@ -3024,10 +2919,11 @@ class IntercomService : Service() {
         private const val ACTION_URI_AUTHORITY = "incoming"
         private const val ACTION_PATH_ACCEPT = "accept"
         private const val ACTION_PATH_REJECT = "reject"
-        private const val CHANNEL_ID = "intercom_status"
-        private const val INCOMING_CHANNEL_ID = "incoming_confirmation"
-        private const val NOTIFICATION_ID = 2601
-        private const val INCOMING_NOTIFICATION_ID = 2602
+        private const val CHANNEL_ID = SessionNotificationFactory.STATUS_CHANNEL_ID
+        private const val INCOMING_CHANNEL_ID = SessionNotificationFactory.INCOMING_CHANNEL_ID
+        private const val NOTIFICATION_ID = SessionNotificationFactory.STATUS_NOTIFICATION_ID
+        private const val INCOMING_NOTIFICATION_ID =
+            SessionNotificationFactory.INCOMING_NOTIFICATION_ID
         private const val AUDIO_STANDBY_STATUS = "当前音频源：待机"
         private const val AUDIO_EARPIECE_STATUS = "当前音频源：手机听筒"
         private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放"
