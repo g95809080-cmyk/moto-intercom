@@ -4,6 +4,7 @@
 **/build/
 build/
 app/build/
+app/.cxx/
 local.properties
 logs/
 debug_logs/
