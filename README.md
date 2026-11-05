@@ -6,6 +6,8 @@
 
 本分支维护**双人版 `1.x`**，当前为 **1.2.3+f587472 修复测试版**：包含音频混播、蓝牙录音与播放恢复、断联恢复、VOX 和本机近 7 天诊断日志相关修复。小米13已覆盖安装并正常启动，双机、蓝牙与道路效果仍需实测。
 
+主线源码同时包含一个独立的**降噪 Beta 变体**（`1.3.0-beta.3`，versionCode 11，包名后缀 `.rnnoise.beta`）：用于 RNNoise 与 WebRTC 降噪的 A/B 对照，可与正式版共存安装。它随主线构建，但不是正式发布版本，物理听音尚未验收。
+
 四人房间版在 [`four-person` 分支](https://github.com/g95809080-cmyk/moto-intercom/tree/four-person)维护，使用 **`2.x`** 版号；首次为 **2.0.0+aee3b3f**，由原四人版1.3.0重编号。两条线的改动分别审查与发布。
 
 ## 📦 下载体验
@@ -52,7 +54,7 @@
 
 ## 🧑‍💻 想自己构建？
 
-项目使用 Kotlin、Jetpack Compose、WebRTC。用 Android Studio 打开仓库根目录，配置 Android SDK（compileSdk 37），再使用项目自带的 Gradle Wrapper。
+项目使用 Kotlin、Jetpack Compose、WebRTC，并包含 RNNoise 原生库。用 Android Studio 打开仓库根目录，配置 Android SDK（compileSdk 37）、NDK `28.2.13676358` 与 CMake 3.22.1，再使用项目自带的 Gradle Wrapper。原生构建挂在默认配置上，debug、release、beta 三类变体都需要 NDK。
 
 Windows 示例：
 
@@ -68,6 +70,14 @@ $env:JAVA_HOME = 'F:/Android/jbr'
 ./gradlew.bat connectedDebugAndroidTest
 ```
 
+降噪 Beta 变体单独构建：
+
+```powershell
+./gradlew.bat assembleBeta
+```
+
+产物位于 `app/build/outputs/apk/beta/`，版本号取 `version.properties` 的 `betaVersion` 与 `betaVersionCode`，与正式版使用不同的包名后缀。
+
 `assembleRelease` 默认生成未签名 Release APK，需要使用分发证书签名后安装。GitHub 个人分发版本沿用历史版本的签名证书，便于覆盖安装；它不是应用商店生产签名。签名文件不保存在仓库中。
 
 源码路径含中文且遇到构建工具路径问题时，可将当前目录映射到空闲盘符，再从该盘符运行 Wrapper。
@@ -78,6 +88,8 @@ $env:JAVA_HOME = 'F:/Android/jbr'
 - [引导功能验证记录](docs/verification/2026-09-12-onboarding.md)
 - [v1.2.0 更新说明](docs/releases/v1.2.0.md)
 - [v1.2.3 修复测试说明](docs/releases/v1.2.3.md)
+- [RNNoise Beta 说明](docs/testing/rnnoise-beta.md)
+- [RNNoise Beta 验证记录](docs/verification/2026-10-16-rnnoise-beta.md)
 - [双人与四人版本约定](docs/releases/versioning.md)
 
 自动测试和模拟器验证不代表双真机听音、蓝牙兼容性或实际距离测试已经通过；每次版本的具体验证范围见更新说明。
