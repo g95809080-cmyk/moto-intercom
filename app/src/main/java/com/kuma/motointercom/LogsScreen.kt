@@ -13,6 +13,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
@@ -43,6 +45,17 @@ internal fun MotoComLogsScreen(
     modifier: Modifier = Modifier,
     onExport: () -> Unit = {}
 ) {
+    val logScroll = rememberScrollState()
+    LaunchedEffect(logScroll) {
+        var previousMax = 0
+        snapshotFlow { logScroll.value to logScroll.maxValue }.collect { (offset, max) ->
+            if (max != previousMax) {
+                val following = offset >= previousMax
+                previousMax = max
+                if (following) logScroll.scrollTo(max)
+            }
+        }
+    }
     Column(
         modifier = modifier.widthIn(max = dimensionResource(R.dimen.motocom_content_max_width)).fillMaxWidth().padding(horizontal = dimensionResource(R.dimen.motocom_page_horizontal_padding), vertical = dimensionResource(R.dimen.motocom_page_vertical_padding)).padding(bottom = 32.dp)
     ) {
@@ -52,7 +65,7 @@ internal fun MotoComLogsScreen(
             Text(state.scopeText, Modifier.padding(top = 6.dp).testTag("logs_scope_text"), color = colorResource(R.color.motocom_text_secondary), fontSize = 14.sp)
             Text(
                 state.logText,
-                Modifier.fillMaxWidth().padding(top = dimensionResource(R.dimen.motocom_gap)).height(dimensionResource(R.dimen.motocom_logs_viewport_height)).background(colorResource(R.color.motocom_console), RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))).verticalScroll(rememberScrollState()).padding(12.dp).testTag("logs_text"),
+                Modifier.fillMaxWidth().padding(top = dimensionResource(R.dimen.motocom_gap)).height(dimensionResource(R.dimen.motocom_logs_viewport_height)).background(colorResource(R.color.motocom_console), RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))).verticalScroll(logScroll).padding(12.dp).testTag("logs_text"),
                 color = colorResource(R.color.motocom_on_console_secondary), fontSize = 13.sp, lineHeight = 21.sp, fontFamily = FontFamily.Monospace
             )
             state.errorText?.let { Text(it, Modifier.padding(top = 8.dp).testTag("logs_error_text"), color = colorResource(R.color.motocom_text_secondary)) }

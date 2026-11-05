@@ -31,7 +31,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             ChannelPlan.race(Transport.LAN, Transport.WIFI_DIRECT),
             connecting.attempt.channelPlan
         )
-        assertEquals(10_500L, connecting.attempt.deadlineElapsedRealtimeMs)
+        assertEquals(35_500L, connecting.attempt.deadlineElapsedRealtimeMs)
         assertEquals(connecting.attempt, coordinator.currentAttempt)
         assertEquals(listOf(ConnectionAttemptId("attempt-outbound")), ids.created)
         assertEquals(
@@ -582,7 +582,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             )
         }
         sequentialFixture().run {
-            clock.advanceBy(5_000L)
+            clock.advanceBy(attempt.deadlineElapsedRealtimeMs - clock.now().elapsedRealtimeMs)
             assertFalse(overlap().accepted)
         }
     }
@@ -744,12 +744,12 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         val connecting = requireNotNull(
             coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
         ).state as IntercomState.Connecting
-        clock.advanceBy(10_000L)
+        clock.advanceBy(connecting.attempt.deadlineElapsedRealtimeMs - clock.now().elapsedRealtimeMs)
 
         val timeout = requireNotNull(
             coordinator.handle(
                 connecting,
-                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, 10_500L)
+                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, connecting.attempt.deadlineElapsedRealtimeMs)
             )
         )
         val lateFailure = requireNotNull(
@@ -789,7 +789,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         val timeout = requireNotNull(
             coordinator.handle(
                 requireNotNull(canceled.state),
-                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, 10_500L)
+                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, connecting.attempt.deadlineElapsedRealtimeMs)
             )
         )
 
@@ -823,7 +823,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         val timeout = requireNotNull(
             coordinator.handle(
                 requireNotNull(connected.state),
-                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, 10_500L)
+                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, connecting.attempt.deadlineElapsedRealtimeMs)
             )
         )
 
@@ -844,7 +844,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
             coordinator.handle(IntercomState.Discovering(runtime), outboundIntent())
         ).state as IntercomState.Connecting
         val withPeer = connecting.copy(peer = verifiedPeer())
-        clock.advanceBy(10_000L)
+        clock.advanceBy(connecting.attempt.deadlineElapsedRealtimeMs - clock.now().elapsedRealtimeMs)
 
         val connected = requireNotNull(
             coordinator.handle(
@@ -860,7 +860,7 @@ class ConnectionAttemptCoordinatorOwnershipTest {
         val timeout = requireNotNull(
             coordinator.handle(
                 withPeer,
-                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, 10_500L)
+                SessionEvent.AttemptTimedOut(runtime, connecting.attempt.id, connecting.attempt.deadlineElapsedRealtimeMs)
             )
         )
 

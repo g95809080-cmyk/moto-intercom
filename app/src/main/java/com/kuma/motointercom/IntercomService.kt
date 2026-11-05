@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Binder
 import android.os.Build
@@ -386,12 +387,31 @@ class IntercomService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    private fun rejectForegroundStart(startId: Int, status: String) {
+        try {
+            // Fulfil the FGS obligation even when no runtime can start. This type needs no microphone grant.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            }
+        } catch (error: RuntimeException) {
+            handleError(error)
+        } finally {
+            try {
+                if (running) stopIntercom()
+                publishStatus(status)
+            } finally {
+                try { stopForegroundCompat() } finally { stopSelf(startId) }
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_INTERCOM -> {
                 if (!running && LegacyRuntimeOwnership.hasOwner()) {
-                    publishStatus("网络正在释放，请稍后重试")
-                    stopSelf(startId)
+                    rejectForegroundStart(startId, "网络正在释放，请稍后重试")
                     return START_NOT_STICKY
                 }
                 requestedRiderName = intent.getStringExtra(EXTRA_RIDER_NAME).orEmpty().trim()
@@ -416,8 +436,7 @@ class IntercomService : Service() {
                     intent.getBooleanExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, true)
                 )
                 if (!hasRequiredRuntimePermissions()) {
-                    publishStatus("缺少必要权限，无法启动摩声")
-                    stopSelf(startId)
+                    rejectForegroundStart(startId, "缺少必要权限，无法启动摩声")
                     return START_NOT_STICKY
                 }
                 if (
@@ -521,8 +540,13 @@ class IntercomService : Service() {
             preferredAudioRoute = selection
             if (changed) listener?.onAudioRouteSelectionChanged(selection)
             try {
+                val controller = audioSessionController
+                if (!changed && source == AudioRouteRequestSource.ACTIVITY_REBIND &&
+                    controller?.preferredAudioRoute() == selection && controller.routeEvidence().ready) {
+                    return@dispatchOnMain
+                }
                 DiagnosticLog.i("IntercomService", "Audio route requested selection=$selection source=$source")
-                audioSessionController?.updateAudioRoute(selection,
+                controller?.updateAudioRoute(selection,
                     resetIoRecoveryBudget = source == AudioRouteRequestSource.USER_SELECTION)
             } catch (error: RuntimeException) {
                 handleError(error)
