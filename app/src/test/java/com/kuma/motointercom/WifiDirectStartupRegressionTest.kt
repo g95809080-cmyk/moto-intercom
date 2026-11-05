@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Looper
@@ -90,6 +91,47 @@ class WifiDirectStartupRegressionTest {
         }
     }
 
+    @Test fun missingPassiveCancelAckIsBoundedAndLateAckCannotRestartSetup() {
+        Harness().use { h ->
+            h.p2p.holdCancelConnect = true
+            h.startStartup()
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(null)
+            val obsoleteCancel = h.p2p.cancellations.single()
+            assertTrue(h.removing())
+            h.idle(6)
+            assertFalse("Passive cancel must have an execution timeout", h.removing())
+            assertTrue(h.ready())
+            val registrations = h.p2p.dns.size
+            obsoleteCancel.onSuccess()
+            obsoleteCancel.onFailure(WifiP2pManager.ERROR)
+            h.idle(2)
+            assertEquals(registrations, h.p2p.dns.size)
+            assertTrue(h.ready())
+        }
+    }
+
+    @Test fun missingPassiveRemovalAckRechecksGroupAndRejectsLateAck() {
+        Harness().use { h ->
+            h.p2p.holdGroupRemoval = true
+            h.startStartup()
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(WifiP2pGroup())
+            val obsoleteRemoval = h.p2p.removals.single()
+            assertTrue(h.removing())
+            h.idle(6)
+            assertFalse("Passive group removal must have an execution timeout", h.removing())
+            assertFalse("A timeout is not proof that the native group was removed", h.ready())
+            h.p2p.groups.removeFirst().onGroupInfoAvailable(null)
+            h.idle(3)
+            assertTrue(h.ready())
+            val registrations = h.p2p.dns.size
+            obsoleteRemoval.onSuccess()
+            obsoleteRemoval.onFailure(WifiP2pManager.ERROR)
+            h.idle(2)
+            assertEquals(registrations, h.p2p.dns.size)
+            assertTrue(h.ready())
+        }
+    }
+
     private class Harness : AutoCloseable {
         val runtime = RuntimeSessionId("90000000-0000-4000-8000-000000000002")
         private val context = ApplicationProvider.getApplicationContext<Context>()
@@ -111,6 +153,8 @@ class WifiDirectStartupRegressionTest {
         }
         fun startStartup() { set("startupDiscoveryPending", true); call("startStartupDiscoveryIfReady") }
         fun ready() = field("serviceDiscoveryReady") as Boolean
+        fun removing() = field("removingGroup") as Boolean
+        fun idle(seconds: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(seconds))
         fun disconnectBroadcast() = (field("receiver") as BroadcastReceiver).onReceive(context,
             Intent(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION))
         fun field(name: String): Any? = WifiDirectTunnel::class.java.getDeclaredField(name).run { isAccessible = true; get(tunnel) }

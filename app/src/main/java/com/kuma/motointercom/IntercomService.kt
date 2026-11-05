@@ -521,8 +521,13 @@ class IntercomService : Service() {
             preferredAudioRoute = selection
             if (changed) listener?.onAudioRouteSelectionChanged(selection)
             try {
+                val controller = audioSessionController
+                if (!changed && source == AudioRouteRequestSource.ACTIVITY_REBIND &&
+                    controller?.preferredAudioRoute() == selection && controller.routeEvidence().ready) {
+                    return@dispatchOnMain
+                }
                 DiagnosticLog.i("IntercomService", "Audio route requested selection=$selection source=$source")
-                audioSessionController?.updateAudioRoute(selection,
+                controller?.updateAudioRoute(selection,
                     resetIoRecoveryBudget = source == AudioRouteRequestSource.USER_SELECTION)
             } catch (error: RuntimeException) {
                 handleError(error)

@@ -366,15 +366,16 @@ internal class SignalingControlCoordinator(
         }
         val newAttemptId = attemptIdFactory()
         if (terminalOutcome(newAttemptId) != null) return rejected()
+        val createdAt = decisionNow()
         val attempt = ConnectionAttempt(
             id = newAttemptId,
             runtimeSessionId = event.runtimeSessionId,
             targetLock = TargetLock(event.targetDeviceId, event.targetSessionId),
             trigger = event.trigger,
             channelPlan = plan,
-            deadlineElapsedRealtimeMs = newAttemptDeadline().elapsedRealtimeMs
+            deadlineElapsedRealtimeMs = newPresenceAttemptDeadline(event.trigger, createdAt).elapsedRealtimeMs
         )
-        val race = createTargetedTransportRace(attempt)
+        val race = createTargetedTransportRace(attempt, startedAt = createdAt)
         val decision = accepted(
             state = IntercomState.Connecting(attempt),
             effects = listOfNotNull(
@@ -2890,6 +2891,17 @@ internal class SignalingControlCoordinator(
         deadlineElapsedRealtimeMs = deadlineAt.elapsedRealtimeMs
     )
 
+    private fun newPresenceAttemptDeadline(
+        trigger: ConnectionTrigger,
+        createdAt: MonotonicTimestamp
+    ): MonotonicTimestamp {
+        // Reserve confirmation and media time once at USER creation; callbacks never renew it.
+        val budget = if (trigger == ConnectionTrigger.USER) {
+            Math.addExact(Math.addExact(attemptTimeoutMs, confirmationTimeoutMs), attemptTimeoutMs)
+        } else attemptTimeoutMs
+        return deadlineAfter(createdAt, budget)
+    }
+
     private fun newAttemptDeadline(): MonotonicTimestamp =
         deadlineAfter(decisionNow(), attemptTimeoutMs)
 
@@ -3118,13 +3130,14 @@ internal class SignalingControlCoordinator(
 
     private fun createTargetedTransportRace(
         attempt: ConnectionAttempt,
-        preferredTransportOpened: Boolean = true
+        preferredTransportOpened: Boolean = true,
+        startedAt: MonotonicTimestamp? = null
     ): TargetedTransportRace {
         val fallbackMilestone = attempt.channelPlan.fallbackTransport?.let {
             AttemptMilestone.FallbackTransport(
                 attempt = attempt,
                 transport = it,
-                scheduledAt = fallbackAt(attempt)
+                scheduledAt = fallbackAt(attempt, startedAt)
             )
         }
         return TargetedTransportRace(
@@ -3271,8 +3284,11 @@ internal class SignalingControlCoordinator(
         )
     }
 
-    private fun fallbackAt(attempt: ConnectionAttempt): MonotonicTimestamp {
-        val startedAt = Math.subtractExact(
+    private fun fallbackAt(
+        attempt: ConnectionAttempt,
+        createdAt: MonotonicTimestamp? = null
+    ): MonotonicTimestamp {
+        val startedAt = createdAt?.elapsedRealtimeMs ?: Math.subtractExact(
             attempt.deadlineElapsedRealtimeMs,
             attemptTimeoutMs
         )
