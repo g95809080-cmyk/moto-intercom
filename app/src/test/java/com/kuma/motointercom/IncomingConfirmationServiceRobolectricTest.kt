@@ -221,8 +221,9 @@ internal class IncomingConfirmationServiceFixture(val localDeviceId: String = UU
     }
 
     fun stopRuntime() { service.onStartCommand(IntercomService.stopIntent(service), 0, 2) }
-    fun activePrompt() = field("activeIncomingPrompt").get(service) as IncomingConfirmationPrompt?
-    fun cachePrompt(prompt: IncomingConfirmationPrompt) { field("activeIncomingPrompt").set(service, prompt) }
+    fun activePrompt() = surface().activePrompt
+    fun cachePrompt(prompt: IncomingConfirmationPrompt) { surface().activePrompt = prompt }
+    private fun surface() = field("incomingConfirmationSurface").get(service) as IncomingConfirmationSurface
     fun scheduledPrompt(): IncomingConfirmationPrompt? {
         val scheduler = field("incomingConfirmationScheduler").get(service)
         val scheduled = IncomingConfirmationDeadlineScheduler::class.java.getDeclaredField("scheduled")

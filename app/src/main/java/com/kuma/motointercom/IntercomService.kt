@@ -158,6 +158,7 @@ class IntercomService : Service() {
 
     private val binder = LocalBinder()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val notifications by lazy { SessionNotificationFactory(this) }
     private val sessions = SessionGeneration()
     private val automaticRecoveryPolicy = AutomaticRecoveryPolicy()
     private val recoveryCleanupCoordinator = RecoveryCleanupCoordinator(
@@ -267,6 +268,39 @@ class IntercomService : Service() {
         }
     )
 
+    private val confirmationHost = object : IncomingConfirmationHost {
+        override fun isPromptCurrent(prompt: IncomingConfirmationPrompt): Boolean =
+            isCurrentIncomingConfirmation(prompt)
+
+        override fun isAppForeground(): Boolean = appInForeground
+
+        override fun showInApp(prompt: IncomingConfirmationPrompt): Boolean {
+            val current = listener ?: return false
+            current.onIncomingConfirmation(prompt)
+            return true
+        }
+
+        override fun cancelInApp(nonce: String) {
+            listener?.onIncomingConfirmationCanceled(nonce)
+        }
+
+        override fun notificationAvailable(): Boolean = isIncomingNotificationAvailable()
+
+        override fun notificationManager(): NotificationManager? =
+            getSystemService(NotificationManager::class.java)
+
+        override fun buildNotification(prompt: IncomingConfirmationPrompt): Notification =
+            buildIncomingConfirmationNotification(prompt)
+
+        override fun onSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
+            reportConfirmationSurfaceUnavailable(prompt)
+        }
+
+        override fun onError(error: Throwable) = handleError(error)
+    }
+
+    private lateinit var incomingConfirmationSurface: IncomingConfirmationSurface
+
     private var listener: Listener? = null
     private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
@@ -298,7 +332,6 @@ class IntercomService : Service() {
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
     private var appInForeground = false
-    private var activeIncomingPrompt: IncomingConfirmationPrompt? = null
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
     private var legacyOwnership: Any? = null
@@ -320,6 +353,10 @@ class IntercomService : Service() {
             onError = ::handleError,
             elapsedRealtime = SystemClock::elapsedRealtime,
             automaticRecoveryPolicy = automaticRecoveryPolicy
+        )
+        incomingConfirmationSurface = IncomingConfirmationSurface(
+            incomingConfirmationScheduler,
+            confirmationHost
         )
         serviceScope.launch {
             orchestrator.state.collect { state ->
@@ -439,14 +476,12 @@ class IntercomService : Service() {
     }
 
     private fun replayActiveIncomingConfirmation(target: Listener) {
-        val prompt = activeIncomingPrompt
-            ?.takeIf { it.surface == ConfirmationSurface.IN_APP }
-            ?.takeIf(::isCurrentIncomingConfirmation)
-            ?: return
-        try {
-            target.onIncomingConfirmation(prompt)
-        } catch (t: Throwable) {
-            handleError(t)
+        incomingConfirmationSurface.replay { prompt ->
+            try {
+                target.onIncomingConfirmation(prompt)
+            } catch (t: Throwable) {
+                handleError(t)
+            }
         }
     }
 
@@ -2295,65 +2330,19 @@ class IntercomService : Service() {
     }
 
     private fun publishIncomingConfirmation(prompt: IncomingConfirmationPrompt) {
-        if (!isCurrentIncomingConfirmation(prompt)) return
-        activeIncomingPrompt = prompt
-        incomingConfirmationScheduler.schedule(prompt)
-        when (prompt.surface) {
-            ConfirmationSurface.IN_APP -> {
-                val currentListener = listener
-                if (!appInForeground || currentListener == null) {
-                    reportConfirmationSurfaceUnavailable(prompt)
-                    return
-                }
-                try {
-                    currentListener.onIncomingConfirmation(prompt)
-                } catch (t: Throwable) {
-                    handleError(t)
-                    reportConfirmationSurfaceUnavailable(prompt)
-                }
-            }
-            ConfirmationSurface.NOTIFICATION -> {
-                if (!isIncomingNotificationAvailable()) {
-                    reportConfirmationSurfaceUnavailable(prompt)
-                    return
-                }
-                try {
-                    val manager = getSystemService(NotificationManager::class.java)
-                        ?: throw IllegalStateException("NotificationManager is unavailable")
-                    manager.notify(
-                        INCOMING_NOTIFICATION_ID,
-                        buildIncomingConfirmationNotification(prompt)
-                    )
-                } catch (t: Throwable) {
-                    handleError(t)
-                    reportConfirmationSurfaceUnavailable(prompt)
-                }
-            }
-        }
+        incomingConfirmationSurface.publish(prompt)
     }
 
     private fun cancelIncomingConfirmation(effect: SessionEffect.CancelIncomingConfirmation) {
-        incomingConfirmationScheduler.cancel(
+        incomingConfirmationSurface.cancel(
             effect.runtimeSessionId,
             effect.attemptId,
             effect.actionNonce
         )
-        activeIncomingPrompt
-            ?.takeIf { it.runtimeSessionId == effect.runtimeSessionId }
-            ?.takeIf { it.attemptId == effect.attemptId }
-            ?.takeIf { it.actionNonce == effect.actionNonce }
-            ?: return
-        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
-        activeIncomingPrompt = null
-        listener?.onIncomingConfirmationCanceled(effect.actionNonce)
     }
 
     private fun cancelAllIncomingConfirmationSurfaces() {
-        val nonce = activeIncomingPrompt?.actionNonce
-        incomingConfirmationScheduler.cancel()
-        activeIncomingPrompt = null
-        getSystemService(NotificationManager::class.java)?.cancel(INCOMING_NOTIFICATION_ID)
-        if (nonce != null) listener?.onIncomingConfirmationCanceled(nonce)
+        incomingConfirmationSurface.cancelAll()
     }
 
     private fun reportConfirmationSurfaceUnavailable(prompt: IncomingConfirmationPrompt) {
@@ -2848,26 +2837,8 @@ class IntercomService : Service() {
         }
     }
 
-    private fun isIncomingNotificationAvailable(): Boolean {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return false
-        }
-        val manager = getSystemService(NotificationManager::class.java) ?: return false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !manager.areNotificationsEnabled()) {
-            return false
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = manager.getNotificationChannel(INCOMING_CHANNEL_ID)
-            if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
-                return false
-            }
-        }
-        return true
-    }
+    private fun isIncomingNotificationAvailable(): Boolean =
+        notifications.incomingConfirmationAvailable()
 
     private fun updateNotification() {
         val notification = buildNotification()
@@ -2886,73 +2857,28 @@ class IntercomService : Service() {
             ?.notify(NOTIFICATION_ID, notification)
     }
 
-    private fun buildNotification(): Notification {
-        ensureNotificationChannel()
-        val notificationText = foregroundNotificationText(
-            orchestrator.state.value,
-            lastStatus,
-            audioInterruptionState
-        )
-
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("摩声")
-            .setContentText(notificationText)
-            .setStyle(Notification.BigTextStyle().bigText(notificationText))
-            .setOngoing(running)
-            .setContentIntent(contentIntent)
-            .build()
-    }
+    private fun buildNotification(): Notification = notifications.statusNotification(
+        orchestrator.state.value,
+        lastStatus,
+        audioInterruptionState,
+        running
+    )
 
     private fun buildIncomingConfirmationNotification(
         prompt: IncomingConfirmationPrompt
     ): Notification {
-        ensureIncomingNotificationChannel()
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val acceptIntent = incomingConfirmationPendingIntent(prompt, accepted = true)
-        val rejectIntent = incomingConfirmationPendingIntent(prompt, accepted = false)
-        val riderName = prompt.peer.nickname.ifBlank { "附近车友" }
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, INCOMING_CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        return builder
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("$riderName 请求加入对讲")
-            .setContentText("请在 15 秒内接受或拒绝")
-            .setStyle(
-                Notification.BigTextStyle().bigText(
-                    incomingConfirmationNotificationMessage(prompt.peer.deviceName)
-                )
-            )
-            .setCategory(Notification.CATEGORY_CALL)
-            .setPriority(Notification.PRIORITY_HIGH)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setOngoing(false)
-            .setAutoCancel(false)
-            .setContentIntent(contentIntent)
-            .addAction(0, "拒绝本次", rejectIntent)
-            .addAction(0, "接受", acceptIntent)
-            .build()
+        return notifications.incomingConfirmationNotification(
+            prompt = prompt,
+            contentIntent = contentIntent,
+            acceptIntent = incomingConfirmationPendingIntent(prompt, accepted = true),
+            rejectIntent = incomingConfirmationPendingIntent(prompt, accepted = false)
+        )
     }
 
     private fun incomingConfirmationPendingIntent(
@@ -2964,37 +2890,6 @@ class IntercomService : Service() {
             0,
             incomingConfirmationActionIntent(this, prompt, accepted),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "对讲状态提示",
-                NotificationManager.IMPORTANCE_LOW
-            )
-        )
-    }
-
-    private fun ensureIncomingNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(INCOMING_CHANNEL_ID) != null) return
-        manager.createNotificationChannel(
-            NotificationChannel(
-                INCOMING_CHANNEL_ID,
-                "车友连接请求",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "陌生车友的接受与拒绝操作"
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
         )
     }
 
@@ -3029,10 +2924,11 @@ class IntercomService : Service() {
         private const val ACTION_URI_AUTHORITY = "incoming"
         private const val ACTION_PATH_ACCEPT = "accept"
         private const val ACTION_PATH_REJECT = "reject"
-        private const val CHANNEL_ID = "intercom_status"
-        private const val INCOMING_CHANNEL_ID = "incoming_confirmation"
-        private const val NOTIFICATION_ID = 2601
-        private const val INCOMING_NOTIFICATION_ID = 2602
+        private const val CHANNEL_ID = SessionNotificationFactory.STATUS_CHANNEL_ID
+        private const val INCOMING_CHANNEL_ID = SessionNotificationFactory.INCOMING_CHANNEL_ID
+        private const val NOTIFICATION_ID = SessionNotificationFactory.STATUS_NOTIFICATION_ID
+        private const val INCOMING_NOTIFICATION_ID =
+            SessionNotificationFactory.INCOMING_NOTIFICATION_ID
         private const val AUDIO_STANDBY_STATUS = "当前音频源：待机"
         private const val AUDIO_EARPIECE_STATUS = "当前音频源：手机听筒"
         private const val AUDIO_SPEAKER_STATUS = "当前音频源：手机外放"
@@ -3094,316 +2990,3 @@ class IntercomService : Service() {
         }
     }
 }
-
-internal fun canApplyAttemptCallback(
-    accepted: Boolean,
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    expectedAttempt: ConnectionAttempt
-): Boolean = accepted && sessionCurrent && currentAttempt == expectedAttempt
-
-internal fun canRegisterControlChannel(
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    session: SignalingSessionV2,
-    currentState: IntercomState? = null,
-    originFollowsCurrentAttempt: Boolean = false
-): Boolean {
-    val attempt = session.originatingAttempt
-    val recoveryAttempt = (currentState as? IntercomState.Recovering)?.attempt
-    return !session.isClosed &&
-        sessionCurrent &&
-        (
-            recoveryAttempt == null ||
-                (currentAttempt == recoveryAttempt && !isNonTargetRecoveryChannel(currentState, session.targetLock))
-            ) &&
-        (attempt == null || currentAttempt == attempt || originFollowsCurrentAttempt &&
-            currentAttempt != null && currentAttempt.runtimeSessionId == attempt.runtimeSessionId &&
-            currentAttempt.targetLock == attempt.targetLock &&
-            currentAttempt.deadlineElapsedRealtimeMs == attempt.deadlineElapsedRealtimeMs &&
-            session.requestRole == RequestRole.RESPONDER && session.wireRequestKey.attemptId == currentAttempt.id &&
-            session.channel.transport in currentAttempt.channelPlan) &&
-        (attempt == null || session.channel.transport in attempt.channelPlan) &&
-        (attempt == null || attempt.targetLock == session.targetLock) &&
-        session.peer.isVerifiedFor(session.targetLock)
-}
-
-internal fun canInstallControlSession(
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    existingSession: SignalingSessionV2?,
-    session: SignalingSessionV2,
-    currentState: IntercomState? = null,
-    originFollowsCurrentAttempt: Boolean = false
-): Boolean = existingSession == null &&
-    canRegisterControlChannel(sessionCurrent, currentAttempt, session, currentState, originFollowsCurrentAttempt)
-
-internal enum class ControlChannelAdmissionOutcome {
-    ADMITTED,
-    REJECTED,
-    REJECTED_NON_TARGET_WIFI_DIRECT
-}
-
-internal fun admitControlSession(
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    existingSession: SignalingSessionV2?,
-    session: SignalingSessionV2,
-    currentState: IntercomState? = null,
-    originFollowsCurrentAttempt: Boolean = false,
-    onRejectedNonTargetWifiDirect: (ConnectionAttempt, TargetLock) -> Unit
-): ControlChannelAdmissionOutcome {
-    if (
-        canInstallControlSession(
-            sessionCurrent,
-            currentAttempt,
-            existingSession,
-            session,
-            currentState,
-            originFollowsCurrentAttempt
-        )
-    ) {
-        return ControlChannelAdmissionOutcome.ADMITTED
-    }
-
-    val recoveryAttempt = (currentState as? IntercomState.Recovering)?.attempt
-    val rejectedNonTargetWifiDirect =
-        session.channel.transport == Transport.WIFI_DIRECT &&
-            recoveryAttempt != null &&
-            recoveryAttempt.targetLock != session.targetLock
-    session.close()
-    if (rejectedNonTargetWifiDirect) {
-        onRejectedNonTargetWifiDirect(requireNotNull(recoveryAttempt), session.targetLock)
-        return ControlChannelAdmissionOutcome.REJECTED_NON_TARGET_WIFI_DIRECT
-    }
-    return ControlChannelAdmissionOutcome.REJECTED
-}
-
-internal fun isNonTargetRecoveryChannel(
-    currentState: IntercomState?,
-    targetLock: TargetLock
-): Boolean = (currentState as? IntercomState.Recovering)
-    ?.attempt
-    ?.targetLock
-    ?.let { it != targetLock } == true
-
-internal fun canExecuteAbortAttemptEffect(
-    effect: SessionEffect.AbortAttemptAndResumeDiscovery,
-    currentState: IntercomState,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    pendingInbound: PendingInboundRequest?,
-    terminalOutcome: ConnectionAttemptTerminalOutcome?
-): Boolean = currentState == IntercomState.Discovering(effect.runtimeSessionId) &&
-    currentAttempt == null &&
-    activeAttempt == null &&
-    pendingInbound == null &&
-    terminalOutcome != null
-
-internal fun canExecuteRefreshDiscoveryEffect(
-    effect: SessionEffect.RefreshDiscovery,
-    currentState: IntercomState,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    pendingInbound: PendingInboundRequest?
-): Boolean = canResumePassiveDiscovery(
-    effect.runtimeSessionId,
-    currentState,
-    currentAttempt,
-    activeAttempt,
-    pendingInbound
-)
-
-internal fun canResumePassiveDiscovery(
-    runtimeSessionId: RuntimeSessionId,
-    currentState: IntercomState,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    pendingInbound: PendingInboundRequest?
-): Boolean = currentState == IntercomState.Discovering(runtimeSessionId) &&
-    currentAttempt == null &&
-    activeAttempt == null &&
-    pendingInbound == null
-
-internal fun canFinalizeActiveSessionReleaseEffect(
-    effect: SessionEffect.ReleaseActiveSessionAndContinueDiscovery,
-    currentState: IntercomState,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    pendingInbound: PendingInboundRequest?
-): Boolean = currentState == IntercomState.Discovering(effect.attempt.runtimeSessionId) &&
-    currentAttempt == null &&
-    activeAttempt == null &&
-    pendingInbound == null
-
-internal fun canDeliverRuntimeAudioCallback(
-    running: Boolean,
-    activeRuntimeSessionId: RuntimeSessionId?,
-    callbackRuntimeSessionId: RuntimeSessionId
-): Boolean = running && activeRuntimeSessionId == callbackRuntimeSessionId
-
-internal fun controlSendCompletionEvent(
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId,
-    channelId: ControlChannelId,
-    messageType: SignalingMessageTypeV2,
-    result: Result<Unit>
-): SessionEvent = result.fold(
-    onSuccess = {
-        SessionEvent.SignalingMessageSent(
-            runtimeSessionId,
-            attemptId,
-            channelId,
-            messageType
-        )
-    },
-    onFailure = { failure ->
-        SessionEvent.SignalingSendFailed(
-            runtimeSessionId,
-            attemptId,
-            channelId,
-            messageType,
-            failure.message.orEmpty()
-        )
-    }
-)
-
-internal fun canDeliverDecodedControlEnvelope(
-    sessionCurrent: Boolean,
-    sessionClosed: Boolean,
-    registeredSessionMatches: Boolean
-): Boolean {
-    // The frame was decoded and identity/phase checked before this main-thread seam.
-    // A following EOF may close the reader, but cannot invalidate that earlier frame.
-    return sessionCurrent && registeredSessionMatches
-}
-
-internal fun canExecuteRestartDiscoveryEffect(
-    effect: SessionEffect.RestartDiscovery,
-    currentState: IntercomState,
-    currentAttempt: ConnectionAttempt?
-): Boolean = currentState is IntercomState.Recovering &&
-    effect.runtimeSessionId == effect.attempt.runtimeSessionId &&
-    currentState.attempt == effect.attempt &&
-    currentAttempt == effect.attempt
-
-internal fun canExecuteResetWirelessEnvironmentEffect(
-    effect: SessionEffect.ResetWirelessEnvironment,
-    currentState: IntercomState,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    pendingInbound: PendingInboundRequest?
-): Boolean = currentState is IntercomState.Resetting &&
-    currentState.runtimeSessionId == effect.runtimeSessionId &&
-    currentState.targetDeviceId == effect.targetDeviceId &&
-    currentState.failedAttemptId == effect.failedAttemptId &&
-    currentState.consecutiveFinalFailures == effect.consecutiveFinalFailures &&
-    currentAttempt == null &&
-    activeAttempt == null &&
-    pendingInbound == null
-
-internal fun canRestartRecoveryAttempt(
-    expectedAttempt: ConnectionAttempt?,
-    currentAttempt: ConnectionAttempt?,
-    now: MonotonicTimestamp
-): Boolean = if (expectedAttempt == null) {
-    currentAttempt == null
-} else {
-    expectedAttempt.hasSameImmutableIdentity(currentAttempt) &&
-        expectedAttempt.remainingMillis(now) > 0L
-}
-
-internal fun SignalingSessionV2.toConnectionCandidateContext(
-    attempt: ConnectionAttempt
-): ConnectionCandidateContext? = runCatching {
-    ConnectionCandidateContext(
-        attempt = attempt,
-        channelId = channel.channelId,
-        wireRequestKey = wireRequestKey,
-        targetLock = targetLock,
-        transport = channel.transport,
-        requestRole = requestRole,
-        peer = peer
-    )
-}.getOrNull()
-
-internal fun SignalingSessionV2.verifiedChannel() = VerifiedControlChannel(
-    channel.channelId, channel.transport, requestRole, wireRequestKey, targetLock, peer, originatingAttempt
-)
-
-internal fun SignalingSessionV2.matchesControlHandle(
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId,
-    channelId: ControlChannelId
-): Boolean = pinnedIdentity.localSessionId == runtimeSessionId &&
-    wireRequestKey.attemptId == attemptId &&
-    channel.channelId == channelId
-
-internal fun SignalingSessionV2.matchesControlHandle(
-    runtimeSessionId: RuntimeSessionId,
-    attemptId: ConnectionAttemptId,
-    channelId: ControlChannelId,
-    targetLock: TargetLock
-): Boolean = matchesControlHandle(runtimeSessionId, attemptId, channelId) &&
-    this.targetLock == targetLock
-
-internal fun SignalingSessionV2.hasCandidateIdentity(
-    candidate: ConnectionCandidateContext
-): Boolean = matchesControlHandle(
-        candidate.runtimeSessionId,
-        candidate.attemptId,
-        candidate.channelId
-    ) &&
-    wireRequestKey == candidate.wireRequestKey &&
-    targetLock == candidate.targetLock &&
-    channel.transport == candidate.transport &&
-    requestRole == candidate.requestRole &&
-    peer == candidate.peer
-
-internal fun SignalingSessionV2.matchesCandidate(
-    candidate: ConnectionCandidateContext
-): Boolean = !isClosed && hasCandidateIdentity(candidate)
-
-internal fun canUseMediaCandidate(
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    candidate: ConnectionCandidateContext,
-    session: SignalingSessionV2,
-    expectedRole: WebRtcRole? = null
-): Boolean = sessionCurrent &&
-    isCurrentMediaCandidate(currentAttempt, activeAttempt, candidate) &&
-    session.matchesCandidate(candidate) &&
-    (expectedRole == null || session.requestRole.webRtcRole == expectedRole)
-
-internal fun canBufferAcceptedMedia(
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    activeAttempt: AttemptChannelSet?,
-    candidate: ConnectionCandidateContext,
-    session: SignalingSessionV2,
-    now: MonotonicTimestamp
-): Boolean = sessionCurrent && session.matchesCandidate(candidate) &&
-    !candidate.attempt.isExpiredAt(now) && currentAttempt == candidate.attempt &&
-    activeAttempt?.let {
-        it.attempt == candidate.attempt && it.phase == SignalingAttemptPhase.ACCEPTING &&
-            it.terminalOutcome == null && it.mediaOwnerChannelId == candidate.channelId &&
-            candidate.channelId in it.channelIds && it.wireRequestKey == candidate.wireRequestKey && it.peer == candidate.peer
-    } == true && session.requestRole == RequestRole.RESPONDER &&
-    session.phase == SignalingPhase.READY_TO_SEND_ANSWER
-
-internal fun canStartWebRtc(
-    sessionCurrent: Boolean,
-    currentAttempt: ConnectionAttempt?,
-    expectedAttempt: ConnectionAttempt,
-    session: SignalingSessionV2,
-    expectedRole: WebRtcRole
-): Boolean = !session.isClosed &&
-    sessionCurrent &&
-    currentAttempt == expectedAttempt &&
-    session.wireRequestKey.attemptId == expectedAttempt.id &&
-    session.channel.transport in expectedAttempt.channelPlan &&
-    session.targetLock == expectedAttempt.targetLock &&
-    session.peer.isVerifiedFor(expectedAttempt.targetLock) &&
-    session.requestRole.webRtcRole == expectedRole &&
-    session.phase in setOf(SignalingPhase.ACCEPTED, SignalingPhase.READY_TO_SEND_ANSWER)
