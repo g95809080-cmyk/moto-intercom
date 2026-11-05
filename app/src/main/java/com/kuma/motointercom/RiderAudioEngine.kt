@@ -121,6 +121,17 @@ internal class RiderAudioEngine(
     private val audioControlLock = Any()
     private var versionedAudioControls = initialAudioControls.normalized()
     private var audioControls = versionedAudioControls.settings
+    private val rnnoiseEnabled = initialAudioControls.settings.rnnoiseEnabled
+    private var rnnoise: RnNoiseProcessor? = null
+    // Accessed only under audioControlLock, after the current-producer check.
+    private var rnnoiseRevision = Long.MIN_VALUE
+    private var rnnoiseProducer: Thread? = null
+    private var rnnoiseSending = false
+    private var rnnoiseResetPending = true
+    private var rnnoiseFrames = 0L
+    private var rnnoiseTotalNs = 0L
+    private var rnnoiseMaxNs = 0L
+    private var rnnoiseSlowFrames = 0L
     private var voxGate = VoxGate(
         enabled = audioControls.voxEnabled,
         sensitivity = audioControls.voxSensitivity
@@ -147,9 +158,13 @@ internal class RiderAudioEngine(
         if (closed.get()) return
         val normalized = controls.normalized()
         val accepted = synchronized(audioControlLock) {
+            if (closed.get()) return@synchronized false
             if (normalized.revision <= versionedAudioControls.revision) {
                 return@synchronized false
             }
+            require(normalized.settings.rnnoiseEnabled == rnnoiseEnabled) { "停止摩声后再切换降噪模式" }
+            if (audioControls.muted != normalized.settings.muted ||
+                audioControls.voxEnabled != normalized.settings.voxEnabled) rnnoiseResetPending = true
             if (
                 audioControls.voxEnabled != normalized.settings.voxEnabled ||
                 audioControls.voxSensitivity != normalized.settings.voxSensitivity
@@ -210,6 +225,7 @@ internal class RiderAudioEngine(
     private fun initializeRtc() {
         try {
             require(hasRequiredPermissions(appContext)) { "缺少 RECORD_AUDIO 运行时权限" }
+            if (rnnoiseEnabled) rnnoise = RnNoiseProcessor()
             initFactory()
             createLocalAudioTrack()
             engineState = EngineState.READY
@@ -356,6 +372,12 @@ internal class RiderAudioEngine(
         source?.let { dispose(it::dispose) }
         connectionFactory?.let { dispose(it::dispose) }
         deviceModule?.let { dispose(it::release) }
+        synchronized(audioControlLock) {
+            rnnoise?.let { dispose(it::close) }
+            rnnoise = null
+            rnnoiseSending = false
+            rnnoiseProducer = null
+        }
         failure?.let { throw it }
     }
 
@@ -409,7 +431,7 @@ internal class RiderAudioEngine(
                     recordingOwner.start(thread, { NativeCaptureDiagnostics.isCurrentProducer(audioDeviceModule, true, thread) }) {
                         ioEvidence.recording(true)
                         pcmFormatLogged.set(false)
-                        postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=software-requested") }
+                        postRuntimeMain { Log.i(TAG, "ADM recording started; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}; NS=${if (rnnoiseEnabled) "RNNoise" else "WebRTC-software"}") }
                     }
                 }
                 override fun onWebRtcAudioRecordStop() {
@@ -443,19 +465,24 @@ internal class RiderAudioEngine(
                         if (pcmFormatLogged.compareAndSet(false, true)) {
                             postRuntimeMain { Log.i(TAG, "ADM captured PCM format=$format rate=$rate channels=$channels") }
                         }
-                        handleCapturedPcm(format, buffer, gate)
+                        handleCapturedPcm(format, channels, rate, buffer, gate)
                     }
                 } catch (error: Throwable) {
                     PcmTransmitGate.silence(buffer)
                     if (captureFailed.compareAndSet(false, true)) postEngineError(error)
                 }
             }
-            // Keep AEC; use the pinned native software NS path for every input, including SCO.
+            // Keep AEC; software NS is selected when creating the audio source below.
             // Declared hardware support cannot prove the effect was created/enabled on this input.
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(false)
             .setUseStereoInput(false)
             .setUseStereoOutput(false)
+            .apply {
+                // Both Beta modes share this request for a controlled comparison.
+                // Android performs device-rate conversion; the callback verifies the actual format.
+                if (BuildConfig.RNNOISE_BETA || rnnoiseEnabled) setInputSampleRate(48_000)
+            }
             .createAudioDeviceModule()
 
         factory = PeerConnectionFactory.builder()
@@ -505,13 +532,14 @@ internal class RiderAudioEngine(
         val constraints = MediaConstraints().apply {
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation2", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", (!rnnoiseEnabled).toString()))
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
         }
 
         audioSource = factoryOrThrow().createAudioSource(constraints)
+        Log.i(TAG, "Noise reduction=${if (rnnoiseEnabled) "RNNoise" else "WebRTC"}; capture48k=${BuildConfig.RNNOISE_BETA || rnnoiseEnabled}; AEC/AGC retained")
         val initialApplication = synchronized(audioControlLock) {
             currentAudioControlApplicationLocked()
         }
@@ -536,8 +564,9 @@ internal class RiderAudioEngine(
         setOpusBitrate(localAudioSender)
     }
 
-    private fun handleCapturedPcm(format: Int, buffer: java.nio.ByteBuffer, gateRevision: Long) {
-        if (closed.get() || !audioIoGate.allows(gateRevision) || format != AudioFormat.ENCODING_PCM_16BIT) {
+    private fun handleCapturedPcm(format: Int, channels: Int, rate: Int, buffer: java.nio.ByteBuffer, gateRevision: Long) {
+        if (closed.get() || !audioIoGate.allows(gateRevision) ||
+            (format != AudioFormat.ENCODING_PCM_16BIT && !rnnoiseEnabled)) {
             PcmTransmitGate.silence(buffer)
             return
         }
@@ -551,12 +580,42 @@ internal class RiderAudioEngine(
                     PcmTransmitGate.silence(buffer)
                     return
                 }
+                if (rnnoiseEnabled) {
+                    check(format == AudioFormat.ENCODING_PCM_16BIT && rate == 48_000 && channels == 1 && buffer.remaining() == 960) {
+                        "RNNoise 需要 48 kHz 单声道录音；请停止摩声后切回 WebRTC 降噪。当前 rate=$rate channels=$channels bytes=${buffer.remaining()}"
+                    }
+                }
                 val decision = voxGate.update(energy, now)
                 gateState = decision.state
                 // Controls and actual frame mutation share a lock, so an acknowledged mute
                 // cannot leak a subsequent frame through a stale queued RTC task.
                 if (closed.get() || !audioIoGate.allows(gateRevision) || effectiveTrackVolume(audioControls, decision.trackVolume) == 0.0) {
                     PcmTransmitGate.silence(buffer)
+                    if (rnnoiseSending) rnnoise?.reset()
+                    rnnoiseSending = false
+                } else if (rnnoiseEnabled) {
+                    val processor = checkNotNull(rnnoise) { "RNNoise 尚未就绪" }
+                    val producer = Thread.currentThread()
+                    if (rnnoiseResetPending || rnnoiseRevision != gateRevision ||
+                        rnnoiseProducer !== producer || !rnnoiseSending) {
+                        processor.reset()
+                        rnnoiseResetPending = false
+                        rnnoiseRevision = gateRevision
+                        rnnoiseProducer = producer
+                    }
+                    val started = SystemClock.elapsedRealtimeNanos()
+                    processor.process(buffer, rate, channels)
+                    val elapsed = SystemClock.elapsedRealtimeNanos() - started
+                    rnnoiseSending = true
+                    rnnoiseFrames++
+                    rnnoiseTotalNs += elapsed
+                    rnnoiseMaxNs = maxOf(rnnoiseMaxNs, elapsed)
+                    if (elapsed > 10_000_000L) rnnoiseSlowFrames++
+                    if (rnnoiseFrames % 1_000L == 0L) {
+                        val diagnostic = "RNNoise frames=$rnnoiseFrames avgUs=${rnnoiseTotalNs / rnnoiseFrames / 1_000} maxUs=${rnnoiseMaxNs / 1_000} over10ms=$rnnoiseSlowFrames"
+                        postRuntimeMain { Log.i(TAG, diagnostic) }
+                    }
+                    if (closed.get() || !audioIoGate.allows(gateRevision)) PcmTransmitGate.silence(buffer)
                 }
                 VoxSampleResult(
                     decision = decision,

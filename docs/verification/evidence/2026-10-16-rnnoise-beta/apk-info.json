@@ -1,0 +1,17 @@
+{
+  "file": "MotoCom-RNNoise-1.3.0-beta.1+dc7a45d.apk",
+  "bytes": 58258914,
+  "sha256": "c0dd4afcf6ed6f456c3726c567dd0c3825b28270eab2420eade72e5113c58391",
+  "package": "com.kuma.motointercom.rnnoise.beta",
+  "versionName": "1.3.0-beta.1+dc7a45d",
+  "versionCode": 9,
+  "functionalSource": "dc7a45d01fc837f795cdcbffa5bf7616a25e5e85",
+  "signing": "Android Debug; APK Signature Scheme v2 verified",
+  "certificateSha256": "7f20f38dc1d7372cde34cac6e0e17d80ec995ac298c298fd0d24605e1a8070f3",
+  "zipAlignment": "PASS: zipalign -c -P 16 4",
+  "abis": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86_64"
+  ]
+}

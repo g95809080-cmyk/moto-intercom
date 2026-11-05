@@ -1,0 +1,3 @@
+arm64-v8a bytes=3863072 LOAD alignment=0x4000
+armeabi-v7a bytes=3732320 LOAD alignment=0x4000
+x86_64 bytes=3874544 LOAD alignment=0x4000

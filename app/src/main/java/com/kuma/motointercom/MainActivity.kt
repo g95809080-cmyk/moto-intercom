@@ -55,7 +55,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             intercomService?.setAutomaticReconnectEnabled(automaticReconnectEnabled)
             intercomService?.setVoxSettings(
                 preferredAudioControls.voxEnabled,
-                preferredAudioControls.voxSensitivity
+                preferredAudioControls.voxSensitivity,
+                preferredAudioControls.rnnoiseEnabled
             )
             replayingServiceSnapshot = true
             try {
@@ -171,6 +172,11 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 )
             },
             onSelectAudioRoute = ::savePreferredAudioRoute,
+            onSetRnnoiseEnabled = { enabled ->
+                if (intercomState == IntercomState.Offline) {
+                    savePreferredVoxSettings(preferredAudioControls.copy(rnnoiseEnabled = enabled))
+                }
+            },
             onAutomaticReconnectChanged = ::saveAutomaticReconnectSetting,
             onSetPairingPreferred = { deviceId, preferred ->
                 val service = intercomService
@@ -444,7 +450,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         if (service == null) {
             screen.setAudioControls(idleAudioControlSnapshot(next))
         } else {
-            service.setVoxSettings(next.voxEnabled, next.voxSensitivity)
+            service.setVoxSettings(next.voxEnabled, next.voxSensitivity, next.rnnoiseEnabled)
         }
     }
 

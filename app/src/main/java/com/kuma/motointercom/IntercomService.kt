@@ -372,7 +372,8 @@ class IntercomService : Service() {
                     voxSensitivity = intent.getIntExtra(
                         EXTRA_VOX_SENSITIVITY,
                         audioControls.voxSensitivity
-                    )
+                    ),
+                    rnnoiseEnabled = intent.getBooleanExtra(EXTRA_RNNOISE_ENABLED, BuildConfig.RNNOISE_BETA)
                 )
                 setAutomaticReconnectEnabled(
                     intent.getBooleanExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, true)
@@ -462,12 +463,15 @@ class IntercomService : Service() {
         }
     }
 
-    internal fun setVoxSettings(voxEnabled: Boolean, voxSensitivity: Int) {
+    internal fun setVoxSettings(voxEnabled: Boolean, voxSensitivity: Int, rnnoiseEnabled: Boolean? = null) {
         dispatchOnMain {
             applyAudioControls(
                 audioControls.copy(
                     voxEnabled = voxEnabled,
-                    voxSensitivity = voxSensitivity
+                    voxSensitivity = voxSensitivity,
+                    // NS is configured when the source is created. Never claim a live switch.
+                    rnnoiseEnabled = if (!running && BuildConfig.RNNOISE_BETA)
+                        rnnoiseEnabled ?: audioControls.rnnoiseEnabled else audioControls.rnnoiseEnabled
                 )
             )
         }
@@ -3012,6 +3016,7 @@ class IntercomService : Service() {
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
         private const val EXTRA_VOX_ENABLED = "com.kuma.motointercom.extra.VOX_ENABLED"
         private const val EXTRA_VOX_SENSITIVITY = "com.kuma.motointercom.extra.VOX_SENSITIVITY"
+        private const val EXTRA_RNNOISE_ENABLED = "com.kuma.motointercom.extra.RNNOISE_ENABLED"
         private const val EXTRA_PREFERRED_AUDIO_ROUTE =
             "com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE"
         private const val EXTRA_AUTOMATIC_RECONNECT_ENABLED =
@@ -3058,6 +3063,7 @@ class IntercomService : Service() {
                 .putExtra(EXTRA_RIDER_NAME, riderName)
                 .putExtra(EXTRA_VOX_ENABLED, audioControls.voxEnabled)
                 .putExtra(EXTRA_VOX_SENSITIVITY, audioControls.normalized().voxSensitivity)
+                .putExtra(EXTRA_RNNOISE_ENABLED, audioControls.rnnoiseEnabled)
                 .putExtra(EXTRA_PREFERRED_AUDIO_ROUTE, preferredAudioRoute.name)
                 .putExtra(EXTRA_AUTOMATIC_RECONNECT_ENABLED, automaticReconnectEnabled)
 

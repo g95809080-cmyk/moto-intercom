@@ -1,5 +1,13 @@
 package com.kuma.motointercom
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
@@ -12,6 +20,7 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -26,12 +35,19 @@ class SettingsScreenComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    @Composable
+    private fun ScrollableSettingsTheme(content: @Composable () -> Unit) {
+        MotoComTheme {
+            Column(Modifier.verticalScroll(rememberScrollState())) { content() }
+        }
+    }
+
     @Test
     fun nicknameInputAndSaveUseStateCallbacks() {
         var nickname = ""
         var saved = false
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTheme {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = nickname,
@@ -69,7 +85,7 @@ class SettingsScreenComposeTest {
         var enabled: Boolean? = null
         var sensitivity: Int? = null
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTheme {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -99,7 +115,7 @@ class SettingsScreenComposeTest {
             }
         }
 
-        composeRule.onNodeWithTag("settings_vox_button").performClick()
+        composeRule.onNodeWithTag("settings_vox_button").performScrollTo().performClick()
         composeRule.onNodeWithTag("settings_vox_sensitivity_button")
             .performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
         composeRule.onNodeWithText("HANGOVER").assertTextContains("HANGOVER")
@@ -115,7 +131,7 @@ class SettingsScreenComposeTest {
         var selected: AudioRouteSelection? = null
         var helpCount = 0
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTheme {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -158,7 +174,7 @@ class SettingsScreenComposeTest {
     fun automaticReconnectExposesPersistedSwitchStateAndRealCallback() {
         var requested: Boolean? = null
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTheme {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -196,7 +212,7 @@ class SettingsScreenComposeTest {
     fun helpEntryRoutesARealHelpAction() {
         var helpRequests = 0
         composeRule.setContent {
-            MotoComTheme {
+            ScrollableSettingsTheme {
                 MotoComSettingsScreen(
                     state = SettingsScreenUiState(
                         nickname = "Rider",
@@ -225,5 +241,39 @@ class SettingsScreenComposeTest {
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
 
         composeRule.runOnIdle { assertEquals(1, helpRequests) }
+    }
+
+    @Test
+    fun betaNoiseSwitchUpdatesSelectionAndDisablesWhileRunning() {
+        val state = mutableStateOf(SettingsScreenUiState(
+            nickname = "Rider", nicknameFeedback = "", audioSource = "Audio standby",
+            productState = "Offline", attemptFacts = "No attempt", discoveryCandidates = "No candidates",
+            deviceStatus = "Ready", optionalPermissionNotice = null,
+            showOptionalPermissionCta = false, version = "1.0", rnnoiseEnabled = true
+        ))
+        var requests = 0
+        composeRule.setContent {
+            ScrollableSettingsTheme {
+                MotoComSettingsScreen(
+                    state = state.value, onBack = {}, onNicknameChanged = {}, onSaveNickname = {},
+                    onOptionalPermission = {}, onLogs = {}, onAbout = {}, onHelp = {},
+                    onRnnoiseEnabledChanged = {
+                        requests++
+                        state.value = state.value.copy(rnnoiseEnabled = it)
+                    }
+                )
+            }
+        }
+        val toggle = composeRule.onNodeWithTag("settings_rnnoise_switch")
+        if (!BuildConfig.RNNOISE_BETA) {
+            toggle.assertDoesNotExist()
+            return
+        }
+        toggle.assertIsOn().performScrollTo().performClick()
+        toggle.assertIsOff()
+        composeRule.onNodeWithTag("settings_noise_mode").assertTextContains("当前选择：WebRTC")
+        composeRule.runOnIdle { state.value = state.value.copy(canChangeNoiseReduction = false) }
+        toggle.assertIsNotEnabled().performClick()
+        composeRule.runOnIdle { assertEquals(1, requests) }
     }
 }

@@ -1,0 +1,2 @@
+--------- beginning of main
+10-16 07:45:12.606  2996  3010 I RNNoiseBenchmark: n=1000 avgUs=538.5566 p50Us=261 p95Us=1298 maxUs=25858 over10ms=7

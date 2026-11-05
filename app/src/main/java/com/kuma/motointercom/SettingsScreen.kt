@@ -68,7 +68,9 @@ internal data class SettingsScreenUiState(
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
     val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
     val preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
-    val automaticReconnectEnabled: Boolean = true
+    val automaticReconnectEnabled: Boolean = true,
+    val rnnoiseEnabled: Boolean = false,
+    val canChangeNoiseReduction: Boolean = true
 )
 
 @Composable
@@ -85,6 +87,7 @@ internal fun MotoComSettingsScreen(
     onVoxEnabledChanged: (Boolean) -> Unit = {},
     onVoxSensitivityChanged: (Int) -> Unit = {},
     onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
+    onRnnoiseEnabledChanged: (Boolean) -> Unit = {},
     onAutomaticReconnectChanged: (Boolean) -> Unit = {},
     onAudioSectionPositioned: (Int) -> Unit = {}
 ) {
@@ -157,6 +160,26 @@ internal fun MotoComSettingsScreen(
                     color = colorResource(R.color.motocom_text_secondary),
                     fontSize = 13.sp
                 )
+            }
+        }
+
+        if (BuildConfig.RNNOISE_BETA) {
+            SettingsSectionLabel(stringResource(R.string.rnnoise_beta_section))
+            SettingsPanel {
+                SettingsSwitchRow(
+                    title = stringResource(R.string.rnnoise_beta_switch),
+                    description = stringResource(R.string.rnnoise_beta_switch_description),
+                    icon = R.drawable.ic_mic_24,
+                    tag = "settings_rnnoise_switch",
+                    checked = state.rnnoiseEnabled,
+                    enabled = state.canChangeNoiseReduction,
+                    onCheckedChange = onRnnoiseEnabledChanged
+                )
+                SettingsFact(
+                    stringResource(if (state.rnnoiseEnabled) R.string.rnnoise_selected else R.string.webrtc_selected),
+                    "settings_noise_mode"
+                )
+                SettingsFact(stringResource(R.string.rnnoise_beta_hint), "settings_noise_hint")
             }
         }
 
@@ -435,6 +458,7 @@ private fun SettingsSwitchRow(
     icon: Int,
     tag: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
@@ -443,6 +467,7 @@ private fun SettingsSwitchRow(
             .defaultMinSize(minHeight = 48.dp)
             .toggleable(
                 value = checked,
+                enabled = enabled,
                 role = Role.Switch,
                 onValueChange = onCheckedChange
             )
@@ -465,7 +490,7 @@ private fun SettingsSwitchRow(
             color = colorResource(R.color.motocom_text_primary),
             fontSize = 14.sp
         )
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 

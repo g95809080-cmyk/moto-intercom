@@ -42,7 +42,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Verify Android project
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+        run: ./gradlew --no-daemon testDebugUnitTest testBetaUnitTest lintDebug lintBeta assembleDebug assembleDebugAndroidTest assembleBeta
 
       - name: Upload verification reports
         if: always()
@@ -53,6 +53,7 @@ jobs:
             app/build/reports/
             app/build/test-results/
             app/build/outputs/apk/debug/
+            app/build/outputs/apk/beta/
             app/build/outputs/apk/androidTest/debug/
           if-no-files-found: warn
           retention-days: 14

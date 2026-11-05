@@ -97,9 +97,16 @@ class VoxBackgroundInstrumentationTest {
         } finally { closeAndAwait(first); closeAndAwait(second) }
     }
 
-    @Test fun producerReplacedWhilePcmWaitsForControlsCannotChangeDetector() {
+    @Test fun producerReplacedWhilePcmWaitsForControlsCannotChangeDetector() =
+        rejectedProducerCannotAdvanceState(false)
+
+    @Test fun producerReplacedWhilePcmWaitsCannotAdvanceRnnoise() =
+        rejectedProducerCannotAdvanceState(true)
+
+    private fun rejectedProducerCannotAdvanceState(rnnoise: Boolean) {
         // Real engine method, simulated owner handover; actual native producer is covered above.
-        val engine = RiderAudioEngine(permittedContext())
+        val engine = RiderAudioEngine(permittedContext(), initialAudioControls = VersionedAudioControls(
+            0, AudioControlSettings(voxEnabled = !rnnoise, rnnoiseEnabled = rnnoise)))
         val oldPcm = tone()
         val freshPcm = tone()
         val errors = LinkedBlockingQueue<Throwable>()
@@ -109,11 +116,12 @@ class VoxBackgroundInstrumentationTest {
             val gate = field(engine, "voxGate") as VoxGate
             val before = noiseFloor(gate)
             val handle = RiderAudioEngine::class.java.getDeclaredMethod("handleCapturedPcm",
-                Int::class.javaPrimitiveType, ByteBuffer::class.java, Long::class.javaPrimitiveType).apply { isAccessible = true }
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                ByteBuffer::class.java, Long::class.javaPrimitiveType).apply { isAccessible = true }
             val revision = (field(engine, "audioIoGate") as AudioIoGate).revision()
-            val old = Thread { runCatching { handle.invoke(engine, AudioFormat.ENCODING_PCM_16BIT, oldPcm, revision) }
+            val old = Thread { runCatching { handle.invoke(engine, AudioFormat.ENCODING_PCM_16BIT, 1, 48_000, oldPcm, revision) }
                 .onFailure { errors.offer(it) } }
-            val fresh = Thread { runCatching { handle.invoke(engine, AudioFormat.ENCODING_PCM_16BIT, freshPcm, revision) }
+            val fresh = Thread { runCatching { handle.invoke(engine, AudioFormat.ENCODING_PCM_16BIT, 1, 48_000, freshPcm, revision) }
                 .onFailure { errors.offer(it) } }
             owner.start(old, { true }) {}
             synchronized(field(engine, "audioControlLock")!!) {
@@ -125,10 +133,12 @@ class VoxBackgroundInstrumentationTest {
             old.join(3_000)
             assertFalse("Old PCM did not return", old.isAlive)
             assertEquals("Revoked producer changed detector history", before, noiseFloor(gate), 0.0)
+            if (rnnoise) assertEquals(0L, field(engine, "rnnoiseFrames"))
             assertTrue("Revoked producer leaked PCM", (0 until oldPcm.capacity()).all { oldPcm.get(it) == 0.toByte() })
             fresh.start(); fresh.join(3_000)
             assertFalse(fresh.isAlive)
-            assertTrue("Current producer cannot advance detection", noiseFloor(gate) > before)
+            if (rnnoise) assertEquals(1L, field(engine, "rnnoiseFrames"))
+            else assertTrue("Current producer cannot advance detection", noiseFloor(gate) > before)
             assertTrue("Capture invocation failed: $errors", errors.isEmpty())
         } finally { closeAndAwait(engine) }
     }
