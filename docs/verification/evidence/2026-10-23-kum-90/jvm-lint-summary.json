@@ -1,0 +1,22 @@
+[
+  {
+    "variant": "Debug",
+    "suites": 97,
+    "tests": 816,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "lintErrors": 0,
+    "lintWarnings": 71
+  },
+  {
+    "variant": "Beta",
+    "suites": 97,
+    "tests": 816,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "lintErrors": 0,
+    "lintWarnings": 71
+  }
+]

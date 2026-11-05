@@ -1,0 +1,12 @@
+[
+  {
+    "file": "app-beta.apk",
+    "bytes": 58258927,
+    "sha256": "dca74f66a9972801b137d01e42f26410909cf54acb3a9f0528f41f749a79db7a"
+  },
+  {
+    "file": "app-beta-androidTest.apk",
+    "bytes": 1276278,
+    "sha256": "4aa56ff40817690cead21c474d906118d6e3c3a694678b1fea83085671d91866"
+  }
+]

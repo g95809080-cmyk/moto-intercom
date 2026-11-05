@@ -1,0 +1,2 @@
+apksigner verify: PASS (Android Debug certificate)
+zipalign -c -P 16 4: PASS
