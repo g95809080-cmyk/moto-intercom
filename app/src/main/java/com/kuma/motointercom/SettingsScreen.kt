@@ -106,6 +106,7 @@ internal fun MotoComSettingsScreen(
 
         SettingsSectionLabel(stringResource(R.string.settings_personal_section))
         SettingsPanel {
+            val nicknameLabel = stringResource(R.string.settings_nickname_label)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -113,7 +114,7 @@ internal fun MotoComSettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    stringResource(R.string.settings_nickname_label),
+                    nicknameLabel,
                     color = colorResource(R.color.motocom_text_primary),
                     fontSize = 15.sp
                 )
@@ -137,7 +138,7 @@ internal fun MotoComSettingsScreen(
                             if (state.nickname.isBlank()) {
                                 Text(
                                     stringResource(R.string.edit_text_hint),
-                                    color = colorResource(R.color.motocom_text_muted),
+                                    color = colorResource(R.color.motocom_text_muted_accessible),
                                     fontSize = 14.sp,
                                     textAlign = TextAlign.End
                                 )
@@ -347,7 +348,7 @@ private fun SettingsIconButton(tag: String, description: String, icon: Int, onCl
             .testTag(tag),
         contentAlignment = Alignment.Center
     ) {
-        Icon(painterResource(icon), description, Modifier.size(24.dp), tint = colorResource(R.color.motocom_text_primary))
+        Icon(painterResource(icon), null, Modifier.size(24.dp), tint = colorResource(R.color.motocom_text_primary))
     }
 }
 
