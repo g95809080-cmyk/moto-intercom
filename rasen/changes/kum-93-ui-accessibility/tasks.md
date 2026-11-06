@@ -9,4 +9,4 @@
 - [x] 2.2 运行相关 Compose 定向测试。
 - [x] 2.3 运行完整 JVM、Lint 和 Debug APK 构建。
 - [x] 2.4 固定 Base/Head 执行 `motointercom-product-architect` 只读审查；tree `b005e76850e48a3023cd585157d2485a1d228b16` 结果为 `APPROVED`，P0=0、P1=0。
-- [ ] 2.5 记录真机或模拟器 TalkBack 验收限制并更新 Linear 状态。
+- [x] 2.5 记录真机或模拟器 TalkBack 验收限制并更新 Linear 状态；设备验收仍待执行。

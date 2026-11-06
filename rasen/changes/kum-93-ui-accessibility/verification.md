@@ -21,6 +21,12 @@
 - P1：0。
 - 审查确认旧 P1 已消除：可编辑节点不再用 `contentDescription` 覆盖文本遍历与选区。
 
+## 交付
+
+- Draft PR：https://github.com/g95809080-cmyk/moto-intercom/pull/67
+- Linear：KUM-93 已更新为 `In Review`，验证摘要与待验收限制已记录。
+- GitHub Actions CI：在 PR #67 上运行。
+
 ## 待验收
 
 - `adb devices` 为空，未执行真机或模拟器 TalkBack 验收。
