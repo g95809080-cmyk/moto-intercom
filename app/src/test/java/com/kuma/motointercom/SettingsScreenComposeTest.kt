@@ -1,11 +1,16 @@
 package com.kuma.motointercom
 
+import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
@@ -13,6 +18,7 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -22,7 +28,11 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.text.TextRange
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,6 +88,96 @@ class SettingsScreenComposeTest {
         assertEquals(true, saved)
         composeRule.onNodeWithTag("settings_product_state").assertTextContains("Offline")
         composeRule.onNodeWithText("自动选择 LAN / Wi-Fi Direct").fetchSemanticsNode()
+    }
+
+    @Test
+    fun headerIconButtonsExposeSingleAccessibleLabel() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        composeRule.setContent {
+            ScrollableSettingsTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "",
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        attemptFacts = "No attempt",
+                        discoveryCandidates = "No candidates",
+                        deviceStatus = "Ready",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0"
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = {}
+                )
+            }
+        }
+
+        val backLabel = context.getString(R.string.back_button_description)
+        val saveLabel = context.getString(R.string.settings_save_nickname)
+        composeRule.onAllNodesWithContentDescription(backLabel).assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription(saveLabel).assertCountEquals(1)
+        composeRule.onNodeWithTag("settings_back_button").assertContentDescriptionEquals(
+            backLabel
+        )
+        composeRule.onNodeWithTag("settings_save_nickname_button").assertContentDescriptionEquals(
+            saveLabel
+        )
+    }
+
+    @Test
+    fun nicknameFieldKeepsEditableTextAndSelectionSemantics() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val nickname = mutableStateOf("")
+        composeRule.setContent {
+            ScrollableSettingsTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = nickname.value,
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        attemptFacts = "No attempt",
+                        discoveryCandidates = "No candidates",
+                        deviceStatus = "Ready",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0"
+                    ),
+                    onBack = {},
+                    onNicknameChanged = { nickname.value = it },
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(context.getString(R.string.settings_nickname_label)).assertExists()
+        val field = composeRule.onNodeWithTag("settings_nickname_input")
+        field.performTextInput("Road Captain")
+        composeRule.waitForIdle()
+
+        assertEquals("Road Captain", nickname.value)
+        val config = field.fetchSemanticsNode().config
+        assertEquals("Road Captain", config[SemanticsProperties.EditableText].text)
+        assertFalse(config.contains(SemanticsProperties.ContentDescription))
+        field.assert(SemanticsMatcher.keyIsDefined(SemanticsActions.SetSelection))
+
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, 4, false) }
+        composeRule.waitForIdle()
+        assertEquals(
+            TextRange(0, 4),
+            field.fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange]
+        )
     }
 
     @Test

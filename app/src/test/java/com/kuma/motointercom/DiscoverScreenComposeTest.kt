@@ -4,12 +4,15 @@ import android.content.Context
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -133,6 +136,42 @@ class DiscoverScreenComposeTest {
 
         composeRule.onNodeWithTag("discover_help_button").performClick()
         assertEquals(1, helpRequests)
+    }
+
+    @Test
+    fun headerIconButtonsExposeSingleAccessibleLabel() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val state = DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "Choose a rider",
+            supplementalText = null,
+            emptyText = "No riders",
+            radarRunning = false
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    state = state,
+                    onBack = {},
+                    onHelp = {},
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = {},
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = {}
+                )
+            }
+        }
+
+        val backLabel = context.getString(R.string.back_button_description)
+        val helpLabel = context.getString(R.string.help_description)
+        composeRule.onAllNodesWithContentDescription(backLabel).assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription(helpLabel).assertCountEquals(1)
+        composeRule.onNodeWithTag("discover_back_button").assertContentDescriptionEquals(backLabel)
+        composeRule.onNodeWithTag("discover_help_button").assertContentDescriptionEquals(helpLabel)
     }
 
     @Test
