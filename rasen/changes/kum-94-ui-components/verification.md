@@ -4,10 +4,12 @@
 
 - Base SHA：`c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6`
 - Branch：`feat/kum-94-ui-components`
-- HEAD：`35c7de9524dee37e209303ce1f79e0e651db7eae`
+- Feature Commit：`17b374c4d53d8fa7bd2c16a25f37f0bdd8d38c42`
+- Feature Commit Tree：`404700bf0b6d91967d5d0ec4eb57b6680034f331`
 - Reviewed Candidate Tree：`df498530ee042fc9cb040277b5b82a541b00bfaf`
+- Draft PR：[#68](https://github.com/g95809080-cmyk/moto-intercom/pull/68)
 - Worktree：`C:\Users\kuma\.codex\worktrees\kum-94-ui-components\MotoIntercomApp`
-- 状态：本轮改动仍在工作树中，未提交、未推送；现有 Draft PR #68 仍指向之前的提交。
+- 状态：功能分支已提交并推送到 `origin`；Draft PR 的 base 为 `fix/kum-93-ui-accessibility`，继续保持 Draft。
 
 Reviewed Candidate Tree 包含本轮源码、测试、资源、Rasen 文档和最终截图。架构审查后仅更新 `verification.md` 与 `tasks.md`，源码未再变化。重复维护一套视觉原型且未被正式页面引用的 `UiConceptActivity` 已删除，只保留使用正式 Compose 组件的 `DesignPreviewActivity`。
 
@@ -68,8 +70,9 @@ Base SHA
 - c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6
 Head SHA
 - df498530ee042fc9cb040277b5b82a541b00bfaf（Reviewed Candidate Tree）
+- df49853..17b374c 没有源码变化，只更新任务状态、验证记录和最终截图。
 Next gate allowed
-- 可以提交当前候选树并更新 Draft PR #68；未经用户明确授权不合并、不推送 main。
+- 已提交并推送功能分支、更新 Draft PR #68；未经用户明确授权不合并、不推送 main。
 ```
 
 审查边界：
@@ -79,8 +82,8 @@ Next gate allowed
 - 主题选择先更新页面状态，再写入 `motocom_appearance`，并同步 `MainScreen` 的导航和系统栏外观。
 - 没有新的产品状态写入者、后台资源所有者、协议路径或导航入口。
 
-## 未提交边界
+## 提交边界
 
-- 本轮未执行 `git commit`、`git push` 或 PR 更新。
+- 本轮已提交 `17b374c` 并推送 `feat/kum-94-ui-components`，并更新 Draft PR #68。
 - 未合并、未发布、未使用签名密钥、未修改生产数据库。
 - Linear 状态与评论未在本轮修改。
