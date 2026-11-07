@@ -24,14 +24,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,7 +48,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -178,53 +178,10 @@ private fun HomeHeader() {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.brand_name), color = MaterialTheme.colorScheme.onBackground,
-                fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
+                style = MaterialTheme.typography.headlineMedium, letterSpacing = (-0.7).sp)
             Text(stringResource(R.string.brand_tagline), Modifier.padding(top = 4.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
-    }
-}
-
-@Composable
-private fun CircleIconButton(
-    painter: Painter,
-    description: String,
-    testTag: String,
-    onClick: () -> Unit,
-    surface: Boolean = true,
-    enabled: Boolean = true,
-    isSelected: Boolean = false
-) {
-    Box(
-        modifier = Modifier
-            .size(dimensionResource(R.dimen.motocom_icon_button_size))
-            .clip(CircleShape)
-            .then(
-                if (surface) {
-                    Modifier
-                        .background(
-                            if (isSelected) {
-                                colorResource(R.color.motocom_accent_green_soft)
-                            } else {
-                                MaterialTheme.colorScheme.surface
-                            }
-                        )
-                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                } else {
-                    Modifier
-                }
-            )
-            .testTag(testTag)
-            .semantics {
-                contentDescription = description
-                if (isSelected) selected = true
-                if (!enabled) disabled()
-            }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(painter = painter, contentDescription = null, modifier = Modifier.size(23.dp),
-            tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
     }
 }
 
@@ -242,13 +199,24 @@ private fun LabeledIconButton(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircleIconButton(
-            painter = painter,
+        MotoComIconButton(
+            icon = painter,
             description = description,
-            testTag = testTag,
             onClick = onClick,
+            modifier = Modifier.testTag(testTag),
             enabled = enabled,
-            isSelected = isSelected
+            selected = if (isSelected) true else null,
+            containerColor = if (isSelected) {
+                colorResource(R.color.motocom_accent_green_soft)
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+            borderColor = MaterialTheme.colorScheme.outline,
+            contentColor = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+            }
         )
         Spacer(Modifier.height(4.dp))
         Text(
@@ -264,34 +232,55 @@ private fun LabeledIconButton(
 private fun StatusCard(state: HomeScreenUiState) {
     val accent = colorResource(R.color.motocom_accent_green)
     val muted = colorResource(R.color.motocom_on_console_secondary)
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
-            .background(colorResource(R.color.motocom_console)).padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+    MotoComSurfaceCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = colorResource(R.color.motocom_console),
+        borderColor = null,
+        contentPadding = PaddingValues(20.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).background(if (state.connected) accent else muted, CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(state.primaryText, Modifier.weight(1f).testTag("home_status_title"),
-                color = Color.White, style = MaterialTheme.typography.bodyMedium)
-        }
-        Text(state.peerText, Modifier.fillMaxWidth().padding(top = 20.dp).testTag("home_peer_name"),
-            color = Color.White, fontSize = 30.sp, lineHeight = 38.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp, textAlign = TextAlign.Center)
-        if (state.detailText.isNotBlank() && state.detailText != stringResource(R.string.brand_tagline)) Text(state.detailText, Modifier.padding(top = 5.dp),
-            color = muted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-        state.supplementalText.orEmpty().let {
-            Text(it, Modifier.then(if (it.isBlank()) Modifier.height(0.dp) else Modifier.padding(top = 5.dp)).testTag("home_status_supplemental"),
-                color = if (state.connected) accent else muted,
-                style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-        }
-        CommunicationDial(state.discovering && state.animationsEnabled, state.connected)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            ConsoleFact(stringResource(R.string.home_transport_plan, state.plannedTransportText),
-                R.drawable.ic_wifi_24, Modifier.weight(1f))
-            ConsoleFact(stringResource(R.string.home_webrtc_state, state.webRtcText),
-                R.drawable.ic_globe_24, Modifier.weight(1f))
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).background(if (state.connected) accent else muted, CircleShape))
+                Spacer(Modifier.width(8.dp))
+                Text(state.primaryText, Modifier.weight(1f).testTag("home_status_title"),
+                    color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            }
+            Text(
+                state.peerText,
+                Modifier.fillMaxWidth().padding(top = 20.dp).testTag("home_peer_name"),
+                color = Color.White,
+                style = MaterialTheme.typography.headlineLarge.copy(letterSpacing = (-0.8).sp),
+                textAlign = TextAlign.Center
+            )
+            if (state.detailText.isNotBlank() && state.detailText != stringResource(R.string.brand_tagline)) {
+                Text(
+                    state.detailText,
+                    Modifier.padding(top = 5.dp),
+                    color = muted,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+            }
+            state.supplementalText.orEmpty().let {
+                Text(
+                    it,
+                    Modifier
+                        .then(if (it.isBlank()) Modifier.height(0.dp) else Modifier.padding(top = 5.dp))
+                        .testTag("home_status_supplemental"),
+                    color = if (state.connected) accent else muted,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+            }
+            CommunicationDial(state.discovering && state.animationsEnabled, state.connected)
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                ConsoleFact(stringResource(R.string.home_transport_plan, state.plannedTransportText),
+                    R.drawable.ic_wifi_24, Modifier.weight(1f))
+                ConsoleFact(stringResource(R.string.home_webrtc_state, state.webRtcText),
+                    R.drawable.ic_globe_24, Modifier.weight(1f))
+            }
         }
     }
 }
@@ -302,7 +291,7 @@ private fun ConsoleFact(text: String, icon: Int, modifier: Modifier) {
         Icon(painterResource(icon), null, Modifier.size(17.dp), tint = colorResource(R.color.motocom_accent_green))
         Spacer(Modifier.width(7.dp))
         Text(text, color = colorResource(R.color.motocom_on_console_secondary),
-            fontSize = 11.sp, lineHeight = 16.sp)
+            style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -331,46 +320,42 @@ private fun CommunicationDial(discovering: Boolean, connected: Boolean) {
 
 @Composable
 private fun AudioCard(state: HomeScreenUiState, audioLevel: Float) {
-    val shape = RoundedCornerShape(20.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically
+    MotoComSurfaceCard(
+        shape = MaterialTheme.shapes.large,
+        containerColor = MaterialTheme.colorScheme.surface,
+        borderColor = MaterialTheme.colorScheme.outline,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 11.dp)
     ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_headset_24),
-            contentDescription = null,
-            modifier = Modifier.size(24.dp),
-            tint = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.section_audio_output),
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painter = painterResource(R.drawable.ic_headset_24),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.onSurface
             )
-            Text(
-                text = state.audioSourceText,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .testTag("home_audio_source")
-            )
-            Text(
-                text = stringResource(R.string.home_bluetooth_state, state.bluetoothText),
-                modifier = Modifier.padding(top = 3.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp
-            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.section_audio_output),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    text = state.audioSourceText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .testTag("home_audio_source")
+                )
+                Text(
+                    text = stringResource(R.string.home_bluetooth_state, state.bluetoothText),
+                    modifier = Modifier.padding(top = 3.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
-
     }
 }
 
@@ -389,6 +374,7 @@ private fun MainControls(
             it
         )
     }
+    val primaryInteractionSource = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier.fillMaxWidth().testTag("home_main_control_section"),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -420,6 +406,7 @@ private fun MainControls(
                 enabled = state.primaryActionEnabled,
                 modifier = Modifier
                     .size(dimensionResource(R.dimen.motocom_main_control_size))
+                    .motoComPressScale(primaryInteractionSource, state.primaryActionEnabled)
                     .then(
                         if (state.connected) {
                             Modifier.border(
@@ -445,26 +432,27 @@ private fun MainControls(
                     disabledContainerColor = colorResource(R.color.motocom_disabled),
                     disabledContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                    contentPadding = PaddingValues(0.dp)
+                contentPadding = PaddingValues(0.dp),
+                interactionSource = primaryInteractionSource
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_mic_24),
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = controlContent
-                        )
-                        Text(
-                            text = state.primaryActionLabel,
-                            color = controlContent,
-                            style = MaterialTheme.typography.labelLarge,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Icon(
+                        painter = painterResource(R.drawable.ic_mic_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint = controlContent
+                    )
+                    Text(
+                        text = state.primaryActionLabel,
+                        color = controlContent,
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = TextAlign.Center
+                    )
                 }
+            }
             Spacer(Modifier.width(dimensionResource(R.dimen.motocom_main_control_gap)))
             LabeledIconButton(
                 painter = painterResource(R.drawable.ic_tune_24),
@@ -490,24 +478,38 @@ private fun MainControls(
 @Composable
 private fun VoxCard(state: HomeScreenUiState, onClick: () -> Unit) {
     val description = stringResource(R.string.home_vox_card_description, state.voxText, state.voxSensitivity)
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-        .background(MaterialTheme.colorScheme.surface)
-        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
-        .testTag("home_vox_card").clickable(role = Role.Button, onClick = onClick)
-        .semantics { contentDescription = description }.padding(16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.home_vox_pill, state.voxText),
-                Modifier.weight(1f).testTag("home_vox_pill"),
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text("灵敏度：${state.voxSensitivity}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("home_vox_state_row"),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            VoxState("LISTENING", state.voxState == VoxRuntimeState.LISTENING, Modifier.weight(1f))
-            VoxState("OPEN", state.voxState == VoxRuntimeState.OPEN, Modifier.weight(1f))
-            VoxState("HANGOVER", state.voxState == VoxRuntimeState.HANGOVER, Modifier.weight(1f))
+    MotoComSurfaceCard(
+        modifier = Modifier
+            .testTag("home_vox_card")
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        shape = MaterialTheme.shapes.large,
+        containerColor = MaterialTheme.colorScheme.surface,
+        borderColor = MaterialTheme.colorScheme.outline,
+        contentPadding = PaddingValues(16.dp)
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.home_vox_pill, state.voxText),
+                    Modifier.weight(1f).testTag("home_vox_pill"),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "灵敏度：${state.voxSensitivity}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp).testTag("home_vox_state_row"),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                VoxState("LISTENING", state.voxState == VoxRuntimeState.LISTENING, Modifier.weight(1f))
+                VoxState("OPEN", state.voxState == VoxRuntimeState.OPEN, Modifier.weight(1f))
+                VoxState("HANGOVER", state.voxState == VoxRuntimeState.HANGOVER, Modifier.weight(1f))
+            }
         }
     }
 }
@@ -532,9 +534,9 @@ private fun VoxState(text: String, active: Boolean, modifier: Modifier) {
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
-            fontSize = 10.sp,
-            lineHeight = 15.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+            ),
             textAlign = TextAlign.Center
         )
     }
@@ -546,9 +548,9 @@ private fun SecondaryAction(text: String, onClick: () -> Unit, testTag: String, 
         modifier = modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = dimensionResource(R.dimen.motocom_control_min_height))
-            .clip(RoundedCornerShape(24.dp))
+            .clip(MaterialTheme.shapes.extraLarge)
             .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraLarge)
             .testTag(testTag)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 12.dp),

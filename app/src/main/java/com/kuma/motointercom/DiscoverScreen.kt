@@ -6,13 +6,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -49,7 +47,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.testTag
 
 internal data class DiscoverScreenUiState(
@@ -133,11 +130,11 @@ internal fun MotoComDiscoverScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp)
-                    .background(colorResource(R.color.motocom_surface), RoundedCornerShape(18.dp))
+                    .background(colorResource(R.color.motocom_surface), MaterialTheme.shapes.medium)
                     .padding(18.dp)
                     .testTag("discover_empty_text"),
                 color = colorResource(R.color.motocom_text_secondary),
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center
             )
         }
@@ -156,12 +153,15 @@ internal fun MotoComDiscoverScreen(
                 containerColor = colorResource(R.color.motocom_surface),
                 contentColor = colorResource(R.color.motocom_text_primary)
             ),
-            shape = RoundedCornerShape(18.dp),
+            shape = MaterialTheme.shapes.small,
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
         ) {
             Icon(painterResource(R.drawable.ic_refresh_24), null, Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.discover_rescan_label), fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.discover_rescan_label),
+                style = MaterialTheme.typography.labelLarge
+            )
         }
         Text(
             text = stringResource(R.string.discover_one_to_one_note),
@@ -170,7 +170,7 @@ internal fun MotoComDiscoverScreen(
                 .padding(top = 14.dp)
                 .padding(horizontal = 10.dp),
             color = colorResource(R.color.motocom_text_muted_accessible),
-            fontSize = 12.sp,
+            style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center
         )
     }
@@ -179,11 +179,11 @@ internal fun MotoComDiscoverScreen(
 @Composable
 private fun DiscoverHeader(onBack: () -> Unit, onHelp: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        DiscoverIconButton(
-            "discover_back_button",
-            stringResource(R.string.back_button_description),
-            R.drawable.ic_arrow_back_24,
-            onBack
+        MotoComIconButton(
+            icon = painterResource(R.drawable.ic_arrow_back_24),
+            description = stringResource(R.string.back_button_description),
+            onClick = onBack,
+            modifier = Modifier.testTag("discover_back_button")
         )
         Text(
             stringResource(R.string.nav_discover),
@@ -192,31 +192,15 @@ private fun DiscoverHeader(onBack: () -> Unit, onHelp: () -> Unit) {
                 .padding(horizontal = 8.dp)
                 .testTag("discover_title"),
             color = colorResource(R.color.motocom_text_primary),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleLarge,
             textAlign = TextAlign.Center
         )
-        DiscoverIconButton(
-            "discover_help_button",
-            stringResource(R.string.help_description),
-            R.drawable.ic_help_24,
-            onHelp
+        MotoComIconButton(
+            icon = painterResource(R.drawable.ic_help_24),
+            description = stringResource(R.string.help_description),
+            onClick = onHelp,
+            modifier = Modifier.testTag("discover_help_button")
         )
-    }
-}
-
-@Composable
-private fun DiscoverIconButton(tag: String, description: String, icon: Int, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(dimensionResource(R.dimen.motocom_icon_button_size))
-            .clip(CircleShape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description }
-            .testTag(tag),
-        contentAlignment = Alignment.Center
-    ) {
-        Image(painterResource(icon), null, Modifier.size(24.dp))
     }
 }
 
@@ -227,15 +211,25 @@ private fun DiscoverRadarCard(state: DiscoverScreenUiState, onStart: () -> Unit,
         val transition = rememberInfiniteTransition(label = "radar")
         transition.animateFloat(0.35f, 0.8f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "radarPulse").value
     } else 0.25f
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-        .background(colorResource(R.color.motocom_console)).padding(20.dp)) {
+    MotoComSurfaceCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = colorResource(R.color.motocom_console),
+        borderColor = null,
+        contentPadding = PaddingValues(20.dp)
+    ) {
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Text(state.stateText, Modifier.testTag("discover_state_text"), color = Color.White,
-                    fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    state.stateText,
+                    Modifier.testTag("discover_state_text"),
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineSmall
+                )
                 state.supplementalText?.takeIf(String::isNotBlank)?.let {
                     Text(it, Modifier.padding(top = 10.dp).testTag("discover_status_supplemental"),
-                        color = colorResource(R.color.motocom_on_console_secondary), fontSize = 12.sp, lineHeight = 18.sp)
+                        color = colorResource(R.color.motocom_on_console_secondary),
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
             Canvas(Modifier.size(108.dp).testTag("discover_radar_ripple")) {
@@ -260,35 +254,37 @@ private fun DiscoverRadarCard(state: DiscoverScreenUiState, onStart: () -> Unit,
 
 @Composable
 private fun DiscoverIdentityNotice() {
-    Row(
+    MotoComSurfaceCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 10.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(colorResource(R.color.motocom_surface_soft))
-            .padding(horizontal = 12.dp, vertical = 9.dp)
             .testTag("discover_identity_notice"),
-        verticalAlignment = Alignment.CenterVertically
+        shape = MaterialTheme.shapes.small,
+        containerColor = colorResource(R.color.motocom_surface_soft),
+        borderColor = null,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp)
     ) {
-        Icon(
-            painterResource(R.drawable.ic_shield_check_24),
-            null,
-            Modifier.size(20.dp),
-            tint = colorResource(R.color.motocom_text_secondary)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            stringResource(R.string.discover_identity_short),
-            modifier = Modifier.weight(1f),
-            color = colorResource(R.color.motocom_text_secondary),
-            fontSize = 12.sp
-        )
-        Icon(
-            painterResource(R.drawable.ic_chevron_right_24),
-            null,
-            Modifier.size(18.dp),
-            tint = colorResource(R.color.motocom_text_muted_accessible)
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painterResource(R.drawable.ic_shield_check_24),
+                null,
+                Modifier.size(20.dp),
+                tint = colorResource(R.color.motocom_text_secondary)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.discover_identity_short),
+                modifier = Modifier.weight(1f),
+                color = colorResource(R.color.motocom_text_secondary),
+                style = MaterialTheme.typography.bodySmall
+            )
+            Icon(
+                painterResource(R.drawable.ic_chevron_right_24),
+                null,
+                Modifier.size(18.dp),
+                tint = colorResource(R.color.motocom_text_muted_accessible)
+            )
+        }
     }
 }
 
@@ -302,26 +298,25 @@ private fun DiscoverGroup(
     onManagePairing: (RiderPresence) -> Unit
 ) {
     if (cards.isEmpty()) return
-    Text(
+    MotoComSectionHeader(
         stringResource(when (tag) {
             "discover_paired_container" -> R.string.discover_paired_title
             "discover_offline_paired_container" -> R.string.discover_offline_paired_title
             else -> R.string.discover_nearby_title
         }),
-        Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 4.dp).testTag("${tag}_label"),
-        color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold
+        Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 4.dp).testTag("${tag}_label")
     )
     Column(Modifier.fillMaxWidth().testTag(tag)) {
-            cards.forEach { indexed ->
-                DiscoverPresenceCard(
-                    indexed.value,
-                    orderedPresences[indexed.index],
-                    onSelectPresence,
-                    onConnect,
-                    onManagePairing
-                )
-            }
+        cards.forEach { indexed ->
+            DiscoverPresenceCard(
+                indexed.value,
+                orderedPresences[indexed.index],
+                onSelectPresence,
+                onConnect,
+                onManagePairing
+            )
         }
+    }
 }
 
 @Composable
@@ -333,7 +328,7 @@ private fun DiscoverPresenceCard(
     onManagePairing: (RiderPresence) -> Unit
 ) {
     val cardId = presence.deviceId ?: card.title
-    val shape = RoundedCornerShape(16.dp)
+    val shape = MaterialTheme.shapes.medium
     val status = when {
         card.preferred && presence.isSelectableForUi() ->
             stringResource(R.string.discover_status_recommended)
@@ -344,7 +339,7 @@ private fun DiscoverPresenceCard(
     }
     val statusColor = when {
         card.preferred && presence.isSelectableForUi() -> colorResource(R.color.motocom_accent_green_dark)
-        card.offlinePaired -> Color(0xFF855D16)
+        card.offlinePaired -> colorResource(R.color.motocom_status_pending)
         !presence.isSelectableForUi() -> colorResource(R.color.motocom_text_muted_accessible)
         else -> colorResource(R.color.motocom_accent_green_dark)
     }
@@ -355,134 +350,150 @@ private fun DiscoverPresenceCard(
     }.joinToString(stringResource(R.string.discover_fact_separator))
         .ifBlank { stringResource(R.string.discover_fact_current) }
 
-    Row(
+    MotoComSurfaceCard(
         modifier = Modifier
-            .fillMaxWidth()
             .padding(top = 8.dp)
-            .border(1.dp, colorResource(R.color.motocom_border), shape)
-            .clip(shape)
-            .background(colorResource(R.color.motocom_surface))
-            .then(
-                if (card.preferred && presence.isSelectableForUi()) {
-                    Modifier.border(1.dp, colorResource(R.color.motocom_accent_green), shape)
-                } else {
-                    Modifier
-                }
-            )
-            .testTag("discover_card_$cardId")
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .testTag("discover_card_$cardId"),
+        shape = shape,
+        containerColor = colorResource(R.color.motocom_surface),
+        borderColor = if (card.preferred && presence.isSelectableForUi()) {
+            colorResource(R.color.motocom_accent_green)
+        } else {
+            colorResource(R.color.motocom_border)
+        },
+        contentPadding = PaddingValues(12.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .testTag("discover_select_$cardId")
-                .semantics { contentDescription = card.title }
-                .clickable { onSelectPresence(presence) },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(40.dp).background(colorResource(R.color.motocom_surface_soft), CircleShape),
-                contentAlignment = Alignment.Center) {
-                Icon(painterResource(R.drawable.ic_person_outline_24), null, Modifier.size(23.dp),
-                    tint = MaterialTheme.colorScheme.onSurface)
-            }
-            Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        card.title,
-                        color = colorResource(R.color.motocom_text_primary),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    DiscoverStatusChip(status, statusColor)
-                }
-                Text(
-                    card.deviceText,
-                    modifier = Modifier.padding(top = 4.dp),
-                    color = colorResource(R.color.motocom_text_secondary),
-                    fontSize = 12.sp
-                )
-                Row(
-                    modifier = Modifier.padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("discover_select_$cardId")
+                    .semantics { contentDescription = card.title }
+                    .clickable(role = Role.Button) { onSelectPresence(presence) },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .background(colorResource(R.color.motocom_surface_soft), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        painterResource(R.drawable.ic_wifi_24),
+                        painterResource(R.drawable.ic_person_outline_24),
                         null,
-                        Modifier.size(15.dp),
-                        tint = colorResource(R.color.motocom_text_muted_accessible)
+                        Modifier.size(23.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(Modifier.width(4.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(card.transportText, color = colorResource(R.color.motocom_text_secondary), fontSize = 12.sp)
-                        Text(facts, Modifier.testTag("discover_facts_$cardId"),
-                            color = colorResource(R.color.motocom_text_secondary), fontSize = 12.sp)
+                }
+                Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            card.title,
+                            color = colorResource(R.color.motocom_text_primary),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        DiscoverStatusChip(status, statusColor)
+                    }
+                    Text(
+                        card.deviceText,
+                        modifier = Modifier.padding(top = 4.dp),
+                        color = colorResource(R.color.motocom_text_secondary),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_wifi_24),
+                            null,
+                            Modifier.size(15.dp),
+                            tint = colorResource(R.color.motocom_text_muted_accessible)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                card.transportText,
+                                color = colorResource(R.color.motocom_text_secondary),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                facts,
+                                Modifier.testTag("discover_facts_$cardId"),
+                                color = colorResource(R.color.motocom_text_secondary),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 }
             }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (card.connectVisible) {
-                Button(
-                    onClick = { onConnect(presence) },
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .width(76.dp)
-                        .height(48.dp)
-                        .testTag("discover_connect_$cardId"),
-                    enabled = card.connectEnabled,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colorResource(R.color.motocom_accent_green),
-                        contentColor = colorResource(R.color.motocom_text_primary),
-                        disabledContainerColor = colorResource(R.color.motocom_surface_soft),
-                        disabledContentColor = colorResource(R.color.motocom_text_muted_accessible)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
-                ) {
-                    Text(
-                        stringResource(if (card.connectEnabled) R.string.discover_connect else R.string.discover_connect_pending),
-                        modifier = Modifier.testTag("discover_connect_${cardId}_text"),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (card.connectVisible) {
+                    Button(
+                        onClick = { onConnect(presence) },
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .width(76.dp)
+                            .height(48.dp)
+                            .testTag("discover_connect_$cardId"),
+                        enabled = card.connectEnabled,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorResource(R.color.motocom_accent_green),
+                            contentColor = colorResource(R.color.motocom_text_primary),
+                            disabledContainerColor = colorResource(R.color.motocom_surface_soft),
+                            disabledContentColor = colorResource(R.color.motocom_text_muted_accessible)
+                        ),
+                        shape = MaterialTheme.shapes.small,
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            stringResource(
+                                if (card.connectEnabled) {
+                                    R.string.discover_connect
+                                } else {
+                                    R.string.discover_connect_pending
+                                }
+                            ),
+                            modifier = Modifier.testTag("discover_connect_${cardId}_text"),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                } else {
+                    Icon(
+                        painter = painterResource(
+                            when {
+                                card.offlinePaired -> R.drawable.ic_hourglass_24
+                                presence.isSelectableForUi() -> R.drawable.ic_chevron_right_24
+                                else -> R.drawable.ic_block_24
+                            }
+                        ),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(24.dp),
+                        tint = colorResource(R.color.motocom_text_muted_accessible)
                     )
                 }
-            } else {
-                Icon(
-                    painter = painterResource(
-                        when {
-                            card.offlinePaired -> R.drawable.ic_hourglass_24
-                            presence.isSelectableForUi() -> R.drawable.ic_chevron_right_24
-                            else -> R.drawable.ic_block_24
-                        }
-                    ),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .size(24.dp),
-                    tint = colorResource(R.color.motocom_text_muted_accessible)
-                )
-            }
-            if (card.paired) {
-                val manageDescription = stringResource(
-                    R.string.discover_manage_pairing_description,
-                    card.title
-                )
-                TextButton(
-                    onClick = { onManagePairing(presence) },
-                    modifier = Modifier
-                        .padding(start = 8.dp, top = 2.dp)
-                        .width(76.dp)
-                        .defaultMinSize(minHeight = 48.dp)
-                        .semantics { contentDescription = manageDescription }
-                        .testTag("discover_manage_$cardId"),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
-                ) {
-                    Text(
-                        stringResource(R.string.discover_manage_pairing),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                if (card.paired) {
+                    val manageDescription = stringResource(
+                        R.string.discover_manage_pairing_description,
+                        card.title
                     )
+                    TextButton(
+                        onClick = { onManagePairing(presence) },
+                        modifier = Modifier
+                            .padding(start = 8.dp, top = 2.dp)
+                            .width(76.dp)
+                            .defaultMinSize(minHeight = 48.dp)
+                            .semantics { contentDescription = manageDescription }
+                            .testTag("discover_manage_$cardId"),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.discover_manage_pairing),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
         }
@@ -494,12 +505,11 @@ private fun DiscoverStatusChip(text: String, color: Color) {
     Text(
         text,
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(MaterialTheme.shapes.extraSmall)
             .background(color.copy(alpha = 0.14f))
             .padding(horizontal = 5.dp, vertical = 2.dp),
         color = color,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold
+        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
     )
 }
 
@@ -516,9 +526,9 @@ private fun DiscoverPrimaryButton(text: String, tag: String, onClick: () -> Unit
             containerColor = colorResource(R.color.motocom_accent_green),
             contentColor = colorResource(R.color.motocom_text_primary)
         ),
-        shape = RoundedCornerShape(14.dp)
+        shape = MaterialTheme.shapes.small
     ) {
-        Text(text, Modifier.testTag("${tag}_text"), fontWeight = FontWeight.Bold)
+        Text(text, Modifier.testTag("${tag}_text"), style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -535,9 +545,9 @@ private fun DiscoverSecondaryButton(text: String, tag: String, onClick: () -> Un
             containerColor = colorResource(R.color.motocom_surface_soft),
             contentColor = colorResource(R.color.motocom_text_primary)
         ),
-        shape = RoundedCornerShape(14.dp)
+        shape = MaterialTheme.shapes.small
     ) {
-        Text(text, Modifier.testTag("${tag}_text"))
+        Text(text, Modifier.testTag("${tag}_text"), style = MaterialTheme.typography.labelLarge)
     }
 }
 

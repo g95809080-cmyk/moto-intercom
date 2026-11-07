@@ -13,6 +13,7 @@
     <color name="motocom_text_secondary">#626B62</color>
     <color name="motocom_text_muted">#727B72</color>
     <color name="motocom_text_muted_accessible">#53604F</color>
+    <color name="motocom_status_pending">#855D16</color>
     <color name="motocom_border">#DFE3D9</color>
     <color name="motocom_disabled">#DDE2D6</color>
     <color name="motocom_scrim">#66000000</color>
