@@ -8,6 +8,7 @@ Home、Discover 和 Settings 都接收不可变 UI state 和事件回调，状�
 
 - 让同类卡片、图标操作、分组标题和设置行具有一致的视觉与语义结构。
 - 把页面内写死的字号和圆角收敛到主题 token。
+- 提供一致的按压回弹和状态颜色过渡，同时保持布局尺寸稳定。
 - 保持调用方对根 modifier、点击、选中、开关和测试 tag 的所有权。
 - 用最小 Compose 测试证明共享组件契约。
 
@@ -25,9 +26,12 @@ Home、Discover 和 Settings 都接收不可变 UI state 和事件回调，状�
 - `MotoComSettingRow` 是纯布局组件，接受 leading、headline、supporting 和 trailing slots。`clickable`、`toggleable`、`selectable`、`semantics` 和 `testTag` 均由调用方 modifier 提供。
 - 第一批字体 token 把辅助信息的最小字号提升到 12sp；卡片标题、正文、标签和页面标题分别使用 Material 3 typography。形状 token 采用 6/12/16/20/26dp 的递进关系。
 - 离线配对状态新增 `motocom_status_pending`，与现有深绿色和弱化文字 token 区分。
+- 共享 `motoComPressScale` 在按压时把绘制缩放到 0.94，并使用低回弹 spring 恢复；只改变 draw transform，不改变测量尺寸、触控边界或语义。
+- 卡片和图标按钮的颜色变化使用 180ms `animateColorAsState`；容器、边框和内容色同步过渡。
 
 ## Risks / Trade-offs
 
 - 统一组件会改变所有页面的卡圆角和标题字号，属于预期的视觉变化；通过三张模拟器截图验收。
 - `MotoComIconButton` 默认提供浅色圆形背景，页头操作会比旧版更显眼；这是本次明确的视觉层级调整。
 - `MotoComSettingRow` 不拥有交互语义，调用方仍需正确提供 role、toggleable 或 selectable 语义；现有页面测试继续覆盖这些行为。
+- 本次不增加页面转场或列表错峰入场，避免把 UI 动效扩展成导航和滚动行为改动。

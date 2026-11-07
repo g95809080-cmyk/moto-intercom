@@ -8,6 +8,7 @@ Home、Discover 和 Settings 已经统一由 Compose 渲染，但卡片、图标
 - 在 `MotoComTheme` 建立第一批 Material 3 字体和形状 token，并把页面内写死的字号、圆角迁移到 token。
 - 将 Home、Discover 和 Settings 的私有卡片、图标按钮和设置行替换为共享组件。
 - 新增待上线状态的语义颜色 token，并让离线配对标签使用该 token。
+- 为共享图标按钮和 Home 主操作增加弹簧按压反馈，并为卡片、按钮颜色变化增加 180ms 过渡。
 - 增加共享组件契约测试，锁定单图标语义、调用方 modifier、slot 渲染和点击回调。
 - 保持导航、业务状态、服务、协议、持久化、音频流程和依赖不变。
 
