@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
@@ -31,6 +32,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -372,6 +374,7 @@ private fun MainControls(
             it
         )
     }
+    val primaryInteractionSource = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier.fillMaxWidth().testTag("home_main_control_section"),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -403,6 +406,7 @@ private fun MainControls(
                 enabled = state.primaryActionEnabled,
                 modifier = Modifier
                     .size(dimensionResource(R.dimen.motocom_main_control_size))
+                    .motoComPressScale(primaryInteractionSource, state.primaryActionEnabled)
                     .then(
                         if (state.connected) {
                             Modifier.border(
@@ -428,26 +432,27 @@ private fun MainControls(
                     disabledContainerColor = colorResource(R.color.motocom_disabled),
                     disabledContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                    contentPadding = PaddingValues(0.dp)
+                contentPadding = PaddingValues(0.dp),
+                interactionSource = primaryInteractionSource
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_mic_24),
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = controlContent
-                        )
-                        Text(
-                            text = state.primaryActionLabel,
-                            color = controlContent,
-                            style = MaterialTheme.typography.labelLarge,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Icon(
+                        painter = painterResource(R.drawable.ic_mic_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint = controlContent
+                    )
+                    Text(
+                        text = state.primaryActionLabel,
+                        color = controlContent,
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = TextAlign.Center
+                    )
                 }
+            }
             Spacer(Modifier.width(dimensionResource(R.dimen.motocom_main_control_gap)))
             LabeledIconButton(
                 painter = painterResource(R.drawable.ic_tune_24),
