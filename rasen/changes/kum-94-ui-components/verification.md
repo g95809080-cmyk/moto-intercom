@@ -3,10 +3,13 @@
 ## 代码候选
 
 - Base SHA：`c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6`
-- Candidate Tree SHA：`55b2c1385bb14d8de01f18087d61485bec04d762`
+- Reviewed Code Tree SHA：`55b2c1385bb14d8de01f18087d61485bec04d762`
+- Feature Commit：`81ba1fc1bd0f71c022c2d50fbe94dc5f23adafce`
+- Feature Commit Tree：`8e23fbe75b72d90aacb348694d7c90a980bfe696`
+- Draft PR：[#68](https://github.com/g95809080-cmyk/moto-intercom/pull/68)
 - 分支：`feat/kum-94-ui-components`
 - 工作树：`C:\Users\kuma\.codex\worktrees\kum-94-ui-components\MotoIntercomApp`
-- 状态：工作树尚未提交，Candidate Tree SHA 由当前未提交改动生成。
+- 状态：已提交并推送到 `origin`；Draft PR 的 base 为 `fix/kum-93-ui-accessibility`。
 
 ## 自动化门禁
 
@@ -47,7 +50,8 @@ Non-blocking
 Base SHA
 - c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6
 Head SHA
-- 55b2c1385bb14d8de01f18087d61485bec04d762（Candidate Tree）
+- 55b2c1385bb14d8de01f18087d61485bec04d762（架构审查时的代码候选树）
+- 55b2c13..8e23fbe 只增加 `tasks.md` 和 `verification.md`，没有源码变化。
 Next gate allowed
 - 提交当前候选树并创建 Draft PR；未经用户授权不合并、不推送 main。
 ```
@@ -60,5 +64,5 @@ Next gate allowed
 
 ## Linear 同步
 
-- KUM-94 已写入实现、门禁和审查摘要。
-- 当前状态保持 `In Progress`；提交和 Draft PR 创建后再推进状态。
+- KUM-94 已写入实现、门禁、审查、commit 和 PR 摘要。
+- 当前状态已推进到 `In Review`。

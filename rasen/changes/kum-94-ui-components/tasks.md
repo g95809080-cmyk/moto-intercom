@@ -14,3 +14,4 @@
 - [x] 2.4 在模拟器验收 Home、Discover、Settings 三张页面并保存截图。
 - [x] 2.5 固定 Base/Tree 执行 `motointercom-product-architect` 只读审查，结论 `APPROVED`，P0/P1 为 0。
 - [x] 2.6 更新 Linear KUM-94 的验证摘要和下一步。
+- [x] 2.7 提交功能分支并创建 Draft PR #68。
