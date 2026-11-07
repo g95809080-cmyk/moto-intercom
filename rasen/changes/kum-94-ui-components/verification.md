@@ -3,51 +3,51 @@
 ## 代码候选
 
 - Base SHA：`c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6`
-- Reviewed Code Tree SHA：`55b2c1385bb14d8de01f18087d61485bec04d762`
-- Motion Candidate Tree：`87dea0e756b1ec7012e7f7a44f5908ff68abdaed`
-- Feature Commit：`81ba1fc1bd0f71c022c2d50fbe94dc5f23adafce`
-- Feature Commit Tree：`8e23fbe75b72d90aacb348694d7c90a980bfe696`
-- Motion Commit：`5a01aee1e4db0a8b19380c07fcd1d99a41d05ad7`
-- Motion Commit Tree：`b7b80a03119a8cceb20f578bf17d8c24e93d8ab1`
-- Draft PR：[#68](https://github.com/g95809080-cmyk/moto-intercom/pull/68)
-- 分支：`feat/kum-94-ui-components`
-- 工作树：`C:\Users\kuma\.codex\worktrees\kum-94-ui-components\MotoIntercomApp`
-- 状态：动效补充已提交并推送到 `origin`；Draft PR 的 base 为 `fix/kum-93-ui-accessibility`。
+- Branch：`feat/kum-94-ui-components`
+- HEAD：`35c7de9524dee37e209303ce1f79e0e651db7eae`
+- Reviewed Candidate Tree：`df498530ee042fc9cb040277b5b82a541b00bfaf`
+- Worktree：`C:\Users\kuma\.codex\worktrees\kum-94-ui-components\MotoIntercomApp`
+- 状态：本轮改动仍在工作树中，未提交、未推送；现有 Draft PR #68 仍指向之前的提交。
+
+Reviewed Candidate Tree 包含本轮源码、测试、资源、Rasen 文档和最终截图。架构审查后仅更新 `verification.md` 与 `tasks.md`，源码未再变化。重复维护一套视觉原型且未被正式页面引用的 `UiConceptActivity` 已删除，只保留使用正式 Compose 组件的 `DesignPreviewActivity`。
+
+## 实现结果
+
+- `NIGHTRIDE` 与 `DAYLIGHT` 两套主题已接入四个主页面、底部导航、系统栏和设置页即时切换；首次启动默认白昼，未知持久化值回退白昼。
+- Home 使用居中“摩声”字标、整卡深色雷达、头盔中心标记和真实发现车友的圆形气泡。气泡点击按 `deviceId + sessionId` 回查当前发现对象，再走现有连接请求路径。
+- Discover、Settings、Logs 统一顶栏、面板、状态胶囊和主题色；Discover 离线状态显示“待机中”，不再显示“对讲中”。
+- Settings 的主题入口直接可见；自动重连卡片显示真实短状态；VOX 不再重复显示灵敏度；已连接但音频未就绪时显示“正在等待音频就绪”。
+- 文案清理删除了重复的产品说明、旧品牌副标题、Home 的通道/WebRTC 明细、Discover 的身份解释和 Settings 的冗余摘要；权限、Wi-Fi、连接、静音、VOX、日志导出等必要操作文案保留。
+- 雷达扫描、声纳波纹和字标脉冲只在活动状态且系统动画开启时运行；关闭动画后保留静态网格、真实状态和原有点击语义。
+- 未修改 `IntercomService`、`IntercomStateMachine`、`SessionOrchestrator`、`SignalingProtocol`、transport adapters、Gradle 或数据库。
 
 ## 自动化门禁
 
-- Compose 定向测试：`MotoComComponentsTest`、`SettingsScreenComposeTest`、`DiscoverScreenComposeTest`、`HomeScreenComposeTest` 通过。
-- 完整门禁：`testDebugUnitTest lintDebug assembleDebug` 通过。
-- 测试结果：103 suites / 856 tests；failures 0、errors 0、skipped 0。
-- Lint：0 errors / 71 warnings，与 KUM-93 基线一致。
-- `assembleDebug`：成功，生成 `app/build/outputs/apk/debug/app-debug.apk`。
-- `git diff --check`：干净。
-- 首次最终门禁曾遇 Gradle daemon 系统内存不足；关闭模拟器释放内存后使用 `--no-daemon` 完整重跑成功，本次结果不是代码失败。
+- 命令：`.\gradlew.bat testDebugUnitTest lintDebug assembleDebug --console=plain`
+- 结果：`BUILD SUCCESSFUL in 2m 52s`
+- 测试：104 suites / 861 tests；failures 0、errors 0、skipped 0。
+- Lint：0 errors / 88 warnings / 2 hints。
+- Debug APK：`app/build/outputs/apk/debug/app-debug.apk`，59,393,188 bytes。
+- `git diff --check`：无空白错误；仅输出 Windows 换行转换提示。
 
-## 组件覆盖
+新增或更新的定向覆盖包括：
 
-- 图标按钮完整语义树中只有一个可访问名称，并路由真实点击回调。
-- 调用方 `modifier.testTag(...)` 能落到 SurfaceCard 根节点。
-- SettingRow 的 leading、headline、supporting、trailing 四个 slot 均可渲染。
-- 既有页面测试继续覆盖 Settings 昵称输入、VOX 开关与滑块、音频路由、自动重连、Discover 重新扫描与配对管理、Home 主操作与 VOX 卡片。
-
-## 动效补充
-
-- 共享 `motoComPressScale` 使用 `0.94` 绘制缩放和低回弹 spring，不改变测量尺寸、触控边界或语义。
-- `MotoComIconButton` 应用于按压和容器、边框、内容色的 180ms 过渡。
-- `MotoComSurfaceCard` 的容器色和状态边框使用 180ms 过渡。
-- Home 主操作复用同一按压弹簧，不改变现有 `onPrimaryAction`、禁用态或 guide anchor。
-- 动效审查候选树 `87dea0e` 与提交树 `b7b80a0` 的源码一致，差异只涉及 Rasen 文档和 `motion.gif`。
-- Compose 动画沿用系统 animator duration scale；系统关闭动画时动画会立即完成。
+- 主题默认值、选择持久化、未知值回退和切换入口。
+- `productStatusLabel` 对 Offline、Discovering、IncomingConfirmation、Connecting、Optimizing、Connected、Recovering、Resetting、Stopping 的短标签映射。
+- Home 雷达使用真实车友气泡，点击时分发同一 `RiderPresence`，并保持不可连接对象不触发连接。
+- Discover 的离线、扫描、重新扫描和车友分组展示。
+- Settings 的身份编辑、音频路由、VOX、自动重连、主题和更多入口。
+- Logs 的复制、导出和关闭操作。
 
 ## 模拟器验收
 
-- 设备：`emulator-5554`，API 36，1080x2400。
-- 截图：`home.png`、`discover.png`、`settings.png`、`settings-bottom.png`。
-- 动效证据：`motion.gif`，从 `DesignPreviewActivity` 录制 Home 主操作按压。
-- 像素测量：主操作绿色圆形直径 `252px -> 246px -> 238px`，释放后回到 `252px`，对应约 `0.94` 缩放。
-- 视觉检查：三张页面使用一致的浅色卡片、20dp 主卡圆角、深色 Home/Discover 面板和绿色主操作；辅助文字不再低于 12sp。
-- 边界：本轮只验证视觉回归，不扩展或声称 TalkBack 设备验收。
+- 设备：`MotoIntercom_Graphics_API36`，API 36，1080x2400，420dpi，字体比例 1.0。
+- 白昼截图：`verification/final-home-daylight.png`、`verification/final-discover-daylight.png`、`verification/final-settings-daylight.png`。
+- 夜航截图：`verification/final-home-nightride.png`、`verification/final-discover-nightride.png`、`verification/final-settings-nightride.png`、`verification/final-logs-nightride.png`。
+- 小屏截图：`verification/final-home-320-font130.png`、`verification/final-discover-320-font130.png`、`verification/final-settings-320-font130.png`。
+- 最终夜航设置页已使用本次最终 APK 重拍，确认自动重连状态为“待机中”，VOX 只显示一处灵敏度。
+- 早前已在同一候选实现上完成白昼、夜航四页和强制停止重启后的主题保留检查；最终 APK 的主题读取路径未变化。
+- 在 320dp 宽、1.3 倍字体下检查 Home、Discover、Settings，可滚动且无关键操作截断。
 
 ## 架构审查
 
@@ -58,45 +58,29 @@ P0
 P1
 - 无
 Non-blocking
-- LogsScreen 仍使用旧 motocom_card_radius，不在本 issue 三屏迁移范围。
-- 模拟器截图只证明视觉状态，不证明 TalkBack 设备验收。
-- 本分支堆叠在 KUM-93 head 上，KUM-93 合并后需 rebase 到 main，只保留本 issue 的 UI 组件提交。
+- Home 在 Connected 但音频尚未就绪的短窗口内，状态胶囊来自产品状态“已连接”，雷达接触点则等待 audioReady；不会错误发起连接，属于短暂视觉状态差异。
+- 雷达气泡使用固定角度和距离做布局分布，不代表真实物理方位；气泡身份和可连接性来自真实发现数据。
+- 88 条 Lint warning 为仓库既有范围告警，本次门禁为 0 errors，未扩大到无关告警清理。
+- Help、About、首次引导和来电确认仍使用旧系统对话框，属于本轮非目标。
+- 本轮未新增 TalkBack 设备验收；KUM-93 的既有无障碍覆盖继续有效。
+- 分支仍堆叠在 KUM-93 head 上，KUM-93 合并后需要 rebase 到 main，只保留 KUM-94 的 UI 改动。
 Base SHA
 - c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6
 Head SHA
-- 55b2c1385bb14d8de01f18087d61485bec04d762（架构审查时的代码候选树）
-- 55b2c13..8e23fbe 只增加 `tasks.md` 和 `verification.md`，没有源码变化。
+- df498530ee042fc9cb040277b5b82a541b00bfaf（Reviewed Candidate Tree）
 Next gate allowed
-- 提交当前候选树并创建 Draft PR；未经用户授权不合并、不推送 main。
-```
-
-动效补充审查：
-
-```text
-APPROVED
-P0
-- 无
-P1
-- 无
-Non-blocking
-- motion.gif 只记录 Home 主操作的按压；共享图标按钮复用同一 modifier，未单独录像。
-- 180ms 颜色过渡未单独录制，由 Compose 测试和代码审查覆盖。
-- 本次不增加页面转场或列表错峰入场。
-Base SHA
-- c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6
-Head SHA
-- 87dea0e756b1ec7012e7f7a44f5908ff68abdaed（动效候选树）
-Next gate allowed
-- 提交动效补充、推送到功能分支并更新 Draft PR #68。
+- 可以提交当前候选树并更新 Draft PR #68；未经用户明确授权不合并、不推送 main。
 ```
 
 审查边界：
 
-- 改动只覆盖 Compose 组件、主题 token、三屏渲染和相关测试。
-- 未修改 `IntercomService`、`IntercomStateMachine`、`SessionOrchestrator`、`SignalingProtocol`、transport adapters、导航、持久化、Gradle 或数据库。
-- 共享组件由调用方持有根 modifier、交互语义和回调；没有布尔外形开关矩阵。
+- 只读检查了 Git 状态、完整源码差异、真实发现数据到雷达点击的路径、主题持久化、状态映射、系统栏接线和测试覆盖。
+- 雷达点击要求当前路由为 Home、产品状态为 Discovering、runtime session 一致、对象仍可连接且没有待处理连接，再调用既有 `connectToPresence` 路径。
+- 主题选择先更新页面状态，再写入 `motocom_appearance`，并同步 `MainScreen` 的导航和系统栏外观。
+- 没有新的产品状态写入者、后台资源所有者、协议路径或导航入口。
 
-## Linear 同步
+## 未提交边界
 
-- KUM-94 已写入实现、门禁、审查、commit 和 PR 摘要。
-- 当前状态已推进到 `In Review`。
+- 本轮未执行 `git commit`、`git push` 或 PR 更新。
+- 未合并、未发布、未使用签名密钥、未修改生产数据库。
+- Linear 状态与评论未在本轮修改。

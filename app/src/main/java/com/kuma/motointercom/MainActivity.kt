@@ -38,6 +38,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var preferredAudioControls = AudioControlSettings()
     private val audioRoutePreferences by lazy { AudioRoutePreferences(this) }
     private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
+    private val appearancePreferences by lazy { AppearancePreferences(this) }
     private var bluetoothPermissionGranted: Boolean? = null
     private var automaticReconnectEnabled = true
 
@@ -155,6 +156,8 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             initialAudioControls = idleAudioControlSnapshot(preferredAudioControls),
             initialPreferredAudioRoute = preferredAudioRoute,
             initialAutomaticReconnectEnabled = automaticReconnectEnabled,
+            initialTheme = appearancePreferences.load(),
+            onThemeSelected = { theme -> appearancePreferences.save(theme) },
             onSetMuted = { muted ->
                 val service = intercomService
                 if (service == null) {

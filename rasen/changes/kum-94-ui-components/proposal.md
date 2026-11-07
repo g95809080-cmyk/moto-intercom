@@ -1,22 +1,25 @@
 ## Why
 
-Home、Discover 和 Settings 已经统一由 Compose 渲染，但卡片、图标按钮、设置行和分组标题仍各自实现。字体大小混用 10–30sp，圆角大量写死为 14–26dp，同类信息在不同页面的层级和触控外观不一致。KUM-93 只修正了可访问名称和输入语义，没有解决这层 UI 重复。
+现有 Android 界面能完成对讲，但信息层级依赖大量说明文字，Home、Discover、Settings 和 Logs 的卡片、状态与导航风格也不统一。概念预览确认了更简洁的“仪表 + 雷达”方向：减少解释性文案，把真实状态、可连接车友和音频操作放到更直接的位置，同时提供日间与夜航两套主题。
 
 ## What Changes
 
-- 新增 `MotoComSurfaceCard`、`MotoComIconButton`、`MotoComSectionHeader` 和 `MotoComSettingRow` 四个共享 Compose 组件。
-- 在 `MotoComTheme` 建立第一批 Material 3 字体和形状 token，并把页面内写死的字号、圆角迁移到 token。
-- 将 Home、Discover 和 Settings 的私有卡片、图标按钮和设置行替换为共享组件。
-- 新增待上线状态的语义颜色 token，并让离线配对标签使用该 token。
-- 为共享图标按钮和 Home 主操作增加弹簧按压反馈，并为卡片、按钮颜色变化增加 180ms 过渡。
-- 增加共享组件契约测试，锁定单图标语义、调用方 modifier、slot 渲染和点击回调。
-- 保持导航、业务状态、服务、协议、持久化、音频流程和依赖不变。
+- 建立 `NIGHTRIDE`、`DAYLIGHT` 两套完整色板，默认白昼，并在设置页提供即时切换和本地持久化。
+- Home 改为居中“摩声”字标、整卡雷达和底部主操作区；雷达使用头盔标记，发现阶段显示扫描、声纳波纹和回波。
+- 首页雷达气泡使用真实 `RiderPresence` 数据；点击气泡按 `deviceId + sessionId` 回查并发起真实连接。
+- Discover 改为在线数量、扫描入口、车友分组和重新扫描；离线状态显示“待机中”，不再伪装成对讲中。
+- Settings 重做身份、主题、音频、VOX、自动重连、权限和更多入口；Logs 对齐同一主题和卡片结构。
+- 底部导航改为圆角浮动胶囊，图标在左、文字在右，并随主题同步更新系统栏和选中态。
+- Home、Discover、Settings 和 Logs 共享顶栏、面板、状态胶囊、开关和主题选择器等 Compose 组件。
+- 清理重复描述和错误语境文案，例如设置页不再显示“点击下方启动摩声”，VOX 不再重复显示灵敏度。
+- 保持导航、业务状态、服务、协议、持久化范围和音频流程不变；新增的持久化仅限主题选择。
+- 辅助 Help、About、首次引导和来电确认继续使用现有系统对话框/引导实现，不在本次重做范围内。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `ui-components`: Android Compose 页面的共享视觉组件和 Material 3 token。
+- `ui-components`: 双主题、四页统一视觉、真实雷达气泡和主题入口。
 
 ### Modified Capabilities
 
@@ -24,4 +27,4 @@ Home、Discover 和 Settings 已经统一由 Compose 渲染，但卡片、图标
 
 ## Impact
 
-主要影响 `MotoComComponents.kt`、`MotoComTheme.kt`、`HomeScreen.kt`、`DiscoverScreen.kt`、`SettingsScreen.kt`、`colors.xml` 和新增组件测试。不改动 `IntercomService`、`IntercomStateMachine`、`SessionOrchestrator`、`SignalingProtocol`、transport adapters、Gradle 或数据库。
+主要影响 `MotoComTheme.kt`、`MotoComConceptComponents.kt`、`HomeScreen.kt`、`DiscoverScreen.kt`、`SettingsScreen.kt`、`LogsScreen.kt`、`MainScreen.kt`、`MainActivity.kt`、`AppearancePreferences.kt`、`activity_main.xml`、`styles.xml`、字符串资源和相关测试。不改动 `IntercomService`、`IntercomStateMachine`、`SessionOrchestrator`、`SignalingProtocol`、transport adapters、Gradle 或数据库。

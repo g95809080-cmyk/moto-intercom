@@ -7,6 +7,9 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Color as AndroidColor
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -24,9 +27,12 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.view.WindowInsetsControllerCompat
 import java.util.EnumMap
 import java.util.UUID
 import java.lang.ref.WeakReference
+import kotlin.math.roundToInt
 
 internal class MainScreen(
     private val activity: Activity,
@@ -42,6 +48,8 @@ internal class MainScreen(
     initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
     initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
     initialAutomaticReconnectEnabled: Boolean = true,
+    initialTheme: MotoComThemeMode = MotoComThemeMode.DAYLIGHT,
+    private val onThemeSelected: (MotoComThemeMode) -> Unit = {},
     private val onSetMuted: (Boolean) -> Unit = {},
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
     private val onSetVoxSensitivity: (Int) -> Unit = {},
@@ -87,7 +95,6 @@ internal class MainScreen(
     private val homeUiState = mutableStateOf(
         HomeScreenUiState(
             primaryText = "",
-            detailText = "",
             supplementalText = null,
             peerText = "",
             primaryActionLabel = "",
@@ -99,29 +106,25 @@ internal class MainScreen(
             discoverCtaLabel = "",
             showDiscoverCta = false,
             audioSourceText = "",
-            plannedTransportText = "",
-            connectedTransportText = "",
-            webRtcText = "",
-            bluetoothText = "",
-            voxText = "",
             discovering = false,
             connected = false
         )
     )
     private val homeAudioLevel = mutableFloatStateOf(0f)
+    private val homeRadarPeers = mutableStateOf(emptyList<RadarPreviewPeer>())
     private var audioControlSnapshot = initialAudioControls
+    private val appTheme = mutableStateOf(initialTheme)
     private val discoverUiState = mutableStateOf(
         DiscoverScreenUiState(
             presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
             stateText = "",
             supplementalText = null,
-            emptyText = "",
             radarRunning = false,
             rescanEnabled = false
         )
     )
     private val settingsUiState = mutableStateOf(
-        SettingsScreenUiState("", "", "", "", "", "", "", null, false, "")
+        SettingsScreenUiState("", "", "", "", null, false, "")
     )
     private val logsUiState = mutableStateOf(LogsScreenUiState("", "", false))
 
@@ -464,6 +467,7 @@ internal class MainScreen(
             cancelPendingPresenceExpiry()
         }
         when (currentRoute) {
+            MainRoute.HOME -> renderHome()
             MainRoute.DISCOVER -> renderDiscover()
             MainRoute.SETTINGS -> renderSettings()
             else -> Unit
@@ -571,14 +575,7 @@ internal class MainScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             activity.window.setDecorFitsSystemWindows(false)
         }
-        activity.window.statusBarColor = activity.getColorCompat(R.color.motocom_background)
-        activity.window.navigationBarColor = activity.getColorCompat(R.color.motocom_background)
-        @Suppress("DEPRECATION")
-        var flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
-        activity.window.decorView.systemUiVisibility = flags
+        applyThemeToWindow(appTheme.value)
         root.setOnApplyWindowInsetsListener { view, insets ->
             val safeInsets = calculateSafeWindowInsets(insets)
             view.setPadding(safeInsets[0], safeInsets[1], safeInsets[2], safeInsets[3])
@@ -597,6 +594,89 @@ internal class MainScreen(
                 if (hadLaidOutWidth) restoreCurrentScroll()
             }
         }
+    }
+
+    private fun applyThemeToWindow(theme: MotoComThemeMode) {
+        val colors = theme.colors
+        activity.window.statusBarColor = colors.background.toArgb()
+        activity.window.navigationBarColor = colors.background.toArgb()
+        @Suppress("DEPRECATION")
+        activity.window.decorView.systemUiVisibility = if (colors.isLight) {
+            var flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+            flags
+        } else {
+            0
+        }
+        WindowInsetsControllerCompat(activity.window, activity.window.decorView).apply {
+            isAppearanceLightStatusBars = colors.isLight
+            isAppearanceLightNavigationBars = colors.isLight
+        }
+        root.setBackgroundColor(colors.background.toArgb())
+        navigationRail.setBackgroundColor(colors.panel.toArgb())
+        navigationPanel.setBackgroundColor(colors.panel.toArgb())
+        expandedDetailContainer.setBackgroundColor(colors.panelRaised.toArgb())
+        bottomNavigation.background = roundedDrawable(
+            fill = colors.panel.copy(alpha = 0.82f).toArgb(),
+            stroke = colors.outline.copy(alpha = 0.72f).toArgb(),
+            radiusDp = 18,
+            strokeWidthDp = 1
+        )
+        bottomNavigation.elevation = 0f
+        updateNavigationSelection()
+    }
+
+    private fun roundedDrawable(
+        fill: Int,
+        stroke: Int,
+        radiusDp: Int,
+        strokeWidthDp: Int = 0
+    ): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(radiusDp).toFloat()
+        setColor(fill)
+        if (strokeWidthDp > 0) {
+            setStroke(dp(strokeWidthDp), stroke)
+        }
+    }
+
+    private fun styleNavItem(button: Button, selected: Boolean, isBottom: Boolean) {
+        val colors = appTheme.value.colors
+        val contentColor = if (selected) colors.text else colors.muted
+        val iconTint = if (selected) colors.accent else colors.muted
+        button.background = if (isBottom) {
+            roundedDrawable(
+                fill = if (selected) {
+                    colors.accent.copy(alpha = 0.1f).toArgb()
+                } else {
+                    AndroidColor.TRANSPARENT
+                },
+                stroke = AndroidColor.TRANSPARENT,
+                radiusDp = 14
+            )
+        } else {
+            roundedDrawable(
+                fill = if (selected) {
+                    colors.accent.copy(alpha = 0.12f).toArgb()
+                } else {
+                    colors.panelRaised.toArgb()
+                },
+                stroke = if (selected) {
+                    colors.accent.copy(alpha = 0.28f).toArgb()
+                } else {
+                    colors.outline.toArgb()
+                },
+                radiusDp = 18,
+                strokeWidthDp = 1
+            )
+        }
+        button.setTextColor(contentColor.toArgb())
+        button.compoundDrawableTintList = ColorStateList.valueOf(iconTint.toArgb())
+        button.elevation = 0f
+        button.isAllCaps = false
+        button.textSize = if (isBottom) 11f else 14f
     }
 
     private fun bindNavigation() {
@@ -687,7 +767,7 @@ internal class MainScreen(
                     ?: activity.getString(R.string.nav_discover)
                 body.text = selected?.let {
                     "${it.deviceName}\n${it.availableTransports.joinToString()}"
-                } ?: activity.getString(R.string.discover_one_to_one_note)
+                }.orEmpty()
                 status.text = selected?.let {
                     if (it.isSelectable) {
                         activity.getString(R.string.discover_connect)
@@ -710,7 +790,7 @@ internal class MainScreen(
                     audioReady = audioReady
                 )
                 title.text = activity.getString(R.string.nav_home)
-                body.text = presentation.detailText
+                body.text = presentation.peerText
                 status.text = presentation.primaryText
             }
             MainRoute.SETTINGS -> {
@@ -726,15 +806,8 @@ internal class MainScreen(
                     audioReady = audioReady
                 )
                 title.text = activity.getString(R.string.nav_settings)
-                body.text = activity.getString(
-                    R.string.settings_state_summary,
-                    presentation.primaryText
-                )
-                status.text = activity.getString(
-                    R.string.settings_audio_summary,
-                    presentation.audioSourceText,
-                    bluetoothActive.toString()
-                )
+                body.text = presentation.primaryText
+                status.text = audioSourceLabel(presentation.audioSourceText)
             }
             MainRoute.LOGS -> Unit
         }
@@ -848,6 +921,13 @@ internal class MainScreen(
         guideAnchors[target] = GuideAnchor(host, android.graphics.RectF(bounds.left, bounds.top, bounds.right, bounds.bottom))
     }
 
+    private fun selectTheme(theme: MotoComThemeMode) {
+        if (theme == appTheme.value) return
+        appTheme.value = theme
+        onThemeSelected(theme)
+        applyThemeToWindow(theme)
+    }
+
     private fun createHomePage(): ScrollView = ScrollView(activity).apply {
         id = R.id.home_scroll
         clipToPadding = false
@@ -863,7 +943,7 @@ internal class MainScreen(
                     ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool
                 )
                 setContent {
-                    MotoComTheme {
+                    MotoComTheme(appTheme.value) {
                         MotoComHomeScreen(
                             state = homeUiState.value,
                             audioLevel = homeAudioLevel.floatValue,
@@ -875,6 +955,8 @@ internal class MainScreen(
                             onMute = onSetMuted,
                             onAudioSettings = { showPage(MainRoute.SETTINGS, focusAudio = true) },
                             onVox = { showPage(MainRoute.SETTINGS) },
+                            radarPreviewPeers = homeRadarPeers.value,
+                            onRadarPreviewPeerClick = ::connectFromHomeRadar,
                             onGuideAnchor = { target, bounds -> recordGuideAnchor(this@homeHost, target, bounds) }
                         )
                     }
@@ -907,7 +989,6 @@ internal class MainScreen(
         )
         homeUiState.value = HomeScreenUiState(
             primaryText = presentation.primaryText,
-            detailText = presentation.detailText,
             supplementalText = presentation.supplementalText,
             peerText = presentation.peerText,
             primaryActionLabel = presentation.primaryActionLabel,
@@ -919,13 +1000,9 @@ internal class MainScreen(
             discoverCtaLabel = presentation.discoverCtaLabel,
             showDiscoverCta = presentation.showDiscoverCta,
             audioSourceText = presentation.audioSourceText,
-            plannedTransportText = presentation.plannedTransportText,
-            connectedTransportText = presentation.connectedTransportText,
-            webRtcText = presentation.webRtcText,
-            bluetoothText = optionalPermission.bluetoothStatusText,
-            voxText = audioControlSnapshot.voxState.name,
             discovering = productState is IntercomState.Discovering,
             connected = productState is IntercomState.Connected && audioReady,
+            statusLabel = productStatusLabel(productState),
             animationsEnabled = animationsEnabled(),
             muted = audioControlSnapshot.controls.muted,
             muteEnabled = productState !is IntercomState.Offline &&
@@ -934,6 +1011,29 @@ internal class MainScreen(
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
             voxState = audioControlSnapshot.voxState
         )
+        homeRadarPeers.value = if (productState is IntercomState.Discovering) {
+            val presentation = discoverPresentation(
+                state = productState,
+                presences = presences,
+                connectPending = discoverConnectAwaitingState
+            )
+            presentation.orderedPresences.mapIndexedNotNull { index, presence ->
+                val card = presentation.cards[index]
+                if (!card.connectVisible) {
+                    null
+                } else {
+                    RadarPreviewPeer(
+                        id = radarPeerId(presence),
+                        label = card.title,
+                        angleDegrees = RADAR_PEER_ANGLES[index % RADAR_PEER_ANGLES.size],
+                        distanceFraction = RADAR_PEER_DISTANCES[index % RADAR_PEER_DISTANCES.size],
+                        enabled = card.connectEnabled
+                    )
+                }
+            }
+        } else {
+            emptyList()
+        }
     }
 
     private fun bindDiscover() {
@@ -953,13 +1053,9 @@ internal class MainScreen(
             presentation = presentation,
             stateText = stateText,
             supplementalText = supplementalStatus,
-            emptyText = if (
-                presentation.wifiSettingsVisible ||
-                presentation.offlineStartVisible ||
-                presentation.readOnlyReason != null
-            ) stateText else activity.getString(R.string.discover_empty_no_presence),
             radarRunning = productState is IntercomState.Discovering,
             animationsEnabled = animationsEnabled(),
+            statusLabel = productStatusLabel(productState),
             rescanEnabled = productState is IntercomState.Discovering &&
                 !wifiUnavailable &&
                 !discoverConnectAwaitingState
@@ -981,7 +1077,7 @@ internal class MainScreen(
                     ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool
                 )
                 setContent {
-                    MotoComTheme {
+                    MotoComTheme(appTheme.value) {
                         MotoComDiscoverScreen(
                             state = discoverUiState.value,
                             onBack = { showPage(MainRoute.HOME) },
@@ -1031,20 +1127,41 @@ internal class MainScreen(
             }
     }
 
+    private fun radarPeerId(presence: RiderPresence): String =
+        "${presence.deviceId.orEmpty()}|${presence.sessionId?.value.orEmpty()}"
+
+    private fun connectFromHomeRadar(peer: RadarPreviewPeer) {
+        val presence = presences.firstOrNull {
+            it.isSelectableForUi() && radarPeerId(it) == peer.id
+        } ?: run {
+            renderHome()
+            return
+        }
+        requestPresenceConnection(presence, MainRoute.HOME)
+    }
+
     private fun connectFromDiscover(presence: RiderPresence) {
+        requestPresenceConnection(presence, MainRoute.DISCOVER)
+    }
+
+    private fun requestPresenceConnection(presence: RiderPresence, route: MainRoute) {
         val currentPresence = presences.firstOrNull {
             it.deviceId == presence.deviceId &&
                 it.sessionId == presence.sessionId &&
                 it.isSelectableForUi()
         }
         if (
-            currentRoute != MainRoute.DISCOVER ||
+            currentRoute != route ||
             productState !is IntercomState.Discovering ||
             discoverConnectAwaitingState ||
             currentPresence == null
         ) {
-            if (currentPresence == null && currentRoute == MainRoute.DISCOVER) {
-                renderDiscover()
+            if (currentPresence == null && currentRoute == route) {
+                when (route) {
+                    MainRoute.HOME -> renderHome()
+                    MainRoute.DISCOVER -> renderDiscover()
+                    else -> Unit
+                }
             }
             return
         }
@@ -1065,7 +1182,11 @@ internal class MainScreen(
         pendingConnectAdmitted = false
         val dispatched = onConnectPresenceRequest(currentPresence, request)
         if (dispatched) {
-            if (currentRoute == MainRoute.DISCOVER) renderDiscover()
+            when (route) {
+                MainRoute.HOME -> renderHome()
+                MainRoute.DISCOVER -> renderDiscover()
+                else -> Unit
+            }
         } else if (pendingConnectRequest == request && productState is IntercomState.Discovering &&
             productState.runtimeSessionId == request.runtimeSessionId) {
             clearPendingDiscoverConnect()
@@ -1184,10 +1305,12 @@ internal class MainScreen(
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
             setContent {
-                MotoComTheme {
+                MotoComTheme(appTheme.value) {
                     MotoComSettingsScreen(
                         state = settingsUiState.value,
                         onBack = { showPage(MainRoute.HOME) },
+                        theme = appTheme.value,
+                        onThemeSelected = ::selectTheme,
                         onNicknameChanged = { value ->
                             settingsNicknameDraft = value
                             settingsUiState.value = settingsUiState.value.copy(nickname = value)
@@ -1202,6 +1325,10 @@ internal class MainScreen(
                         onAudioRouteSelected = onSelectAudioRoute,
                         onRnnoiseEnabledChanged = onSetRnnoiseEnabled,
                         onAutomaticReconnectChanged = onAutomaticReconnectChanged,
+                        onGuide = {
+                            showPage(MainRoute.HOME)
+                            onboarding?.replay()
+                        },
                         onAudioSectionPositioned = { offset ->
                             if (audioFocusPending) {
                                 audioFocusPending = false
@@ -1226,7 +1353,7 @@ internal class MainScreen(
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
             setContent {
-                MotoComTheme {
+                MotoComTheme(appTheme.value) {
                     MotoComLogsScreen(
                         state = logsUiState.value,
                         onBack = { showPage(MainRoute.SETTINGS) },
@@ -1266,17 +1393,13 @@ internal class MainScreen(
         settingsUiState.value = SettingsScreenUiState(
             nickname = settingsNicknameDraft,
             nicknameFeedback = settingsUiState.value.nicknameFeedback,
-            audioSource = activity.getString(R.string.settings_audio_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText),
-            productState = activity.getString(R.string.settings_state_summary, presentation.primaryText),
-            attemptFacts = activity.getString(R.string.settings_attempt_summary, presentation.plannedTransportText, presentation.connectedTransportText, presentation.webRtcText),
-            discoveryCandidates = activity.getString(R.string.settings_discovery_candidates_summary, discoveryCandidateSummary(presences)),
-            deviceStatus = activity.getString(R.string.settings_device_status_summary, presentation.audioSourceText, optionalPermission.bluetoothStatusText, presentation.primaryText, presentation.connectedTransportText),
+            audioSource = presentation.audioSourceText,
+            productState = settingsProductStateText(productState, audioReady),
             optionalPermissionNotice = optionalPermission.noticeText,
             showOptionalPermissionCta = optionalPermission.showGrantCta,
             version = activity.getString(R.string.settings_version_summary, currentVersionName()),
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
-            voxState = audioControlSnapshot.voxState,
             preferredAudioRoute = preferredAudioRoute,
             automaticReconnectEnabled = automaticReconnectEnabled,
             rnnoiseEnabled = audioControlSnapshot.controls.rnnoiseEnabled,
@@ -1511,6 +1634,9 @@ internal class MainScreen(
     private fun setNavSelected(id: Int, selected: Boolean) {
         root.findViewById<Button?>(id)?.apply {
             isSelected = selected
+            val isBottomItem = id == R.id.bottom_nav_home_button ||
+                id == R.id.bottom_nav_discover_button || id == R.id.bottom_nav_settings_button
+            styleNavItem(this, selected, isBottomItem)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 contentDescription = null
                 stateDescription = if (selected) {
@@ -1527,13 +1653,6 @@ internal class MainScreen(
                 } else {
                     null
                 }
-            }
-            val isBottomItem = id == R.id.bottom_nav_home_button ||
-                id == R.id.bottom_nav_discover_button || id == R.id.bottom_nav_settings_button
-            if (!isBottomItem) {
-                setBackgroundResource(
-                    if (selected) R.drawable.motocom_pill_green else R.drawable.motocom_secondary_button
-                )
             }
         }
     }
@@ -1634,6 +1753,8 @@ internal class MainScreen(
             isSelectableForUi()
 
     private companion object {
+        val RADAR_PEER_ANGLES = floatArrayOf(-140f, -38f, 140f, 42f, -96f, 96f, 178f, 0f)
+        val RADAR_PEER_DISTANCES = floatArrayOf(0.88f, 0.78f, 0.91f, 0.82f, 0.74f, 0.86f, 0.89f, 0.76f)
         const val KEY_ROUTE = "main_route"
         const val KEY_NICKNAME_DRAFT = "nickname_draft"
         const val KEY_EXPANDED_SELECTED_DEVICE_ID = "expanded_selected_device_id"

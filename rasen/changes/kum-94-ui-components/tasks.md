@@ -1,21 +1,23 @@
 ## 1. 实现
 
-- [x] 1.1 新增共享 SurfaceCard、IconButton、SectionHeader 和 SettingRow。
-- [x] 1.2 建立第一批 Material 3 typography 和 shape token。
-- [x] 1.3 迁移 Settings 到共享组件和 token。
-- [x] 1.4 迁移 Discover 到共享组件和 token。
-- [x] 1.5 迁移 Home 到共享组件和 token。
-- [x] 1.6 增加共享按压弹簧和 180ms 颜色过渡，并应用到图标按钮、卡片和 Home 主操作。
+- [x] 1.1 建立 `NIGHTRIDE` / `DAYLIGHT` 色板和 Material 3 主题映射。
+- [x] 1.2 新增主题持久化、默认白昼和设置页即时切换入口。
+- [x] 1.3 重做 Home 居中字标、整卡雷达、头盔中心标记和控制区。
+- [x] 1.4 把真实发现车友映射为雷达气泡，并接入精确匹配的连接点击。
+- [x] 1.5 重做 Discover 的在线数量、状态胶囊、车友分组和重新扫描。
+- [x] 1.6 重做 Settings 的身份、主题、音频、VOX、重连、权限和更多入口。
+- [x] 1.7 对齐 Logs、底部浮动导航和系统栏主题。
+- [x] 1.8 清理重复或错误语境文案，统一真实短状态标签。
+- [x] 1.9 保留减少动画降级，不使用无限动画驱动非活动状态。
 
 ## 2. 验证与交付
 
-- [x] 2.1 增加共享组件契约测试。
-- [x] 2.2 运行相关 Compose 定向测试。
-- [x] 2.3 运行完整 JVM、Lint 和 Debug APK 构建。
-- [x] 2.4 在模拟器验收 Home、Discover、Settings 三张页面并保存截图。
-- [x] 2.5 固定 Base/Tree 执行 `motointercom-product-architect` 只读审查，结论 `APPROVED`，P0/P1 为 0。
-- [x] 2.6 更新 Linear KUM-94 的验证摘要和下一步。
-- [x] 2.7 提交功能分支并创建 Draft PR #68。
-- [x] 2.8 在 API 36 模拟器录制按压动效并保存 `motion.gif`。
-- [x] 2.9 固定动效候选树执行 `motointercom-product-architect` 审查，结论 `APPROVED`，P0/P1 为 0。
-- [x] 2.10 提交动效补充，推送并更新 Draft PR #68。
+- [x] 2.1 增加主题选择、主题持久化和状态标签测试。
+- [x] 2.2 增加首页雷达真实车友气泡点击测试。
+- [x] 2.3 运行定向 Compose / Robolectric 测试。
+- [x] 2.4 运行完整 JVM 单元测试。
+- [x] 2.5 运行 Lint 和最终 Debug APK 构建。
+- [x] 2.6 在 API 36 模拟器验收白昼、夜航、四页和重启持久化。
+- [x] 2.7 在 320dp 宽、1.3 倍字体下检查 Home、Discover、Settings。
+- [x] 2.8 固定候选树执行 `motointercom-product-architect` 只读审查并关闭 P0/P1。
+- [x] 2.9 更新验证记录，标明本轮未提交、未推送。

@@ -1,37 +1,43 @@
 ## Context
 
-Home、Discover 和 Settings 都接收不可变 UI state 和事件回调，状态仍由现有 `MainScreen` 与 `MainActivity` 持有。本次只调整 Compose 渲染层，不建立新的 ViewModel、状态持有者或导航路径。
+Home、Discover、Settings 和 Logs 继续接收不可变 UI state 与事件回调，状态仍由现有 `MainScreen`、`MainActivity` 和 `IntercomService` 持有。本次只调整 Compose 渲染、主题选择、导航外观和 Home 雷达的真实点击接线，不建立新的 ViewModel、状态持有者或导航路径。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 让同类卡片、图标操作、分组标题和设置行具有一致的视觉与语义结构。
-- 把页面内写死的字号和圆角收敛到主题 token。
-- 提供一致的按压回弹和状态颜色过渡，同时保持布局尺寸稳定。
-- 保持调用方对根 modifier、点击、选中、开关和测试 tag 的所有权。
-- 用最小 Compose 测试证明共享组件契约。
+- 用 `NIGHTRIDE` 和 `DAYLIGHT` 两套色板统一四个主页面、系统栏和底部导航。
+- 默认使用白昼主题，并让主题选择跨 Activity 重启保留。
+- 把 Home 雷达做成整卡仪表视觉，使用头盔中心标记和真实车友气泡。
+- 让车友气泡点击走现有连接请求路径，并按设备与会话精确匹配。
+- 用短状态文案替代重复解释，保留真实业务状态和所有关键操作。
+- 在 320dp 宽、1.3 倍字体下保持可读和可滚动。
 
 **Non-Goals:**
 
-- 不改业务状态、导航、服务、协议、持久化、音频、依赖或 Gradle。
-- 不扩 KUM-93 的 TalkBack 验收范围。
-- 不引入新的设计系统库或截图测试基础设施。
+- 不改业务状态机、导航、服务、协议、音频、依赖或数据库。
+- 不迁移 Help、About、首次引导和来电确认的系统对话框。
+- 不新增 TalkBack 设备验收或扩大 KUM-93 范围。
+- 不引入新的设计系统库或截图测试框架。
 
 ## Decisions
 
-- `MotoComSurfaceCard` 固定卡片背景、边框和内容内边距，根 modifier 由调用方放置；可变内容使用单一 content slot。
-- `MotoComIconButton` 只接收 `Painter`、可访问名称和点击回调。可访问名称放在交互父节点，内部 `Icon` 的 `contentDescription` 固定为 `null`，避免重复朗读。
-- `MotoComSectionHeader` 只负责分组标题的字体与颜色；页面间距仍由调用方 modifier 提供。
-- `MotoComSettingRow` 是纯布局组件，接受 leading、headline、supporting 和 trailing slots。`clickable`、`toggleable`、`selectable`、`semantics` 和 `testTag` 均由调用方 modifier 提供。
-- 第一批字体 token 把辅助信息的最小字号提升到 12sp；卡片标题、正文、标签和页面标题分别使用 Material 3 typography。形状 token 采用 6/12/16/20/26dp 的递进关系。
-- 离线配对状态新增 `motocom_status_pending`，与现有深绿色和弱化文字 token 区分。
-- 共享 `motoComPressScale` 在按压时把绘制缩放到 0.94，并使用低回弹 spring 恢复；只改变 draw transform，不改变测量尺寸、触控边界或语义。
-- 卡片和图标按钮的颜色变化使用 180ms `animateColorAsState`；容器、边框和内容色同步过渡。
+- `MotoComThemeMode` 同时持有标签和完整色板；`MotoComTheme` 将其映射为 Material 3 light/dark scheme。默认 `DAYLIGHT`，避免首次安装进入深色界面。
+- 主题选择通过 `AppearancePreferences` 写入 `motocom_appearance`，`MainActivity` 创建 `MainScreen` 前同步读取；设置页点击后立即更新 Compose、系统栏和导航背景。
+- Home 雷达固定使用 `NIGHTRIDE` 色板，白昼主题下仍保留深色仪表卡，避免雷达对比度随主题下降。
+- `MotoComTopBar` 只显示居中的“摩声”字标；发现和搜索状态由页面状态胶囊表达，不再恢复左上菜单或右上设置图标。
+- 页面状态统一由 `productStatusLabel` 从真实 `IntercomState` 映射为“待机中、搜索中、待确认、连接中、已连接、恢复中、重置中、结束中”；设置页在已连接但音频未就绪时保留“正在等待音频就绪”。
+- Home 雷达气泡不创建假数据。`MainScreen` 从 `discoverPresentation` 的同一有序车友列表生成气泡，连接时再按 `deviceId + sessionId` 回查当前可连接对象。
+- 雷达中心使用现有 `ic_rider_24` 头盔标记；扫描、扩散和脉冲只在 `discovering && animationsEnabled` 时创建，减少动画时保留静态网格和真实状态。
+- Discover 的离线状态优先显示“待机中”，Wi-Fi 不可用显示“Wi-Fi 未开启”；连接、恢复和结束等只读状态使用短状态胶囊，不把连接请求误标成“对讲中”。
+- Settings 使用双列音频/VOX 卡片和主题选择器；主题入口直接可见，不再藏在“更多”或二级页面。
+- 底部导航继续复用现有 XML Button，由 `MainScreen` 程序化设置为浮动胶囊、图标在左和主题色选中态，避免整页迁移导航框架。
+- 文案收敛只删除重复或错误语境的说明，不删除权限、Wi-Fi、连接、静音、VOX 和日志导出等必要操作。
 
 ## Risks / Trade-offs
 
-- 统一组件会改变所有页面的卡圆角和标题字号，属于预期的视觉变化；通过三张模拟器截图验收。
-- `MotoComIconButton` 默认提供浅色圆形背景，页头操作会比旧版更显眼；这是本次明确的视觉层级调整。
-- `MotoComSettingRow` 不拥有交互语义，调用方仍需正确提供 role、toggleable 或 selectable 语义；现有页面测试继续覆盖这些行为。
-- 本次不增加页面转场或列表错峰入场，避免把 UI 动效扩展成导航和滚动行为改动。
+- 白昼主题的浅色背景与深色雷达形成明显对比，这是预期的仪表层级，不作为主题不一致处理。
+- 新增主题持久化只保存枚举值；读取未知值时回退白昼，避免升级后出现不可恢复的空白主题。
+- 雷达气泡位置按固定角度和距离分布，真实车友数量和身份仍来自发现列表；同一车友在不同布局中的角度不作为物理方位含义。
+- 小字号标签在 320dp、1.3 倍字体下已人工检查，但不等同于新的 TalkBack 设备验收。
+- Help、About、首次引导和来电确认仍保留旧对话框样式，属于本轮明确的非目标。

@@ -66,7 +66,6 @@ internal fun resolveBackNavigation(chrome: RouteChrome): BackNavigation = when {
 
 internal data class HomePresentation(
     val primaryText: String,
-    val detailText: String,
     val primaryAction: PrimaryIntercomAction,
     val primaryActionLabel: String,
     val primaryActionEnabled: Boolean,
@@ -107,7 +106,6 @@ internal fun homePresentation(
     val waitingForAudio = state is IntercomState.Connected && !audioReady
     return HomePresentation(
         primaryText = if (waitingForAudio) "正在等待音频就绪" else state.primaryText(),
-        detailText = if (waitingForAudio) "等待远端首帧与本地音频路由确认" else state.detailText(),
         primaryAction = primaryAction,
         primaryActionLabel = state.primaryActionLabel(),
         primaryActionEnabled = primaryEnabled,
@@ -212,6 +210,30 @@ internal fun visibleAudioSourceText(
     return audioSourcePresentation(status, bluetooth)
 }
 
+internal fun audioSourceLabel(status: String): String =
+    status.trim().removePrefix("当前音频源：").trim().ifBlank { "待机" }
+
+internal fun productStatusLabel(state: IntercomState): String = when (state) {
+    IntercomState.Offline -> "待机中"
+    is IntercomState.Discovering -> "搜索中"
+    is IntercomState.IncomingConfirmation -> "待确认"
+    is IntercomState.Connecting,
+    is IntercomState.Optimizing -> "连接中"
+    is IntercomState.Connected -> "已连接"
+    is IntercomState.Recovering -> "恢复中"
+    is IntercomState.Resetting -> "重置中"
+    is IntercomState.Stopping -> "结束中"
+}
+
+internal fun settingsProductStateText(
+    state: IntercomState,
+    audioReady: Boolean
+): String = if (state is IntercomState.Connected && !audioReady) {
+    "正在等待音频就绪"
+} else {
+    productStatusLabel(state)
+}
+
 internal fun incomingConfirmationNotificationMessage(deviceName: String): String {
     val visibleDeviceName = deviceName.trim().ifBlank { DEVICE_NAME_UNAVAILABLE }
     return "$visibleDeviceName · 请在应用内确认"
@@ -229,18 +251,6 @@ private fun IntercomState.primaryText(): String = when (this) {
     is IntercomState.Stopping -> "正在结束对讲"
 }
 
-private fun IntercomState.detailText(): String = when (this) {
-    IntercomState.Offline -> "一对一对讲 · 无需网络"
-    is IntercomState.Discovering -> "保持两台手机的 Wi-Fi 可用"
-    is IntercomState.IncomingConfirmation -> "请在确认框中选择接受或拒绝"
-    is IntercomState.Connecting -> "正在建立信令与媒体通道"
-    is IntercomState.Optimizing -> "保持当前目标不变"
-    is IntercomState.Connected -> "对讲已就绪"
-    is IntercomState.Recovering -> "不会切换到其他附近车友"
-    is IntercomState.Resetting -> "请稍候"
-    is IntercomState.Stopping -> "正在释放连接和音频资源"
-}
-
 private fun IntercomState.primaryActionLabel(): String = when (this) {
     is IntercomState.Stopping -> "停止中…"
     IntercomState.Offline -> "启动摩声"
@@ -249,7 +259,7 @@ private fun IntercomState.primaryActionLabel(): String = when (this) {
 
 private fun IntercomState.peerText(lastStoppingPeerName: String?): String = when (this) {
     IntercomState.Offline,
-    is IntercomState.Discovering -> "等待车友加入"
+    is IntercomState.Discovering -> ""
     is IntercomState.IncomingConfirmation -> peer.displayName("附近车友")
     is IntercomState.Connecting -> peer?.displayName("正在确认目标车友") ?: "正在确认目标车友"
     is IntercomState.Optimizing -> peer?.displayName("正在确认目标车友") ?: "正在确认目标车友"
@@ -327,11 +337,11 @@ internal fun discoverPresentation(
 
 internal fun discoverStateText(presentation: DiscoverPresentation): String = when {
     presentation.wifiSettingsVisible -> WIFI_UNAVAILABLE_TEXT
-    presentation.offlineStartVisible -> "启动摩声后开始发现附近车友"
+    presentation.offlineStartVisible -> "待机中"
     presentation.readOnlyReason != null -> presentation.readOnlyReason
-    presentation.cards.isEmpty() -> "正在搜索附近 MotoCom 车友"
-    presentation.cards.none(DiscoverCardPresentation::connectVisible) -> "当前没有可连接的车友"
-    else -> "选择一位当前可连接的车友"
+    presentation.cards.isEmpty() -> "正在搜索"
+    presentation.cards.none(DiscoverCardPresentation::connectVisible) -> "暂无可连接车友"
+    else -> "选择车友"
 }
 
 private fun discoverGroupRank(presence: RiderPresence): Int = when {
@@ -354,15 +364,15 @@ internal fun discoveryCandidateSummary(presences: List<RiderPresence>): String =
         .ifBlank { "当前没有可用发现候选" }
 
 private fun discoverReadOnlyReason(state: IntercomState): String? = when (state) {
-    IntercomState.Offline -> "启动摩声后开始发现附近车友"
+    IntercomState.Offline -> "附近车友"
     is IntercomState.Discovering -> null
-    is IntercomState.IncomingConfirmation -> "请先处理当前连接请求"
-    is IntercomState.Connected -> "请先结束当前对讲"
-    is IntercomState.Recovering -> "正在恢复原车友连接，暂不能切换目标"
-    is IntercomState.Resetting -> "正在重置无线连接"
+    is IntercomState.IncomingConfirmation -> "请先处理连接请求"
+    is IntercomState.Connected -> "结束当前对讲后可切换"
+    is IntercomState.Recovering -> "正在恢复连接"
+    is IntercomState.Resetting -> "正在重置连接"
     is IntercomState.Stopping -> "正在结束对讲"
     is IntercomState.Connecting,
-    is IntercomState.Optimizing -> "正在连接当前目标"
+    is IntercomState.Optimizing -> "正在连接"
 }
 
 private fun presenceTitle(

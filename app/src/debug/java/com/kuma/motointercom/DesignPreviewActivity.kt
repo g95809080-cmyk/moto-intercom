@@ -14,6 +14,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.colorResource
 
@@ -50,6 +54,7 @@ internal class DesignPreviewActivity : ComponentActivity() {
                     when (screen) {
                         SCREEN_DISCOVER -> ConnectedDiscoverPreview()
                         SCREEN_SETTINGS -> ConnectedSettingsPreview()
+                        SCREEN_HOME_DISCOVERING -> DiscoveringHomePreview()
                         else -> ConnectedHomePreview()
                     }
                 }
@@ -59,6 +64,7 @@ internal class DesignPreviewActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SCREEN = "screen"
+        const val SCREEN_HOME_DISCOVERING = "home-discovering"
         const val SCREEN_DISCOVER = "discover"
         const val SCREEN_SETTINGS = "settings"
     }
@@ -69,8 +75,7 @@ private fun ConnectedHomePreview() {
     MotoComHomeScreen(
         state = HomeScreenUiState(
             primaryText = "语音通道已连接",
-            detailText = "",
-            supplementalText = "对方在线",
+            supplementalText = null,
             peerText = "张一山",
             primaryActionLabel = "结束对讲",
             primaryActionEnabled = true,
@@ -80,18 +85,72 @@ private fun ConnectedHomePreview() {
             showWifiSettingsCta = false,
             discoverCtaLabel = "查看附近车友",
             showDiscoverCta = false,
-            audioSourceText = "已连接：M200 Pro",
-            plannedTransportText = "Wi-Fi Direct",
-            connectedTransportText = "Wi-Fi Direct",
-            webRtcText = "已连接",
-            bluetoothText = "蓝牙耳机已连接",
-            voxText = VoxRuntimeState.OPEN.name,
+            audioSourceText = "蓝牙耳机 · M200 Pro",
             discovering = false,
             connected = true,
             muteEnabled = true,
             voxState = VoxRuntimeState.OPEN
         ),
         audioLevel = 0.4f,
+        onPrimaryAction = {},
+        onDiscover = {},
+        onPermissionGrant = {},
+        onPermissionSettings = {},
+        onWifiSettings = {},
+        onMute = {},
+        onAudioSettings = {},
+        onVox = {}
+    )
+}
+
+@androidx.compose.runtime.Composable
+private fun DiscoveringHomePreview() {
+    val previewPeers = remember {
+        listOf(
+            RadarPreviewPeer(
+                id = "zhang-yishan",
+                label = "张一山",
+                angleDegrees = 16f,
+                distanceFraction = 0.68f
+            ),
+            RadarPreviewPeer(
+                id = "rider-b",
+                label = "车友 B",
+                angleDegrees = 164f,
+                distanceFraction = 0.68f
+            ),
+            RadarPreviewPeer(
+                id = "rider-c",
+                label = "阿杰",
+                angleDegrees = 90f,
+                distanceFraction = 0.58f
+            )
+        )
+    }
+    var selectedPeerId by remember { mutableStateOf<String?>(null) }
+    val selectedPeer = previewPeers.firstOrNull { it.id == selectedPeerId }
+    MotoComHomeScreen(
+        state = HomeScreenUiState(
+            primaryText = "正在搜索附近车友",
+            supplementalText = null,
+            peerText = selectedPeer?.label.orEmpty(),
+            primaryActionLabel = "结束对讲",
+            primaryActionEnabled = true,
+            disabledReason = null,
+            showPermissionGrantCta = false,
+            showPermissionSettingsCta = false,
+            showWifiSettingsCta = false,
+            discoverCtaLabel = "查看附近车友",
+            showDiscoverCta = true,
+            audioSourceText = "蓝牙耳机",
+            discovering = true,
+            connected = false,
+            muteEnabled = true,
+            animationsEnabled = true
+        ),
+        radarPreviewPeers = previewPeers.map { it.copy(selected = it.id == selectedPeerId) },
+        onRadarPreviewPeerClick = { selectedPeerId = it.id },
+        audioLevel = 0f,
         onPrimaryAction = {},
         onDiscover = {},
         onPermissionGrant = {},
@@ -164,9 +223,8 @@ private fun ConnectedDiscoverPreview() {
                 state = IntercomState.Discovering(RuntimeSessionId("preview-runtime")),
                 presences = presences
             ),
-            stateText = "正在搜索附近 MotoCom 车友…",
-            supplementalText = "请确保双方已打开 MotoCom",
-            emptyText = "暂无附近车友",
+            stateText = "正在搜索",
+            supplementalText = null,
             radarRunning = true
         ),
         onBack = {},
@@ -196,11 +254,8 @@ private fun ConnectedSettingsPreview() {
         state = SettingsScreenUiState(
             nickname = "骑行者 A",
             nicknameFeedback = "",
-            audioSource = "当前音频源：蓝牙耳机（推荐）",
-            productState = "当前状态：语音通道已连接",
-            attemptFacts = "规划通道：Wi-Fi Direct；当前通道：Wi-Fi Direct；WebRTC：已连接",
-            discoveryCandidates = "可用发现候选：张一山：Wi-Fi Direct",
-            deviceStatus = "音频：已连接：M200 Pro\n蓝牙：蓝牙音频已连接\n产品状态：语音通道已连接\n当前通道：Wi-Fi Direct",
+            audioSource = "蓝牙耳机 · M200 Pro",
+            productState = "语音通道已连接",
             optionalPermissionNotice = null,
             showOptionalPermissionCta = false,
             version = "v1.2.0"

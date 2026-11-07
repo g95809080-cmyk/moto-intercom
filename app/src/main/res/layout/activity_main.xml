@@ -31,15 +31,6 @@
                 android:paddingBottom="16dp"
                 android:visibility="gone">
 
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:text="@string/brand_name"
-                    android:textColor="@color/motocom_text_primary"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
                 <Button
                     android:id="@+id/adaptive_nav_home_button"
                     android:layout_width="match_parent"
@@ -120,19 +111,25 @@
             android:id="@+id/bottom_navigation"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginBottom="10dp"
             android:background="@color/motocom_surface"
+            android:clipToOutline="true"
+            android:elevation="0dp"
             android:orientation="horizontal"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp">
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp">
             <Button
                 android:id="@+id/bottom_nav_home_button"
                 style="@style/MotoComBottomNavItem"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:drawableTop="@drawable/ic_home_24"
+                android:drawableStart="@drawable/ic_home_24"
                 android:text="@string/nav_home" />
             <Button
                 android:id="@+id/bottom_nav_discover_button"
@@ -140,7 +137,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:drawableTop="@drawable/ic_radar_24"
+                android:drawableStart="@drawable/ic_radar_24"
                 android:text="@string/nav_discover" />
             <Button
                 android:id="@+id/bottom_nav_settings_button"
@@ -148,7 +145,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:drawableTop="@drawable/ic_settings_24"
+                android:drawableStart="@drawable/ic_settings_24"
                 android:text="@string/nav_settings" />
         </LinearLayout>
     </LinearLayout>
@@ -177,22 +174,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="@dimen/motocom_page_horizontal_padding">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/brand_name"
-                android:textColor="@color/motocom_text_primary"
-                android:textSize="24sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/brand_tagline"
-                android:textColor="@color/motocom_text_secondary"
-                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/nav_home_button"

@@ -1,54 +1,107 @@
 ## ADDED Requirements
 
-### Requirement: Shared Surface And Icon Actions
+### Requirement: Dual Theme With Persistence
 
-Android Compose 页面 SHALL 通过共享组件渲染可重复的卡片表面和圆形图标操作。
+应用 SHALL 提供 `夜航` 和 `白昼` 两套完整主题，并在重新启动后保留用户选择。
 
-#### Scenario: 图标操作只朗读一次
+#### Scenario: 首次启动
 
-- **WHEN** 页面渲染共享图标按钮
-- **THEN** 交互父节点提供唯一的可访问名称
-- **AND** 内部图标不发布重复名称
-- **AND** 点击回调仍由调用方提供
+- **WHEN** 本机没有保存过主题选择
+- **THEN** 应用使用 `白昼`
+- **AND** 设置页显示 `白昼` 已选中
 
-#### Scenario: 调用方控制根布局
+#### Scenario: 切换主题
 
-- **WHEN** 页面把 `modifier.testTag(...)` 传给共享卡片
-- **THEN** 该 tag 位于卡片根节点
-- **AND** 卡片内容仍渲染在统一背景、边框和内边距内
+- **WHEN** 用户在设置页选择 `夜航` 或 `白昼`
+- **THEN** 四个主页面、底部导航、状态栏和导航栏同步更新
+- **AND** 选择写入本地偏好
+- **AND** 强制停止并重新启动后仍保持该主题
 
-### Requirement: Consistent Setting Rows
+#### Scenario: 未知持久化值
 
-设置页面 SHALL 使用共享行组件组合图标、标题、辅助内容和尾部控件。
+- **WHEN** 本地保存的主题值无法识别
+- **THEN** 应用回退到 `白昼`
 
-#### Scenario: 开关和选择行为不丢失
+### Requirement: Centered Product Wordmark
 
-- **WHEN** 设置行包含开关或音频路由
-- **THEN** 调用方 modifier 继续提供 toggleable、clickable 或 selected 语义
-- **AND** 现有回调、持久化状态和测试 tag 不变
+主页面 SHALL 只在顶栏中央显示“摩声”字标。
 
-### Requirement: Material 3 Tokens
+#### Scenario: 页面切换
 
-页面文字和形状 SHALL 使用主题 typography 与 shape token，而不是重复的页面级魔法数字。
+- **WHEN** 用户切换 Home、Discover、Settings 或 Logs
+- **THEN** 顶栏继续居中显示“摩声”
+- **AND** 不出现左上菜单、右上设置或其他旧入口图标
 
-#### Scenario: 辅助信息可读
+### Requirement: Truthful Status Labels
 
-- **WHEN** 页面渲染刻度、通道事实、状态标签或辅助说明
-- **THEN** 字号不低于 12sp
-- **AND** 主标题、卡片标题和正文使用对应 Material 3 typography
+页面 SHALL 使用真实产品状态生成短标签，不得把连接中、待确认或恢复中显示成待机。
 
-### Requirement: Consistent Motion Feedback
+#### Scenario: 状态映射
 
-共享交互组件 SHALL 提供克制的按压和颜色反馈，不改变布局尺寸、触控边界或语义。
+- **WHEN** 产品处于 Offline、Discovering、IncomingConfirmation、Connecting、Optimizing、Connected、Recovering、Resetting 或 Stopping
+- **THEN** 状态标签分别为“待机中、搜索中、待确认、连接中、连接中、已连接、恢复中、重置中、结束中”
+- **AND** 已连接但音频未就绪时设置页显示“正在等待音频就绪”
 
-#### Scenario: 按压后回弹
+#### Scenario: Discover 离线
 
-- **WHEN** 用户按住共享图标按钮或 Home 主操作
-- **THEN** 控件按 0.94 比例缩放并在释放后回弹
-- **AND** 点击回调、可访问名称和禁用态保持不变
+- **WHEN** 应用离线且没有正在扫描
+- **THEN** Discover 状态胶囊和摘要显示“待机中”
+- **AND** 不显示“对讲中”或把离线原因当成附近车友标题
 
-#### Scenario: 状态颜色平滑变化
+### Requirement: Full-Card Discovery Radar
 
-- **WHEN** 卡片的选中边框、图标按钮容器或内容色发生状态变化
-- **THEN** 颜色在 180ms 内过渡到目标值
-- **AND** 布局不因动效重新测量
+Home SHALL 在发现车友阶段以铺满深色状态卡的雷达/声纳反馈表达扫描，同时保持离线、连接和减少动画状态清晰可辨。
+
+#### Scenario: 启动后进入扫描
+
+- **WHEN** Home 收到 `discovering=true` 且系统动画开启
+- **THEN** 雷达扫描扇区持续旋转
+- **AND** 声纳波纹从中心向外扩散
+- **AND** 雷达背景覆盖整张状态卡并保留内嵌圆角边框
+- **AND** 中心显示骑手头盔标记
+
+#### Scenario: 关闭动画
+
+- **WHEN** 系统动画关闭
+- **THEN** 雷达保持静态网格
+- **AND** 状态文字、主操作和可访问语义不变
+
+#### Scenario: 白昼主题
+
+- **WHEN** 应用处于白昼主题且雷达正在发现或连接
+- **THEN** 雷达卡仍使用夜航深色色板
+
+### Requirement: Real Discovered Peer Bubbles
+
+Home 雷达 SHALL 只显示真实发现列表中的可连接车友，并允许点击气泡发起同一连接流程。
+
+#### Scenario: 显示气泡
+
+- **WHEN** 产品处于 Discovering 且发现列表包含可连接车友
+- **THEN** 雷达气泡数量和名称来自真实发现数据
+- **AND** 不可连接车友不生成可点击气泡
+
+#### Scenario: 点击气泡
+
+- **WHEN** 用户点击某个雷达气泡
+- **THEN** 应用使用该车友的 `deviceId + sessionId` 回查当前发现对象
+- **AND** 通过现有连接请求路径发起连接
+- **AND** 过期或已不可连接的对象不得触发连接
+
+### Requirement: Compact Four-Page Visual System
+
+Home、Discover、Settings 和 Logs SHALL 使用统一的顶栏、面板、状态胶囊和主题色，并删除重复的描述性提示。
+
+#### Scenario: 设置页主题入口
+
+- **WHEN** 用户打开 Settings
+- **THEN** 主题选择器直接显示在主内容中
+- **AND** 不重复显示同一 VOX 灵敏度文案
+- **AND** 自动重连卡片显示真实短状态而不是“点击下方启动摩声”
+
+#### Scenario: 底部导航
+
+- **WHEN** 任一主页面显示底部导航
+- **THEN** 导航为圆角浮动胶囊
+- **AND** 图标在左、文字在右
+- **AND** 选中态和文字颜色随主题更新

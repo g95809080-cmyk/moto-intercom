@@ -4,52 +4,151 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-@Composable
-internal fun MotoComTheme(content: @Composable () -> Unit) {
-    val colorScheme = lightColorScheme(
-        primary = colorResource(R.color.motocom_accent_green_dark),
-        onPrimary = Color.White,
-        primaryContainer = colorResource(R.color.motocom_accent_green_soft),
-        onPrimaryContainer = colorResource(R.color.motocom_text_primary),
-        secondary = colorResource(R.color.motocom_accent_green_dark),
-        onSecondary = Color.White,
-        secondaryContainer = colorResource(R.color.motocom_surface_soft),
-        onSecondaryContainer = colorResource(R.color.motocom_text_primary),
-        tertiary = colorResource(R.color.motocom_accent_green_dark),
-        onTertiary = Color.White,
-        tertiaryContainer = colorResource(R.color.motocom_accent_green_soft),
-        onTertiaryContainer = colorResource(R.color.motocom_text_primary),
-        surfaceContainer = colorResource(R.color.motocom_surface),
-        surfaceContainerHigh = colorResource(R.color.motocom_surface_soft),
-        surfaceContainerHighest = colorResource(R.color.motocom_surface_soft),
-        background = colorResource(R.color.motocom_background),
-        onBackground = colorResource(R.color.motocom_text_primary),
-        surface = colorResource(R.color.motocom_surface),
-        onSurface = colorResource(R.color.motocom_text_primary),
-        surfaceVariant = colorResource(R.color.motocom_surface_soft),
-        onSurfaceVariant = colorResource(R.color.motocom_text_secondary),
-        outline = colorResource(R.color.motocom_border),
-        outlineVariant = colorResource(R.color.motocom_border),
-        scrim = colorResource(R.color.motocom_scrim),
-        error = Color(0xFFB3261E),
-        onError = Color.White
+internal data class MotoComColors(
+    val background: Color,
+    val backgroundDeep: Color,
+    val panel: Color,
+    val panelRaised: Color,
+    val panelGlow: Color,
+    val outline: Color,
+    val text: Color,
+    val muted: Color,
+    val accent: Color,
+    val accentDeep: Color,
+    val accentInk: Color,
+    val amber: Color,
+    val hairline: Color,
+    val isLight: Boolean
+)
+
+internal enum class MotoComThemeMode(
+    val label: String,
+    val colors: MotoComColors
+) {
+    NIGHTRIDE(
+        label = "夜航",
+        colors = MotoComColors(
+            background = Color(0xFF0B100E),
+            backgroundDeep = Color(0xFF070B09),
+            panel = Color(0xFF141C18),
+            panelRaised = Color(0xFF1B2721),
+            panelGlow = Color(0xFF213329),
+            outline = Color(0xFF2A3931),
+            text = Color(0xFFF1F5EF),
+            muted = Color(0xFF95A39B),
+            accent = Color(0xFFC8F56B),
+            accentDeep = Color(0xFF4D712C),
+            accentInk = Color(0xFF142008),
+            amber = Color(0xFFFFB264),
+            hairline = Color.White,
+            isLight = false
+        )
+    ),
+    DAYLIGHT(
+        label = "白昼",
+        colors = MotoComColors(
+            background = Color(0xFFF6F7F4),
+            backgroundDeep = Color(0xFFEDEFEA),
+            panel = Color(0xFFFFFFFF),
+            panelRaised = Color(0xFFF1F3EE),
+            panelGlow = Color(0xFFEAEFE5),
+            outline = Color(0xFFD8DDD3),
+            text = Color(0xFF142018),
+            muted = Color(0xFF66736A),
+            accent = Color(0xFF4F7A16),
+            accentDeep = Color(0xFF31510B),
+            accentInk = Color(0xFFFFFFFF),
+            amber = Color(0xFFA65118),
+            hairline = Color(0xFF1C2A20),
+            isLight = true
+        )
     )
+}
+
+internal val LocalMotoComColors = staticCompositionLocalOf {
+    MotoComThemeMode.DAYLIGHT.colors
+}
+
+internal object MotoComThemePalette {
+    val current: MotoComColors
+        @Composable get() = LocalMotoComColors.current
+}
+
+@Composable
+internal fun MotoComTheme(
+    theme: MotoComThemeMode = MotoComThemeMode.DAYLIGHT,
+    content: @Composable () -> Unit
+) {
+    val colors = theme.colors
+    val colorScheme = if (colors.isLight) {
+        lightColorScheme(
+            primary = colors.accent,
+            onPrimary = colors.accentInk,
+            primaryContainer = colors.panelGlow,
+            onPrimaryContainer = colors.text,
+            secondary = colors.muted,
+            onSecondary = colors.panel,
+            tertiary = colors.amber,
+            onTertiary = colors.panel,
+            background = colors.background,
+            onBackground = colors.text,
+            surface = colors.panel,
+            onSurface = colors.text,
+            surfaceVariant = colors.panelRaised,
+            onSurfaceVariant = colors.muted,
+            surfaceContainer = colors.panel,
+            surfaceContainerHigh = colors.panelRaised,
+            surfaceContainerHighest = colors.panelRaised,
+            outline = colors.outline,
+            outlineVariant = colors.outline,
+            scrim = Color.Black.copy(alpha = 0.4f),
+            error = Color(0xFFB3261E),
+            onError = Color.White
+        )
+    } else {
+        darkColorScheme(
+            primary = colors.accent,
+            onPrimary = colors.accentInk,
+            primaryContainer = colors.panelGlow,
+            onPrimaryContainer = colors.text,
+            secondary = colors.muted,
+            onSecondary = colors.panel,
+            tertiary = colors.amber,
+            onTertiary = colors.panel,
+            background = colors.background,
+            onBackground = colors.text,
+            surface = colors.panel,
+            onSurface = colors.text,
+            surfaceVariant = colors.panelRaised,
+            onSurfaceVariant = colors.muted,
+            surfaceContainer = colors.panel,
+            surfaceContainerHigh = colors.panelRaised,
+            surfaceContainerHighest = colors.panelRaised,
+            outline = colors.outline,
+            outlineVariant = colors.outline,
+            scrim = Color.Black.copy(alpha = 0.72f),
+            error = Color(0xFFFFB4AB),
+            onError = Color(0xFF690005)
+        )
+    }
     val typography = Typography(
         headlineLarge = TextStyle(
             fontFamily = FontFamily.SansSerif,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Black,
             fontSize = 30.sp,
-            lineHeight = 38.sp
+            lineHeight = 36.sp
         ),
         headlineMedium = TextStyle(
             fontFamily = FontFamily.SansSerif,
@@ -107,19 +206,27 @@ internal fun MotoComTheme(content: @Composable () -> Unit) {
             fontWeight = FontWeight.Medium,
             fontSize = 12.sp,
             lineHeight = 16.sp
+        ),
+        labelSmall = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = FontWeight.Medium,
+            fontSize = 11.sp,
+            lineHeight = 14.sp
         )
     )
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = typography,
-        shapes = Shapes(
-            extraSmall = RoundedCornerShape(6.dp),
-            small = RoundedCornerShape(12.dp),
-            medium = RoundedCornerShape(16.dp),
-            large = RoundedCornerShape(20.dp),
-            extraLarge = RoundedCornerShape(26.dp)
-        ),
-        content = content
-    )
+    CompositionLocalProvider(LocalMotoComColors provides colors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = typography,
+            shapes = Shapes(
+                extraSmall = RoundedCornerShape(8.dp),
+                small = RoundedCornerShape(14.dp),
+                medium = RoundedCornerShape(18.dp),
+                large = RoundedCornerShape(22.dp),
+                extraLarge = RoundedCornerShape(28.dp)
+            ),
+            content = content
+        )
+    }
 }

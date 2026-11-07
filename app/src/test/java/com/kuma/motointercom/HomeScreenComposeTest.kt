@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHasClickAction
@@ -13,7 +14,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
-import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -31,13 +31,11 @@ class HomeScreenComposeTest {
 
     @Test
     fun baselineStateShowsFactsAndRoutesPrimaryAction() {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val primaryClicked = AtomicBoolean(false)
         val state = HomeScreenUiState(
             primaryText = "点击下方启动摩声",
-            detailText = "一对一对讲 · 无需网络",
-            supplementalText = "请点击下方启动对讲",
-            peerText = "等待车友加入",
+            supplementalText = null,
+            peerText = "",
             primaryActionLabel = "启动",
             primaryActionEnabled = true,
             disabledReason = null,
@@ -47,11 +45,6 @@ class HomeScreenComposeTest {
             discoverCtaLabel = "查看附近车友",
             showDiscoverCta = false,
             audioSourceText = "当前音频源：待机",
-            plannedTransportText = "待建立",
-            connectedTransportText = "未连接",
-            webRtcText = "未连接",
-            bluetoothText = "蓝牙状态不可用",
-            voxText = "IDLE",
             discovering = false,
             connected = false
         )
@@ -74,10 +67,12 @@ class HomeScreenComposeTest {
             }
         }
 
-        composeRule.onNodeWithText(state.primaryText).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(
-            context.getString(R.string.home_transport_plan, state.plannedTransportText)
-        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("home_discovery_radar")
+            .assertContentDescriptionEquals(state.primaryText)
+        composeRule.onNodeWithText("摩声 MotoCom").assertDoesNotExist()
+        composeRule.onNodeWithText("一对一对讲 · 无需网络").assertDoesNotExist()
+        composeRule.onNodeWithText(state.primaryText).assertDoesNotExist()
+        composeRule.onNodeWithText("待机").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("home_menu_button").assertDoesNotExist()
         composeRule.onNodeWithTag("home_settings_button").assertDoesNotExist()
         composeRule.onNodeWithText(state.primaryActionLabel)
@@ -96,7 +91,6 @@ class HomeScreenComposeTest {
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = HomeScreenUiState(
                         primaryText = "已连接",
-                        detailText = "对讲可用",
                         supplementalText = null,
                         peerText = "Road Captain",
                         primaryActionLabel = "断开",
@@ -107,12 +101,7 @@ class HomeScreenComposeTest {
                         showWifiSettingsCta = false,
                         discoverCtaLabel = "",
                         showDiscoverCta = false,
-                        audioSourceText = "当前音频源：蓝牙耳机",
-                        plannedTransportText = "Wi-Fi Direct",
-                        connectedTransportText = "Wi-Fi Direct",
-                        webRtcText = "已连接",
-                        bluetoothText = "已连接",
-                        voxText = "OPEN",
+                        audioSourceText = "蓝牙耳机",
                         discovering = false,
                         connected = true,
                         muted = true,
@@ -137,7 +126,8 @@ class HomeScreenComposeTest {
         composeRule.onNodeWithTag("home_mute_button")
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         composeRule.onNodeWithText("灵敏度：70").fetchSemanticsNode()
-        composeRule.onNodeWithText("开麦\nOPEN").fetchSemanticsNode()
+        composeRule.onNodeWithText("VOX · 开麦").fetchSemanticsNode()
+        composeRule.onNodeWithTag("home_vox_state_row").assertDoesNotExist()
         composeRule.onNodeWithTag("home_vox_card")
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
 

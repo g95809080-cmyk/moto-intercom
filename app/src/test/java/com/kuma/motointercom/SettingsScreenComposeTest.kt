@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
@@ -64,9 +64,6 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "Audio standby",
                         productState = "Offline",
-                        attemptFacts = "No attempt",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0"
@@ -86,12 +83,13 @@ class SettingsScreenComposeTest {
         composeRule.onNodeWithTag("settings_save_nickname_button").performClick()
         assertEquals("Road Captain", nickname)
         assertEquals(true, saved)
-        composeRule.onNodeWithTag("settings_product_state").assertTextContains("Offline")
-        composeRule.onNodeWithText("自动选择 LAN / Wi-Fi Direct").fetchSemanticsNode()
+        composeRule.onNodeWithTag("settings_product_state", useUnmergedTree = true)
+            .assertTextContains("Offline")
+        composeRule.onNodeWithTag("settings_audio_route_button").performScrollTo().assertIsDisplayed()
     }
 
     @Test
-    fun headerIconButtonsExposeSingleAccessibleLabel() {
+    fun saveActionExposesSingleAccessibleLabelWithoutHeaderBackButton() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         composeRule.setContent {
             ScrollableSettingsTheme {
@@ -101,9 +99,6 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "Audio standby",
                         productState = "Offline",
-                        attemptFacts = "No attempt",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0"
@@ -119,16 +114,10 @@ class SettingsScreenComposeTest {
             }
         }
 
-        val backLabel = context.getString(R.string.back_button_description)
         val saveLabel = context.getString(R.string.settings_save_nickname)
-        composeRule.onAllNodesWithContentDescription(backLabel).assertCountEquals(1)
         composeRule.onAllNodesWithContentDescription(saveLabel).assertCountEquals(1)
-        composeRule.onNodeWithTag("settings_back_button").assertContentDescriptionEquals(
-            backLabel
-        )
-        composeRule.onNodeWithTag("settings_save_nickname_button").assertContentDescriptionEquals(
-            saveLabel
-        )
+        composeRule.onNodeWithTag("settings_back_button").assertDoesNotExist()
+        composeRule.onNodeWithText("摩声").assertIsDisplayed()
     }
 
     @Test
@@ -143,9 +132,6 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "Audio standby",
                         productState = "Offline",
-                        attemptFacts = "No attempt",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0"
@@ -192,15 +178,11 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "Audio standby",
                         productState = "Connected",
-                        attemptFacts = "Wi-Fi Direct",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0",
                         voxEnabled = true,
-                        voxSensitivity = 60,
-                        voxState = VoxRuntimeState.HANGOVER
+                        voxSensitivity = 60
                     ),
                     onBack = {},
                     onNicknameChanged = {},
@@ -218,7 +200,7 @@ class SettingsScreenComposeTest {
         composeRule.onNodeWithTag("settings_vox_button").performScrollTo().performClick()
         composeRule.onNodeWithTag("settings_vox_sensitivity_button")
             .performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
-        composeRule.onNodeWithText("HANGOVER").assertTextContains("HANGOVER")
+        composeRule.onNodeWithText("60").fetchSemanticsNode()
 
         composeRule.runOnIdle {
             assertEquals(false, enabled)
@@ -238,9 +220,6 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "当前音频源：手机听筒",
                         productState = "Offline",
-                        attemptFacts = "No attempt",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0",
@@ -271,6 +250,44 @@ class SettingsScreenComposeTest {
     }
 
     @Test
+    fun themeSelectorExposesBothThemesAndRoutesSelection() {
+        var selected: MotoComThemeMode? = null
+        composeRule.setContent {
+            ScrollableSettingsTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "Rider",
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0"
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = {},
+                    theme = MotoComThemeMode.DAYLIGHT,
+                    onThemeSelected = { selected = it }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("settings_theme_daylight")
+            .performScrollTo()
+            .assertIsSelected()
+        composeRule.onNodeWithTag("settings_theme_nightride")
+            .performScrollTo()
+            .performClick()
+
+        composeRule.runOnIdle { assertEquals(MotoComThemeMode.NIGHTRIDE, selected) }
+    }
+
+    @Test
     fun automaticReconnectExposesPersistedSwitchStateAndRealCallback() {
         var requested: Boolean? = null
         composeRule.setContent {
@@ -281,9 +298,6 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "Audio standby",
                         productState = "Offline",
-                        attemptFacts = "No attempt",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0",
@@ -319,9 +333,6 @@ class SettingsScreenComposeTest {
                         nicknameFeedback = "",
                         audioSource = "Audio standby",
                         productState = "Offline",
-                        attemptFacts = "No attempt",
-                        discoveryCandidates = "No candidates",
-                        deviceStatus = "Ready",
                         optionalPermissionNotice = null,
                         showOptionalPermissionCta = false,
                         version = "1.0"
@@ -347,8 +358,7 @@ class SettingsScreenComposeTest {
     fun betaNoiseSwitchUpdatesSelectionAndDisablesWhileRunning() {
         val state = mutableStateOf(SettingsScreenUiState(
             nickname = "Rider", nicknameFeedback = "", audioSource = "Audio standby",
-            productState = "Offline", attemptFacts = "No attempt", discoveryCandidates = "No candidates",
-            deviceStatus = "Ready", optionalPermissionNotice = null,
+            productState = "Offline", optionalPermissionNotice = null,
             showOptionalPermissionCta = false, version = "1.0", rnnoiseEnabled = true
         ))
         var requests = 0
@@ -371,7 +381,7 @@ class SettingsScreenComposeTest {
         }
         toggle.assertIsOn().performScrollTo().performClick()
         toggle.assertIsOff()
-        composeRule.onNodeWithTag("settings_noise_mode").assertTextContains("当前选择：WebRTC")
+        composeRule.onNodeWithTag("settings_noise_mode").assertTextContains("WebRTC")
         composeRule.runOnIdle { state.value = state.value.copy(canChangeNoiseReduction = false) }
         toggle.assertIsNotEnabled().performClick()
         composeRule.runOnIdle { assertEquals(1, requests) }

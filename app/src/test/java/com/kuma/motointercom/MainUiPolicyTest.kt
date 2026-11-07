@@ -307,7 +307,7 @@ class MainUiPolicyTest {
         assertTrue(presentations[1].showDiscoverCta)
         assertEquals(HOME_DISCOVER_CTA, presentations[1].discoverCtaLabel)
         assertFalse(presentations[3].showDiscoverCta)
-        assertEquals("等待车友加入", presentations[0].peerText)
+        assertEquals("", presentations[0].peerText)
         assertEquals("Road Captain", presentations[5].peerText)
         assertEquals("Road Captain", presentations[6].peerText)
         assertEquals("正在恢复原车友", presentations[7].peerText)
@@ -319,6 +319,62 @@ class MainUiPolicyTest {
         assertTrue(presentations[0].bluetoothActive)
         assertEquals("supplement", presentations[0].supplementalText)
         assertEquals("点击下方启动摩声", presentations[0].primaryText)
+    }
+
+    @Test
+    fun productStatusLabelsStayAccurateAcrossTransientStates() {
+        val runtime = RuntimeSessionId("runtime-a")
+        val attempt = attempt(runtime)
+        val peer = PeerIdentity(
+            deviceId = "peer-a",
+            nickname = "Road Captain",
+            deviceName = "Pixel",
+            runtimeSessionId = RuntimeSessionId("peer-runtime"),
+            isDeviceIdVerified = true
+        )
+
+        assertEquals("待机中", productStatusLabel(IntercomState.Offline))
+        assertEquals("搜索中", productStatusLabel(IntercomState.Discovering(runtime)))
+        assertEquals(
+            "待确认",
+            productStatusLabel(
+                IntercomState.IncomingConfirmation(
+                    runtime,
+                    ConnectionAttemptId("incoming"),
+                    peer
+                )
+            )
+        )
+        assertEquals("连接中", productStatusLabel(IntercomState.Connecting(attempt, peer)))
+        assertEquals("连接中", productStatusLabel(IntercomState.Optimizing(attempt, peer)))
+        assertEquals(
+            "已连接",
+            productStatusLabel(
+                IntercomState.Connected(attempt, peer, connectedAt = 1L, transport = Transport.LAN)
+            )
+        )
+        assertEquals("恢复中", productStatusLabel(IntercomState.Recovering(attempt, peer)))
+        assertEquals(
+            "重置中",
+            productStatusLabel(
+                IntercomState.Resetting(
+                    runtime,
+                    "peer-a",
+                    ConnectionAttemptId("failed"),
+                    RECOVERY_RESET_FAILURE_THRESHOLD
+                )
+            )
+        )
+        assertEquals("结束中", productStatusLabel(IntercomState.Stopping(runtime)))
+
+        val connected = IntercomState.Connected(
+            attempt,
+            peer,
+            connectedAt = 1L,
+            transport = Transport.LAN
+        )
+        assertEquals("正在等待音频就绪", settingsProductStateText(connected, audioReady = false))
+        assertEquals("已连接", settingsProductStateText(connected, audioReady = true))
     }
 
     @Test
@@ -374,7 +430,7 @@ class MainUiPolicyTest {
         assertFalse(home.showPermissionGrantCta)
         assertTrue(discover.offlineStartVisible)
         assertTrue(discover.wifiSettingsVisible)
-        assertEquals("启动摩声后开始发现附近车友", discover.readOnlyReason)
+        assertEquals("附近车友", discover.readOnlyReason)
         assertTrue(discovering.wifiSettingsVisible)
     }
 
@@ -389,7 +445,7 @@ class MainUiPolicyTest {
 
         assertTrue(offline.offlineStartVisible)
         assertFalse(offline.wifiSettingsVisible)
-        assertEquals("启动摩声后开始发现附近车友", offline.readOnlyReason)
+        assertEquals("附近车友", offline.readOnlyReason)
     }
 
     @Test
@@ -566,7 +622,7 @@ class MainUiPolicyTest {
         assertEquals("LAN", discovering.cards[0].transportText)
         assertFalse(offline.cards[0].connectVisible)
         assertTrue(offline.offlineStartVisible)
-        assertEquals("启动摩声后开始发现附近车友", offline.readOnlyReason)
+        assertEquals("附近车友", offline.readOnlyReason)
     }
 
     @Test
@@ -644,9 +700,9 @@ class MainUiPolicyTest {
         assertTrue(discovering.cards[0].preferred)
         assertEquals("Pixel 9", discovering.cards[1].deviceText)
         assertEquals("Wi-Fi Direct", discovering.cards[1].transportText)
-        assertEquals("请先结束当前对讲", connected.readOnlyReason)
+        assertEquals("结束当前对讲后可切换", connected.readOnlyReason)
         assertFalse(connected.cards[0].connectVisible)
-        assertEquals("正在恢复原车友连接，暂不能切换目标", recovering.readOnlyReason)
+        assertEquals("正在恢复连接", recovering.readOnlyReason)
         assertTrue(staleRemoved.cards.isEmpty())
     }
 
@@ -717,7 +773,7 @@ class MainUiPolicyTest {
         )
 
         assertFalse(presentation.cards.single().connectVisible)
-        assertEquals("当前没有可连接的车友", discoverStateText(presentation))
+        assertEquals("暂无可连接车友", discoverStateText(presentation))
     }
 
     @Test
