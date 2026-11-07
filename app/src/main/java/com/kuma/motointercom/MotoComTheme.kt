@@ -1,5 +1,6 @@
 package com.kuma.motointercom
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -7,12 +8,11 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.colorResource
-import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.shape.RoundedCornerShape
 
 @Composable
 internal fun MotoComTheme(content: @Composable () -> Unit) {
@@ -45,42 +45,68 @@ internal fun MotoComTheme(content: @Composable () -> Unit) {
         onError = Color.White
     )
     val typography = Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = FontWeight.Bold,
+            fontSize = 30.sp,
+            lineHeight = 38.sp
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = FontWeight.Bold,
+            fontSize = 24.sp,
+            lineHeight = 30.sp
+        ),
         headlineSmall = TextStyle(
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
-            fontSize = 20.sp
+            fontSize = 20.sp,
+            lineHeight = 26.sp
         ),
         titleLarge = TextStyle(
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
-            fontSize = 22.sp
+            fontSize = 22.sp,
+            lineHeight = 28.sp
         ),
         titleMedium = TextStyle(
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
-            fontSize = 17.sp
+            fontSize = 17.sp,
+            lineHeight = 24.sp
+        ),
+        titleSmall = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            lineHeight = 20.sp
         ),
         bodyLarge = TextStyle(
             fontFamily = FontFamily.SansSerif,
-            fontSize = 15.sp
+            fontSize = 15.sp,
+            lineHeight = 22.sp
         ),
         bodyMedium = TextStyle(
             fontFamily = FontFamily.SansSerif,
-            fontSize = 14.sp
+            fontSize = 14.sp,
+            lineHeight = 20.sp
         ),
         bodySmall = TextStyle(
             fontFamily = FontFamily.SansSerif,
-            fontSize = 13.sp
+            fontSize = 13.sp,
+            lineHeight = 18.sp
         ),
         labelLarge = TextStyle(
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
+            fontSize = 14.sp,
+            lineHeight = 20.sp
         ),
         labelMedium = TextStyle(
             fontFamily = FontFamily.SansSerif,
-            fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
+            fontWeight = FontWeight.Medium,
+            fontSize = 12.sp,
+            lineHeight = 16.sp
         )
     )
 
@@ -88,11 +114,11 @@ internal fun MotoComTheme(content: @Composable () -> Unit) {
         colorScheme = colorScheme,
         typography = typography,
         shapes = Shapes(
-            extraSmall = RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius)),
-            small = RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius)),
-            medium = RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius)),
-            large = RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius)),
-            extraLarge = RoundedCornerShape(dimensionResource(R.dimen.motocom_card_radius))
+            extraSmall = RoundedCornerShape(6.dp),
+            small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(16.dp),
+            large = RoundedCornerShape(20.dp),
+            extraLarge = RoundedCornerShape(26.dp)
         ),
         content = content
     )
