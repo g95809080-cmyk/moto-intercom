@@ -193,3 +193,12 @@ Next gate allowed
 - 功能分支以 merge commit `a70f9f6` 合入 `origin/main`，未使用 force push；源码内容未变化。
 - Draft PR #68 的 base 已切换为 `main`，Android CI 在最终 head 上运行。
 - base 切换属于 `edited` 事件，不触发 `pull_request` 的默认 `opened/synchronize/reopened`；推送本记录提交以触发最终 Android CI。
+
+## CI 首轮与 beta 门禁修复（2026-11-09）
+
+- GitHub Android CI 首轮：debug 任务通过；beta 单元测试在 `SettingsScreenComposeTest.betaNoiseSwitchUpdatesSelectionAndDisablesWhileRunning` 第 473 行失败。
+- 失败原因是 `settings_noise_mode` 文本位于 `SettingsSwitchCard` 的 `toggleable` 语义合并范围内，默认合并树中找不到该子节点；生产 UI 行为正确。
+- 修复仅在测试侧使用 `useUnmergedTree = true` 读取 footer 文本，未修改生产代码。
+- 本地 CI 等价门禁：`testDebugUnitTest testBetaUnitTest lintDebug lintBeta assembleDebug assembleDebugAndroidTest assembleBeta`，`BUILD SUCCESSFUL in 3m 56s`。
+- debug：104 suites / 870 tests，failures 0、errors 0、skipped 0；Lint 0 errors / 88 warnings。
+- beta：104 suites / 870 tests，failures 0、errors 0、skipped 0；Lint 0 errors / 88 warnings。
