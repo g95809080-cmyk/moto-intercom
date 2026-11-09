@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,6 +43,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -104,8 +107,9 @@ internal fun MotoComTopBar(
     Box(
         modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .semantics {
+            .heightIn(min = 48.dp)
+            .testTag("motocom_top_bar")
+            .semantics(mergeDescendants = true) {
                 contentDescription = statusDescription?.let { "摩声，$it" } ?: "摩声"
             },
         contentAlignment = Alignment.Center
@@ -200,7 +204,7 @@ internal fun MotoComPageHeading(
     Row(
         modifier
             .fillMaxWidth()
-            .height(40.dp),
+            .heightIn(min = 40.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -225,7 +229,7 @@ internal fun MotoComSectionLabel(
     Row(
         modifier
             .fillMaxWidth()
-            .height(16.dp),
+            .heightIn(min = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -274,6 +278,7 @@ internal fun MotoComPanel(
 internal fun MotoComStatusPill(
     label: String,
     active: Boolean,
+    animated: Boolean = active,
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemePalette.current
@@ -285,7 +290,7 @@ internal fun MotoComStatusPill(
             .padding(horizontal = 11.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        MotoComPulseDot(active)
+        MotoComPulseDot(active = active, animated = animated)
         Spacer(Modifier.width(7.dp))
         Text(
             text = label,
@@ -299,7 +304,7 @@ internal fun MotoComStatusPill(
 }
 
 @Composable
-private fun MotoComPulseDot(active: Boolean) {
+private fun MotoComPulseDot(active: Boolean, animated: Boolean) {
     val colors = MotoComThemePalette.current
     if (!active) {
         Box(
@@ -310,6 +315,19 @@ private fun MotoComPulseDot(active: Boolean) {
                 Modifier
                     .size(5.dp)
                     .background(colors.muted, CircleShape)
+            )
+        }
+        return
+    }
+    if (!animated) {
+        Box(
+            Modifier.size(10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .size(5.dp)
+                    .background(colors.accent, CircleShape)
             )
         }
         return
@@ -346,51 +364,69 @@ internal fun MotoComToggle(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    interactive: Boolean = true,
+    contentDescription: String? = null
 ) {
     val colors = MotoComThemePalette.current
     Box(
         modifier
-            .width(39.dp)
-            .height(23.dp)
-            .clip(CircleShape)
-            .background(
-                if (checked) {
-                    colors.accent.copy(alpha = if (enabled) 0.24f else 0.12f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .then(
+                if (interactive) {
+                    Modifier
+                        .toggleable(
+                            value = checked,
+                            enabled = enabled,
+                            role = Role.Switch,
+                            onValueChange = onCheckedChange
+                        )
+                        .semantics {
+                            contentDescription?.let { this.contentDescription = it }
+                        }
                 } else {
-                    colors.background.copy(alpha = 0.7f)
+                    Modifier.clearAndSetSemantics {}
                 }
-            )
-            .border(
-                1.dp,
-                if (checked) {
-                    colors.accent.copy(alpha = 0.42f)
-                } else {
-                    colors.outline
-                },
-                CircleShape
-            )
-            .toggleable(
-                value = checked,
-                enabled = enabled,
-                role = Role.Switch,
-                onValueChange = onCheckedChange
             ),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+        contentAlignment = Alignment.Center
     ) {
         Box(
             Modifier
-                .padding(horizontal = 3.dp)
-                .size(15.dp)
+                .width(39.dp)
+                .height(23.dp)
+                .clip(CircleShape)
                 .background(
-                    when {
-                        !enabled -> colors.muted.copy(alpha = 0.45f)
-                        checked -> colors.accent
-                        else -> colors.muted
+                    if (checked) {
+                        colors.accent.copy(alpha = if (enabled) 0.24f else 0.12f)
+                    } else {
+                        colors.background.copy(alpha = 0.7f)
+                    }
+                )
+                .border(
+                    1.dp,
+                    if (checked) {
+                        colors.accent.copy(alpha = 0.42f)
+                    } else {
+                        colors.outline
                     },
                     CircleShape
-                )
-        )
+                ),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+        ) {
+            Box(
+                Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(15.dp)
+                    .background(
+                        when {
+                            !enabled -> colors.muted.copy(alpha = 0.45f)
+                            checked -> colors.accent
+                            else -> colors.muted
+                        },
+                        CircleShape
+                    )
+            )
+        }
     }
 }
 
@@ -404,7 +440,7 @@ internal fun MotoComThemeSelector(
     Row(
         modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(colors.panel.copy(alpha = 0.9f))
             .border(
@@ -420,7 +456,7 @@ internal fun MotoComThemeSelector(
             Row(
                 Modifier
                     .weight(1f)
-                    .height(36.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(
                         if (selected) {

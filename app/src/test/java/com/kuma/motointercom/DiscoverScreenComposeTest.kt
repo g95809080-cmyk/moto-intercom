@@ -3,7 +3,9 @@ package com.kuma.motointercom
 import android.content.Context
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -16,8 +18,10 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Density
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -309,6 +313,120 @@ class DiscoverScreenComposeTest {
                 .isEmpty()
         )
         assertEquals("paired-device", managedDeviceId)
+    }
+
+    @Test
+    fun discoveryActionsMeetMinimumTouchTargets() {
+        val paired = selectablePresence("touch-device").copy(
+            pairing = PairingRecord(
+                remoteDeviceId = "touch-device",
+                remoteNickname = "Touch Rider",
+                deviceName = "Touch Phone",
+                localAlias = "Touch Rider",
+                shortCode = "2468",
+                pairedAt = 1L,
+                lastConnectedAt = 2L,
+                isPreferred = false,
+                lastTransport = "LAN",
+                failureCount = 0
+            )
+        )
+        val state = DiscoverScreenUiState(
+            presentation = discoverPresentation(
+                state = IntercomState.Discovering(RuntimeSessionId("runtime-touch-targets")),
+                presences = listOf(paired)
+            ),
+            stateText = "Choose a rider",
+            supplementalText = null,
+            radarRunning = true,
+            rescanEnabled = true
+        )
+
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    state = state,
+                    onBack = {},
+                    onHelp = {},
+                    onStart = {},
+                    onWifiSettings = {},
+                    onRescan = {},
+                    onSelectPresence = {},
+                    onConnect = {},
+                    onManagePairing = {}
+                )
+            }
+        }
+
+        listOf(
+            "discover_rescan_button",
+            "discover_connect_touch-device",
+            "discover_manage_touch-device"
+        ).forEach { tag ->
+            composeRule.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo()
+            val height = composeRule.onNodeWithTag(tag, useUnmergedTree = true)
+                .fetchSemanticsNode().size.height
+            val minimum = 48f * composeRule.density.density
+            assertTrue(
+                "$tag must be at least 48dp high, was ${height}px",
+                height.toFloat() >= minimum - 1f
+            )
+        }
+    }
+
+    @Test
+    fun reducedMotionStopsStatusPulseWithoutHidingDiscovery() {
+        val state = DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "Scanning",
+            supplementalText = null,
+            radarRunning = true,
+            animationsEnabled = false
+        )
+
+        assertFalse(discoverStatusPulseActive(state))
+        assertTrue(state.radarRunning)
+        assertTrue(discoverStatusPulseActive(state.copy(animationsEnabled = true)))
+    }
+
+    @Test
+    fun discoveryHeroGrowsAtLargeFontScale() {
+        val state = DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "等待车友加入",
+            supplementalText = "保持屏幕常亮",
+            radarRunning = true
+        )
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 2f)
+            ) {
+                MotoComTheme {
+                    MotoComDiscoverScreen(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        state = state,
+                        onBack = {},
+                        onHelp = {},
+                        onStart = {},
+                        onWifiSettings = {},
+                        onRescan = {},
+                        onSelectPresence = {},
+                        onConnect = {},
+                        onManagePairing = {}
+                    )
+                }
+            }
+        }
+
+        val heroHeight = composeRule.onNodeWithTag("discover_hero")
+            .fetchSemanticsNode().boundsInRoot.height
+        assertTrue(
+            "discover_hero must grow past its 124dp minimum at 2x font scale",
+            heroHeight > 124f * composeRule.density.density
+        )
+        composeRule.onNodeWithTag("discover_state_text").assertIsDisplayed()
     }
 
     @Test

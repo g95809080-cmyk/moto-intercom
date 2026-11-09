@@ -40,9 +40,14 @@ import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -212,7 +217,7 @@ internal fun MotoComSettingsScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp)
-                                .defaultMinSize(minHeight = 44.dp)
+                                .defaultMinSize(minHeight = 48.dp)
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(colors.accent.copy(alpha = 0.12f))
                                 .border(
@@ -338,10 +343,7 @@ private fun IdentityCard(
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(colors.panelRaised)
-                    .border(1.dp, colors.outline, CircleShape)
+                    .size(48.dp)
                     .testTag("settings_save_nickname_button")
                     .semantics {
                         contentDescription = "保存昵称"
@@ -349,12 +351,21 @@ private fun IdentityCard(
                     .clickable(role = Role.Button, onClick = onSaveNickname),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_check_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(15.dp),
-                    tint = colors.accent
-                )
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(colors.panelRaised)
+                        .border(1.dp, colors.outline, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_check_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = colors.accent
+                    )
+                }
             }
         }
     }
@@ -413,24 +424,7 @@ private fun AudioCard(
                 Box(
                     Modifier
                         .weight(1f)
-                        .height(25.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            if (selected) {
-                                colors.accent.copy(alpha = 0.15f)
-                            } else {
-                                colors.panelRaised.copy(alpha = 0.7f)
-                            }
-                        )
-                        .border(
-                            1.dp,
-                            if (selected) {
-                                colors.accent.copy(alpha = 0.3f)
-                            } else {
-                                colors.outline.copy(alpha = 0.55f)
-                            },
-                            RoundedCornerShape(50)
-                        )
+                        .heightIn(min = 48.dp)
                         .testTag(tag)
                         .semantics {
                             this.selected = selected
@@ -439,12 +433,36 @@ private fun AudioCard(
                         .clickable(role = Role.RadioButton) { onAudioRouteSelected(route) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = label,
-                        color = if (selected) colors.accent else colors.muted,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                        maxLines = 1
-                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(25.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (selected) {
+                                    colors.accent.copy(alpha = 0.15f)
+                                } else {
+                                    colors.panelRaised.copy(alpha = 0.7f)
+                                }
+                            )
+                            .border(
+                                1.dp,
+                                if (selected) {
+                                    colors.accent.copy(alpha = 0.3f)
+                                } else {
+                                    colors.outline.copy(alpha = 0.55f)
+                                },
+                                RoundedCornerShape(50)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (selected) colors.accent else colors.muted,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -459,6 +477,10 @@ private fun VoxCard(
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemePalette.current
+    val voxSensitivityDescription = stringResource(
+        R.string.settings_vox_sensitivity_description,
+        state.voxSensitivity
+    )
     Column(
         modifier
             .fillMaxSize()
@@ -484,7 +506,8 @@ private fun VoxCard(
             MotoComToggle(
                 checked = state.voxEnabled,
                 onCheckedChange = onVoxEnabledChanged,
-                modifier = Modifier.testTag("settings_vox_button")
+                modifier = Modifier.testTag("settings_vox_button"),
+                contentDescription = stringResource(R.string.settings_vox_switch_description)
             )
         }
         Spacer(Modifier.weight(1f))
@@ -508,25 +531,51 @@ private fun VoxCard(
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
             )
         }
-        Slider(
-            value = state.voxSensitivity.toFloat(),
-            onValueChange = { onVoxSensitivityChanged(it.roundToInt().coerceIn(0, 100)) },
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(28.dp)
-                .testTag("settings_vox_sensitivity_button"),
-            enabled = state.voxEnabled,
-            valueRange = 0f..100f,
-            steps = 9,
-            colors = SliderDefaults.colors(
-                thumbColor = colors.accent,
-                activeTrackColor = colors.accent,
-                inactiveTrackColor = colors.outline,
-                disabledThumbColor = colors.muted,
-                disabledActiveTrackColor = colors.outline,
-                disabledInactiveTrackColor = colors.outline.copy(alpha = 0.5f)
+                .heightIn(min = 48.dp)
+                .testTag("settings_vox_sensitivity_button")
+                .semantics {
+                    contentDescription = voxSensitivityDescription
+                    progressBarRangeInfo = ProgressBarRangeInfo(
+                        current = state.voxSensitivity.toFloat(),
+                        range = 0f..100f,
+                        steps = 9
+                    )
+                    if (state.voxEnabled) {
+                        setProgress { target ->
+                            onVoxSensitivityChanged(
+                                target.roundToInt().coerceIn(0, 100)
+                            )
+                            true
+                        }
+                    } else {
+                        disabled()
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Slider(
+                value = state.voxSensitivity.toFloat(),
+                onValueChange = { onVoxSensitivityChanged(it.roundToInt().coerceIn(0, 100)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clearAndSetSemantics {},
+                enabled = state.voxEnabled,
+                valueRange = 0f..100f,
+                steps = 9,
+                colors = SliderDefaults.colors(
+                    thumbColor = colors.accent,
+                    activeTrackColor = colors.accent,
+                    inactiveTrackColor = colors.outline,
+                    disabledThumbColor = colors.muted,
+                    disabledActiveTrackColor = colors.outline,
+                    disabledInactiveTrackColor = colors.outline.copy(alpha = 0.5f)
+                )
             )
-        )
+        }
     }
 }
 
@@ -608,7 +657,8 @@ private fun SettingsSwitchCard(
             MotoComToggle(
                 checked = checked,
                 enabled = enabled,
-                onCheckedChange = onCheckedChange
+                onCheckedChange = {},
+                interactive = false
             )
         }
         footer?.let {
@@ -643,7 +693,7 @@ private fun MoreGrid(
                     Row(
                         Modifier
                             .weight(1f)
-                            .height(50.dp)
+                            .heightIn(min = 50.dp)
                             .clip(RoundedCornerShape(17.dp))
                             .background(colors.panel.copy(alpha = 0.9f))
                             .border(

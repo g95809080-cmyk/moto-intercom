@@ -22,3 +22,7 @@
 - [x] 2.8 固定候选树执行 `motointercom-product-architect` 只读审查并关闭 P0/P1。
 - [x] 2.9 更新验证记录与候选树状态。
 - [x] 2.10 提交并推送功能分支，更新 Draft PR #68。
+- [x] 2.11 修复 Settings 开关重复焦点、VOX 开关缺少标签和无标签内部 Switch。
+- [x] 2.12 统一关键交互目标的 48dp 命中高度，并让固定标题高度随字体缩放增长。
+- [x] 2.13 修复系统减少动画时 Discover 状态点仍脉冲的问题。
+- [x] 2.14 重跑 104 suites / 868 tests、Lint 和 Debug APK，并完成只读 P0/P1 复核。

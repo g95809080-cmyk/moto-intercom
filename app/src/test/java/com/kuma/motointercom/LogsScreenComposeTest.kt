@@ -20,7 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], qualifiers = "w360dp-h800dp")
 class LogsScreenComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
@@ -70,12 +70,14 @@ class LogsScreenComposeTest {
     fun logViewportAndActionsAreAvailable() {
         composeRule.setContent {
             MotoComTheme {
-                MotoComLogsScreen(
-                    state = LogsScreenUiState("Current session", "first\nsecond", true),
-                    onBack = {},
-                    onCopy = {},
-                    onClose = {}
-                )
+                Box(Modifier.size(360.dp, 800.dp)) {
+                    MotoComLogsScreen(
+                        state = LogsScreenUiState("Current session", "first\nsecond", true),
+                        onBack = {},
+                        onCopy = {},
+                        onClose = {}
+                    )
+                }
             }
         }
 
@@ -86,5 +88,36 @@ class LogsScreenComposeTest {
         composeRule.onNodeWithTag("logs_copy_button").assertHasClickAction()
         composeRule.onNodeWithTag("logs_close_button").assertHasClickAction()
         composeRule.onNodeWithTag("logs_export_button").assertHasClickAction()
+    }
+
+    @Test
+    fun logActionsMeetMinimumTouchTargets() {
+        composeRule.setContent {
+            MotoComTheme {
+                Box(Modifier.size(360.dp, 800.dp)) {
+                    MotoComLogsScreen(
+                        state = LogsScreenUiState("Current session", "first\nsecond", true),
+                        onBack = {},
+                        onCopy = {},
+                        onClose = {}
+                    )
+                }
+            }
+        }
+
+        listOf(
+            "logs_back_button",
+            "logs_export_button",
+            "logs_copy_button",
+            "logs_close_button"
+        ).forEach { tag ->
+            val height = composeRule.onNodeWithTag(tag, useUnmergedTree = true)
+                .fetchSemanticsNode().size.height
+            val minimum = 48f * composeRule.density.density
+            assertTrue(
+                "$tag must be at least 48dp high, was ${height}px",
+                height.toFloat() >= minimum - 1f
+            )
+        }
     }
 }

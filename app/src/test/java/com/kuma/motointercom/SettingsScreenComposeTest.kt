@@ -21,6 +21,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performSemanticsAction
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -320,6 +322,91 @@ class SettingsScreenComposeTest {
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
 
         composeRule.runOnIdle { assertEquals(true, requested) }
+    }
+
+    @Test
+    fun switchesExposeOneLabelledToggleEach() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        composeRule.setContent {
+            ScrollableSettingsTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "Rider",
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = false,
+                        version = "1.0",
+                        automaticReconnectEnabled = true,
+                        voxEnabled = true
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = {}
+                )
+            }
+        }
+
+        val reconnectDescription = buildString {
+            append(context.getString(R.string.settings_auto_reconnect))
+            append("，")
+            append(context.getString(R.string.settings_auto_reconnect_description))
+        }
+        composeRule.onAllNodesWithContentDescription(reconnectDescription).assertCountEquals(1)
+        composeRule.onNodeWithTag("settings_reconnect_button").assertIsOn()
+
+        val voxDescription = context.getString(R.string.settings_vox_switch_description)
+        composeRule.onAllNodesWithContentDescription(voxDescription).assertCountEquals(1)
+        composeRule.onNodeWithContentDescription(voxDescription).assertIsOn()
+    }
+
+    @Test
+    fun settingsActionsMeetMinimumTouchTargets() {
+        composeRule.setContent {
+            ScrollableSettingsTheme {
+                MotoComSettingsScreen(
+                    state = SettingsScreenUiState(
+                        nickname = "Rider",
+                        nicknameFeedback = "",
+                        audioSource = "Audio standby",
+                        productState = "Offline",
+                        optionalPermissionNotice = null,
+                        showOptionalPermissionCta = true,
+                        version = "1.0"
+                    ),
+                    onBack = {},
+                    onNicknameChanged = {},
+                    onSaveNickname = {},
+                    onOptionalPermission = {},
+                    onLogs = {},
+                    onAbout = {},
+                    onHelp = {}
+                )
+            }
+        }
+
+        listOf(
+            "settings_save_nickname_button",
+            "settings_audio_route_button",
+            "settings_vox_button",
+            "settings_vox_sensitivity_button",
+            "settings_optional_permission_button",
+            "settings_logs_button"
+        ).forEach { tag ->
+            composeRule.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo()
+            val height = composeRule.onNodeWithTag(tag, useUnmergedTree = true)
+                .fetchSemanticsNode().size.height
+            val minimum = 48f * composeRule.density.density
+            assertTrue(
+                "$tag must be at least 48dp high, was ${height}px",
+                height.toFloat() >= minimum - 1f
+            )
+        }
     }
 
     @Test

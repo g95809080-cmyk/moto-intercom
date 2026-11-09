@@ -87,3 +87,43 @@ Next gate allowed
 - 本轮已提交 `17b374c` 并推送 `feat/kum-94-ui-components`，并更新 Draft PR #68。
 - 未合并、未发布、未使用签名密钥、未修改生产数据库。
 - Linear 状态与评论未在本轮修改。
+
+## P1 无障碍修复复核（2026-11-09）
+
+- 工作区：`HEAD 3d8d4d7b9b4164815fd703ec84161706bc18e612` + 8 个未提交文件。
+- Settings：卡片外层保留唯一 `Switch` 语义，内部 `MotoComToggle` 改为非交互并清除语义；VOX 开关补上 `settings_vox_switch_description`。
+- 触控目标：保存昵称、音频路由、VOX 开关与滑块、权限 CTA、Discover 操作/连接/管理配对、Logs 返回与按钮、主题选择器均达到至少 48dp 高度。
+- 字体缩放：TopBar、PageHeading、SectionLabel、Discover Hero、分组标题、Logs 标题和 MoreGrid 由固定高度改为最小高度。
+- 减少动画：Discover 状态点在系统动画关闭时保留扫描状态与强调色，但不再启动无限脉冲；`MotoComStatusPill` 将状态与动画拆成独立参数。
+- 未修改 `IntercomService`、`IntercomStateMachine`、`SessionOrchestrator`、`SignalingProtocol`、transport adapters、Gradle 或数据库。
+
+自动化门禁：
+
+- 命令：`.\gradlew.bat testDebugUnitTest lintDebug assembleDebug --console=plain`
+- 结果：`BUILD SUCCESSFUL in 2m 46s`
+- 测试：104 suites / 868 tests；failures 0、errors 0、skipped 0。
+- Lint：0 errors / 87 warnings。
+- Debug APK：`app/build/outputs/apk/debug/app-debug.apk` 构建成功。
+- `git diff --check`：无空白错误。
+
+只读审查结论：
+
+```text
+APPROVED
+P0
+- 无
+P1
+- 无
+Non-blocking
+- 音频路由三段式选项在 320dp 宽度下受半宽卡片限制，单项宽度不足 48dp；高度已达到 48dp，本轮 P1 按高度验收，后续若继续压缩布局需重新评估横向目标。
+- 已配对车友的连接与管理配对按钮改为 48dp 外层目标后，行高增加约 48dp，列表密度略降。
+- `MotoComTopBar` 与 `MotoComStatusPill` 的既有 `ModifierParameter` Lint warning 仍在，属于参数顺序提示，不影响本轮门禁。
+Base SHA
+- c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6
+Head SHA
+- 3d8d4d7b9b4164815fd703ec84161706bc18e612 + working tree（8 个修改文件）
+Next gate allowed
+- 可提交并推送本轮修复、更新 Draft PR #68；未经用户明确授权不合并、不发布、不修改 main。
+```
+
+审查边界：只读检查了当前工作区差异、开关语义树、48dp 布局约束、2 倍字体测试、减少动画分支、测试结果和 Lint 报告；未重跑构建，未修改审查范围内的源码。

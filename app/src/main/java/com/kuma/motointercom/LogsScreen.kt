@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -91,25 +92,31 @@ internal fun MotoComLogsScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
+                    .heightIn(min = 48.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(colors.panelRaised)
-                        .border(1.dp, colors.outline, CircleShape)
+                        .size(48.dp)
                         .testTag("logs_back_button")
                         .clickable(role = Role.Button, onClick = onBack),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_arrow_back_24),
-                        contentDescription = stringResource(R.string.logs_back_settings),
-                        modifier = Modifier.size(18.dp),
-                        tint = colors.text
-                    )
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(colors.panelRaised)
+                            .border(1.dp, colors.outline, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_back_24),
+                            contentDescription = stringResource(R.string.logs_back_settings),
+                            modifier = Modifier.size(18.dp),
+                            tint = colors.text
+                        )
+                    }
                 }
                 Spacer(Modifier.width(10.dp))
                 Text(
@@ -198,7 +205,7 @@ private fun LogsButton(
     Box(
         Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 46.dp)
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(
                 when {

@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -125,7 +125,8 @@ internal fun MotoComDiscoverScreen(
             MotoComPageHeading("发现", Modifier.testTag("discover_title")) {
                 MotoComStatusPill(
                     label = discoverPillLabel(state),
-                    active = state.radarRunning
+                    active = state.radarRunning,
+                    animated = discoverStatusPulseActive(state)
                 )
             }
             DiscoveryHero(
@@ -215,6 +216,9 @@ private fun discoverPillLabel(state: DiscoverScreenUiState): String {
     }
 }
 
+internal fun discoverStatusPulseActive(state: DiscoverScreenUiState): Boolean =
+    state.animationsEnabled && state.radarRunning
+
 @Composable
 private fun DiscoveryHero(
     state: DiscoverScreenUiState,
@@ -226,6 +230,7 @@ private fun DiscoveryHero(
     Column(
         Modifier
             .fillMaxWidth()
+            .testTag("discover_hero")
             .clip(RoundedCornerShape(28.dp))
             .background(
                 Brush.linearGradient(
@@ -242,7 +247,7 @@ private fun DiscoveryHero(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(124.dp),
+                .heightIn(min = 124.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
@@ -437,7 +442,7 @@ private fun DiscoverAction(
         Modifier
             .fillMaxWidth()
             .padding(top = 10.dp)
-            .defaultMinSize(minHeight = 46.dp)
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(
                 if (primary) {
@@ -481,7 +486,7 @@ private fun DiscoverGroup(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(18.dp)
+                .heightIn(min = 18.dp)
                 .padding(top = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -656,40 +661,46 @@ private fun DiscoverRiderRow(
                 )
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            if (card.connectEnabled) {
-                                colors.accent.copy(alpha = 0.13f)
-                            } else {
-                                colors.panelRaised
-                            }
-                        )
-                        .border(
-                            1.dp,
-                            if (card.connectEnabled) {
-                                colors.accent.copy(alpha = 0.22f)
-                            } else {
-                                colors.outline
-                            },
-                            RoundedCornerShape(50)
-                        )
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .testTag("discover_connect_$cardId")
                         .clickable(
                             enabled = card.connectEnabled,
                             role = Role.Button
-                        ) { onConnect(presence) }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        ) { onConnect(presence) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = connectionLabel,
-                        modifier = Modifier.testTag("discover_connect_${cardId}_text"),
-                        color = if (card.connectEnabled) colors.accent else colors.muted,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontSize = 10.sp,
-                            lineHeight = 12.sp
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (card.connectEnabled) {
+                                    colors.accent.copy(alpha = 0.13f)
+                                } else {
+                                    colors.panelRaised
+                                }
+                            )
+                            .border(
+                                1.dp,
+                                if (card.connectEnabled) {
+                                    colors.accent.copy(alpha = 0.22f)
+                                } else {
+                                    colors.outline
+                                },
+                                RoundedCornerShape(50)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = connectionLabel,
+                            modifier = Modifier.testTag("discover_connect_${cardId}_text"),
+                            color = if (card.connectEnabled) colors.accent else colors.muted,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontSize = 10.sp,
+                                lineHeight = 12.sp
+                            )
                         )
-                    )
+                    }
                 }
             } else {
                 Text(
@@ -703,18 +714,21 @@ private fun DiscoverRiderRow(
                     R.string.discover_manage_pairing_description,
                     card.title
                 )
-                Text(
-                    text = stringResource(R.string.discover_manage_pairing),
+                Box(
                     modifier = Modifier
-                        .padding(top = 4.dp)
-                        .clip(RoundedCornerShape(50))
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .testTag("discover_manage_$cardId")
                         .semantics { contentDescription = manageDescription }
-                        .clickable(role = Role.Button) { onManagePairing(presence) }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    color = colors.muted,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
-                )
+                        .clickable(role = Role.Button) { onManagePairing(presence) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.discover_manage_pairing),
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        color = colors.muted,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
+                    )
+                }
             }
         }
     }
