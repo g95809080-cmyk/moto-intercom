@@ -192,3 +192,4 @@ Next gate allowed
 - KUM-93 PR #67 已获用户明确授权合入 `main`，merge commit 为 `c343413`。
 - 功能分支以 merge commit `a70f9f6` 合入 `origin/main`，未使用 force push；源码内容未变化。
 - Draft PR #68 的 base 已切换为 `main`，Android CI 在最终 head 上运行。
+- base 切换属于 `edited` 事件，不触发 `pull_request` 的默认 `opened/synchronize/reopened`；推送本记录提交以触发最终 Android CI。
