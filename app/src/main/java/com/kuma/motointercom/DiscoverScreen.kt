@@ -216,7 +216,7 @@ private fun DiscoverIconButton(tag: String, description: String, icon: Int, onCl
             .testTag(tag),
         contentAlignment = Alignment.Center
     ) {
-        Image(painterResource(icon), description, Modifier.size(24.dp))
+        Image(painterResource(icon), null, Modifier.size(24.dp))
     }
 }
 
