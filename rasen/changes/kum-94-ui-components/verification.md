@@ -183,6 +183,6 @@ Next gate allowed
 ## 交付记录（2026-11-09）
 
 - P2 复核通过的工作区内容已提交为 `fb61b16`，父提交为 `5ed818d`；提交内容与门禁运行的源码一致，仅额外包含验证记录和任务状态。
-- 分支 `feat/kum-94-ui-components` 已推送，Draft PR #68 的 head 更新为 `fb61b16`。
-- PR 描述同步更新为 104 suites / 870 tests、Lint 0 errors / 88 warnings 和最终 Head SHA。
+- 分支 `feat/kum-94-ui-components` 已推送；Draft PR #68 的源码 head 为 `fb61b16`，其后仅有验证记录提交。
+- PR 描述同步更新为 104 suites / 870 tests、Lint 0 errors / 88 warnings 和源码 Head SHA。
 - KUM-93 PR #67 仍为 Draft；在它合入 `main` 之前，本 PR 继续保持堆叠 base `fix/kum-93-ui-accessibility`，不触发 Android CI，也不执行 rebase 或合并。
