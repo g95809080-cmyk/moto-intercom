@@ -1,64 +1,81 @@
 package com.kuma.motointercom
 
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 internal data class HomeScreenUiState(
     val primaryText: String,
-    val detailText: String,
     val supplementalText: String?,
     val peerText: String,
     val primaryActionLabel: String,
@@ -70,13 +87,9 @@ internal data class HomeScreenUiState(
     val discoverCtaLabel: String,
     val showDiscoverCta: Boolean,
     val audioSourceText: String,
-    val plannedTransportText: String,
-    val connectedTransportText: String,
-    val webRtcText: String,
-    val bluetoothText: String,
-    val voxText: String,
     val discovering: Boolean,
     val connected: Boolean,
+    val statusLabel: String = "",
     val muted: Boolean = false,
     val muteEnabled: Boolean = false,
     val voxEnabled: Boolean = true,
@@ -85,7 +98,80 @@ internal data class HomeScreenUiState(
     val animationsEnabled: Boolean = true
 )
 
-/** Compose equivalent of the former screen_home.xml hierarchy. */
+internal data class RadarPreviewPeer(
+    val id: String,
+    val label: String,
+    val selected: Boolean = false,
+    val enabled: Boolean = true
+)
+
+internal data class RadarPeerPlacement(
+    val angleDegrees: Float,
+    val distanceFraction: Float,
+    val bubbleSizeDp: Float
+)
+
+private const val RADAR_MAX_VISIBLE_PEERS = 11
+private const val RADAR_RING_FRACTION = 0.82f
+private const val RADAR_CENTER_NODE_SIZE_DP = 94f
+private const val RADAR_BUBBLE_MIN_DP = 48f
+private const val RADAR_BUBBLE_MAX_DP = 72f
+private const val RADAR_BUBBLE_GAP_DP = 6f
+
+internal fun radarPeerPlacements(
+    count: Int,
+    scopeRadiusDp: Float
+): List<RadarPeerPlacement> {
+    if (count <= 0) return emptyList()
+    val visible = visibleRadarPeerCount(count, scopeRadiusDp)
+    if (visible == 1) {
+        val requiredDistance = RADAR_CENTER_NODE_SIZE_DP / 2f +
+            RADAR_BUBBLE_MAX_DP / 2f +
+            RADAR_BUBBLE_GAP_DP
+        val distanceFraction = (requiredDistance / scopeRadiusDp.coerceAtLeast(1f))
+            .coerceIn(0.62f, 0.9f)
+        return listOf(
+            RadarPeerPlacement(
+                angleDegrees = -31f,
+                distanceFraction = distanceFraction,
+                bubbleSizeDp = RADAR_BUBBLE_MAX_DP
+            )
+        )
+    }
+    val scopeRadius = scopeRadiusDp.coerceAtLeast(1f)
+    val baseRadius = scopeRadius * RADAR_RING_FRACTION
+    val chord = 2f * baseRadius * sin(PI.toFloat() / visible)
+    val bubbleSize = (chord - RADAR_BUBBLE_GAP_DP)
+        .coerceIn(RADAR_BUBBLE_MIN_DP, RADAR_BUBBLE_MAX_DP)
+    val ringRadius = maxOf(
+        baseRadius,
+        RADAR_CENTER_NODE_SIZE_DP / 2f +
+            bubbleSize / 2f +
+            RADAR_BUBBLE_GAP_DP
+    )
+    val distanceFraction = ringRadius / scopeRadius
+    val startAngle = -90f + 180f / visible
+    return List(visible) { index ->
+        RadarPeerPlacement(
+            angleDegrees = startAngle + index * 360f / visible,
+            distanceFraction = distanceFraction,
+            bubbleSizeDp = bubbleSize
+        )
+    }
+}
+
+internal fun visibleRadarPeerCount(count: Int, scopeRadiusDp: Float): Int {
+    if (count <= 0) return 0
+    val maxVisible = count.coerceAtMost(RADAR_MAX_VISIBLE_PEERS)
+    val ringRadius = scopeRadiusDp.coerceAtLeast(1f) * RADAR_RING_FRACTION
+    val minimumChord = RADAR_BUBBLE_MIN_DP + RADAR_BUBBLE_GAP_DP
+    for (visible in maxVisible downTo 2) {
+        val chord = 2f * ringRadius * sin(PI.toFloat() / visible)
+        if (chord >= minimumChord) return visible
+    }
+    return 1
+}
+
 @Composable
 internal fun MotoComHomeScreen(
     state: HomeScreenUiState,
@@ -99,19 +185,20 @@ internal fun MotoComHomeScreen(
     onAudioSettings: () -> Unit,
     onVox: () -> Unit,
     modifier: Modifier = Modifier,
-    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> }
+    onGuideAnchor: (GuideTarget, Rect) -> Unit = { _, _ -> },
+    radarPreviewPeers: List<RadarPreviewPeer> = emptyList(),
+    onRadarPreviewPeerClick: (RadarPreviewPeer) -> Unit = {}
 ) {
+    val colors = MotoComThemePalette.current
     val pageHorizontalPadding = dimensionResource(R.dimen.motocom_page_horizontal_padding)
     val pageVerticalPadding = dimensionResource(R.dimen.motocom_page_vertical_padding)
-    val gap = dimensionResource(R.dimen.motocom_gap)
-    val gapLarge = dimensionResource(R.dimen.motocom_gap_large)
-
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background),
+            .background(colors.background),
         contentAlignment = Alignment.TopCenter
     ) {
+        MotoComBackdrop(Modifier.matchParentSize())
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -120,316 +207,869 @@ internal fun MotoComHomeScreen(
                     start = pageHorizontalPadding,
                     top = pageVerticalPadding,
                     end = pageHorizontalPadding,
-                    bottom = 32.dp
+                    bottom = 20.dp
                 )
         ) {
-            HomeHeader()
-            Spacer(Modifier.height(gapLarge))
-            StatusCard(state = state)
-            Spacer(Modifier.height(gap))
-            AudioCard(state = state, audioLevel = audioLevel)
-            Spacer(Modifier.height(gap))
-            MainControls(
+            MotoComTopBar(
+                active = state.animationsEnabled && state.discovering
+            )
+            Spacer(Modifier.height(10.dp))
+            RadarStatusCard(
                 state = state,
+                radarPeers = radarPreviewPeers,
+                onRadarPeerClick = onRadarPreviewPeerClick
+            )
+            Spacer(Modifier.height(12.dp))
+            ControlDeck(
+                state = state,
+                audioLevel = audioLevel,
                 onPrimaryAction = onPrimaryAction,
                 onMute = onMute,
                 onAudioSettings = onAudioSettings,
+                onVox = onVox,
                 onGuideAnchor = onGuideAnchor
             )
             if (state.showPermissionGrantCta) {
-                Spacer(Modifier.height(gap))
+                Spacer(Modifier.height(10.dp))
                 SecondaryAction(
-                    stringResource(R.string.home_permission_grant_cta),
-                    onPermissionGrant,
-                    "home_permission_grant_cta",
-                    Modifier.guideAnchor(GuideTarget.PERMISSION, onGuideAnchor)
+                    text = stringResource(R.string.home_permission_grant_cta),
+                    onClick = onPermissionGrant,
+                    testTag = "home_permission_grant_cta",
+                    modifier = Modifier.guideAnchor(GuideTarget.PERMISSION, onGuideAnchor)
                 )
             }
             if (state.showPermissionSettingsCta) {
-                Spacer(Modifier.height(gap))
+                Spacer(Modifier.height(10.dp))
                 SecondaryAction(
-                    stringResource(R.string.home_permission_settings_cta),
-                    onPermissionSettings,
-                    "home_permission_settings_cta",
-                    Modifier.guideAnchor(GuideTarget.PERMISSION_SETTINGS, onGuideAnchor)
+                    text = stringResource(R.string.home_permission_settings_cta),
+                    onClick = onPermissionSettings,
+                    testTag = "home_permission_settings_cta",
+                    modifier = Modifier.guideAnchor(
+                        GuideTarget.PERMISSION_SETTINGS,
+                        onGuideAnchor
+                    )
                 )
             }
             if (state.showWifiSettingsCta) {
-                Spacer(Modifier.height(gap))
+                Spacer(Modifier.height(10.dp))
                 SecondaryAction(
-                    stringResource(R.string.wifi_settings_cta),
-                    onWifiSettings,
-                    "home_wifi_settings_cta",
-                    Modifier.guideAnchor(GuideTarget.WIFI, onGuideAnchor)
+                    text = stringResource(R.string.wifi_settings_cta),
+                    onClick = onWifiSettings,
+                    testTag = "home_wifi_settings_cta",
+                    modifier = Modifier.guideAnchor(GuideTarget.WIFI, onGuideAnchor)
                 )
             }
-            Spacer(Modifier.height(gap))
-            VoxCard(state = state, onClick = onVox)
             if (state.showDiscoverCta) {
-                Spacer(Modifier.height(gap))
-                SecondaryAction(state.discoverCtaLabel, onDiscover, "home_discover_cta")
+                Spacer(Modifier.height(10.dp))
+                SecondaryAction(
+                    text = state.discoverCtaLabel,
+                    onClick = onDiscover,
+                    testTag = "home_discover_cta"
+                )
+            }
+            state.supplementalText?.takeIf(String::isNotBlank)?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = it,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_status_supplemental"),
+                    color = colors.muted,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }
 }
 
-@Composable
-private fun HomeHeader() {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(stringResource(R.string.brand_name), color = MaterialTheme.colorScheme.onBackground,
-                fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
-            Text(stringResource(R.string.brand_tagline), Modifier.padding(top = 4.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-        }
-    }
+private fun homeStatusLabel(state: HomeScreenUiState): String = when {
+    state.statusLabel.isNotBlank() -> state.statusLabel
+    state.connected -> "已连接"
+    state.discovering -> "搜索中"
+    else -> "待机中"
 }
 
 @Composable
-private fun CircleIconButton(
-    painter: Painter,
-    description: String,
-    testTag: String,
-    onClick: () -> Unit,
-    surface: Boolean = true,
-    enabled: Boolean = true,
-    isSelected: Boolean = false
+private fun RadarStatusCard(
+    state: HomeScreenUiState,
+    radarPeers: List<RadarPreviewPeer>,
+    onRadarPeerClick: (RadarPreviewPeer) -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .size(dimensionResource(R.dimen.motocom_icon_button_size))
-            .clip(CircleShape)
-            .then(
-                if (surface) {
-                    Modifier
-                        .background(
-                            if (isSelected) {
-                                colorResource(R.color.motocom_accent_green_soft)
-                            } else {
-                                MaterialTheme.colorScheme.surface
-                            }
-                        )
-                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                } else {
-                    Modifier
-                }
-            )
-            .testTag(testTag)
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.86f)
+            .clip(RoundedCornerShape(32.dp))
+            .background(colors.panel)
+            .border(1.dp, colors.hairline.copy(alpha = 0.075f), RoundedCornerShape(32.dp))
             .semantics {
-                contentDescription = description
-                if (isSelected) selected = true
-                if (!enabled) disabled()
+                if (state.primaryText.isNotBlank()) {
+                    contentDescription = state.primaryText
+                }
             }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .testTag("home_discovery_radar")
+    ) {
+        val scopeRadius = min(maxWidth.value * 0.44f, maxHeight.value * 0.32f).dp
+        RadarCanvas(state = state, scopeRadius = scopeRadius)
+        RadarStatusPill(
+            label = homeStatusLabel(state),
+            active = state.connected || state.discovering,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 20.dp)
+        )
+        RadarCenterNode(
+            state = state,
+            modifier = Modifier.align(Alignment.Center)
+        )
+        if (!state.connected) {
+            state.peerText.takeIf(String::isNotBlank)?.let {
+                Text(
+                    text = it,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 38.dp)
+                        .widthIn(max = 220.dp)
+                        .testTag("home_peer_name"),
+                    color = colors.text,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        val peers = when {
+            state.connected && state.peerText.isNotBlank() -> listOf(
+                RadarPreviewPeer(
+                    id = "connected",
+                    label = state.peerText,
+                    selected = true
+                )
+            )
+            state.discovering -> radarPeers
+            else -> emptyList()
+        }
+        val placements = remember(peers.size, scopeRadius) {
+            radarPeerPlacements(peers.size, scopeRadius.value)
+        }
+        val visiblePeers = peers.take(placements.size)
+        visiblePeers.forEachIndexed { index, peer ->
+            val placement = placements[index]
+            val angle = placement.angleDegrees * PI.toFloat() / 180f
+            val distance = scopeRadius * placement.distanceFraction
+            PeerBubble(
+                peer = peer,
+                size = placement.bubbleSizeDp.dp,
+                onClick = { onRadarPeerClick(peer) },
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offsetDp(
+                        x = distance * cos(angle),
+                        y = distance * sin(angle)
+                    )
+            )
+        }
+        val hiddenPeers = peers.size - visiblePeers.size
+        if (hiddenPeers > 0) {
+            RadarOverflowBadge(
+                hiddenCount = hiddenPeers,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 20.dp, end = 16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RadarStatusPill(
+    label: String,
+    active: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(colors.background.copy(alpha = 0.62f))
+            .border(1.dp, colors.outline.copy(alpha = 0.72f), RoundedCornerShape(50))
+            .testTag("home_radar_status")
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .clearAndSetSemantics { contentDescription = "状态：$label" },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(13.dp)
+                .background(
+                    colors.accent.copy(alpha = if (active) 0.16f else 0f),
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .size(if (active) 6.dp else 5.dp)
+                    .background(if (active) colors.accent else colors.muted, CircleShape)
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = label,
+            color = if (active) colors.text else colors.muted,
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                letterSpacing = 2.sp
+            )
+        )
+    }
+}
+
+@Composable
+private fun RadarCenterNode(
+    state: HomeScreenUiState,
+    modifier: Modifier = Modifier
+) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    Box(
+        modifier
+            .size(RADAR_CENTER_NODE_SIZE_DP.dp)
+            .testTag("home_radar_center")
+            .semantics {
+                contentDescription = when {
+                    state.connected -> "正在与${state.peerText.ifBlank { "车友" }}对讲"
+                    state.discovering -> "正在搜索附近车友"
+                    else -> "待机中"
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
-        Icon(painter = painter, contentDescription = null, modifier = Modifier.size(23.dp),
-            tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+        Box(
+            Modifier
+                .size(RADAR_CENTER_NODE_SIZE_DP.dp)
+                .border(1.dp, colors.accent.copy(alpha = 0.12f), CircleShape)
+        )
+        Box(
+            Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(colors.background.copy(alpha = 0.94f))
+                .border(1.dp, colors.accent.copy(alpha = 0.56f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_rider_24),
+                contentDescription = null,
+                modifier = Modifier.size(31.dp),
+                tint = colors.accent
+            )
+        }
     }
 }
 
 @Composable
-private fun LabeledIconButton(
-    painter: Painter,
-    description: String,
-    label: String,
-    testTag: String,
+private fun PeerBubble(
+    peer: RadarPreviewPeer,
+    size: Dp,
     onClick: () -> Unit,
-    enabled: Boolean = true,
-    isSelected: Boolean = false
+    modifier: Modifier = Modifier
 ) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    val compact = size < 70.dp
+    val innerPadding = if (compact) 4.dp else 7.dp
+    val iconBoxSize = if (compact) 20.dp else 29.dp
+    val iconSize = if (compact) 12.dp else 17.dp
+    val labelTopPadding = if (compact) 2.dp else 4.dp
+    val labelMaxWidth = if (compact) 40.dp else 62.dp
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(
+        fontSize = if (compact) 8.sp else 10.sp,
+        lineHeight = if (compact) 10.sp else 13.sp
+    )
+    val container = if (peer.selected) {
+        colors.panelGlow.copy(alpha = 0.97f)
+    } else {
+        colors.background.copy(alpha = 0.93f)
+    }
     Column(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(container)
+            .border(
+                width = if (peer.selected) 1.7.dp else 1.dp,
+                color = colors.accent.copy(alpha = if (peer.selected) 0.9f else 0.46f),
+                shape = CircleShape
+            )
+            .testTag("home_radar_peer_${peer.id}")
+            .clickable(
+                enabled = peer.enabled,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .padding(innerPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircleIconButton(
-            painter = painter,
-            description = description,
-            testTag = testTag,
-            onClick = onClick,
-            enabled = enabled,
-            isSelected = isSelected
-        )
-        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .size(iconBoxSize)
+                .background(
+                    color = if (peer.selected) {
+                        colors.accent.copy(alpha = 0.2f)
+                    } else {
+                        colors.hairline.copy(alpha = 0.055f)
+                    },
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_person_outline_24),
+                contentDescription = null,
+                modifier = Modifier.size(iconSize),
+                tint = if (peer.selected) colors.accent else colors.text
+            )
+        }
         Text(
-            text = label,
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.labelMedium,
+            text = peer.label,
+            modifier = Modifier
+                .padding(top = labelTopPadding)
+                .widthIn(max = labelMaxWidth),
+            color = if (peer.selected) colors.accent else colors.text,
+            style = labelStyle,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center
         )
     }
 }
 
 @Composable
-private fun StatusCard(state: HomeScreenUiState) {
-    val accent = colorResource(R.color.motocom_accent_green)
-    val muted = colorResource(R.color.motocom_on_console_secondary)
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
-            .background(colorResource(R.color.motocom_console)).padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).background(if (state.connected) accent else muted, CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(state.primaryText, Modifier.weight(1f).testTag("home_status_title"),
-                color = Color.White, style = MaterialTheme.typography.bodyMedium)
-        }
-        Text(state.peerText, Modifier.fillMaxWidth().padding(top = 20.dp).testTag("home_peer_name"),
-            color = Color.White, fontSize = 30.sp, lineHeight = 38.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp, textAlign = TextAlign.Center)
-        if (state.detailText.isNotBlank() && state.detailText != stringResource(R.string.brand_tagline)) Text(state.detailText, Modifier.padding(top = 5.dp),
-            color = muted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-        state.supplementalText.orEmpty().let {
-            Text(it, Modifier.then(if (it.isBlank()) Modifier.height(0.dp) else Modifier.padding(top = 5.dp)).testTag("home_status_supplemental"),
-                color = if (state.connected) accent else muted,
-                style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-        }
-        CommunicationDial(state.discovering && state.animationsEnabled, state.connected)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            ConsoleFact(stringResource(R.string.home_transport_plan, state.plannedTransportText),
-                R.drawable.ic_wifi_24, Modifier.weight(1f))
-            ConsoleFact(stringResource(R.string.home_webrtc_state, state.webRtcText),
-                R.drawable.ic_globe_24, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun ConsoleFact(text: String, icon: Int, modifier: Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(icon), null, Modifier.size(17.dp), tint = colorResource(R.color.motocom_accent_green))
-        Spacer(Modifier.width(7.dp))
-        Text(text, color = colorResource(R.color.motocom_on_console_secondary),
-            fontSize = 11.sp, lineHeight = 16.sp)
-    }
-}
-
-@Composable
-private fun CommunicationDial(discovering: Boolean, connected: Boolean) {
-    val accent = colorResource(R.color.motocom_accent_green)
-    val pulse = if (discovering) {
-        val transition = rememberInfiniteTransition(label = "communication")
-        transition.animateFloat(0.35f, 0.8f,
-            infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "signal").value
-    } else if (connected) 0.7f else 0.3f
-    Box(Modifier.padding(vertical = 12.dp).size(130.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val radius = size.minDimension / 2f
-            drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = 0.08f), Color.Transparent)), radius)
-            listOf(1f, 0.8f, 0.59f).forEachIndexed { index, scale ->
-                drawCircle(accent.copy(alpha = pulse * (0.25f + index * 0.25f)), radius * scale,
-                    style = Stroke(if (index == 2) 1.5.dp.toPx() else 0.8.dp.toPx()))
-            }
-            if (connected || discovering) drawCircle(accent, 3.dp.toPx(),
-                Offset(center.x + radius * 0.56f, center.y - radius * 0.56f))
-        }
-        Icon(painterResource(R.drawable.ic_mic_24), null, Modifier.size(40.dp), tint = Color.White)
-    }
-}
-
-@Composable
-private fun AudioCard(state: HomeScreenUiState, audioLevel: Float) {
-    val shape = RoundedCornerShape(20.dp)
+private fun RadarOverflowBadge(
+    hiddenCount: Int,
+    modifier: Modifier = Modifier
+) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(colors.background.copy(alpha = 0.88f))
+            .border(1.dp, colors.outline.copy(alpha = 0.72f), RoundedCornerShape(50))
+            .testTag("home_radar_overflow")
+            .clearAndSetSemantics {
+                contentDescription = "另有 $hiddenCount 位车友"
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_headset_24),
-            contentDescription = null,
-            modifier = Modifier.size(24.dp),
-            tint = MaterialTheme.colorScheme.onSurface
+        Text(
+            text = "+$hiddenCount",
+            color = colors.accent,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 10.sp,
+                lineHeight = 12.sp
+            )
         )
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.section_audio_output),
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = state.audioSourceText,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .testTag("home_audio_source")
-            )
-            Text(
-                text = stringResource(R.string.home_bluetooth_state, state.bluetoothText),
-                modifier = Modifier.padding(top = 3.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp
-            )
-        }
-
     }
 }
 
+private fun Modifier.offsetDp(x: Dp, y: Dp): Modifier =
+    this.then(Modifier.offset(x = x, y = y))
+
 @Composable
-private fun MainControls(
+private fun RadarCanvas(state: HomeScreenUiState, scopeRadius: Dp) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    val motion = rememberRadarMotion(state.discovering && state.animationsEnabled)
+    val density = LocalDensity.current
+    Canvas(Modifier.fillMaxSize()) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = with(density) { scopeRadius.toPx() }
+        val ringAlpha = when {
+            state.discovering -> 0.33f
+            state.connected -> 0.23f
+            else -> 0.16f
+        }
+
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(colors.panelGlow, colors.panel, colors.backgroundDeep),
+                start = Offset(size.width / 2f, 0f),
+                end = Offset(size.width / 2f, size.height)
+            )
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(colors.accent.copy(alpha = 0.055f), Color.Transparent),
+                center = Offset(size.width / 2f, size.height * 0.28f),
+                radius = size.width * 0.72f
+            ),
+            radius = size.width * 0.72f,
+            center = Offset(size.width / 2f, size.height * 0.28f)
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    colors.accent.copy(alpha = 0.115f),
+                    colors.accent.copy(alpha = 0.025f),
+                    Color.Transparent
+                ),
+                center = center,
+                radius = radius
+            ),
+            radius = radius,
+            center = center
+        )
+
+        listOf(1f, 0.73f, 0.47f).forEachIndexed { index, scale ->
+            drawCircle(
+                color = colors.accent.copy(alpha = ringAlpha * if (index == 0) 1f else 0.62f),
+                radius = radius * scale,
+                center = center,
+                style = Stroke(if (index == 0) 1.3.dp.toPx() else 0.8.dp.toPx())
+            )
+        }
+        drawLine(
+            color = colors.accent.copy(alpha = 0.13f),
+            start = Offset(center.x - radius, center.y),
+            end = Offset(center.x + radius, center.y),
+            strokeWidth = 0.7.dp.toPx()
+        )
+        drawLine(
+            color = colors.accent.copy(alpha = 0.13f),
+            start = Offset(center.x, center.y - radius),
+            end = Offset(center.x, center.y + radius),
+            strokeWidth = 0.7.dp.toPx()
+        )
+        repeat(36) { index ->
+            val major = index % 3 == 0
+            rotate(degrees = index * 10f, pivot = center) {
+                drawLine(
+                    color = colors.accent.copy(alpha = if (major) 0.36f else 0.16f),
+                    start = Offset(center.x + radius * 0.91f, center.y),
+                    end = Offset(
+                        center.x + radius * if (major) 0.965f else 0.945f,
+                        center.y
+                    ),
+                    strokeWidth = if (major) 1.dp.toPx() else 0.55.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+
+        when {
+            state.discovering -> {
+                rotate(degrees = motion.sweep, pivot = center) {
+                    val wedge = Path().apply {
+                        moveTo(center.x, center.y)
+                        arcTo(
+                            rect = Rect(
+                                left = center.x - radius,
+                                top = center.y - radius,
+                                right = center.x + radius,
+                                bottom = center.y + radius
+                            ),
+                            startAngleDegrees = -42f,
+                            sweepAngleDegrees = 42f,
+                            forceMoveTo = false
+                        )
+                        close()
+                    }
+                    drawPath(
+                        path = wedge,
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                colors.accent.copy(alpha = 0.22f),
+                                colors.accent.copy(alpha = 0.055f),
+                                Color.Transparent
+                            ),
+                            center = center,
+                            radius = radius
+                        )
+                    )
+                    drawLine(
+                        color = colors.accent.copy(alpha = 0.88f),
+                        start = center,
+                        end = Offset(center.x + radius * 0.975f, center.y),
+                        strokeWidth = 1.4.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+                listOf(0f, 0.5f).forEach { offset ->
+                    val progress = (motion.pulse + offset) % 1f
+                    drawCircle(
+                        color = colors.accent.copy(alpha = (1f - progress) * 0.22f),
+                        radius = radius * (0.13f + progress * 0.81f),
+                        center = center,
+                        style = Stroke(1.dp.toPx())
+                    )
+                }
+            }
+            state.connected -> {
+                val peerAngle = -31f * PI.toFloat() / 180f
+                val peer = Offset(
+                    center.x + cos(peerAngle) * radius * 0.62f,
+                    center.y + sin(peerAngle) * radius * 0.62f
+                )
+                drawLine(
+                    color = colors.accent.copy(alpha = 0.42f),
+                    start = center,
+                    end = peer,
+                    strokeWidth = 1.2.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(
+                        floatArrayOf(7.dp.toPx(), 8.dp.toPx())
+                    )
+                )
+                drawCircle(
+                    color = colors.accent.copy(alpha = 0.12f),
+                    radius = radius * 0.42f,
+                    center = center,
+                    style = Stroke(1.dp.toPx())
+                )
+                drawCircle(colors.accent.copy(alpha = 0.16f), 15.dp.toPx(), peer)
+                drawCircle(colors.accent, 3.2.dp.toPx(), peer)
+            }
+            else -> {
+                drawCircle(
+                    color = colors.accent.copy(alpha = 0.1f),
+                    radius = radius * 0.34f,
+                    center = center,
+                    style = Stroke(1.dp.toPx())
+                )
+                drawCircle(colors.muted.copy(alpha = 0.38f), 3.dp.toPx(), center)
+            }
+        }
+
+        val frameInset = 13.dp.toPx()
+        drawRoundRect(
+            color = colors.accent.copy(alpha = 0.08f),
+            topLeft = Offset(frameInset, frameInset),
+            size = Size(size.width - frameInset * 2f, size.height - frameInset * 2f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(22.dp.toPx()),
+            style = Stroke(0.8.dp.toPx())
+        )
+        val laneY = size.height - 23.dp.toPx()
+        drawLine(
+            color = colors.hairline.copy(alpha = 0.055f),
+            start = Offset(size.width * 0.08f, laneY),
+            end = Offset(size.width * 0.92f, laneY),
+            strokeWidth = 1.dp.toPx()
+        )
+        repeat(5) { index ->
+            val x = size.width * (0.27f + index * 0.115f)
+            drawLine(
+                color = colors.accent.copy(alpha = 0.13f),
+                start = Offset(x, laneY - 4.dp.toPx()),
+                end = Offset(x, laneY + 4.dp.toPx()),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+    }
+}
+
+private data class RadarMotion(val sweep: Float, val pulse: Float)
+
+@Composable
+private fun rememberRadarMotion(active: Boolean): RadarMotion {
+    if (!active) return RadarMotion(sweep = 0f, pulse = 0f)
+    val transition = rememberInfiniteTransition(label = "home_radar")
+    val sweep = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3000, easing = LinearEasing)
+        ),
+        label = "home_radar_sweep"
+    ).value
+    val pulse = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2300, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "home_radar_pulse"
+    ).value
+    return RadarMotion(sweep = sweep, pulse = pulse)
+}
+
+@Composable
+private fun ControlDeck(
     state: HomeScreenUiState,
+    audioLevel: Float,
     onPrimaryAction: () -> Unit,
     onMute: (Boolean) -> Unit,
     onAudioSettings: () -> Unit,
-    onGuideAnchor: (GuideTarget, androidx.compose.ui.geometry.Rect) -> Unit
+    onVox: () -> Unit,
+    onGuideAnchor: (GuideTarget, Rect) -> Unit
 ) {
-    val disabledDescription = state.disabledReason?.let {
-        stringResource(
-            R.string.home_primary_disabled_description,
-            state.primaryActionLabel,
-            it
-        )
-    }
+    val colors = MotoComThemePalette.current
     Column(
-        modifier = Modifier.fillMaxWidth().testTag("home_main_control_section"),
-        horizontalAlignment = Alignment.CenterHorizontally
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(colors.panel.copy(alpha = 0.96f))
+            .border(1.dp, colors.outline, RoundedCornerShape(28.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Row(
-            modifier = Modifier.testTag("home_main_control_row"),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LabeledIconButton(
-                painter = painterResource(R.drawable.ic_mute_24),
-                description = when {
-                    state.muted -> stringResource(R.string.unmute_description)
-                    state.muteEnabled -> stringResource(R.string.mute_description)
-                    else -> stringResource(R.string.mute_unavailable_description)
-                },
-                label = stringResource(
-                    if (state.muted) R.string.home_unmute_label else R.string.home_mute_label
-                ),
-                testTag = "home_mute_button",
-                onClick = { onMute(!state.muted) },
-                enabled = state.muteEnabled,
-                isSelected = state.muted
+            Icon(
+                painter = painterResource(R.drawable.ic_headset_24),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = colors.accent
             )
-            Spacer(Modifier.width(dimensionResource(R.dimen.motocom_main_control_gap)))
-            val controlContainer = colorResource(R.color.motocom_accent_green)
-            val controlContent = MaterialTheme.colorScheme.onSurface
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = audioSourceLabel(state.audioSourceText),
+                color = colors.text,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("home_audio_source"),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            VoxStatus(
+                state = state,
+                audioLevel = audioLevel,
+                onClick = onVox
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = colors.outline.copy(alpha = 0.78f), thickness = 1.dp)
+        Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .testTag("home_main_control_section"),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth(0.92f)
+                    .testTag("home_main_control_row"),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DeckSideControl(
+                    icon = R.drawable.ic_mute_24,
+                    label = stringResource(
+                        if (state.muted) R.string.home_unmute_label else R.string.home_mute_label
+                    ),
+                    description = when {
+                        state.muted -> stringResource(R.string.unmute_description)
+                        state.muteEnabled -> stringResource(R.string.mute_description)
+                        else -> stringResource(R.string.mute_unavailable_description)
+                    },
+                    tag = "home_mute_button",
+                    enabled = state.muteEnabled,
+                    selected = state.muted,
+                    onClick = { onMute(!state.muted) }
+                )
+                DeckPrimaryControl(
+                    state = state,
+                    onPrimaryAction = onPrimaryAction,
+                    onGuideAnchor = onGuideAnchor
+                )
+                DeckSideControl(
+                    icon = R.drawable.ic_tune_24,
+                    label = stringResource(R.string.home_audio_label),
+                    description = stringResource(R.string.audio_button_description),
+                    tag = "home_audio_settings_button",
+                    enabled = true,
+                    selected = false,
+                    onClick = onAudioSettings
+                )
+            }
+        }
+        state.disabledReason?.takeIf(String::isNotBlank)?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = it,
+                color = colors.muted,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("home_disabled_reason")
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoxStatus(
+    state: HomeScreenUiState,
+    audioLevel: Float,
+    onClick: () -> Unit
+) {
+    val colors = MotoComThemePalette.current
+    val stateLabel = when (state.voxState) {
+        VoxRuntimeState.IDLE -> stringResource(R.string.vox_state_idle)
+        VoxRuntimeState.DISABLED -> stringResource(R.string.vox_state_disabled)
+        VoxRuntimeState.MUTED -> stringResource(R.string.vox_state_muted)
+        VoxRuntimeState.LISTENING -> stringResource(R.string.vox_state_listening)
+        VoxRuntimeState.OPEN -> stringResource(R.string.vox_state_open)
+        VoxRuntimeState.HANGOVER -> stringResource(R.string.vox_state_hangover)
+    }
+    val level = if (state.connected) {
+        audioLevel.coerceIn(0f, 1f)
+    } else {
+        (state.voxSensitivity / 100f).coerceIn(0f, 1f)
+    }
+    Column(
+        Modifier
+            .testTag("home_vox_card")
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = "VOX $stateLabel，灵敏度 ${state.voxSensitivity}，打开设置"
+            },
+        horizontalAlignment = Alignment.End
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.home_vox_pill, stateLabel),
+                modifier = Modifier.testTag("home_vox_pill"),
+                color = colors.text,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp
+                )
+            )
+            Spacer(Modifier.width(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                repeat(5) { index ->
+                    val lit = index < (level * 5f).roundToInt().coerceIn(0, 5)
+                    Box(
+                        Modifier
+                            .width(5.dp)
+                            .height(if (lit) 9.dp else 5.dp)
+                            .clip(CircleShape)
+                            .background(if (lit) colors.accent else colors.outline)
+                    )
+                }
+            }
+        }
+        Text(
+            text = stringResource(R.string.settings_vox_sensitivity, state.voxSensitivity),
+            color = colors.muted,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp)
+        )
+    }
+}
+
+@Composable
+private fun DeckSideControl(
+    icon: Int,
+    label: String,
+    description: String,
+    tag: String,
+    enabled: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MotoComThemePalette.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        val interactionSource = remember { MutableInteractionSource() }
+        Box(
+            Modifier
+                .size(52.dp)
+                .motoComPressScale(interactionSource, enabled)
+                .clip(CircleShape)
+                .background(
+                    if (selected) {
+                        colors.accent.copy(alpha = 0.14f)
+                    } else {
+                        colors.panelRaised
+                    }
+                )
+                .border(
+                    1.dp,
+                    if (selected) colors.accent.copy(alpha = 0.4f) else colors.outline,
+                    CircleShape
+                )
+                .testTag(tag)
+                .semantics {
+                    contentDescription = description
+                    if (!enabled) disabled()
+                }
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = if (enabled) colors.text else colors.muted.copy(alpha = 0.45f)
+            )
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            text = label,
+            color = if (enabled) colors.muted else colors.muted.copy(alpha = 0.45f),
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+@Composable
+private fun DeckPrimaryControl(
+    state: HomeScreenUiState,
+    onPrimaryAction: () -> Unit,
+    onGuideAnchor: (GuideTarget, Rect) -> Unit
+) {
+    val colors = MotoComThemePalette.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val disabledDescription = state.disabledReason?.let {
+        stringResource(R.string.home_primary_disabled_description, state.primaryActionLabel, it)
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(92.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(colors.accent.copy(alpha = 0.16f), Color.Transparent),
+                        center = center,
+                        radius = size.minDimension / 2f
+                    ),
+                    radius = size.minDimension / 2f,
+                    center = center
+                )
+                drawCircle(
+                    color = colors.accent.copy(alpha = 0.2f),
+                    radius = size.minDimension * 0.4f,
+                    center = center,
+                    style = Stroke(1.dp.toPx())
+                )
+            }
             Button(
                 onClick = onPrimaryAction,
                 enabled = state.primaryActionEnabled,
                 modifier = Modifier
-                    .size(dimensionResource(R.dimen.motocom_main_control_size))
-                    .then(
-                        if (state.connected) {
-                            Modifier.border(
-                                BorderStroke(3.dp, colorResource(R.color.motocom_accent_green)),
-                                CircleShape
-                            )
-                        } else {
-                            Modifier
-                        }
-                    )
+                    .size(76.dp)
+                    .motoComPressScale(interactionSource, state.primaryActionEnabled)
                     .testTag("home_primary_button")
                     .guideAnchor(GuideTarget.START, onGuideAnchor)
                     .semantics(mergeDescendants = true) {
@@ -440,115 +1080,55 @@ private fun MainControls(
                     },
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = controlContainer,
-                    contentColor = controlContent,
-                    disabledContainerColor = colorResource(R.color.motocom_disabled),
-                    disabledContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = colors.accent,
+                    contentColor = colors.accentInk,
+                    disabledContainerColor = colors.outline,
+                    disabledContentColor = colors.muted
                 ),
-                    contentPadding = PaddingValues(0.dp)
+                contentPadding = PaddingValues(0.dp),
+                interactionSource = interactionSource
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_mic_24),
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = controlContent
-                        )
-                        Text(
-                            text = state.primaryActionLabel,
-                            color = controlContent,
-                            style = MaterialTheme.typography.labelLarge,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Icon(
+                        painter = painterResource(R.drawable.ic_mic_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(27.dp),
+                        tint = colors.accentInk
+                    )
+                    Text(
+                        text = state.primaryActionLabel,
+                        color = colors.accentInk,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            lineHeight = 11.sp
+                        ),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
                 }
-            Spacer(Modifier.width(dimensionResource(R.dimen.motocom_main_control_gap)))
-            LabeledIconButton(
-                painter = painterResource(R.drawable.ic_tune_24),
-                description = stringResource(R.string.audio_button_description),
-                label = stringResource(R.string.home_audio_label),
-                testTag = "home_audio_settings_button",
-                onClick = onAudioSettings
-            )
-        }
-        state.disabledReason?.takeIf(String::isNotBlank)?.let {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().testTag("home_disabled_reason")
-            )
+            }
         }
     }
 }
 
 @Composable
-private fun VoxCard(state: HomeScreenUiState, onClick: () -> Unit) {
-    val description = stringResource(R.string.home_vox_card_description, state.voxText, state.voxSensitivity)
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-        .background(MaterialTheme.colorScheme.surface)
-        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
-        .testTag("home_vox_card").clickable(role = Role.Button, onClick = onClick)
-        .semantics { contentDescription = description }.padding(16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.home_vox_pill, state.voxText),
-                Modifier.weight(1f).testTag("home_vox_pill"),
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text("灵敏度：${state.voxSensitivity}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("home_vox_state_row"),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            VoxState("LISTENING", state.voxState == VoxRuntimeState.LISTENING, Modifier.weight(1f))
-            VoxState("OPEN", state.voxState == VoxRuntimeState.OPEN, Modifier.weight(1f))
-            VoxState("HANGOVER", state.voxState == VoxRuntimeState.HANGOVER, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun VoxState(text: String, active: Boolean, modifier: Modifier) {
-    Box(
-        modifier = modifier
-            .defaultMinSize(minHeight = 40.dp)
-            .padding(horizontal = 4.dp, vertical = 3.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        val title = when (text) {
-            "LISTENING" -> "待机"
-            "OPEN" -> "开麦"
-            else -> "保持"
-        }
-        Text(
-            text = "$title\n$text",
-            color = if (active) {
-                colorResource(R.color.motocom_accent_green_dark)
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            fontSize = 10.sp,
-            lineHeight = 15.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-private fun SecondaryAction(text: String, onClick: () -> Unit, testTag: String, modifier: Modifier = Modifier) {
+private fun SecondaryAction(
+    text: String,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    val colors = MotoComThemePalette.current
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = dimensionResource(R.dimen.motocom_control_min_height))
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.panel.copy(alpha = 0.9f))
+            .border(1.dp, colors.outline, RoundedCornerShape(18.dp))
             .testTag(testTag)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 12.dp),
@@ -556,7 +1136,7 @@ private fun SecondaryAction(text: String, onClick: () -> Unit, testTag: String, 
     ) {
         Text(
             text = text,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = colors.text,
             style = MaterialTheme.typography.labelLarge,
             textAlign = TextAlign.Center
         )
@@ -570,9 +1150,8 @@ private fun MotoComHomeScreenPreview() {
         MotoComHomeScreen(
             state = HomeScreenUiState(
                 primaryText = "点击下方启动摩声",
-                detailText = "一对一对讲 · 无需网络",
-                supplementalText = "请点击下方启动对讲",
-                peerText = "等待车友加入",
+                supplementalText = null,
+                peerText = "",
                 primaryActionLabel = "启动",
                 primaryActionEnabled = true,
                 disabledReason = null,
@@ -581,12 +1160,7 @@ private fun MotoComHomeScreenPreview() {
                 showWifiSettingsCta = false,
                 discoverCtaLabel = "查看附近车友",
                 showDiscoverCta = false,
-                audioSourceText = "当前音频源：待机",
-                plannedTransportText = "待建立",
-                connectedTransportText = "未连接",
-                webRtcText = "未连接",
-                bluetoothText = "蓝牙状态不可用",
-                voxText = "IDLE",
+                audioSourceText = "待机",
                 discovering = false,
                 connected = false,
                 voxState = VoxRuntimeState.IDLE

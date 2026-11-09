@@ -127,10 +127,8 @@ class MainScreenRobolectricTest {
         openRoute(fixture, MainRoute.SETTINGS)
         listOf(false, true, false, true).forEach { ready ->
             fixture.screen.setAudioReady(ready)
-            val expected = if (ready) "语音通道已连接" else "正在等待音频就绪"
+            val expected = if (ready) "已连接" else "正在等待音频就绪"
             assertTrue(settingsText("settings_product_state").contains(expected))
-            assertTrue(settingsText("settings_device_status_summary").contains(expected))
-            assertEquals(!ready, settingsText("settings_attempt_facts").contains("待音频"))
         }
     }
 
@@ -165,7 +163,7 @@ class MainScreenRobolectricTest {
         clickDiscoverSelection("discover_select_device-a")
         val dialog = ShadowAlertDialog.getLatestAlertDialog()
         assertTrue(dialog.isShowing)
-        assertTrue(shadowOf(dialog).message.toString().contains("发现时可用通道"))
+        assertTrue(shadowOf(dialog).message.toString().contains("LAN"))
         assertEquals(0, connections)
         assertTrue(fixture.screen.handleBack())
         assertFalse(dialog.isShowing)
@@ -294,7 +292,7 @@ class MainScreenRobolectricTest {
 
         clickHome("home_audio_settings_button")
         assertTrue(settingsExists("settings_audio_source"))
-        clickSettings("settings_back_button")
+        root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
 
         shadowOf(Looper.getMainLooper()).idle()
 
@@ -313,10 +311,10 @@ class MainScreenRobolectricTest {
         assertHomeText("home_audio_source", BLUETOOTH_AUDIO_CONNECTED_TEXT)
 
         fixture.screen.setAudioSource("", bluetooth = false)
-        assertHomeText("home_audio_source", AUDIO_SOURCE_STANDBY_TEXT)
+        assertHomeText("home_audio_source", "待机")
 
         fixture.screen.setAudioSource("当前音频源：蓝牙耳机 (Helmet)", bluetooth = false)
-        assertHomeText("home_audio_source", AUDIO_SOURCE_STANDBY_TEXT)
+        assertHomeText("home_audio_source", "待机")
     }
 
     @Test
@@ -347,10 +345,6 @@ class MainScreenRobolectricTest {
 
         root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
         assertNotNull(pageContainer.findViewById<View>(R.id.discover_scroll))
-
-        clickDiscover("discover_help_button")
-        dismissHelp()
-        clickDiscover("discover_back_button")
 
         fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         clickSettings("settings_logs_button")
@@ -418,14 +412,14 @@ class MainScreenRobolectricTest {
         )
 
         assertEquals(
-            "当前没有可连接的车友",
+            "暂无可连接车友",
             discoverText("discover_state_text")
         )
         assertFalse(discoverExists("discover_connect_device-a"))
     }
 
     @Test
-    fun discoverPresenceFactsUseResourceBackedTruthfulLabels() {
+    fun discoverPresenceCardsAvoidDuplicateStatusCopy() {
         val fixture = fixture()
         openRoute(fixture, MainRoute.DISCOVER)
         fixture.screen.setIntercomState(
@@ -452,24 +446,9 @@ class MainScreenRobolectricTest {
         )
         fixture.screen.setPresences(listOf(preferred, offlinePairedPresence(), nearby))
 
-        assertEquals(
-            fixture.activity.getString(R.string.discover_fact_paired) +
-                fixture.activity.getString(R.string.discover_fact_separator) +
-                fixture.activity.getString(R.string.discover_fact_preferred),
-            discoverText("discover_facts_device-a")
-        )
-
-        assertEquals(
-            fixture.activity.getString(R.string.discover_fact_paired) +
-                fixture.activity.getString(R.string.discover_fact_separator) +
-                fixture.activity.getString(R.string.discover_fact_unavailable),
-            discoverText("discover_facts_device-offline")
-        )
-
-        assertEquals(
-            fixture.activity.getString(R.string.discover_fact_current),
-            discoverText("discover_facts_device-nearby")
-        )
+        assertFalse(discoverExists("discover_facts_device-a"))
+        assertFalse(discoverExists("discover_facts_device-offline"))
+        assertFalse(discoverExists("discover_facts_device-nearby"))
     }
 
     @Test
@@ -694,7 +673,7 @@ class MainScreenRobolectricTest {
         assertEquals(savedScrollY, recreatedScroll.scrollY)
         assertTrue("product state must come from the new runtime, not saved UI state", recreatedSummary != discoveringSummary)
 
-        clickSettings("settings_back_button")
+        recreated.screen.root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
         assertNotNull(recreated.screen.root.findViewById<View>(R.id.home_scroll))
     }
 
@@ -768,7 +747,7 @@ class MainScreenRobolectricTest {
         homeScroll.scrollTo(0, 140)
 
         fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
-        clickSettings("settings_back_button")
+        root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
         shadowOf(Looper.getMainLooper()).idle()
 
         val restoredHomeScroll = pageContainer.findViewById<ScrollView>(R.id.home_scroll)
@@ -792,7 +771,7 @@ class MainScreenRobolectricTest {
         assertTrue(discoverExists("discover_wifi_settings_button"))
         assertTrue(discoverExists("discover_rescan_button"))
 
-        clickDiscover("discover_back_button")
+        fixture.screen.root.findViewById<View>(R.id.bottom_nav_home_button).performClick()
         fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         assertTrue(settingsExists("settings_save_nickname_button"))
         assertTrue(settingsExists("settings_audio_route_button"))
@@ -828,7 +807,7 @@ class MainScreenRobolectricTest {
         val versionName = fixture.activity.packageManager
             .getPackageInfo(fixture.activity.packageName, 0)
             .versionName
-        assertTrue(message.contains(fixture.activity.getString(R.string.brand_name)))
+        assertTrue(message.contains("摩声 MotoCom"))
         assertTrue(message.contains("版本 $versionName"))
         assertTrue(message.contains("power by kuma"))
         assertFalse(message.contains("http"))
@@ -919,7 +898,7 @@ class MainScreenRobolectricTest {
         measureAtWidth(fixture, widthDp = 360)
         assertTrue(discoverExists("discover_title"))
 
-        clickDiscover("discover_back_button")
+        fixture.screen.root.findViewById<View>(R.id.bottom_nav_home_button).performClick()
         fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         measureAtWidth(fixture, widthDp = 360)
         assertTrue(settingsExists("settings_title"))
@@ -1059,6 +1038,30 @@ class MainScreenRobolectricTest {
     }
 
     @Test
+    fun failedThemeSaveKeepsTheCurrentTheme() {
+        var requested: MotoComThemeMode? = null
+        val fixture = fixture(
+            initialTheme = MotoComThemeMode.DAYLIGHT,
+            onThemeSelected = {
+                requested = it
+                false
+            }
+        )
+        openRoute(fixture, MainRoute.SETTINGS)
+
+        clickSettings("settings_theme_nightride")
+
+        assertEquals(MotoComThemeMode.NIGHTRIDE, requested)
+        val themeField = MainScreen::class.java.getDeclaredField("appTheme").apply {
+            isAccessible = true
+        }
+        @Suppress("UNCHECKED_CAST")
+        val currentTheme =
+            (themeField.get(fixture.screen) as androidx.compose.runtime.State<MotoComThemeMode>).value
+        assertEquals(MotoComThemeMode.DAYLIGHT, currentTheme)
+    }
+
+    @Test
     fun pageContentStaysWithinSupportedWidthsAtLargeFontScale() {
         val routes = listOf(
             Triple(MainRoute.HOME, R.id.home_scroll, R.id.home_content),
@@ -1138,7 +1141,10 @@ class MainScreenRobolectricTest {
             val content = fixture.screen.root.findViewById<View>(contentId)
             assertEquals("$route must have one vertical scroll child", 1, scroll.childCount)
             assertTrue("$route at landscape width must not overflow horizontally", content.right <= scroll.width)
-            assertTrue("$route must retain content below a short landscape viewport", content.height > scroll.height)
+            assertTrue("$route must retain measurable content in a short landscape viewport", content.height > 0)
+            if (content.height > scroll.height) {
+                assertTrue("$route must scroll when its content exceeds the viewport", scroll.canScrollVertically(1))
+            }
         }
     }
 
@@ -1266,7 +1272,10 @@ class MainScreenRobolectricTest {
         states.forEach { state ->
             fixture.screen.setIntercomState(state, canStart = true)
 
-            assertHomeTextIsNotBlank("home_status_title")
+            assertTrue(
+                "${state.kind} radar status must remain accessible",
+                homeContentDescription("home_discovery_radar").isNotBlank()
+            )
             assertHomeTextIsNotBlank("home_primary_button")
             assertEquals(
                 "${state.kind} must keep Home route active",
@@ -1284,7 +1293,7 @@ class MainScreenRobolectricTest {
                 homeIsEnabled("home_primary_button")
             )
             assertEquals(
-                "VOX：IDLE",
+                "VOX · 待机",
                 homeText("home_vox_pill", useUnmergedTree = true)
             )
         }
@@ -1335,21 +1344,13 @@ class MainScreenRobolectricTest {
         assertFalse(helpDescription.contains("开发中"))
         listOf(
             "settings_vox_button",
-            "settings_vox_sensitivity_button",
-            "settings_vox_state_button"
+            "settings_vox_sensitivity_button"
         ).forEach { assertTrue(settingsExists(it)) }
+        assertFalse(settingsExists("settings_vox_state_button"))
 
-        clickSettings("settings_back_button")
+        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
 
         fixture.screen.root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
-        val discoverHelp = discoverNode("discover_help_button")
-        assertTrue("Discover help action should exist", discoverExists("discover_help_button"))
-        assertTrue(discoverHelp.fetchSemanticsNode().config.contains(SemanticsProperties.ContentDescription))
-        assertFalse(
-            discoverHelp.fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
-                .joinToString(separator = "")
-                .contains("开发中")
-        )
         assertTrue(discoverExists("discover_rescan_button"))
         assertFalse(
             discoverNode("discover_rescan_button")
@@ -1359,9 +1360,9 @@ class MainScreenRobolectricTest {
                 .contains("开发中")
         )
 
-        clickDiscover("discover_back_button")
+        fixture.screen.root.findViewById<View>(R.id.bottom_nav_home_button).performClick()
         assertFalse(homeContentDescription("home_vox_card").contains("开发中"))
-        assertTrue(homeContentDescription("home_vox_card").contains("VOX 当前状态"))
+        assertTrue(homeContentDescription("home_vox_card").contains("VOX 待机"))
     }
 
     @Test
@@ -1420,23 +1421,18 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun voxVisualStateChipsRemainDecorativeForAccessibility() {
+    fun voxCardKeepsCompactStateWithoutDecorativeColumns() {
         val fixture = fixture()
-        val stateRow = composeRule.onAllNodesWithTag(
-            "home_vox_state_row",
-            useUnmergedTree = true
-        ).onLast().fetchSemanticsNode()
-
-        assertFalse(stateRow.config.contains(SemanticsActions.OnClick))
-        assertEquals(3, stateRow.children.size)
+        assertFalse(homeExists("home_vox_state_row"))
+        assertTrue(homeContentDescription("home_vox_card").contains("VOX 待机"))
     }
 
     @Test
     fun helpButtonShowsOneRealDialogAndRoutesFeedbackWithTheCurrentVersion() {
         var feedbackVersion: String? = null
         val fixture = fixture(onSendFeedback = { feedbackVersion = it })
-        openRoute(fixture, MainRoute.DISCOVER)
-        clickDiscover("discover_help_button")
+        openRoute(fixture, MainRoute.SETTINGS)
+        clickSettings("settings_help_button")
 
         val dialog = ShadowAlertDialog.getLatestAlertDialog() ?: error("help dialog was not shown")
         val shadow = shadowOf(dialog)
@@ -1447,7 +1443,7 @@ class MainScreenRobolectricTest {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).text
         )
 
-        clickDiscover("discover_help_button")
+        clickSettings("settings_help_button")
         assertSame(dialog, ShadowAlertDialog.getLatestAlertDialog())
         assertTrue(dialog.isShowing)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
@@ -1468,6 +1464,28 @@ class MainScreenRobolectricTest {
 
         assertNotNull(fixture.screen.root.findViewById<View>(R.id.settings_scroll))
         assertTrue(settingsExists("settings_vox_button"))
+    }
+
+    @Test
+    fun homeRadarPeerClickDispatchesTheExactDiscoveredPresence() {
+        var connected: RiderPresence? = null
+        val fixture = fixture(
+            onConnectPresence = {
+                connected = it
+                true
+            }
+        )
+        fixture.screen.setIntercomState(
+            IntercomState.Discovering(RuntimeSessionId("runtime-home-radar")),
+            canStart = true
+        )
+        fixture.screen.setPresences(listOf(selectablePresence()))
+
+        clickHome("home_radar_peer_device-a|session-a")
+
+        assertEquals("device-a", connected?.deviceId)
+        assertEquals(RuntimeSessionId("session-a"), connected?.sessionId)
+        assertNotNull(fixture.screen.root.findViewById<View>(R.id.home_scroll))
     }
 
     @Test
@@ -1493,7 +1511,7 @@ class MainScreenRobolectricTest {
             canStart = true
         )
 
-        assertEquals("VOX：OPEN", homeText("home_vox_pill", useUnmergedTree = true))
+        assertEquals("VOX · 开麦", homeText("home_vox_pill", useUnmergedTree = true))
         clickHome("home_mute_button")
         assertEquals(true, requestedMute)
 
@@ -1508,14 +1526,9 @@ class MainScreenRobolectricTest {
             )
         )
         assertTrue(homeContentDescription("home_mute_button").contains("取消"))
+        assertTrue(homeContentDescription("home_vox_card").contains("VOX 静音"))
 
         clickHome("home_vox_card")
-        assertTrue(
-            settingsNode("settings_vox_state_button").fetchSemanticsNode()
-                .config[SemanticsProperties.ContentDescription]
-                .joinToString(separator = "")
-                .contains("MUTED")
-        )
         clickSettings("settings_vox_button")
         settingsNode("settings_vox_sensitivity_button")
             .performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
@@ -1526,23 +1539,18 @@ class MainScreenRobolectricTest {
 
     @Test
     fun discoverAndSettingsHelpUseTheSameRealDialogContractWithoutChangingRoute() {
-        val cases = listOf(
-            MainRoute.DISCOVER to "discover_help_button",
-            MainRoute.SETTINGS to "settings_help_button"
-        )
+        val cases = listOf(MainRoute.SETTINGS to "settings_help_button")
 
         cases.forEach { (route, tag) ->
             val fixture = fixture()
             openRoute(fixture, route)
             val pageContainer = fixture.screen.root.findViewById<FrameLayout>(R.id.page_container)
             val pageId = when (route) {
-                MainRoute.DISCOVER -> R.id.discover_scroll
                 MainRoute.SETTINGS -> R.id.settings_scroll
                 else -> error("No help entry on $route")
             }
 
             when (route) {
-                MainRoute.DISCOVER -> clickDiscover(tag)
                 MainRoute.SETTINGS -> clickSettings(tag)
                 else -> error("No help entry on $route")
             }
@@ -1596,7 +1604,7 @@ class MainScreenRobolectricTest {
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
         fixture.screen.setPermissionStatus("请点击下方启动对讲")
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
-        assertHomeText("home_status_supplemental", "")
+        assertFalse(homeExists("home_status_supplemental"))
 
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = true)
         fixture.screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
@@ -1612,7 +1620,7 @@ class MainScreenRobolectricTest {
         assertHomeText("home_status_supplemental", WIFI_UNAVAILABLE_TEXT)
 
         fixture.screen.setWifiUnavailable(false)
-        assertHomeText("home_status_supplemental", "")
+        assertFalse(homeExists("home_status_supplemental"))
 
         fixture.screen.setWifiUnavailable(true)
         fixture.screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
@@ -1639,10 +1647,9 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun settingsCandidateSummaryRefreshesWhenPresenceSnapshotChanges() {
+    fun settingsDoesNotExposeDiscoveryCandidateInternalsWhenSnapshotChanges() {
         val fixture = fixture()
         fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
-        val summaryTag = "settings_discovery_candidates"
 
         fixture.screen.setPresences(listOf(
             RiderPresence(
@@ -1665,10 +1672,10 @@ class MainScreenRobolectricTest {
                 pairing = null
             )
         ))
-        assertTrue(settingsText(summaryTag).contains("Road Captain"))
+        assertFalse(settingsExists("settings_discovery_candidates"))
 
         fixture.screen.setPresences(emptyList())
-        assertTrue(settingsText(summaryTag).isNotBlank())
+        assertFalse(settingsExists("settings_discovery_candidates"))
     }
 
     @Test
@@ -1913,7 +1920,7 @@ class MainScreenRobolectricTest {
         fixture.screen.setWifiUnavailable(true)
 
         assertEquals(
-            "启动摩声后开始发现附近车友",
+            "待机中",
             discoverText("discover_state_text")
         )
         assertEquals(
@@ -2169,6 +2176,8 @@ class MainScreenRobolectricTest {
         initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
         initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
         initialAutomaticReconnectEnabled: Boolean = true,
+        initialTheme: MotoComThemeMode = MotoComThemeMode.DAYLIGHT,
+        onThemeSelected: (MotoComThemeMode) -> Boolean = { true },
         onSetMuted: (Boolean) -> Unit = {},
         onSetVoxEnabled: (Boolean) -> Unit = {},
         onSetVoxSensitivity: (Int) -> Unit = {},
@@ -2200,6 +2209,8 @@ class MainScreenRobolectricTest {
             initialAudioControls = initialAudioControls,
             initialPreferredAudioRoute = initialPreferredAudioRoute,
             initialAutomaticReconnectEnabled = initialAutomaticReconnectEnabled,
+            initialTheme = initialTheme,
+            onThemeSelected = onThemeSelected,
             onSetMuted = onSetMuted,
             onSetVoxEnabled = onSetVoxEnabled,
             onSetVoxSensitivity = onSetVoxSensitivity,

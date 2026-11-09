@@ -42,7 +42,6 @@ class MainActivityRobolectricTest {
         val value = state.value as HomeScreenUiState
         return when (tag) {
             "home_audio_source" -> value.audioSourceText
-            "home_bluetooth_pill" -> value.bluetoothText
             "home_status_supplemental" -> value.supplementalText.orEmpty()
             else -> error("Activity test has no Home text mapping for $tag")
         }
@@ -646,7 +645,7 @@ class MainActivityRobolectricTest {
         val activity = controller.get()
 
         val home = stateValue(screen(activity), "homeUiState") as HomeScreenUiState
-        assertEquals("DISABLED", home.voxText)
+        assertEquals(VoxRuntimeState.DISABLED, home.voxState)
         assertEquals(70, home.voxSensitivity)
         assertFalse(home.voxEnabled)
 
@@ -962,14 +961,9 @@ class MainActivityRobolectricTest {
         shadowOf(Looper.getMainLooper()).idle()
 
         assertEquals(
-            "当前音频源：待机",
+            AUDIO_SOURCE_STANDBY_TEXT,
             homeText(activity, "home_audio_source")
         )
-        assertFalse(
-            homeText(activity, "home_bluetooth_pill")
-                .contains(BLUETOOTH_CONNECTED_TEXT)
-        )
-
         clickBottomNavigation(activity, R.id.bottom_nav_discover_button)
         assertEquals(
             0,
