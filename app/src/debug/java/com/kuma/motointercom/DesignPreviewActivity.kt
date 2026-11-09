@@ -109,21 +109,15 @@ private fun DiscoveringHomePreview() {
         listOf(
             RadarPreviewPeer(
                 id = "zhang-yishan",
-                label = "张一山",
-                angleDegrees = 16f,
-                distanceFraction = 0.68f
+                label = "张一山"
             ),
             RadarPreviewPeer(
                 id = "rider-b",
-                label = "车友 B",
-                angleDegrees = 164f,
-                distanceFraction = 0.68f
+                label = "车友 B"
             ),
             RadarPreviewPeer(
                 id = "rider-c",
-                label = "阿杰",
-                angleDegrees = 90f,
-                distanceFraction = 0.58f
+                label = "阿杰"
             )
         )
     }

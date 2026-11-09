@@ -5,10 +5,7 @@ import android.content.SharedPreferences
 
 internal class AppearancePreferences(
     context: Context,
-    private val commit: SharedPreferences.Editor.() -> Boolean = {
-        apply()
-        true
-    }
+    private val commitEditor: SharedPreferences.Editor.() -> Boolean = { commit() }
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
@@ -23,7 +20,7 @@ internal class AppearancePreferences(
 
     fun save(theme: MotoComThemeMode): Boolean {
         val editor = preferences.edit().putString(KEY_THEME, theme.name)
-        return commit(editor)
+        return commitEditor(editor)
     }
 
     private companion object {

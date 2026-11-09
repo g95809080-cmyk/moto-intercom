@@ -100,7 +100,6 @@ internal fun MotoComBackdrop(modifier: Modifier = Modifier) {
 @Composable
 internal fun MotoComTopBar(
     active: Boolean = false,
-    statusDescription: String? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemePalette.current
@@ -109,8 +108,8 @@ internal fun MotoComTopBar(
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .testTag("motocom_top_bar")
-            .semantics(mergeDescendants = true) {
-                contentDescription = statusDescription?.let { "摩声，$it" } ?: "摩声"
+            .clearAndSetSemantics {
+                contentDescription = "摩声"
             },
         contentAlignment = Alignment.Center
     ) {

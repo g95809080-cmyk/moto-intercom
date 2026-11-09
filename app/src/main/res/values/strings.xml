@@ -109,6 +109,7 @@
     <string name="vox_settings_save_failed">VOX 设置保存失败</string>
     <string name="audio_route_save_failed">音频输出设置保存失败</string>
     <string name="automatic_reconnect_save_failed">自动重连设置保存失败</string>
+    <string name="theme_save_failed">主题设置保存失败</string>
     <string name="section_audio_output">音频</string>
     <string name="section_vox">VOX</string>
     <string name="discover_paired_title">已配对</string>

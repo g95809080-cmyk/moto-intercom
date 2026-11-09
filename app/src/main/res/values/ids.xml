@@ -11,8 +11,6 @@
     <item name="discover_content" type="id" />
     <item name="discover_help_button" type="id" />
     <item name="discover_rescan_button" type="id" />
-    <item name="discover_radar_ripple" type="id" />
-
     <item name="settings_scroll" type="id" />
     <item name="settings_content" type="id" />
     <item name="settings_audio_earpiece_button" type="id" />

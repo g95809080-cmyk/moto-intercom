@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -119,7 +120,8 @@ class SettingsScreenComposeTest {
         val saveLabel = context.getString(R.string.settings_save_nickname)
         composeRule.onAllNodesWithContentDescription(saveLabel).assertCountEquals(1)
         composeRule.onNodeWithTag("settings_back_button").assertDoesNotExist()
-        composeRule.onNodeWithText("摩声").assertIsDisplayed()
+        composeRule.onNodeWithTag("motocom_top_bar")
+            .assertContentDescriptionEquals("摩声")
     }
 
     @Test

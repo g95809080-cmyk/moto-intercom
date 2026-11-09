@@ -6,6 +6,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -132,7 +133,8 @@ class DiscoverScreenComposeTest {
             }
         }
 
-        composeRule.onNodeWithText("摩声").assertIsDisplayed()
+        composeRule.onNodeWithTag("motocom_top_bar")
+            .assertContentDescriptionEquals("摩声")
         composeRule.onNodeWithTag("discover_back_button").assertDoesNotExist()
         composeRule.onNodeWithTag("discover_help_button").assertDoesNotExist()
     }

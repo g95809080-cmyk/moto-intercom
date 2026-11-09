@@ -49,7 +49,7 @@ internal class MainScreen(
     initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
     initialAutomaticReconnectEnabled: Boolean = true,
     initialTheme: MotoComThemeMode = MotoComThemeMode.DAYLIGHT,
-    private val onThemeSelected: (MotoComThemeMode) -> Unit = {},
+    private val onThemeSelected: (MotoComThemeMode) -> Boolean = { true },
     private val onSetMuted: (Boolean) -> Unit = {},
     private val onSetVoxEnabled: (Boolean) -> Unit = {},
     private val onSetVoxSensitivity: (Int) -> Unit = {},
@@ -567,7 +567,6 @@ internal class MainScreen(
 
     fun stopAnimations() {
         homeAudioLevel.floatValue = 0f
-        pageContainer.findViewById<RippleView?>(R.id.discover_radar_ripple)?.stop()
     }
 
     @SuppressLint("NewApi")
@@ -923,8 +922,8 @@ internal class MainScreen(
 
     private fun selectTheme(theme: MotoComThemeMode) {
         if (theme == appTheme.value) return
+        if (!onThemeSelected(theme)) return
         appTheme.value = theme
-        onThemeSelected(theme)
         applyThemeToWindow(theme)
     }
 
@@ -1025,8 +1024,6 @@ internal class MainScreen(
                     RadarPreviewPeer(
                         id = radarPeerId(presence),
                         label = card.title,
-                        angleDegrees = RADAR_PEER_ANGLES[index % RADAR_PEER_ANGLES.size],
-                        distanceFraction = RADAR_PEER_DISTANCES[index % RADAR_PEER_DISTANCES.size],
                         enabled = card.connectEnabled
                     )
                 }
@@ -1753,8 +1750,6 @@ internal class MainScreen(
             isSelectableForUi()
 
     private companion object {
-        val RADAR_PEER_ANGLES = floatArrayOf(-140f, -38f, 140f, 42f, -96f, 96f, 178f, 0f)
-        val RADAR_PEER_DISTANCES = floatArrayOf(0.88f, 0.78f, 0.91f, 0.82f, 0.74f, 0.86f, 0.89f, 0.76f)
         const val KEY_ROUTE = "main_route"
         const val KEY_NICKNAME_DRAFT = "nickname_draft"
         const val KEY_EXPANDED_SELECTED_DEVICE_ID = "expanded_selected_device_id"

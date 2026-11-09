@@ -58,6 +58,7 @@ import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
@@ -100,11 +101,76 @@ internal data class HomeScreenUiState(
 internal data class RadarPreviewPeer(
     val id: String,
     val label: String,
-    val angleDegrees: Float,
-    val distanceFraction: Float,
     val selected: Boolean = false,
     val enabled: Boolean = true
 )
+
+internal data class RadarPeerPlacement(
+    val angleDegrees: Float,
+    val distanceFraction: Float,
+    val bubbleSizeDp: Float
+)
+
+private const val RADAR_MAX_VISIBLE_PEERS = 11
+private const val RADAR_RING_FRACTION = 0.82f
+private const val RADAR_CENTER_NODE_SIZE_DP = 94f
+private const val RADAR_BUBBLE_MIN_DP = 48f
+private const val RADAR_BUBBLE_MAX_DP = 72f
+private const val RADAR_BUBBLE_GAP_DP = 6f
+
+internal fun radarPeerPlacements(
+    count: Int,
+    scopeRadiusDp: Float
+): List<RadarPeerPlacement> {
+    if (count <= 0) return emptyList()
+    val visible = visibleRadarPeerCount(count, scopeRadiusDp)
+    if (visible == 1) {
+        val requiredDistance = RADAR_CENTER_NODE_SIZE_DP / 2f +
+            RADAR_BUBBLE_MAX_DP / 2f +
+            RADAR_BUBBLE_GAP_DP
+        val distanceFraction = (requiredDistance / scopeRadiusDp.coerceAtLeast(1f))
+            .coerceIn(0.62f, 0.9f)
+        return listOf(
+            RadarPeerPlacement(
+                angleDegrees = -31f,
+                distanceFraction = distanceFraction,
+                bubbleSizeDp = RADAR_BUBBLE_MAX_DP
+            )
+        )
+    }
+    val scopeRadius = scopeRadiusDp.coerceAtLeast(1f)
+    val baseRadius = scopeRadius * RADAR_RING_FRACTION
+    val chord = 2f * baseRadius * sin(PI.toFloat() / visible)
+    val bubbleSize = (chord - RADAR_BUBBLE_GAP_DP)
+        .coerceIn(RADAR_BUBBLE_MIN_DP, RADAR_BUBBLE_MAX_DP)
+    val ringRadius = maxOf(
+        baseRadius,
+        RADAR_CENTER_NODE_SIZE_DP / 2f +
+            bubbleSize / 2f +
+            RADAR_BUBBLE_GAP_DP
+    )
+    val distanceFraction = ringRadius / scopeRadius
+    val startAngle = -90f + 180f / visible
+    return List(visible) { index ->
+        RadarPeerPlacement(
+            angleDegrees = startAngle + index * 360f / visible,
+            distanceFraction = distanceFraction,
+            bubbleSizeDp = bubbleSize
+        )
+    }
+}
+
+internal fun visibleRadarPeerCount(count: Int, scopeRadiusDp: Float): Int {
+    if (count <= 0) return 0
+    val maxVisible = count.coerceAtMost(RADAR_MAX_VISIBLE_PEERS)
+    val ringRadius = scopeRadiusDp.coerceAtLeast(1f) * RADAR_RING_FRACTION
+    val minimumChord = RADAR_BUBBLE_MIN_DP + RADAR_BUBBLE_GAP_DP
+    for (visible in maxVisible downTo 2) {
+        val chord = 2f * ringRadius * sin(PI.toFloat() / visible)
+        if (chord >= minimumChord) return visible
+    }
+    return 1
+}
 
 @Composable
 internal fun MotoComHomeScreen(
@@ -145,8 +211,7 @@ internal fun MotoComHomeScreen(
                 )
         ) {
             MotoComTopBar(
-                active = state.animationsEnabled && state.discovering,
-                statusDescription = homeStatusLabel(state)
+                active = state.animationsEnabled && state.discovering
             )
             Spacer(Modifier.height(10.dp))
             RadarStatusCard(
@@ -284,19 +349,23 @@ private fun RadarStatusCard(
                 RadarPreviewPeer(
                     id = "connected",
                     label = state.peerText,
-                    angleDegrees = -31f,
-                    distanceFraction = 0.62f,
                     selected = true
                 )
             )
             state.discovering -> radarPeers
             else -> emptyList()
         }
-        peers.forEach { peer ->
-            val angle = peer.angleDegrees * PI.toFloat() / 180f
-            val distance = scopeRadius * peer.distanceFraction
+        val placements = remember(peers.size, scopeRadius) {
+            radarPeerPlacements(peers.size, scopeRadius.value)
+        }
+        val visiblePeers = peers.take(placements.size)
+        visiblePeers.forEachIndexed { index, peer ->
+            val placement = placements[index]
+            val angle = placement.angleDegrees * PI.toFloat() / 180f
+            val distance = scopeRadius * placement.distanceFraction
             PeerBubble(
                 peer = peer,
+                size = placement.bubbleSizeDp.dp,
                 onClick = { onRadarPeerClick(peer) },
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -304,6 +373,15 @@ private fun RadarStatusCard(
                         x = distance * cos(angle),
                         y = distance * sin(angle)
                     )
+            )
+        }
+        val hiddenPeers = peers.size - visiblePeers.size
+        if (hiddenPeers > 0) {
+            RadarOverflowBadge(
+                hiddenCount = hiddenPeers,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 20.dp, end = 16.dp)
             )
         }
     }
@@ -321,8 +399,9 @@ private fun RadarStatusPill(
             .clip(RoundedCornerShape(50))
             .background(colors.background.copy(alpha = 0.62f))
             .border(1.dp, colors.outline.copy(alpha = 0.72f), RoundedCornerShape(50))
+            .testTag("home_radar_status")
             .padding(horizontal = 14.dp, vertical = 7.dp)
-            .semantics { contentDescription = "状态：$label" },
+            .clearAndSetSemantics { contentDescription = "状态：$label" },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -361,7 +440,8 @@ private fun RadarCenterNode(
     val colors = MotoComThemeMode.NIGHTRIDE.colors
     Box(
         modifier
-            .size(94.dp)
+            .size(RADAR_CENTER_NODE_SIZE_DP.dp)
+            .testTag("home_radar_center")
             .semantics {
                 contentDescription = when {
                     state.connected -> "正在与${state.peerText.ifBlank { "车友" }}对讲"
@@ -373,7 +453,7 @@ private fun RadarCenterNode(
     ) {
         Box(
             Modifier
-                .size(94.dp)
+                .size(RADAR_CENTER_NODE_SIZE_DP.dp)
                 .border(1.dp, colors.accent.copy(alpha = 0.12f), CircleShape)
         )
         Box(
@@ -397,11 +477,21 @@ private fun RadarCenterNode(
 @Composable
 private fun PeerBubble(
     peer: RadarPreviewPeer,
+    size: Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemeMode.NIGHTRIDE.colors
-    val size = if (peer.selected) 82.dp else 72.dp
+    val compact = size < 70.dp
+    val innerPadding = if (compact) 4.dp else 7.dp
+    val iconBoxSize = if (compact) 20.dp else 29.dp
+    val iconSize = if (compact) 12.dp else 17.dp
+    val labelTopPadding = if (compact) 2.dp else 4.dp
+    val labelMaxWidth = if (compact) 40.dp else 62.dp
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(
+        fontSize = if (compact) 8.sp else 10.sp,
+        lineHeight = if (compact) 10.sp else 13.sp
+    )
     val container = if (peer.selected) {
         colors.panelGlow.copy(alpha = 0.97f)
     } else {
@@ -423,13 +513,13 @@ private fun PeerBubble(
                 role = Role.Button,
                 onClick = onClick
             )
-            .padding(7.dp),
+            .padding(innerPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
             Modifier
-                .size(29.dp)
+                .size(iconBoxSize)
                 .background(
                     color = if (peer.selected) {
                         colors.accent.copy(alpha = 0.2f)
@@ -443,20 +533,49 @@ private fun PeerBubble(
             Icon(
                 painter = painterResource(R.drawable.ic_person_outline_24),
                 contentDescription = null,
-                modifier = Modifier.size(17.dp),
+                modifier = Modifier.size(iconSize),
                 tint = if (peer.selected) colors.accent else colors.text
             )
         }
         Text(
             text = peer.label,
             modifier = Modifier
-                .padding(top = 4.dp)
-                .widthIn(max = 62.dp),
+                .padding(top = labelTopPadding)
+                .widthIn(max = labelMaxWidth),
             color = if (peer.selected) colors.accent else colors.text,
-            style = MaterialTheme.typography.labelSmall,
+            style = labelStyle,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun RadarOverflowBadge(
+    hiddenCount: Int,
+    modifier: Modifier = Modifier
+) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(colors.background.copy(alpha = 0.88f))
+            .border(1.dp, colors.outline.copy(alpha = 0.72f), RoundedCornerShape(50))
+            .testTag("home_radar_overflow")
+            .clearAndSetSemantics {
+                contentDescription = "另有 $hiddenCount 位车友"
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "+$hiddenCount",
+            color = colors.accent,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 10.sp,
+                lineHeight = 12.sp
+            )
         )
     }
 }

@@ -127,3 +127,55 @@ Next gate allowed
 ```
 
 审查边界：只读检查了当前工作区差异、开关语义树、48dp 布局约束、2 倍字体测试、减少动画分支、测试结果和 Lint 报告；未重跑构建，未修改审查范围内的源码。
+
+## P2 清理与复核（2026-11-09）
+
+- 工作区：`HEAD 5ed818d` + working tree；分支 `feat/kum-94-ui-components`，Draft PR #68 保持 Draft。
+- 雷达气泡改为按真实车友数量和画布半径动态排布，尺寸限制在 48–72dp；雷达环和单气泡都避让 94dp 中心节点，容量不足时显示 `+N`。
+- 删除未接入生产页面的 `MotoComSurfaceCard`、`MotoComIconButton`、`MotoComSectionHeader`、`MotoComSettingRow`，以及未挂载的 `RippleView` 和 `discover_radar_ripple`。
+- `MotoComTopBar` 只朗读“摩声”；状态由雷达/页面状态胶囊独立朗读。`RadarStatusPill` 和 `RadarOverflowBadge` 使用单一语义，避免视觉文字和描述重复。
+- 主题保存默认改用真实 `commit()` 结果；保存失败时 Toast 提示并保持当前主题，保存成功后才更新页面和系统栏。
+- 未修改 `IntercomService`、`IntercomStateMachine`、`SessionOrchestrator`、`SignalingProtocol`、transport adapters、Gradle 或数据库。
+
+自动化门禁：
+
+- 命令：`.\gradlew.bat testDebugUnitTest lintDebug assembleDebug --console=plain`
+- 结果：`BUILD SUCCESSFUL in 2m 58s`
+- 测试：104 suites / 870 tests；failures 0、errors 0、skipped 0。
+- Lint：0 errors / 88 warnings。
+- Debug APK：`app/build/outputs/apk/debug/app-debug.apk`，59,395,468 bytes。
+- `git diff --check`：无空白错误。
+
+新增或更新的定向覆盖包括：
+
+- 1–30 个车友、多个画布半径下，气泡尺寸保持 48–72dp、相邻气泡不重叠，并在 320dp 实际 Compose 布局中检查单气泡与中心节点、状态胶囊和卡片边界的关系。
+- 超出雷达容量时，按实际画布尺寸计算隐藏数量并断言“另有 N 位车友”。
+- 雷达气泡点击继续分发精确的 `RadarPreviewPeer`。
+- 顶栏只暴露“摩声”单一描述；Discover/Settings 的顶栏断言同步更新。
+- 主题保存失败时保持原主题，提交失败结果可被测试注入并观测。
+
+首轮只读复核结论为 `REQUEST CHANGES`，指出主题默认写入仍是 `apply()`、单气泡压住中心节点、TopBar/overflow 可能重复朗读。上述 P1/P2 已全部修复并重跑门禁。
+
+第二轮只读复核结论：
+
+```text
+APPROVED
+P0
+- 无
+P1
+- 无
+P2
+- 无
+Non-blocking
+- 复核未重跑 Gradle；门禁数据沿用 104 suites / 870 tests、0 failures/errors/skipped，Lint 0 errors / 88 warnings，assembleDebug 成功。
+- 本轮修复仍在未提交工作区，需随 PR #68 一并提交后再合入。
+- PR #68 保持 Draft；未经明确授权不合并、不推送 main、不删除远端分支。
+Base SHA
+- c44c2ba78a253a317e8d4ce7175f2e7dcaf368b6
+Head SHA
+- 5ed818db9e5fd27d79c9f80a9311d15f2e8fb45b + working tree
+Next gate allowed
+- 可进入 Rasen verify-change / PR review cycle，并可将 PR #68 更新为待评审状态；合并、推送 main、发布仍不在本门禁授权范围内。
+```
+
+审查边界：只读检查了本轮完整差异、主题保存与回滚链路、雷达几何和 320dp 布局测试、顶栏/状态/溢出语义，以及治理禁止修改范围；未修改文件、未提交、未推送。

@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,5 +34,12 @@ class AppearancePreferencesRobolectricTest {
         preferences.edit().putString("theme", "UNKNOWN").commit()
 
         assertEquals(MotoComThemeMode.DAYLIGHT, AppearancePreferences(context).load())
+    }
+
+    @Test
+    fun saveReportsCommitFailure() {
+        val failing = AppearancePreferences(context) { false }
+
+        assertFalse(failing.save(MotoComThemeMode.NIGHTRIDE))
     }
 }

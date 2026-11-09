@@ -1038,6 +1038,30 @@ class MainScreenRobolectricTest {
     }
 
     @Test
+    fun failedThemeSaveKeepsTheCurrentTheme() {
+        var requested: MotoComThemeMode? = null
+        val fixture = fixture(
+            initialTheme = MotoComThemeMode.DAYLIGHT,
+            onThemeSelected = {
+                requested = it
+                false
+            }
+        )
+        openRoute(fixture, MainRoute.SETTINGS)
+
+        clickSettings("settings_theme_nightride")
+
+        assertEquals(MotoComThemeMode.NIGHTRIDE, requested)
+        val themeField = MainScreen::class.java.getDeclaredField("appTheme").apply {
+            isAccessible = true
+        }
+        @Suppress("UNCHECKED_CAST")
+        val currentTheme =
+            (themeField.get(fixture.screen) as androidx.compose.runtime.State<MotoComThemeMode>).value
+        assertEquals(MotoComThemeMode.DAYLIGHT, currentTheme)
+    }
+
+    @Test
     fun pageContentStaysWithinSupportedWidthsAtLargeFontScale() {
         val routes = listOf(
             Triple(MainRoute.HOME, R.id.home_scroll, R.id.home_content),
@@ -2152,6 +2176,8 @@ class MainScreenRobolectricTest {
         initialAudioControls: AudioControlSnapshot = idleAudioControlSnapshot(AudioControlSettings()),
         initialPreferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
         initialAutomaticReconnectEnabled: Boolean = true,
+        initialTheme: MotoComThemeMode = MotoComThemeMode.DAYLIGHT,
+        onThemeSelected: (MotoComThemeMode) -> Boolean = { true },
         onSetMuted: (Boolean) -> Unit = {},
         onSetVoxEnabled: (Boolean) -> Unit = {},
         onSetVoxSensitivity: (Int) -> Unit = {},
@@ -2183,6 +2209,8 @@ class MainScreenRobolectricTest {
             initialAudioControls = initialAudioControls,
             initialPreferredAudioRoute = initialPreferredAudioRoute,
             initialAutomaticReconnectEnabled = initialAutomaticReconnectEnabled,
+            initialTheme = initialTheme,
+            onThemeSelected = onThemeSelected,
             onSetMuted = onSetMuted,
             onSetVoxEnabled = onSetVoxEnabled,
             onSetVoxSensitivity = onSetVoxSensitivity,

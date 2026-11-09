@@ -157,7 +157,13 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
             initialPreferredAudioRoute = preferredAudioRoute,
             initialAutomaticReconnectEnabled = automaticReconnectEnabled,
             initialTheme = appearancePreferences.load(),
-            onThemeSelected = { theme -> appearancePreferences.save(theme) },
+            onThemeSelected = { theme ->
+                val saved = appearancePreferences.save(theme)
+                if (!saved) {
+                    Toast.makeText(this, R.string.theme_save_failed, Toast.LENGTH_LONG).show()
+                }
+                saved
+            },
             onSetMuted = { muted ->
                 val service = intercomService
                 if (service == null) {

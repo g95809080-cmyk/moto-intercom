@@ -119,8 +119,7 @@ internal fun MotoComDiscoverScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             MotoComTopBar(
-                active = state.animationsEnabled && state.radarRunning,
-                statusDescription = discoverPillLabel(state)
+                active = state.animationsEnabled && state.radarRunning
             )
             MotoComPageHeading("发现", Modifier.testTag("discover_title")) {
                 MotoComStatusPill(
