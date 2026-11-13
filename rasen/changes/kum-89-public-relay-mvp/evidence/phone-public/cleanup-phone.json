@@ -1,0 +1,26 @@
+{
+  "networkTypeProperty": "NR_SA,NR_SA",
+  "apps": {
+    "com.kuma.motointercom": {
+      "versions": [
+        "versionCode=7 minSdk=23 targetSdk=36",
+        "versionName=1.2.3+f587472"
+      ],
+      "activeServices": "ACTIVITY MANAGER SERVICES (dumpsys activity services)\r\n  (nothing)"
+    },
+    "com.kuma.motointercom.rnnoise.beta": {
+      "versions": [
+        "versionCode=9 minSdk=23 targetSdk=36",
+        "versionName=1.3.0-beta.1+dc7a45d"
+      ],
+      "activeServices": "ACTIVITY MANAGER SERVICES (dumpsys activity services)\r\n  (nothing)"
+    },
+    "com.kuma.motointercom.relay.validation": {
+      "versions": [
+        "versionCode=7 minSdk=23 targetSdk=36",
+        "versionName=1.2.3-relay-validation+5684f99"
+      ],
+      "activeServices": "ACTIVITY MANAGER SERVICES (dumpsys activity services)\r\n  (nothing)"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "motocom-relay-validation",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "test": "node --test", "start": "node server.mjs" }
+}

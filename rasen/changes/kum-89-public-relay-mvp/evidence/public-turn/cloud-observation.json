@@ -1,0 +1,36 @@
+{
+  "startedEpoch": 1792211703.163463,
+  "endedEpoch": 1792211758.533456,
+  "publicHost": "101.33.205.188",
+  "relayAddress": "10.1.0.6",
+  "allowedPortRange": [
+    49160,
+    49200
+  ],
+  "observedRelayPorts": {
+    "49171": {
+      "firstEpoch": 1792211716.2509887,
+      "lastEpoch": 1792211745.4478738,
+      "samples": 30
+    },
+    "49180": {
+      "firstEpoch": 1792211716.2509997,
+      "lastEpoch": 1792211746.4539638,
+      "samples": 31
+    },
+    "49184": {
+      "firstEpoch": 1792211716.2510045,
+      "lastEpoch": 1792211746.4539676,
+      "samples": 31
+    },
+    "49189": {
+      "firstEpoch": 1792211716.2510076,
+      "lastEpoch": 1792211745.447882,
+      "samples": 30
+    }
+  },
+  "servicesAfter": "MainPID=761\nId=coturn.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:32:00 CST\n\nMainPID=781\nId=sig.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:31:59 CST",
+  "matchedProbeLogSessions": 0,
+  "perSessionLogEvidence": "Unavailable: no per-session output appeared in existing file logs or journal; cloud logging configuration unchanged.",
+  "socketEvidenceScope": "Contemporaneous coturn allocation sockets; not a mapping of the selected candidate pair to a specific port."
+}

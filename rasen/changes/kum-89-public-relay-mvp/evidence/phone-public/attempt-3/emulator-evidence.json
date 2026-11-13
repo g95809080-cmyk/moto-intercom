@@ -1,0 +1,52 @@
+{
+  "pass": false,
+  "deviceId": "probe-b",
+  "runtimeId": "826cb86d-ae62-4d2d-bca0-e8870150262e",
+  "signalingNetwork": "100",
+  "cellularRequested": false,
+  "signalingCellularRequired": false,
+  "cellularMediaRequired": false,
+  "stage": "checkingMedia",
+  "callId": "71a9b196-26d8-433d-b483-b6df41ecb3b8",
+  "everMetMediaGate": false,
+  "latestMetMediaGate": false,
+  "mediaQueryReturnedNull": false,
+  "transportQueryReturnedNull": true,
+  "decodedPeerToneFrames": 0,
+  "media": {
+    "connected": false,
+    "remoteTrack": true,
+    "audioIoEnabled": false,
+    "sameStreams": true,
+    "rtpSentGrowth": 0,
+    "rtpReceivedGrowth": 0
+  },
+  "baseline": {
+    "connected": false,
+    "remoteTrack": true,
+    "audioIoEnabled": false,
+    "gateRevision": 2,
+    "nativeRevision": 5,
+    "rtpSent": 0,
+    "rtpReceived": 0,
+    "streamIds": [
+      "inbound-rtp:IT01A356563680:356563680",
+      "outbound-rtp:OT01A2315418973:2315418973"
+    ]
+  },
+  "lastMedia": {
+    "connected": false,
+    "remoteTrack": true,
+    "audioIoEnabled": false,
+    "gateRevision": 2,
+    "nativeRevision": 6,
+    "rtpSent": 0,
+    "rtpReceived": 0,
+    "streamIds": [
+      "inbound-rtp:IT01A356563680:356563680",
+      "outbound-rtp:OT01A2315418973:2315418973"
+    ]
+  },
+  "closeReason": "LEFT",
+  "errorClass": "IllegalStateException"
+}

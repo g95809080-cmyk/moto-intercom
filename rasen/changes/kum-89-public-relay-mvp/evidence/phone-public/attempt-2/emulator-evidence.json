@@ -1,0 +1,29 @@
+{
+  "pass": true,
+  "deviceId": "probe-b",
+  "callId": "a18f9ca6-d29c-490d-bc8d-012dcc60ab0e",
+  "runtimeId": "da450c77-dcd3-45c4-8d11-e7d4073c4335",
+  "signalingNetwork": "100",
+  "cellularRequested": false,
+  "signalingCellularRequired": false,
+  "cellularMediaRequired": false,
+  "transport": {
+    "sessionId": "b4eecf7d-4089-433f-b91d-c4c7849e087a",
+    "pairId": "CPgR9UGwVV_kLjSo4M0",
+    "state": "succeeded",
+    "localType": "relay",
+    "remoteType": "relay",
+    "protocol": "udp",
+    "networkType": "cellular",
+    "rttSeconds": 0.031,
+    "bytesSent": 22514,
+    "bytesReceived": 68119
+  },
+  "rtpSent": 5808,
+  "rtpReceived": 40664,
+  "rtpSentGrowth": 5808,
+  "rtpReceivedGrowth": 40664,
+  "decodedPeerToneFrames": 2107,
+  "expectedPeerHz": 500,
+  "scope": "developer native relay probe; not public cellular or latency acceptance"
+}

@@ -90,7 +90,10 @@ internal class AudioSessionController(
         preferredAudioRoute
     }
 
-    fun openMediaSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession {
+    fun openMediaSession(
+        callbacks: RiderMediaSessionCallbacks,
+        icePolicy: MediaIcePolicy = MediaIcePolicy.Nearby
+    ): RiderMediaSession {
         val lease = Any()
         synchronized(lock) {
             check(!closed) { "audio session controller is closed" }
@@ -117,7 +120,7 @@ internal class AudioSessionController(
             }
         )
         return try {
-            engine.openSession(guardedCallbacks).also { session ->
+            engine.openSession(guardedCallbacks, icePolicy).also { session ->
                 val accepted = synchronized(lock) {
                     if (!closed && activeLease === lease && activeSession == null) {
                         activeSession = session
@@ -169,6 +172,10 @@ internal class AudioSessionController(
                 session.close()
             }
         }
+    }
+
+    fun closeWhenDisposed(onDisposed: () -> Unit) {
+        try { close() } finally { engine.closeWhenDisposed(onDisposed) }
     }
 
     override fun close() {
@@ -286,13 +293,18 @@ internal class AudioSessionController(
             onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {},
             onPlatformError: (Throwable) -> Unit = onError
         ): AudioSessionController {
-            val engine = RiderAudioEngine(
+            val nativeReservation = LegacyRuntimeOwnership.retainAudioResources()
+            val engine = try { RiderAudioEngine(
                 context = context,
                 onEngineError = onPlatformError,
                 isRuntimeCurrent = isRuntimeCurrent,
                 initialAudioControls = initialAudioControls,
-                onVoxStateChanged = onVoxStateChanged
-            )
+                onVoxStateChanged = onVoxStateChanged,
+                onNativeDisposed = nativeReservation::close
+            ) } catch (error: Throwable) {
+                nativeReservation.close()
+                throw error
+            }
             return try {
                 var controller: AudioSessionController? = null
                 var coordinator: CommunicationAudioCoordinator? = null

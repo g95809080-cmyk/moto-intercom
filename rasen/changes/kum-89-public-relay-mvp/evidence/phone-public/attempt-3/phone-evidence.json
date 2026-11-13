@@ -1,0 +1,21 @@
+{
+  "pass": false,
+  "deviceId": "probe-a",
+  "runtimeId": "e6525f63-4775-451c-8d1a-63fd44cf6d93",
+  "signalingNetwork": "225",
+  "cellularRequested": true,
+  "signalingCellularRequired": true,
+  "cellularMediaRequired": true,
+  "stage": "checkingMedia",
+  "callId": "71a9b196-26d8-433d-b483-b6df41ecb3b8",
+  "networkPreferenceApplied": true,
+  "everMetMediaGate": false,
+  "latestMetMediaGate": false,
+  "mediaQueryReturnedNull": true,
+  "transportQueryReturnedNull": true,
+  "decodedPeerToneFrames": 0,
+  "media": {
+    "sameStreams": true
+  },
+  "errorClass": "SocketTimeoutException"
+}

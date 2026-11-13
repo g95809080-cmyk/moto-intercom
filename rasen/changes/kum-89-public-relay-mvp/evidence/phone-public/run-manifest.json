@@ -1,0 +1,164 @@
+{
+  "reviewedSourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043",
+  "productionSourceUnchangedSince": "dcb426c43d227d07e00ab92503bfee1bbf0bad5a",
+  "isolatedPhoneAppSha256": "acbcc8540f4cc872c9f670e7b958ca747bafd5428508911bb2c881b21a24d6a2",
+  "testApks": [
+    {
+      "serial": "emulator-5554",
+      "package": "com.kuma.motointercom.instrumentation",
+      "target": "com.kuma.motointercom",
+      "sha256": "b5b0bc2d20566ce429bfdcbf2e10ead223ab099da8f8fa38851000e890f04d4e",
+      "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043"
+    },
+    {
+      "serial": "192.168.1.62:42991",
+      "package": "com.kuma.motointercom.relay.validation.instrumentation",
+      "target": "com.kuma.motointercom.relay.validation",
+      "sha256": "3c7ed94a9d199df7c64ce87b6846f455a57fa1d11caae47832954ad9a23cf900",
+      "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043"
+    }
+  ],
+  "attempts": [
+    {
+      "attempt": 1,
+      "startedAtUtc": "2026-10-17T05:41:21.382311+00:00",
+      "nativeProbePassed": false,
+      "phoneMediaCandidateCellular": false,
+      "matchedServerSessions": 6,
+      "pcapBytes": 677425,
+      "relayPorts": [
+        "49160",
+        "49163",
+        "49175",
+        "49181",
+        "49189",
+        "49192"
+      ],
+      "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+      "sendHz": {
+        "phone": 500,
+        "emulator": 1000
+      },
+      "phoneRequireCellularMedia": false,
+      "sourceSha": "5684f997ab62689c302f8c44fc0ef746a87c7154"
+    },
+    {
+      "attempt": 2,
+      "startedAtUtc": "2026-10-17T05:54:46.161929+00:00",
+      "nativeProbePassed": false,
+      "phoneMediaCandidateCellular": true,
+      "matchedServerSessions": 6,
+      "pcapBytes": 452751,
+      "relayPorts": [
+        "49162",
+        "49171",
+        "49180",
+        "49182",
+        "49195",
+        "49200"
+      ],
+      "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+      "sendHz": {
+        "phone": 500,
+        "emulator": 1000
+      },
+      "phoneRequireCellularMedia": true,
+      "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043",
+      "summaryCorrection": "Derived summary corrected: selected cellular is independent of overall probe pass; null means no selected path recorded. Private original summary preserved."
+    },
+    {
+      "attempt": 3,
+      "startedAtUtc": "2026-10-17T05:56:29.390430+00:00",
+      "nativeProbePassed": false,
+      "phoneMediaCandidateCellular": null,
+      "matchedServerSessions": 6,
+      "pcapBytes": 154982,
+      "relayPorts": [
+        "49169",
+        "49178",
+        "49185",
+        "49188",
+        "49190",
+        "49193"
+      ],
+      "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+      "sendHz": {
+        "phone": 500,
+        "emulator": 700
+      },
+      "phoneRequireCellularMedia": true,
+      "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043",
+      "summaryCorrection": "Derived summary corrected: selected cellular is independent of overall probe pass; null means no selected path recorded. Private original summary preserved."
+    },
+    {
+      "attempt": 4,
+      "startedAtUtc": "2026-10-17T05:58:15.551625+00:00",
+      "nativeProbePassed": true,
+      "phoneMediaCandidateCellular": true,
+      "matchedServerSessions": 6,
+      "pcapBytes": 581946,
+      "relayPorts": [
+        "49166",
+        "49167",
+        "49168",
+        "49172",
+        "49183",
+        "49191"
+      ],
+      "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+      "sendHz": {
+        "phone": 500,
+        "emulator": 700
+      },
+      "phoneRequireCellularMedia": true,
+      "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043"
+    },
+    {
+      "attempt": 5,
+      "startedAtUtc": "2026-10-17T05:59:44.322312+00:00",
+      "nativeProbePassed": true,
+      "phoneMediaCandidateCellular": true,
+      "matchedServerSessions": 6,
+      "pcapBytes": 773025,
+      "relayPorts": [
+        "49161",
+        "49176",
+        "49177",
+        "49187",
+        "49196",
+        "49198"
+      ],
+      "scope": "single phone + emulator synthetic-tone validation; not P95/AEC/Wi-Fi Direct coexistence acceptance",
+      "sendHz": {
+        "phone": 500,
+        "emulator": 700
+      },
+      "phoneRequireCellularMedia": true,
+      "sourceSha": "5f5727e89f3aa01b7eb72d328b914b1a0bc96043"
+    }
+  ],
+  "runtime": "Node.js v24.22.0 (official SHA256-verified Linux x64 release)",
+  "runtimeTests": {
+    "passed": 13,
+    "failed": 0
+  },
+  "httpsService": "systemd transient, max 1h; explicitly stopped after attempt 5",
+  "tls": "dedicated self-signed CA; IP hostname verification retained; no global trust changes",
+  "phoneNetworkProperty": "NR_SA,NR_SA",
+  "scope": "Single physical phone + emulator developer probe; synthetic tones; not physical 4G/P95/AEC/Wi-Fi Direct coexistence or reliability acceptance.",
+  "phoneMainAppBuildSource": "5684f997ab62689c302f8c44fc0ef746a87c7154",
+  "installedMainApps": {
+    "emulator": {
+      "installedMainApkSha256": "49df6a9a31d61d0fd940b77f44822ceea5fc68ce681c54e5ee78ec5b4a8543f8",
+      "version": [
+        "versionName=1.2.3+f587472"
+      ]
+    },
+    "phone": {
+      "installedMainApkSha256": "acbcc8540f4cc872c9f670e7b958ca747bafd5428508911bb2c881b21a24d6a2",
+      "version": [
+        "versionName=1.2.3-relay-validation+5684f99"
+      ]
+    }
+  }
+}

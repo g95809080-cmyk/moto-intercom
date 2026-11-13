@@ -48,7 +48,8 @@ public final class SessionCoordinator: ObservableObject {
         identityStore: StableIdentityStore = StableIdentityStore(),
         pairingStore: PairingStore = PairingStore(),
         audio: AudioSessionController? = nil,
-        webRTCEngine: WebRTCEngine = WebRTCEngineFactory.makeDefault()
+        webRTCEngine: WebRTCEngine = WebRTCEngineFactory.makeDefault(),
+        webRTCConfiguration: WebRTCSessionConfiguration = WebRTCSessionConfiguration()
     ) {
         self.nickname = nickname
         self.deviceName = deviceName
@@ -57,7 +58,7 @@ public final class SessionCoordinator: ObservableObject {
         let resolvedAudio = audio ?? AudioSessionController()
         self.audio = resolvedAudio
         self.networkBootstrap = NetworkBootstrapCoordinator()
-        self.webRTC = WebRTCSessionCoordinator(engine: webRTCEngine, audio: resolvedAudio)
+        self.webRTC = WebRTCSessionCoordinator(engine: webRTCEngine, audio: resolvedAudio, configuration: webRTCConfiguration)
         self.webRTC.onAudioReadinessChanged = { [weak self] in
             self?.updateAudioReady()
         }

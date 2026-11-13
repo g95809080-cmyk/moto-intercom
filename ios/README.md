@@ -30,7 +30,7 @@
 - HELLO 不增加 Android 当前严格 parser 未声明的字段；平台和网络能力通过 BLE/Bonjour metadata 传递。
 - iOS↔iOS 优先使用已发现的共同 LAN 端点；只有没有 LAN 端点且双方声明 `IOS_PEER_TO_PEER` 时才使用 Apple P2P，P2P 失败会尝试禁用 P2P 回退 LAN。
 - WebRTC 首版使用 host ICE，不依赖公网 STUN/TURN；`OFFER`/`ANSWER` 的字符串内部使用 Android 同样的 `{"type":"offer|answer","sdp":"..."}` JSON，ICE candidate 使用 `sdpMid`、`sdpMLineIndex`、`candidate` 三字段，并强制 Opus 32 kbps FMTP。
-- 实际 SDK 的远端音频渲染/解码回调必须调用 `GoogleWebRTCEngine.markRemoteAudioFrameDecoded()`，之后才会满足 `AUDIO_READY`。
+- 实际 SDK 的远端 PCM sink 应在本次会话开始后获取 `GoogleWebRTCEngine.makeDecodedAudioObserver()`，仅在收到真实解码音频时调用返回的闭包，之后才会满足 `AUDIO_READY`。旧会话保留的闭包不会影响新会话。
 - 只有远端首个可播放音频帧、本地音频路由和非电话中断状态同时满足时才发布 `AUDIO_READY`。
 - 媒体开始后 10 秒内未满足 `AUDIO_READY` 会关闭当前控制/媒体会话并显示失败，不会把 TCP 或 ICE 成功误报为已连接。
 

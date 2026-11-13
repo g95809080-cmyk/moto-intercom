@@ -1,0 +1,10 @@
+{
+  "backupPath": "/etc/turnserver.conf.motocom-validation-20261017T053356Z.bak",
+  "beforeSha256": "2e7222b6ff88b32279d46dcde7828ae97257b3fd9f34812e761dce75fd8684dd",
+  "afterSha256": "067dc599e09522a295fcfafdbb2643d03a753309f9f643b49a9ce39a5304c336",
+  "beforeServices": "MainPID=761\nId=coturn.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:32:00 CST\n\nMainPID=781\nId=sig.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:31:59 CST",
+  "afterServices": "MainPID=30755\nId=coturn.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 13:33:59 CST\n\nMainPID=781\nId=sig.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:31:59 CST",
+  "activeRelaySocketsBefore": [],
+  "changedSetting": "verbose",
+  "restartPerformed": true
+}

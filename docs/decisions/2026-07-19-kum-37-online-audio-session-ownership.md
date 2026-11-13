@@ -71,3 +71,7 @@ validation decision. They are never represented as development PASS.
 This decision does not implement KUM-32 target retention, KUM-33 three-second
 recovery/fallback, KUM-34 RESETTING, KUM-35 active disconnect, KUM-36 final
 matrix work, any protocol/database change, signing, deployment, or release.
+
+## Public relay validation follow-up
+
+[KUM-89 public transport ADR](2026-10-16-kum-89-online-transport-engine-selection.md) preserves the single-owner / single-active-media contract. Public production orchestration and automatic switching remain separate gates.

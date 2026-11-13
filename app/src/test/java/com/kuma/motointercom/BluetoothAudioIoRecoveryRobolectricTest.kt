@@ -260,7 +260,7 @@ class BluetoothAudioIoRecoveryRobolectricTest {
         val sessions = mutableListOf<Session>()
         val operations = mutableListOf<String>()
         override fun updateAudioControls(controls: VersionedAudioControls) = Unit
-        override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession = Session().also { sessions.add(it) }
+        override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession = Session().also { sessions.add(it) }
         override fun suspendAudio() { operations.add("suspend") }
         override fun resumeAudio() { operations.add("resume") }
         override fun close() = Unit

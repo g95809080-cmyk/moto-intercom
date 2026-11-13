@@ -1,0 +1,27 @@
+{
+  "pass": true,
+  "deviceId": "probe-a",
+  "callId": "52324604-6aed-477f-8fa5-6abf8699dfe3",
+  "runtimeId": "252953a4-fbc7-4684-900d-3af8f759daf8",
+  "signalingNetwork": "100",
+  "cellularRequested": false,
+  "transport": {
+    "sessionId": "607205ad-b24f-4a67-8e4f-9d865341d506",
+    "pairId": "CPBSue5V/f_g5/INXRU",
+    "state": "succeeded",
+    "localType": "relay",
+    "remoteType": "relay",
+    "protocol": "udp",
+    "networkType": "cellular",
+    "rttSeconds": 0.001,
+    "bytesSent": 184824,
+    "bytesReceived": 63642
+  },
+  "rtpSent": 118251,
+  "rtpReceived": 25661,
+  "rtpSentGrowth": 118251,
+  "rtpReceivedGrowth": 25661,
+  "decodedPeerToneFrames": 376,
+  "expectedPeerHz": 1000,
+  "scope": "developer native relay probe; not public cellular or latency acceptance"
+}

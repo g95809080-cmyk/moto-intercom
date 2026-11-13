@@ -42,7 +42,7 @@ class BluetoothPermissionRecoveryRobolectricTest {
         val calls = mutableListOf<AudioRouteSelection>()
         val engine = object : RiderMediaEngine {
             override fun updateAudioControls(controls: VersionedAudioControls) = Unit
-            override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession = error("unused")
+            override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy): RiderMediaSession = error("unused")
             override fun close() = Unit
         }
         val route = object : RiderAudioRoute {

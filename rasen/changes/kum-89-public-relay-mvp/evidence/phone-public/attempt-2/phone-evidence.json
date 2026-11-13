@@ -1,0 +1,66 @@
+{
+  "pass": false,
+  "deviceId": "probe-a",
+  "runtimeId": "cb7950d5-1f04-43df-bee8-58e0269bcdb8",
+  "signalingNetwork": "225",
+  "cellularRequested": true,
+  "signalingCellularRequired": true,
+  "cellularMediaRequired": true,
+  "stage": "checkingMedia",
+  "callId": "a18f9ca6-d29c-490d-bc8d-012dcc60ab0e",
+  "networkPreferenceApplied": true,
+  "everMetMediaGate": false,
+  "latestMetMediaGate": false,
+  "mediaQueryReturnedNull": false,
+  "transportQueryReturnedNull": false,
+  "decodedPeerToneFrames": 56,
+  "media": {
+    "connected": true,
+    "remoteTrack": true,
+    "audioIoEnabled": true,
+    "sameStreams": true,
+    "rtpSentGrowth": 40563,
+    "rtpReceivedGrowth": 5736
+  },
+  "baseline": {
+    "connected": false,
+    "remoteTrack": true,
+    "audioIoEnabled": false,
+    "gateRevision": 2,
+    "nativeRevision": 4,
+    "rtpSent": 0,
+    "rtpReceived": 0,
+    "streamIds": [
+      "inbound-rtp:IT01A285377805:285377805",
+      "outbound-rtp:OT01A1170103956:1170103956"
+    ]
+  },
+  "lastMedia": {
+    "connected": true,
+    "remoteTrack": true,
+    "audioIoEnabled": true,
+    "gateRevision": 2,
+    "nativeRevision": 8,
+    "rtpSent": 40563,
+    "rtpReceived": 5736,
+    "streamIds": [
+      "inbound-rtp:IT01A285377805:285377805",
+      "outbound-rtp:OT01A1170103956:1170103956"
+    ]
+  },
+  "transport": {
+    "sessionId": "3cb7a19c-4fa1-4115-9d0a-c102cb14be7f",
+    "pairId": "CPslrpwp+S_Uf1kxcm/",
+    "state": "succeeded",
+    "localType": "relay",
+    "remoteType": "relay",
+    "protocol": "udp",
+    "networkType": "cellular",
+    "rttSeconds": 0.037,
+    "bytesSent": 67942,
+    "bytesReceived": 22076
+  },
+  "transportSampleAgeMs": 2,
+  "closeReason": "LEFT",
+  "errorClass": "IllegalStateException"
+}

@@ -1,0 +1,296 @@
+{
+  "startedAtUtc": "2026-10-17T05:41:21.382311+00:00",
+  "endedAtUtc": "2026-10-17T05:42:17.168437+00:00",
+  "attribution": "Only new authenticated allocations within this capture window; delayed prior-window log flushes excluded.",
+  "probeSessionIds": [
+    "000000000000000001",
+    "000000000000000002",
+    "000000000000000003",
+    "000000000000000004",
+    "001000000000000001",
+    "001000000000000002"
+  ],
+  "coturnLogs": [
+    "449: : session 001000000000000001: realm <turn.moto.local> user <>: incoming packet BINDING processed, success",
+    "449: : session 000000000000000001: realm <turn.moto.local> user <>: incoming packet BINDING processed, success",
+    "449: : session 001000000000000001: realm <turn.moto.local> user <>: incoming packet message processed, error 401: Unauthorized",
+    "449: : session 000000000000000001: realm <turn.moto.local> user <>: incoming packet message processed, error 401: Unauthorized",
+    "449: : session 000000000000000002: realm <turn.moto.local> user <>: incoming packet message processed, error 401: Unauthorized",
+    "449: : session 001000000000000001: new, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=600",
+    "449: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet ALLOCATE processed, success",
+    "449: : session 000000000000000001: new, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=600",
+    "449: : session 000000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet ALLOCATE processed, success",
+    "449: : session 000000000000000002: new, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=600",
+    "449: : session 000000000000000002: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet ALLOCATE processed, success",
+    "449: : session 000000000000000003: realm <turn.moto.local> user <>: incoming packet message processed, error 401: Unauthorized",
+    "449: : session 000000000000000003: new, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=600",
+    "449: : session 000000000000000003: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet ALLOCATE processed, success",
+    "450: : session 001000000000000002: realm <turn.moto.local> user <>: incoming packet BINDING processed, success",
+    "450: : session 001000000000000002: realm <turn.moto.local> user <>: incoming packet message processed, error 401: Unauthorized",
+    "450: : session 000000000000000004: realm <turn.moto.local> user <>: incoming packet message processed, error 401: Unauthorized",
+    "450: : session 001000000000000002: new, realm=<turn.moto.local>, username=<<expiry>:probe-b>, lifetime=600",
+    "450: : session 001000000000000002: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet ALLOCATE processed, success",
+    "450: : session 001000000000000002: peer 10.1.0.6 lifetime updated: 300",
+    "450: : session 001000000000000002: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet CREATE_PERMISSION processed, success",
+    "450: : session 000000000000000004: new, realm=<turn.moto.local>, username=<<expiry>:probe-b>, lifetime=600",
+    "450: : session 000000000000000004: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet ALLOCATE processed, success",
+    "450: : session 000000000000000004: peer 10.1.0.6 lifetime updated: 300",
+    "450: : session 000000000000000004: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet CREATE_PERMISSION processed, success",
+    "450: : session 000000000000000001: peer 10.1.0.6 lifetime updated: 300",
+    "450: : session 000000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet CREATE_PERMISSION processed, success",
+    "450: : session 000000000000000003: peer 10.1.0.6 lifetime updated: 300",
+    "450: : session 000000000000000003: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet CREATE_PERMISSION processed, success",
+    "450: : session 000000000000000002: peer 10.1.0.6 lifetime updated: 300",
+    "450: : session 000000000000000002: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet CREATE_PERMISSION processed, success",
+    "450: : session 001000000000000001: peer 10.1.0.6 lifetime updated: 300",
+    "450: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet CREATE_PERMISSION processed, success",
+    "450: : session 000000000000000004: peer 10.1.0.6 lifetime updated: 600",
+    "450: : session 000000000000000004: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet CHANNEL_BIND processed, success",
+    "450: : session 001000000000000001: peer 10.1.0.6 lifetime updated: 600",
+    "450: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet CHANNEL_BIND processed, success",
+    "450: : session 001000000000000002: peer 10.1.0.6 lifetime updated: 600",
+    "450: : session 001000000000000002: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet CHANNEL_BIND processed, success",
+    "459: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet BINDING processed, success",
+    "459: : session 000000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet BINDING processed, success",
+    "460: : session 001000000000000002: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet BINDING processed, success",
+    "469: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet BINDING processed, success",
+    "469: : session 000000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet BINDING processed, success",
+    "470: : session 001000000000000002: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet BINDING processed, success",
+    "479: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet BINDING processed, success",
+    "479: : session 001000000000000002: refreshed, realm=<turn.moto.local>, username=<<expiry>:probe-b>, lifetime=0",
+    "479: : session 001000000000000002: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet REFRESH processed, success",
+    "479: : session 000000000000000004: refreshed, realm=<turn.moto.local>, username=<<expiry>:probe-b>, lifetime=0",
+    "479: : session 000000000000000004: realm <turn.moto.local> user <<expiry>:probe-b>: incoming packet REFRESH processed, success",
+    "479: : session 000000000000000004: TCP socket closed remotely client-1:13398",
+    "479: : session 000000000000000004: usage: realm=<turn.moto.local>, username=<<expiry>:probe-b>, rp=16, rb=2309, sp=12, sb=1096",
+    "479: : session 000000000000000004: peer usage: realm=<turn.moto.local>, username=<<expiry>:probe-b>, rp=4, rb=288, sp=8, sb=1246",
+    "479: : session 000000000000000004: closed (2nd stage), user <<expiry>:probe-b> realm <turn.moto.local> origin <>, local client-2:3478, remote client-1:13398, reason: TCP connection closed by client (callback)",
+    "479: : session 000000000000000004: delete: realm=<turn.moto.local>, username=<<expiry>:probe-b>",
+    "479: : session 000000000000000004: peer 10.1.0.6 deleted",
+    "480: : session 000000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet BINDING processed, success",
+    "480: : session 001000000000000001: refreshed, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=0",
+    "480: : session 001000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet REFRESH processed, success",
+    "480: : session 000000000000000002: refreshed, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=0",
+    "480: : session 000000000000000002: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet REFRESH processed, success",
+    "480: : session 000000000000000002: TCP socket closed remotely client-1:14156",
+    "480: : session 000000000000000002: usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=5, rb=500, sp=5, sb=484",
+    "480: : session 000000000000000002: peer usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=2, rb=192, sp=0, sb=0",
+    "480: : session 000000000000000002: closed (2nd stage), user <<expiry>:probe-a> realm <turn.moto.local> origin <>, local client-2:3478, remote client-1:14156, reason: TCP connection closed by client (callback)",
+    "480: : session 000000000000000002: delete: realm=<turn.moto.local>, username=<<expiry>:probe-a>",
+    "480: : session 000000000000000002: peer 10.1.0.6 deleted",
+    "480: : session 000000000000000003: refreshed, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=0",
+    "480: : session 000000000000000003: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet REFRESH processed, success",
+    "480: : session 000000000000000001: refreshed, realm=<turn.moto.local>, username=<<expiry>:probe-a>, lifetime=0",
+    "480: : session 000000000000000001: realm <turn.moto.local> user <<expiry>:probe-a>: incoming packet REFRESH processed, success",
+    "480: : session 000000000000000003: TCP socket closed remotely client-3:18864",
+    "480: : session 000000000000000003: usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=5, rb=500, sp=5, sb=484",
+    "480: : session 000000000000000003: peer usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=0, rb=0, sp=0, sb=0",
+    "480: : session 000000000000000003: closed (2nd stage), user <<expiry>:probe-a> realm <turn.moto.local> origin <>, local client-2:3478, remote client-3:18864, reason: TCP connection closed by client (callback)",
+    "480: : session 000000000000000003: delete: realm=<turn.moto.local>, username=<<expiry>:probe-a>",
+    "480: : session 000000000000000003: peer 10.1.0.6 deleted",
+    "480: : session 001000000000000002: usage: realm=<turn.moto.local>, username=<<expiry>:probe-b>, rp=1142, rb=104813, sp=893, sb=83625",
+    "480: : session 001000000000000002: peer usage: realm=<turn.moto.local>, username=<<expiry>:probe-b>, rp=882, rb=78481, sp=1131, sb=98943",
+    "480: : session 001000000000000002: closed (2nd stage), user <<expiry>:probe-b> realm <turn.moto.local> origin <>, local client-2:3478, remote client-1:15036, reason: allocation timeout",
+    "480: : session 001000000000000002: delete: realm=<turn.moto.local>, username=<<expiry>:probe-b>",
+    "480: : session 001000000000000002: peer 10.1.0.6 deleted",
+    "481: : session 001000000000000001: usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=889, rb=82515, sp=1135, sb=103963",
+    "481: : session 001000000000000001: peer usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=1127, rb=98655, sp=879, sb=78193",
+    "481: : session 001000000000000001: closed (2nd stage), user <<expiry>:probe-a> realm <turn.moto.local> origin <>, local client-2:3478, remote client-1:15035, reason: allocation timeout",
+    "481: : session 001000000000000001: delete: realm=<turn.moto.local>, username=<<expiry>:probe-a>",
+    "481: : session 001000000000000001: peer 10.1.0.6 deleted",
+    "481: : session 000000000000000001: usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=16, rb=1408, sp=18, sb=2752",
+    "481: : session 000000000000000001: peer usage: realm=<turn.moto.local>, username=<<expiry>:probe-a>, rp=10, rb=1342, sp=7, sb=576",
+    "481: : session 000000000000000001: closed (2nd stage), user <<expiry>:probe-a> realm <turn.moto.local> origin <>, local client-2:3478, remote client-3:33006, reason: allocation timeout",
+    "481: : session 000000000000000001: delete: realm=<turn.moto.local>, username=<<expiry>:probe-a>",
+    "481: : session 000000000000000001: peer 10.1.0.6 deleted"
+  ],
+  "relayPortsObserved": {
+    "49160": {
+      "firstEpoch": 1792215689.4934525,
+      "lastEpoch": 1792215718.84717,
+      "samples": 30
+    },
+    "49163": {
+      "firstEpoch": 1792215689.4934576,
+      "lastEpoch": 1792215719.858761,
+      "samples": 31
+    },
+    "49175": {
+      "firstEpoch": 1792215689.4934604,
+      "lastEpoch": 1792215718.8471787,
+      "samples": 30
+    },
+    "49181": {
+      "firstEpoch": 1792215689.4934638,
+      "lastEpoch": 1792215719.8587646,
+      "samples": 31
+    },
+    "49189": {
+      "firstEpoch": 1792215689.4934669,
+      "lastEpoch": 1792215719.858767,
+      "samples": 31
+    },
+    "49192": {
+      "firstEpoch": 1792215689.4934711,
+      "lastEpoch": 1792215718.8471878,
+      "samples": 30
+    }
+  },
+  "packetFlows": {
+    "client-3:37508 -> 10.1.0.6:443": {
+      "firstEpoch": 1792215684.605361,
+      "lastEpoch": 1792215719.555471,
+      "packets": 16,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:443 -> client-3:37508": {
+      "firstEpoch": 1792215684.605408,
+      "lastEpoch": 1792215718.95347,
+      "packets": 18,
+      "udpPayloadBytes": 0
+    },
+    "client-1:15757 -> 10.1.0.6:443": {
+      "firstEpoch": 1792215688.522638,
+      "lastEpoch": 1792215719.21278,
+      "packets": 19,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:443 -> client-1:15757": {
+      "firstEpoch": 1792215688.522681,
+      "lastEpoch": 1792215719.205197,
+      "packets": 21,
+      "udpPayloadBytes": 0
+    },
+    "client-1:15035 -> 10.1.0.6:3478": {
+      "firstEpoch": 1792215688.868999,
+      "lastEpoch": 1792215719.436854,
+      "packets": 889,
+      "udpPayloadBytes": 82515
+    },
+    "10.1.0.6:3478 -> client-1:15035": {
+      "firstEpoch": 1792215688.869269,
+      "lastEpoch": 1792215719.437126,
+      "packets": 1135,
+      "udpPayloadBytes": 103963
+    },
+    "client-3:33006 -> 10.1.0.6:3478": {
+      "firstEpoch": 1792215688.882217,
+      "lastEpoch": 1792215719.455621,
+      "packets": 16,
+      "udpPayloadBytes": 1408
+    },
+    "client-3:37509 -> 10.1.0.6:443": {
+      "firstEpoch": 1792215688.88256,
+      "lastEpoch": 1792215719.098269,
+      "packets": 16,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:443 -> client-3:37509": {
+      "firstEpoch": 1792215688.882592,
+      "lastEpoch": 1792215719.098275,
+      "packets": 14,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:3478 -> client-3:33006": {
+      "firstEpoch": 1792215688.882599,
+      "lastEpoch": 1792215719.456039,
+      "packets": 18,
+      "udpPayloadBytes": 2752
+    },
+    "client-1:14156 -> 10.1.0.6:3478": {
+      "firstEpoch": 1792215688.915071,
+      "lastEpoch": 1792215719.459698,
+      "packets": 14,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:3478 -> client-1:14156": {
+      "firstEpoch": 1792215688.915115,
+      "lastEpoch": 1792215719.456471,
+      "packets": 9,
+      "udpPayloadBytes": 0
+    },
+    "client-3:18864 -> 10.1.0.6:3478": {
+      "firstEpoch": 1792215688.922226,
+      "lastEpoch": 1792215719.492545,
+      "packets": 14,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:3478 -> client-3:18864": {
+      "firstEpoch": 1792215688.922251,
+      "lastEpoch": 1792215719.480353,
+      "packets": 11,
+      "udpPayloadBytes": 0
+    },
+    "client-1:15348 -> 10.1.0.6:443": {
+      "firstEpoch": 1792215689.257313,
+      "lastEpoch": 1792215718.917495,
+      "packets": 13,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:443 -> client-1:15348": {
+      "firstEpoch": 1792215689.257362,
+      "lastEpoch": 1792215718.917505,
+      "packets": 11,
+      "udpPayloadBytes": 0
+    },
+    "client-1:15036 -> 10.1.0.6:3478": {
+      "firstEpoch": 1792215689.25753,
+      "lastEpoch": 1792215719.113282,
+      "packets": 1142,
+      "udpPayloadBytes": 104813
+    },
+    "10.1.0.6:3478 -> client-1:15036": {
+      "firstEpoch": 1792215689.257727,
+      "lastEpoch": 1792215719.123942,
+      "packets": 893,
+      "udpPayloadBytes": 83625
+    },
+    "client-1:13398 -> 10.1.0.6:3478": {
+      "firstEpoch": 1792215689.308907,
+      "lastEpoch": 1792215719.11423,
+      "packets": 22,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:3478 -> client-1:13398": {
+      "firstEpoch": 1792215689.308941,
+      "lastEpoch": 1792215719.114345,
+      "packets": 21,
+      "udpPayloadBytes": 0
+    },
+    "client-1:15084 -> 10.1.0.6:443": {
+      "firstEpoch": 1792215718.923555,
+      "lastEpoch": 1792215719.21675,
+      "packets": 8,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:443 -> client-1:15084": {
+      "firstEpoch": 1792215718.92359,
+      "lastEpoch": 1792215719.205873,
+      "packets": 7,
+      "udpPayloadBytes": 0
+    },
+    "client-3:37510 -> 10.1.0.6:443": {
+      "firstEpoch": 1792215719.095512,
+      "lastEpoch": 1792215719.275314,
+      "packets": 9,
+      "udpPayloadBytes": 0
+    },
+    "10.1.0.6:443 -> client-3:37510": {
+      "firstEpoch": 1792215719.095532,
+      "lastEpoch": 1792215719.247623,
+      "packets": 8,
+      "udpPayloadBytes": 0
+    }
+  },
+  "httpsPeers": {
+    "client-3:37508": 34,
+    "client-1:15757": 30,
+    "client-1:15348": 6,
+    "client-3:37509": 6
+  },
+  "pcapBytes": 677425,
+  "pcapSha256": "4b3acf2e666d9c12ee1ac1f5565397eab0775617e3291d1db1a1c83fb3f77245",
+  "pcapRetainedPrivately": true,
+  "servicesAfter": "RuntimeMaxUSec=infinity\nMainPID=30755\nId=coturn.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 13:33:59 CST\nTransient=no\n\nRuntimeMaxUSec=infinity\nMainPID=781\nId=sig.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 11:31:59 CST\nTransient=no\n\nRuntimeMaxUSec=1h\nMainPID=32177\nId=motocom-relay-validation.service\nActiveState=active\nActiveEnterTimestamp=Sat 2026-10-17 13:37:41 CST\nTransient=yes\n",
+  "selectedRelayPortMapping": "not recorded by the current client evidence; observed ports must not be labeled as selected"
+}

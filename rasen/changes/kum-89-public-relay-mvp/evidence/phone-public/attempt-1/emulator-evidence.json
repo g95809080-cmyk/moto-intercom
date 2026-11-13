@@ -1,0 +1,5 @@
+{
+  "pass": false,
+  "deviceId": "probe-b",
+  "errorClass": "IllegalStateException"
+}

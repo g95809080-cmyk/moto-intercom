@@ -69,7 +69,7 @@ class IntercomManagerReadinessTest {
     private class EvidenceEngine : RiderMediaEngine {
         lateinit var session: EvidenceSession
         override fun updateAudioControls(controls: VersionedAudioControls) = Unit
-        override fun openSession(callbacks: RiderMediaSessionCallbacks) = EvidenceSession(callbacks).also { session = it }
+        override fun openSession(callbacks: RiderMediaSessionCallbacks, icePolicy: MediaIcePolicy) = EvidenceSession(callbacks).also { session = it }
         override fun close() = Unit
     }
     private class EvidenceSession(val callbacks: RiderMediaSessionCallbacks) : RiderMediaSession {
