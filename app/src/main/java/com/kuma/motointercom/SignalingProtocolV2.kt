@@ -16,7 +16,10 @@ internal enum class SignalingMessageTypeV2 {
     DISCONNECT,
     OFFER,
     ANSWER,
-    CANDIDATE
+    CANDIDATE,
+    CLOUD_PAIRING_OFFER,
+    CLOUD_PAIRING_PROOF,
+    CLOUD_SHADOW
 }
 
 internal sealed interface SignalingMessageV2 {
@@ -79,6 +82,16 @@ internal sealed interface SignalingMessageV2 {
 
     data class Candidate(val candidateJson: String) : SignalingMessageV2 {
         override val type = SignalingMessageTypeV2.CANDIDATE
+    }
+
+    data class CloudPairingOffer(val pairId: String, val publicKey: String, val challenge: String, val createdAt: Long, val expiresAt: Long) : SignalingMessageV2 {
+        override val type = SignalingMessageTypeV2.CLOUD_PAIRING_OFFER
+    }
+    data class CloudPairingProof(val transcript: PairingTranscript, val signature: String) : SignalingMessageV2 {
+        override val type = SignalingMessageTypeV2.CLOUD_PAIRING_PROOF
+    }
+    data class CloudShadow(val frame: String) : SignalingMessageV2 {
+        override val type = SignalingMessageTypeV2.CLOUD_SHADOW
     }
 }
 
@@ -179,6 +192,16 @@ internal class SignalingV2Codec {
 
     private fun encodePayload(message: SignalingMessageV2): JsonObject = JsonObject().apply {
         when (message) {
+            is SignalingMessageV2.CloudShadow -> addProperty("frame",boundedPayload("frame",message.frame,MAX_SDP_BYTES))
+            is SignalingMessageV2.CloudPairingOffer -> {
+                require(cloudId(message.pairId) && message.publicKey.length <= 256 && message.challenge.matches(Regex("[A-Za-z0-9_-]{16,128}")))
+                addProperty("pairId",message.pairId); addProperty("publicKey",message.publicKey); addProperty("challenge",message.challenge)
+                addProperty("createdAt",message.createdAt); addProperty("expiresAt",message.expiresAt)
+            }
+            is SignalingMessageV2.CloudPairingProof -> {
+                require(message.signature.length <= 128)
+                add("transcript",message.transcript.json()); addProperty("signature",message.signature)
+            }
             is SignalingMessageV2.Hello -> {
                 addProperty("requestRole", message.requestRole.name)
                 message.nickname.trim().takeIf(String::isNotEmpty)?.let {
@@ -242,6 +265,23 @@ internal class SignalingV2Codec {
         type: SignalingMessageTypeV2,
         payload: JsonObject
     ): SignalingMessageV2 = when (type) {
+        SignalingMessageTypeV2.CLOUD_SHADOW -> {
+            payload.requireExactKeys(setOf("frame"))
+            SignalingMessageV2.CloudShadow(payload.requiredPayload("frame",MAX_SDP_BYTES))
+        }
+        SignalingMessageTypeV2.CLOUD_PAIRING_OFFER -> {
+            payload.requireExactKeys(setOf("pairId","publicKey","challenge","createdAt","expiresAt"))
+            SignalingMessageV2.CloudPairingOffer(payload.requiredString("pairId").also { require(cloudId(it)) },
+                payload.requiredString("publicKey").also { require(it.length <= 256) },
+                payload.requiredString("challenge").also { require(it.matches(Regex("[A-Za-z0-9_-]{16,128}"))) },
+                payload.optionalNonNegativeLong("createdAt") ?: throw SignalingV2Exception("missing createdAt"),
+                payload.optionalNonNegativeLong("expiresAt") ?: throw SignalingV2Exception("missing expiresAt"))
+        }
+        SignalingMessageTypeV2.CLOUD_PAIRING_PROOF -> {
+            payload.requireExactKeys(setOf("transcript","signature"))
+            SignalingMessageV2.CloudPairingProof(PairingTranscript.parse(payload.requiredObject("transcript")),
+                payload.requiredString("signature").also { require(it.length <= 128) })
+        }
         SignalingMessageTypeV2.HELLO -> {
             payload.requireKeys(
                 setOf("requestRole", "capabilities"),
@@ -509,6 +549,7 @@ internal class SignalingV2Codec {
 }
 
 internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
+    private var shadowPurpose=false
     var requestRole: RequestRole? = initialRequestRole
         private set
 
@@ -522,7 +563,12 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
 
     @Synchronized
     fun onFrame(direction: FrameDirection, message: SignalingMessageV2) {
-        val next = nextPhase(direction, message)
+        val cloudFrame = message is SignalingMessageV2.CloudPairingOffer || message is SignalingMessageV2.CloudPairingProof
+        val shadow=message is SignalingMessageV2.CloudShadow
+        val next = (if(shadow) phase.takeIf {it in setOf(SignalingPhase.READY_TO_SEND_CONNECT_REQUEST,SignalingPhase.AWAITING_CONNECT_REQUEST)}
+            else if(shadowPurpose) null
+            else if (cloudFrame) phase.takeIf { it in setOf(SignalingPhase.ACCEPTED,SignalingPhase.AWAITING_ANSWER,
+            SignalingPhase.READY_TO_SEND_ANSWER,SignalingPhase.MEDIA_NEGOTIATING,SignalingPhase.CONNECTED) } else nextPhase(direction, message))
             ?: throw SignalingV2Exception(
                 "unexpected ${message.type} direction=$direction phase=$phase role=$requestRole"
             )
@@ -534,6 +580,7 @@ internal class SignalingPhaseMachine(initialRequestRole: RequestRole?) {
             requestRole = RequestRole.RESPONDER
         }
         phase = next
+        if(shadow) shadowPurpose=true
     }
 
     @Synchronized

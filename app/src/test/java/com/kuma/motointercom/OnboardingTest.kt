@@ -136,13 +136,13 @@ class OnboardingTest {
 
     @Test
     @Config(sdk = [35], qualifiers = "w640dp-h360dp")
-    fun smallLandscapeRevealsAnchorAgainAfterNativeScrollRestoration() {
+    fun smallLandscapeKeepsAnchorVisibleWithoutHomeScrolling() {
         preferences.save(OnboardingPhase.TOUR)
         val screen = fixture().second
         screen.setIntercomState(IntercomState.Offline, true)
         settle(screen)
-        val scroll = screen.root.findViewById<ScrollView>(R.id.home_scroll)
-        scroll.scrollTo(0, 0)
+        val scroll = screen.root.findViewById<View>(R.id.home_scroll)
+        assertFalse(scroll.canScrollVertically(1))
         settle(screen)
         val target = screen.root.findViewById<View>(R.id.onboarding_target)
         assertEquals(View.VISIBLE, target.visibility)

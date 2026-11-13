@@ -24,7 +24,8 @@ internal class SessionOrchestrator(
     private val elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
     attemptTimeoutMs: Long = 10_000L,
     attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
-    private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy()
+    private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy(),
+    cloudFallbackEnabled: Boolean = false
 ) : Closeable {
     private data class QueuedEvent(
         val event: SessionEvent,
@@ -40,7 +41,8 @@ internal class SessionOrchestrator(
         clock = MonotonicClock { MonotonicTimestamp(elapsedRealtime()) },
         attemptTimeoutMs = attemptTimeoutMs,
         attemptIdFactory = attemptIdFactory,
-        automaticRecoveryPolicy = automaticRecoveryPolicy
+        automaticRecoveryPolicy = automaticRecoveryPolicy,
+        cloudFallbackEnabled = cloudFallbackEnabled
     )
     private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
     private val persistedConnectedAttempts = mutableSetOf<ConnectionAttemptId>()

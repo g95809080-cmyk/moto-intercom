@@ -59,6 +59,13 @@ internal class MainScreen(
     private val onRequestDiscoveryRefresh: () -> Unit = {},
     private val onSetPairingPreferred: (String, Boolean) -> Boolean = { _, _ -> false },
     private val onForgetPairing: (String) -> Boolean = { false },
+    private val onStartCloudIntercom: (String, String) -> Boolean = { _, _ -> false },
+    private val onStopCloudIntercom: () -> Unit = {},
+    private val onCloudPreferencesChanged: () -> Unit = {},
+    private val onCloudPairingRequested: (String) -> Unit = {},
+    private val onCloudResumeRequested: (String) -> Unit = {},
+    private val cloudConfigured: Boolean = GmeConfig.fromBuildConfig().canConnect,
+    private val cloudFeatureEnabled: Boolean = BuildConfig.GME_ENABLED,
     private val onSendFeedback: (String) -> Unit = {},
     private val onboardingPreferences: OnboardingPreferences? = null,
     private val diagnostics: DiagnosticLogAccess? = DiagnosticLog.forContext(activity),
@@ -132,6 +139,10 @@ internal class MainScreen(
     private var windowWidthClass: MainWindowWidthClass = MainWindowWidthClass.Compact
     private var currentScroll: ScrollView? = null
     private var productState: IntercomState = IntercomState.Offline
+    private var cloudState: CloudIntercomState = CloudIntercomState.Idle
+    private var cloudAudioInterruption=AudioInterruptionState.NORMAL
+    private val cloudPreferences = CloudPreferences(activity)
+    private var cloudPeers = emptyList<CloudPeerInfo>()
     private var canStartIntercom = false
     private var permissionRequestAttempted = onboardingPreferences?.permissionRequested ?: false
     private var supplementalStatus: String? = null
@@ -146,6 +157,7 @@ internal class MainScreen(
     private var bluetoothPermissionMissing = false
     private var notificationPermissionMissing = false
     private var presences = emptyList<RiderPresence>()
+    private var pairingRecords = emptyList<PairingRecord>()
     private var lastRenderedDiscoverPresentation: DiscoverPresentation? = null
     private var lastRealPeerName: String? = null
     private var discoverConnectAwaitingState = false
@@ -162,6 +174,7 @@ internal class MainScreen(
     private var presenceDetailsDialog: AlertDialog? = null
     private var pairingManagementDialog: AlertDialog? = null
     private var forgetPairingDialog: AlertDialog? = null
+    private var cloudPeerDialog: AlertDialog? = null
     private var activePairingDeviceId: String? = null
     private var incomingConfirmationVisible = false
     private var logBottomFollowPending = false
@@ -272,6 +285,8 @@ internal class MainScreen(
     fun dismissTransientDialogs() {
         dismissHelpDialog()
         presenceDetailsDialog?.dismiss()
+        cloudPeerDialog?.dismiss()
+        cloudPeerDialog = null
         dismissPairingDialogs()
     }
 
@@ -284,7 +299,7 @@ internal class MainScreen(
         if (pendingConnectRequest?.let { it.runtimeSessionId != state.runtimeSessionId } == true) {
             clearPendingDiscoverConnect()
         }
-        if (state !is IntercomState.Connected) audioReady = false
+        if (state !is IntercomState.Connected && !cloudState.ownsCloudSession) audioReady = false
         if (state !is IntercomState.Offline && supplementalStatus == permissionStatus) {
             supplementalStatus = null
         }
@@ -327,6 +342,20 @@ internal class MainScreen(
         }
         updateExpandedDetailPane()
     }
+
+    fun setCloudState(state: CloudIntercomState) {
+        cloudState = state
+        renderCurrentPage()
+        updateExpandedDetailPane()
+    }
+    fun setCloudAudioInterruption(state: AudioInterruptionState) {
+        cloudAudioInterruption=state
+        if(state!=AudioInterruptionState.NORMAL) audioReady=false
+        renderCurrentPage()
+    }
+
+    fun setCloudPeers(peers: List<CloudPeerInfo>) { cloudPeers = peers; renderCurrentPage() }
+    fun cloudPreferencesChanged() { renderCurrentPage() }
 
     fun setIntercomError(message: String, persistLog: Boolean = true) {
         clearPendingDiscoverConnect()
@@ -372,7 +401,7 @@ internal class MainScreen(
     }
 
     fun setAudioReady(ready: Boolean) {
-        audioReady = ready && productState is IntercomState.Connected
+        audioReady = ready && (productState is IntercomState.Connected || cloudState.ownsCloudSession)
         renderCurrentPage()
         updateExpandedDetailPane()
     }
@@ -398,6 +427,7 @@ internal class MainScreen(
         bluetoothActive = false
         audioReady = false
         presences = emptyList()
+        cloudState = CloudIntercomState.Idle
         lastRealPeerName = null
         audioControlSnapshot = idleAudioControlSnapshot(audioControlSnapshot.controls)
         renderCurrentPage()
@@ -538,6 +568,10 @@ internal class MainScreen(
         renderCurrentPage()
     }
 
+    fun setPairings(records: List<PairingRecord>) {
+        pairingRecords = records.toList()
+    }
+
     fun setAudioLevel(level: Float) {
         if (currentRoute != MainRoute.HOME || !animationsEnabled()) return
         homeAudioLevel.floatValue = level.coerceIn(0f, 1f)
@@ -618,9 +652,9 @@ internal class MainScreen(
         navigationPanel.setBackgroundColor(colors.panel.toArgb())
         expandedDetailContainer.setBackgroundColor(colors.panelRaised.toArgb())
         bottomNavigation.background = roundedDrawable(
-            fill = colors.panel.copy(alpha = 0.82f).toArgb(),
-            stroke = colors.outline.copy(alpha = 0.72f).toArgb(),
-            radiusDp = 18,
+            fill = colors.panel.copy(alpha = 0.94f).toArgb(),
+            stroke = colors.outline.copy(alpha = 0.82f).toArgb(),
+            radiusDp = 22,
             strokeWidthDp = 1
         )
         bottomNavigation.elevation = 0f
@@ -643,17 +677,26 @@ internal class MainScreen(
 
     private fun styleNavItem(button: Button, selected: Boolean, isBottom: Boolean) {
         val colors = appTheme.value.colors
-        val contentColor = if (selected) colors.text else colors.muted
+        val contentColor = if (selected) {
+            if (isBottom) colors.accent else colors.text
+        } else {
+            colors.muted
+        }
         val iconTint = if (selected) colors.accent else colors.muted
         button.background = if (isBottom) {
             roundedDrawable(
                 fill = if (selected) {
-                    colors.accent.copy(alpha = 0.1f).toArgb()
+                    colors.accent.copy(alpha = 0.14f).toArgb()
                 } else {
                     AndroidColor.TRANSPARENT
                 },
-                stroke = AndroidColor.TRANSPARENT,
-                radiusDp = 14
+                stroke = if (selected) {
+                    colors.accent.copy(alpha = 0.32f).toArgb()
+                } else {
+                    AndroidColor.TRANSPARENT
+                },
+                radiusDp = 16,
+                strokeWidthDp = if (selected) 1 else 0
             )
         } else {
             roundedDrawable(
@@ -741,7 +784,9 @@ internal class MainScreen(
         val isExpanded = windowWidthClass == MainWindowWidthClass.Expanded
         navigationRail.visibility = View.GONE
         bottomNavigation.visibility = View.VISIBLE
-        expandedDetailContainer.visibility = if (isExpanded && currentRoute != MainRoute.LOGS) {
+        expandedDetailContainer.visibility = if (
+            isExpanded && currentRoute != MainRoute.HOME && currentRoute != MainRoute.LOGS
+        ) {
             View.VISIBLE
         } else {
             View.GONE
@@ -789,8 +834,17 @@ internal class MainScreen(
                     audioReady = audioReady
                 )
                 title.text = activity.getString(R.string.nav_home)
-                body.text = presentation.peerText
-                status.text = presentation.primaryText
+                val cloudActive = cloudState.ownsCloudSession
+                body.text = if (cloudActive) {
+                    cloudState.peerLabelOrNull().orEmpty()
+                } else {
+                    presentation.peerText
+                }
+                status.text = if (cloudActive) {
+                    cloudState.statusText()
+                } else {
+                    presentation.primaryText
+                }
             }
             MainRoute.SETTINGS -> {
                 val presentation = homePresentation(
@@ -927,16 +981,19 @@ internal class MainScreen(
         applyThemeToWindow(theme)
     }
 
-    private fun createHomePage(): ScrollView = ScrollView(activity).apply {
+    private fun createHomePage(): FrameLayout = FrameLayout(activity).apply {
         id = R.id.home_scroll
         clipToPadding = false
-        isFillViewport = false
+        layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
         addView(
             ComposeView(activity).apply homeHost@ {
                 id = R.id.home_content
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
+                    ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 setViewCompositionStrategy(
                     ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool
@@ -954,6 +1011,7 @@ internal class MainScreen(
                             onMute = onSetMuted,
                             onAudioSettings = { showPage(MainRoute.SETTINGS, focusAudio = true) },
                             onVox = { showPage(MainRoute.SETTINGS) },
+                            onCloudAction = ::handleCloudAction,
                             radarPreviewPeers = homeRadarPeers.value,
                             onRadarPreviewPeerClick = ::connectFromHomeRadar,
                             onGuideAnchor = { target, bounds -> recordGuideAnchor(this@homeHost, target, bounds) }
@@ -986,29 +1044,64 @@ internal class MainScreen(
             permissionRequestAttempted = permissionRequestAttempted,
             audioReady = audioReady
         )
+        val cloudActive = cloudState.ownsCloudSession
+        val cloudPeer = cloudState.peerLabelOrNull()
+        val cloudStatusText = when (val state = cloudState) {
+            CloudIntercomState.Idle -> when {
+                productState !is IntercomState.Offline -> "本地对讲进行中，请先结束本地对讲"
+                !cloudPreferences.enabled -> "首次使用需同意云端隐私说明"
+                cloudConfigured -> "邀请已完成云端配对的在线车友"
+                else -> "云端服务尚未配置"
+            }
+            is CloudIntercomState.Failed -> "上次失败：${state.message}"
+            else -> state.statusText(cloudAudioInterruption)
+        }
         homeUiState.value = HomeScreenUiState(
-            primaryText = presentation.primaryText,
+            primaryText = if (cloudActive) cloudState.statusText(cloudAudioInterruption) else presentation.primaryText,
             supplementalText = presentation.supplementalText,
-            peerText = presentation.peerText,
-            primaryActionLabel = presentation.primaryActionLabel,
-            primaryActionEnabled = presentation.primaryActionEnabled,
-            disabledReason = presentation.disabledReason,
+            peerText = if (cloudActive) cloudPeer.orEmpty() else presentation.peerText,
+            primaryActionLabel = if (cloudActive) {
+                "云端对讲中"
+            } else {
+                presentation.primaryActionLabel
+            },
+            primaryActionEnabled = !cloudState.blocksLocalStart && presentation.primaryActionEnabled,
+            disabledReason = if (cloudState.blocksLocalStart) {
+                "请先继续或结束本次云端骑行"
+            } else {
+                presentation.disabledReason
+            },
             showPermissionGrantCta = presentation.showPermissionGrantCta,
             showPermissionSettingsCta = presentation.showPermissionSettingsCta,
             showWifiSettingsCta = presentation.showWifiSettingsCta,
             discoverCtaLabel = presentation.discoverCtaLabel,
             showDiscoverCta = presentation.showDiscoverCta,
             audioSourceText = presentation.audioSourceText,
-            discovering = productState is IntercomState.Discovering,
-            connected = productState is IntercomState.Connected && audioReady,
-            statusLabel = productStatusLabel(productState),
+            discovering = !cloudActive && productState is IntercomState.Discovering,
+            connected = if (cloudActive) {
+                (cloudState is CloudIntercomState.Connected || cloudState is CloudIntercomState.LocalConnected || cloudState is CloudIntercomState.SwitchingLocal) && audioReady && cloudAudioInterruption==AudioInterruptionState.NORMAL
+            } else {
+                productState is IntercomState.Connected && audioReady
+            },
+            statusLabel = if (cloudActive) "云端对讲" else productStatusLabel(productState),
             animationsEnabled = animationsEnabled(),
             muted = audioControlSnapshot.controls.muted,
-            muteEnabled = productState !is IntercomState.Offline &&
-                productState !is IntercomState.Stopping,
+            muteEnabled = cloudActive || (
+                productState !is IntercomState.Offline &&
+                    productState !is IntercomState.Stopping
+                ),
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
-            voxState = audioControlSnapshot.voxState
+            voxState = audioControlSnapshot.voxState,
+            cloudStatusText = if (cloudFeatureEnabled) cloudStatusText else "",
+            cloudActionLabel = if (!cloudConfigured && !cloudActive) {
+                "未配置"
+            } else {
+                cloudState.actionLabel()
+            },
+            cloudActionEnabled = cloudState.actionEnabled && (cloudActive || productState is IntercomState.Offline),
+            cloudActive = cloudActive,
+            cloudCardTitle=if(cloudState is CloudIntercomState.LocalConnected) "本地对讲" else "云端对讲"
         )
         homeRadarPeers.value = if (productState is IntercomState.Discovering) {
             val presentation = discoverPresentation(
@@ -1140,6 +1233,97 @@ internal class MainScreen(
     private fun connectFromDiscover(presence: RiderPresence) {
         requestPresenceConnection(presence, MainRoute.DISCOVER)
     }
+
+    private fun handleCloudAction() {
+        if (!cloudState.actionEnabled) return
+        if (cloudState.ownsCloudSession) {
+            onStopCloudIntercom()
+            return
+        }
+        val resume = when (val state = cloudState) {
+            is CloudIntercomState.ResumeAvailable -> state.rideId
+            is CloudIntercomState.LimitReached -> state.rideId
+            else -> null
+        }
+        if (resume != null) {
+            AlertDialog.Builder(activity).setTitle(cloudState.actionLabel())
+                .setMessage(if (cloudState is CloudIntercomState.LimitReached) "继续将为本次骑行增加 4 小时云端额度。" else "继续后会重新连接本次骑行；需要时会再次邀请车友。")
+                .setPositiveButton("继续") { _,_ -> onCloudResumeRequested(resume) }
+                .setNegativeButton("结束本次骑行") { _,_ -> onStopCloudIntercom() }.show()
+            return
+        }
+        if (productState !is IntercomState.Offline) return
+        if (!cloudPreferences.enabled) { showCloudConsent(::showCloudPeerPicker); return }
+        showCloudPeerPicker()
+    }
+
+    private fun showCloudPeerPicker() {
+        if (cloudPeerDialog?.isShowing == true) return
+        if (cloudConfigured && cloudPreferences.enabled) {
+            val records = pairingRecords.filter { record -> cloudPeers.any { it.deviceId == record.remoteDeviceId && it.registered } }
+            if (records.isNotEmpty()) {
+                cloudPeerDialog = AlertDialog.Builder(activity).setTitle("邀请车友")
+                    .setItems(records.map { record ->
+                        val online = cloudPeers.any { it.deviceId == record.remoteDeviceId && it.online }
+                        "${cloudPeerName(record)} · ${if(online) "在线" else "离线"}"
+                    }.toTypedArray()) { _,index ->
+                        val record = records[index]
+                        if (cloudPeers.any { it.deviceId == record.remoteDeviceId && it.online && it.registered }) {
+                            onStartCloudIntercom(record.remoteDeviceId,cloudPeerName(record))
+                        } else Toast.makeText(activity,"车友当前不在线；请让对方打开应用或保持对讲服务运行",Toast.LENGTH_LONG).show()
+                    }.setNegativeButton("取消",null).create().also { dialog ->
+                        dialog.setOnDismissListener { cloudPeerDialog=null }; dialog.show()
+                    }
+                return
+            }
+        }
+        cloudPeerDialog = AlertDialog.Builder(activity)
+            .setTitle("云端对讲")
+            .setMessage(if (cloudConfigured) {
+                "还没有完成云端配对的车友。请先连接本地对讲，再到设置 → 云端对讲重新配对。双方都需要确认。"
+            } else {
+                "当前版本尚未配置云端服务，请继续使用本地对讲。"
+            })
+            .setPositiveButton("知道了", null)
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener { cloudPeerDialog = null }
+                dialog.show()
+            }
+    }
+
+    private fun showCloudConsent(accepted: () -> Unit) {
+        AlertDialog.Builder(activity).setTitle("云端对讲隐私说明")
+            .setMessage(CloudPreferences.PRIVACY_TEXT)
+            .setPositiveButton("同意并启用") { _,_ ->
+                if (runCatching { cloudPreferences.accept() }.isSuccess) { onCloudPreferencesChanged(); renderCurrentPage(); accepted() }
+                else Toast.makeText(activity,"无法保存设置，请重试",Toast.LENGTH_LONG).show()
+            }.setNegativeButton("取消",null).show()
+    }
+
+    private fun showCloudSettingsDialog() {
+        if (!cloudPreferences.enabled) { showCloudConsent(::showCloudSettingsDialog); return }
+        val connectedPeer = (productState as? IntercomState.Connected)?.peer?.deviceId
+        val options = mutableListOf(if(cloudPreferences.wifiOnly) "允许 Wi-Fi 和蜂窝网络" else "仅使用 Wi-Fi", "查看隐私说明", "关闭云端对讲")
+        if (connectedPeer != null) options.add("与当前车友重新进行云端配对")
+        AlertDialog.Builder(activity).setTitle("云端对讲").setItems(options.toTypedArray()) { _,index ->
+            when(index) {
+                0 -> { cloudPreferences.wifiOnly=!cloudPreferences.wifiOnly; onCloudPreferencesChanged(); renderCurrentPage() }
+                1 -> AlertDialog.Builder(activity).setTitle("云端对讲隐私说明").setMessage(CloudPreferences.PRIVACY_TEXT).setPositiveButton("知道了",null).show()
+                2 -> { cloudPreferences.disable(); onCloudPreferencesChanged(); renderCurrentPage() }
+                3 -> connectedPeer?.let(onCloudPairingRequested)
+            }
+        }.setNegativeButton("返回",null).show()
+    }
+
+    private fun cloudPeerName(record: PairingRecord): String =
+        record.localAlias.ifBlank {
+            record.remoteNickname.ifBlank {
+                record.deviceName.ifBlank {
+                    record.shortCode.ifBlank { "车友" }
+                }
+            }
+        }
 
     private fun requestPresenceConnection(presence: RiderPresence, route: MainRoute) {
         val currentPresence = presences.firstOrNull {
@@ -1322,6 +1506,7 @@ internal class MainScreen(
                         onAudioRouteSelected = onSelectAudioRoute,
                         onRnnoiseEnabledChanged = onSetRnnoiseEnabled,
                         onAutomaticReconnectChanged = onAutomaticReconnectChanged,
+                        onCloudSettings = ::showCloudSettingsDialog,
                         onGuide = {
                             showPage(MainRoute.HOME)
                             onboarding?.replay()
@@ -1397,10 +1582,14 @@ internal class MainScreen(
             version = activity.getString(R.string.settings_version_summary, currentVersionName()),
             voxEnabled = audioControlSnapshot.controls.voxEnabled,
             voxSensitivity = audioControlSnapshot.controls.voxSensitivity,
-            preferredAudioRoute = preferredAudioRoute,
+            preferredAudioRoute = if(cloudState.ownsCloudSession) cloudAudioRoute(preferredAudioRoute) else preferredAudioRoute,
             automaticReconnectEnabled = automaticReconnectEnabled,
-            rnnoiseEnabled = audioControlSnapshot.controls.rnnoiseEnabled,
-            canChangeNoiseReduction = productState == IntercomState.Offline
+            rnnoiseEnabled = (!cloudState.ownsCloudSession || cloudState is CloudIntercomState.LocalConnected) && audioControlSnapshot.controls.rnnoiseEnabled,
+            canChangeNoiseReduction = productState == IntercomState.Offline && !cloudState.ownsCloudSession,
+            cloudVisible = cloudFeatureEnabled,
+            cloudSummary = if (cloudPreferences.enabled) "已启用 · ${if(cloudPreferences.wifiOnly) "仅 Wi-Fi" else "Wi-Fi / 蜂窝网络"}" else "未启用",
+            cloudAudioActive = cloudState.ownsCloudSession && cloudState !is CloudIntercomState.LocalConnected,
+            earpieceAvailable = !cloudState.ownsCloudSession
         )
     }
 
@@ -1680,6 +1869,7 @@ internal class MainScreen(
     }
 
     private fun constrainCurrentPageWidth() {
+        if (currentRoute == MainRoute.HOME) return
         val contentId = when (currentRoute) {
             MainRoute.HOME -> R.id.home_content
             MainRoute.DISCOVER -> R.id.discover_content

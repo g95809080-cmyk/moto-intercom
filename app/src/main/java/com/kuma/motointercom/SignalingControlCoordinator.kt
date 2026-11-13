@@ -36,7 +36,8 @@ internal class SignalingControlCoordinator(
     private val confirmationTimeoutMs: Long = 15_000L,
     private val actionNonce: () -> String = { UUID.randomUUID().toString() },
     private val attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
-    private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy()
+    private val automaticRecoveryPolicy: AutomaticRecoveryPolicy = AutomaticRecoveryPolicy(),
+    private val cloudFallbackEnabled: Boolean = false
 ) {
     init {
         require(attemptTimeoutMs > 0L) { "Attempt timeout must be positive" }
@@ -59,6 +60,14 @@ internal class SignalingControlCoordinator(
         require(confirmationTimeoutMs > 0L) { "Confirmation timeout must be positive" }
     }
     private val channels = linkedMapOf<ControlChannelId, VerifiedControlChannel>()
+    private val notifiedCloudLosses = linkedSetOf<ConnectionAttemptId>()
+    private fun cloudLoss(current: IntercomState.Connected, decision: SignalingControlDecision): SignalingControlDecision {
+        if (!cloudFallbackEnabled || !decision.accepted || decision.state is IntercomState.Connected ||
+            terminalOutcome(current.attemptId) == ConnectionAttemptTerminalOutcome.CANCELED ||
+            !notifiedCloudLosses.add(current.attemptId)) return decision
+        while(notifiedCloudLosses.size>64) notifiedCloudLosses.remove(notifiedCloudLosses.first())
+        return decision.copy(effects=listOf(SessionEffect.LocalRideLost(current.attempt))+decision.effects)
+    }
     private val completedAttempts = linkedMapOf<WireRequestKey, CompletedWireAttempt>()
     private val terminalAttempts =
         linkedMapOf<ConnectionAttemptId, TerminalAttemptRecord>()
@@ -981,20 +990,20 @@ internal class SignalingControlCoordinator(
             return finishAttemptImmediately(current, context).let { it.copy(effects = cancellation + it.effects) }
         }
         if (context != null) {
-            return finishActiveSessionDisconnect(
+            return cloudLoss(current,finishActiveSessionDisconnect(
                 current = current,
                 context = context,
                 prefixEffects = cancellation,
                 logicalOutcome = outcome
-            )
+            ))
         }
         clearOwnedAttempt(current.attempt)
-        return accepted(
+        return cloudLoss(current,accepted(
             state = IntercomState.Discovering(current.runtimeSessionId),
             effects = cancellation + listOf(
                 SessionEffect.ReleaseActiveSessionAndContinueDiscovery(current.attempt)
             )
-        )
+        ))
     }
 
     private fun restartRecoveringAttempt(
@@ -1106,7 +1115,7 @@ internal class SignalingControlCoordinator(
                 else adopt()
             }
         } else adopt()
-        return claimed ?: finishConnectedAttemptWithoutRecovery(current, outcome, allowObservedSelfHeal)
+        return cloudLoss(current,claimed ?: finishConnectedAttemptWithoutRecovery(current, outcome, allowObservedSelfHeal))
     }
 
     private fun recoveryExhausted(
@@ -1964,11 +1973,12 @@ internal class SignalingControlCoordinator(
         }
         automaticRecoveryIntent = null
         remember(context.wireRequestKey, AttemptOutcome.DISCONNECTED, null)
-        return finishActiveSessionDisconnect(
+        val decision = finishActiveSessionDisconnect(
             current,
             context,
             logicalOutcome = ConnectionAttemptTerminalOutcome.CANCELED
         )
+        return if(cloudFallbackEnabled) decision.copy(effects=listOf(SessionEffect.LocalRideEnded(context.attempt))+decision.effects) else decision
     }
 
     private fun disconnectRequested(

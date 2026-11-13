@@ -3,6 +3,7 @@ package com.kuma.motointercom
 import android.Manifest
 
 internal object PermissionPolicy {
+    fun cloudPermissions(): List<String> = listOf(Manifest.permission.RECORD_AUDIO,Manifest.permission.READ_PHONE_STATE)
     fun corePermissions(apiLevel: Int): List<String> = buildList {
         add(Manifest.permission.RECORD_AUDIO)
         add(Manifest.permission.READ_PHONE_STATE)

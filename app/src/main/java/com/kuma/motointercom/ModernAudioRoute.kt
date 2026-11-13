@@ -25,11 +25,12 @@ internal class ModernAudioRoute(
     private val callbackExecutor: Executor,
     private val onBluetoothConnected: (String) -> Unit,
     private val onDeviceLost: () -> Unit,
-    private val onDeviceChanged: () -> Unit = {}
+    private val onDeviceChanged: () -> Unit = {},
+    restoreInitialDevice: Boolean = true
 ) : CommunicationDeviceRoute {
     enum class RouteResult { ROUTED, NO_MATCHING_DEVICE, REJECTED }
 
-    private val initialDevice = audioManager.communicationDevice
+    private val initialDevice = if(restoreInitialDevice) audioManager.communicationDevice else null
     private val closed = AtomicBoolean(false)
     private val listener = AudioManager.OnCommunicationDeviceChangedListener {
         if (closed.get()) return@OnCommunicationDeviceChangedListener

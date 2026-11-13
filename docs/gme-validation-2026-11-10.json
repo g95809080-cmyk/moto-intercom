@@ -1,0 +1,327 @@
+{
+  "date": "2026-11-10",
+  "status": "EXPERIMENTAL",
+  "branch": "feat/gme-cloud-intercom",
+  "head": "b1636f5",
+  "scope": "Phase 0-5 experimental control plane and Android implementation; test AWS stack deployed and live control-plane integration passed; no real-device GME voice acceptance",
+  "android": {
+    "command": ":app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --console=plain --no-build-cache --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx1536m",
+    "result": "BUILD SUCCESSFUL",
+    "suites": 123,
+    "tests": 976,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "gmeEnabledInDeliveredApk": true,
+    "newPhase2Tests": 29,
+    "lint": "PASS",
+    "keystoreInstrumentation": {
+      "result": "PASS",
+      "tests": 1,
+      "api": 36,
+      "avd": "MotoIntercom_API_36",
+      "mode": "headless read-only AVD overlay",
+      "class": "com.kuma.motointercom.DeviceKeyStoreInstrumentedTest",
+      "assertions": [
+        "P-256 public key",
+        "same alias across adapter recreation",
+        "privateKey.encoded is null",
+        "ECDSA verification and changed-message rejection"
+      ],
+      "realDevice": false,
+      "validationSource": "Repeated with the Phase 4 APK and test APK"
+    },
+    "newPhase3Tests": 30,
+    "lintErrors": 0,
+    "lintWarnings": 100,
+    "gradleLog": "app/build/reports/gme-phase4-gradle.log",
+    "instrumentationLog": "app/build/reports/gme-phase4-instrumentation.log",
+    "audioPlatformInstrumentation": {
+      "result": "PASS",
+      "tests": 1,
+      "api": 36,
+      "avd": "MotoIntercom_API_36",
+      "mode": "headless read-only AVD overlay",
+      "class": "com.kuma.motointercom.CloudAudioPlatformInstrumentedTest",
+      "assertions": [
+        "Required runtime grants present",
+        "Android focus and route readiness precede target resume",
+        "MODE_IN_COMMUNICATION and actual built-in speaker selected",
+        "Close callback follows completed route restoration",
+        "Initial AudioManager mode restored"
+      ],
+      "target": "silent CommunicationAudioTarget; no GME capture or voice",
+      "realDevice": false,
+      "validationSource": "Repeated with the Phase 4 APK and test APK"
+    },
+    "phase3": {
+      "sdkLifecycle": "Fake GmeEngine exercises real adapter and Handler timing; no Tencent network call",
+      "vox": "20ms SDK score sampling, existing VoxGate and 0/100 gain; not calibrated PCM dB",
+      "handover": "Waits native media and route release; cancellation revokes admission",
+      "localFaults": "Flag-gated transport fault after a successful local connection; user end retires lease",
+      "userStop": "Uses existing DisconnectRequested/send/flush path with a 1s bound; runtime guard protects later sessions",
+      "hardwareLimitations": [
+        "GetMicLevel behavior at zero gain requires measurement",
+        "Real native recorder release cannot be proven from SDK Uninit wrapper alone",
+        "No real headset/cellular/GME voice acceptance"
+      ]
+    },
+    "newPhase4Tests": 35,
+    "localShadowMediaInstrumentation": {
+      "result": "PASS",
+      "tests": 1,
+      "api": 36,
+      "avd": "MotoIntercom_API_36",
+      "mode": "headless read-only AVD overlay",
+      "class": "com.kuma.motointercom.LocalShadowMediaInstrumentedTest",
+      "realDevice": false,
+      "target": "Two real pinned WebRTC/Android audio endpoints; synthetic PCM and manual mute; no GME network call",
+      "assertions": [
+        "Connected prewarm has no native recording and no AudioManager mode change",
+        "New native PCM/playout and bidirectional RTP evidence after explicit grant, including muted silence",
+        "Pause completion follows native recorder/thread stop",
+        "Same prepared connection resumes with fresh evidence",
+        "Both native engines close successfully"
+      ],
+      "nativeLog": "app/build/reports/gme-phase4-native.log"
+    },
+    "phase4": {
+      "discovery": "Actual Wi-Fi LAN binding; network/address changes, exact adapter teardown, P2P cellular eligibility, fresh receipts and per-transport backoff",
+      "authentication": "V2 capability, paired device signatures, fresh mutual challenges, ride/runtime/transport/attempt binding, ordered frames and 3s authentication deadline",
+      "coordination": "Server 10s stable same probe, fresh within 3s, two-party prepare/arm/complete, local READY/GO, 8s transaction deadline, max 3 attempts per ride",
+      "audio": "One focus/phone/route host; GME Pause before local authorization; no GME Exit/Uninit before local commit; failure resumes retained cloud after verified teardown",
+      "evidence": "Fresh bidirectional RTP growth within the same native grant and stream set; rejects counter rollback and prior-grant evidence",
+      "dtx": "Disabled only for prepared handback WebRTC sessions so muted/VOX-closed RTP can be verified; PCM mute remains active",
+      "recovery": "Manual continuation after process recreation or peer absence; same ride/room; local media/end and fallback protected by generation/release fences",
+      "platform": "GME native-stop witness requires API 26+; older devices remain cloud-only for this handback",
+      "activationBudgetMs": 300,
+      "physicalEndToEndBudgetVerified": false,
+      "gmeSdk": "Official Tencent Android SDK, standard capture/playback; GmeEngine fake is used only for lifecycle tests"
+    },
+    "phase5Instrumentation": {
+      "result": "PASS",
+      "command": ".\\gradlew.bat :app:connectedDebugAndroidTest --console=plain --no-build-cache --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx1536m",
+      "tests": 53,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "api": 36,
+      "avd": "MotoIntercom_API_36",
+      "realDevice": false,
+      "gmeEnabled": true,
+      "report": "app/build/reports/androidTests/connected/debug/index.html",
+      "resultXml": "app/build/outputs/androidTest-results/connected/debug/TEST-MotoIntercom_API_36(AVD) - 16-_app-.xml",
+      "workaround": "Run Gradle from the G:\\ worktree mapping to avoid a CMake JSON path-escaping defect caused by the Chinese absolute path",
+      "uiSmoke": [
+        "App installed and cold-started without an AndroidRuntime crash",
+        "First-run onboarding rendered",
+        "Cloud card opened the complete privacy disclosure",
+        "Consent enabled the cloud entry",
+        "Unpaired state directed the user to complete a local connection and cloud pairing"
+      ]
+    }
+  },
+  "controlPlane": {
+    "memoryTests": {
+      "passed": 24,
+      "failed": 0
+    },
+    "dynamoDbLocalTests": {
+      "passed": 24,
+      "failed": 0
+    },
+    "packagedLambdaImportAndHttpRouting": "PASS",
+    "developmentServerAndWsExcludedFromLambda": true,
+    "androidNodeContract": {
+      "result": "PASS",
+      "clients": 2,
+      "realComponents": [
+        "Java ECDSA",
+        "signed raw HTTP",
+        "Node control-plane implementation",
+        "WebSocket events"
+      ],
+      "testDoubles": [
+        "GME ticket signing",
+        "GME media host",
+        "Local native release completion barrier"
+      ],
+      "covered": [
+        "pair registration",
+        "no ticket before acceptance",
+        "same room after acceptance",
+        "process recreation offers manual resume",
+        "manual resume",
+        "remote end",
+        "Both local-established confirmations share one ride/room",
+        "Local failure approved via signed HTTP and delivered by WebSocket",
+        "No media ticket while local release barrier is pending",
+        "Both peers enter the same fallback room after release",
+        "Same authenticated local probe stable for an actual 10-second window",
+        "Both PREPARED/COMPLETE before local commit",
+        "Cloud metadata accumulation stops at local commit",
+        "Recreated local ride offers manual continuation and uses the same room only after explicit resume"
+      ]
+    },
+    "validationSource": "24 memory and 24 real DynamoDB Local tests rerun in Phase 4; current 976-test Android gate includes signed two-client HTTP/WebSocket contracts",
+    "packagingLog": "app/build/reports/gme-phase4-package.log",
+    "dynamoDbLocalLog": "app/build/reports/gme-phase4-dynamodb.log",
+    "liveAwsIntegration": {
+      "result": "PASS",
+      "script": "scripts/gme/smoke-control-plane.mjs",
+      "devices": 2,
+      "deviceKeyType": "EC P-256",
+      "websocketConnections": 2,
+      "eventsObserved": [
+        "invite.created",
+        "invite.accepted",
+        "ride.cloud.ready"
+      ],
+      "covered": [
+        "signed device registration",
+        "double-signed pairing",
+        "same ride, room and AppID for both tickets",
+        "both peers reached CLOUD_ACTIVE",
+        "same-room fallback after both local-established confirmations",
+        "ride end and pair revoke"
+      ],
+      "sensitiveOutput": "No private key, WebSocket token or authBuffer was printed"
+    }
+  },
+  "infrastructure": {
+    "cfnLint": "PASS",
+    "awsValidateTemplate": "PASS",
+    "cfnGuard": "NOT_RUN",
+    "deployed": true,
+    "deploymentScope": "TEST_ONLY",
+    "stackName": "motocom-gme",
+    "stackStatus": "UPDATE_COMPLETE",
+    "account": "401921623615",
+    "region": "ap-southeast-2",
+    "httpBaseUrl": "https://1nzpbifxo6.execute-api.ap-southeast-2.amazonaws.com",
+    "webSocketUrl": "wss://0v8zmyfkuk.execute-api.ap-southeast-2.amazonaws.com/live",
+    "dynamoDbTable": "motocom-gme-Records-3XZEA6Q1EA01",
+    "alertsTopicArn": "arn:aws:sns:ap-southeast-2:401921623615:motocom-gme-AlertsTopic-SxRLOE6Pkrxh",
+    "cloudWatchAlarms": {
+      "count": 4,
+      "states": "OK",
+      "snsActionsAttached": true
+    },
+    "awsBudget": {
+      "name": "explore-aws-budget",
+      "actualCostThreshold": "80%",
+      "forecastedCostThreshold": "100%",
+      "snsSubscriptionConfigured": true
+    },
+    "notificationGap": "The SNS topic has no email subscription because no recipient address was provided",
+    "gmeUsageAlarm": "NOT_CONFIGURED",
+    "appKeyRotation": "NOT_PERFORMED",
+    "validationSource": "Phase 5 deployment and live integration on 2026-11-11"
+  },
+  "readonlyReview": {
+    "phase1": {
+      "reportedFindings": 4,
+      "fixedFindings": 4,
+      "targetedRecheck": "PASS",
+      "newP1Findings": 0
+    },
+    "phase2": {
+      "reportedFindings": 10,
+      "fixedFindings": 10,
+      "targetedStaticRecheck": "PASS",
+      "remainingConfirmedFindings": 0,
+      "runtimeValidation": "Android tests and contract tests; no real GME call"
+    },
+    "phase3": {
+      "reportedFindings": 15,
+      "fixedFindings": 15,
+      "targetedStaticRecheck": "PASS",
+      "remainingConfirmedFindings": 0,
+      "runtimeValidation": "941 JVM tests and 2 API 36 instrumentation tests; SDK lifecycle uses a fake engine; no real GME voice",
+      "reviewed": [
+        "GME pause/reconnect/timeout order",
+        "Native and route release ownership",
+        "Local lease and ended persistence races",
+        "Cancellation during handover",
+        "Explicit user stop across recovery attempt changes"
+      ]
+    },
+    "phase4": {
+      "targetedStaticRecheck": "PASS",
+      "remainingConfirmedFindings": 0,
+      "reviewed": [
+        "Local shadow discovery/retry/adapter and attempt generations",
+        "P2P cleanup failure propagation",
+        "Single source audio grant and late callbacks",
+        "GME/native stop fences and retained route ownership",
+        "Fresh media evidence and counter rollback"
+      ],
+      "runtimeValidation": "976 JVM tests, 3 API 36 instrumentation tests, 24 memory and 24 DynamoDB Local tests; no physical GME/headset test"
+    }
+  },
+  "legacyCredentialArtifactScan": {
+    "status": "PASS",
+    "scope": "known local legacy credentials",
+    "checkedArtifacts": 3,
+    "checkedSourceFiles": 232,
+    "findings": []
+  },
+  "artifacts": {
+    "app/build/outputs/apk/debug/app-debug.apk": {
+      "bytes": 83398138,
+      "sha256": "6574afcd1061550b3d33b31c470510abbc9802961dc4b4064123839838e0e2e3",
+      "gmeEnabled": true,
+      "configuredFor": "motocom-gme test stack"
+    },
+    "backend/gme-control-plane/.build/control-plane.zip": {
+      "bytes": 3077273,
+      "sha256": "32894bac08d912877d85046873dca6fac120f02f2614813c0f948ae8a8360b67"
+    },
+    "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk": {
+      "bytes": 1285296,
+      "sha256": "656f24a97aa2be20ee7aff24242fb73bcf1f302d5a2aa4a7f4e880efad751b9d"
+    }
+  },
+  "actions": {
+    "committed": false,
+    "merged": false,
+    "deployedTestStack": true,
+    "productionDeployed": false,
+    "mainWorkspaceModified": false
+  },
+  "remaining": [
+    "At least two real Android devices; one must use cellular data only",
+    "Two-device real GME voice acceptance with standard HFP/A2DP helmet routing",
+    "Invite accept/decline/timeout/busy plus a 10-minute bidirectional voice run",
+    "Physical local-failure fallback and measured switchback gap <=300ms without double capture/playback",
+    "Lockscreen, phone interruption, process death and manual recovery",
+    "Real VOX calibration, zero-gain uplink silence, dropped syllables, clipping and echo",
+    "Weak network, 20 repeated entry/exit cycles and the 4-hour cloud limit",
+    "SNS recipient subscription for emails and Tencent GME usage-alert configuration",
+    "Rotate the GME AppKey before production",
+    "Production deployment, merge and release remain unrequested"
+  ],
+  "updatedAt": "2026-11-11T12:15:00+08:00",
+  "verificationRecovery": [
+    {
+      "type": "CMake malformed JSON from the Chinese absolute worktree path",
+      "resolvedBy": "Rebuilt the project from the G:\\ mapping; all three CMake ABIs configured and built successfully",
+      "finalResult": "PASS"
+    },
+    {
+      "type": "Windows JVM native-memory exhaustion",
+      "resolvedBy": "Stopped emulator; ran Gradle with one worker and 1536m build JVM before instrumentation",
+      "finalResult": "PASS"
+    },
+    {
+      "type": "New UI test event-loop and Room teardown failures",
+      "resolvedBy": "Waited for dialog callbacks; used response callbacks in UI tests; awaited service jobs before closing test DB",
+      "finalResult": "PASS"
+    },
+    {
+      "type": "Phase 3 full-suite compatibility regressions",
+      "resolvedBy": "Updated stop-method test invocation and masked audio readiness while offline/interrupted",
+      "finalResult": "PASS"
+    }
+  ]
+}

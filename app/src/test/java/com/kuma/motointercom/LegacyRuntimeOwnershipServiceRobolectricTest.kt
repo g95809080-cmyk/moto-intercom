@@ -103,9 +103,8 @@ class LegacyRuntimeOwnershipServiceRobolectricTest {
 
     private fun destroyOnly(controller: ServiceController<IntercomService>) {
         val scope = field(controller.get(), "serviceScope").get(controller.get()) as CoroutineScope
-        val complete = CountDownLatch(1)
-        scope.coroutineContext[Job]?.invokeOnCompletion { complete.countDown() } ?: complete.countDown()
+        val job = scope.coroutineContext[Job]
         controller.destroy()
-        assertTrue("Service scope did not stop", complete.await(5L, TimeUnit.SECONDS))
+        awaitCoroutineCompletionWithMainLooper(job, "Service scope did not stop")
     }
 }

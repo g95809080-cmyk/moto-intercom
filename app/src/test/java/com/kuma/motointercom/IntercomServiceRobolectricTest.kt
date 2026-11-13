@@ -10,8 +10,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -267,6 +269,83 @@ class IntercomServiceRobolectricTest {
     }
 
     @Test
+    fun stopCompletesForTheSameRuntimeWhenItsAttemptAlreadyChanged() = runBlocking {
+        val controller=Robolectric.buildService(IntercomService::class.java).create()
+        val service=controller.get()
+        val runtime=RuntimeSessionId("stop_runtime")
+        val old=ConnectionAttemptFixture.create(MonotonicClock {MonotonicTimestamp(SystemClock.elapsedRealtime())},
+            id=ConnectionAttemptId("old_attempt"),runtimeSessionId=runtime)
+        val next=old.copy(id=ConnectionAttemptId("next_attempt"))
+        val orchestrator=IntercomService::class.java.getDeclaredField("orchestrator").run {
+            isAccessible=true; get(service) as SessionOrchestrator
+        }
+        try {
+            setPrivate(service,"running",true); setPrivate(service,"activeRuntimeSessionId",runtime.value)
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime)))
+            assertTrue(orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(next)))
+            assertEquals(next,orchestrator.currentAttempt)
+            var stopped=false
+            service.stopLocalAfterDisconnect(old) {stopped=true}
+            assertTrue(stopped)
+            val running=IntercomService::class.java.getDeclaredField("running").apply {isAccessible=true}
+            assertFalse(running.getBoolean(service))
+        } finally { destroyAndAwait(controller) }
+    }
+
+    @Test
+    fun oldStopCannotCloseANewerRuntime() = runBlocking {
+        val controller=Robolectric.buildService(IntercomService::class.java).create()
+        val service=controller.get()
+        val old=ConnectionAttemptFixture.create(MonotonicClock {MonotonicTimestamp(SystemClock.elapsedRealtime())})
+        try {
+            setPrivate(service,"running",true); setPrivate(service,"activeRuntimeSessionId","new_runtime")
+            var stopped=false
+            service.stopLocalAfterDisconnect(old) {stopped=true}
+            assertFalse(stopped)
+            val running=IntercomService::class.java.getDeclaredField("running").apply {isAccessible=true}
+            assertTrue(running.getBoolean(service))
+        } finally { destroyAndAwait(controller) }
+    }
+
+    @Test
+    fun cancellingCloudHandoverWhileNativeReleaseWaitsClearsTheStartReservation() = runBlocking {
+        val controller = Robolectric.buildService(IntercomService::class.java).create()
+        val service=controller.get()
+        var releaseNative: ((Boolean)->Unit)?=null
+        val engine=object : RiderMediaEngine {
+            override fun updateAudioControls(controls: VersionedAudioControls) {}
+            override fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession=error("Unused")
+            override fun close() {}
+            override fun whenReleased(callback: (Boolean)->Unit) { releaseNative=callback }
+        }
+        val route=object : RiderAudioRoute {
+            override fun select(selection: AudioRouteSelection) {}
+            override fun close() {}
+        }
+        try {
+            setPrivate(service,"running",true)
+            setPrivate(service,"activeRuntimeSessionId","local_handover")
+            setPrivate(service,"audioSessionController",AudioSessionController(engine,route))
+            val now=System.currentTimeMillis()
+            val ride=testRide(now,RideState.CLOUD_PENDING).copy(cloudReason=CloudEntryReason.LOCAL_FAILURE,everLocalActive=true)
+            val approved=ApprovedCloudRide.from(ride,"a","车友",now-1,now)!!
+            val job=launch(start=CoroutineStart.UNDISPATCHED) {
+                service.prepareApprovedCloudIntercom(approved,GmeTicketSource { error("Must not take a ticket") }) {true}
+            }
+            val pending=IntercomService::class.java.getDeclaredField("cloudStartPending").apply {isAccessible=true}
+            assertTrue(pending.getBoolean(service))
+            job.cancel()
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            job.join()
+            assertFalse(pending.getBoolean(service))
+            releaseNative!!(true)
+        } finally {
+            releaseNative?.invoke(true)
+            destroyAndAwait(controller)
+        }
+    }
+
+    @Test
     fun stoppingRuntimeClearsTransientMuteButKeepsVoxSettings() {
         val controller = Robolectric.buildService(IntercomService::class.java).create()
         val service = controller.get()
@@ -279,9 +358,9 @@ class IntercomServiceRobolectricTest {
         service.setMuted(true)
         assertEquals(VoxRuntimeState.MUTED, snapshots.last().voxState)
 
-        IntercomService::class.java.getDeclaredMethod("stopIntercom").apply {
+        IntercomService::class.java.getDeclaredMethod("stopIntercom", Boolean::class.javaPrimitiveType, Function1::class.java).apply {
             isAccessible = true
-        }.invoke(service)
+        }.invoke(service, false, { _: Boolean -> })
 
         assertEquals(
             AudioControlSnapshot(
@@ -690,15 +769,13 @@ class IntercomServiceRobolectricTest {
         val scope = IntercomService::class.java.getDeclaredField("serviceScope").apply {
             isAccessible = true
         }.get(service) as CoroutineScope
-        val completion = CountDownLatch(1)
-        scope.coroutineContext[Job]?.invokeOnCompletion { completion.countDown() }
-            ?: completion.countDown()
+        val job = scope.coroutineContext[Job]
 
         controller.destroy()
 
-        assertTrue(
+        awaitCoroutineCompletionWithMainLooper(
+            job,
             "IntercomService coroutine scope did not stop",
-            completion.await(5L, TimeUnit.SECONDS)
         )
         val databaseField = pairingDatabaseInstanceField()
         (databaseField.get(null) as? PairingDatabase)?.close()

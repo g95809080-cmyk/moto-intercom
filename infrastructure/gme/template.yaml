@@ -1,0 +1,448 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MotoCom GME control plane; signed HTTP owns state, WebSocket delivers events, Tencent carries audio.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    ref:
+      - at: docs/gme-control-plane.md
+        has: contracts, retention, packaging and experimental acceptance limits
+        scope: stack
+    must:
+      - Never deploy static client tokens or GME keys in function configuration or logs.
+      - Read the existing app-key secret at invocation time; do not replace it.
+      - Invitations cannot mint tickets until accepted; local fallback requires both local acknowledgements.
+Parameters:
+  ArtifactBucket:
+    Type: String
+    AllowedPattern: '[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
+    Description: Existing private S3 bucket holding the immutable Lambda ZIP.
+  ArtifactKey:
+    Type: String
+    MinLength: 1
+    MaxLength: 1024
+    Description: SHA256-addressed ZIP key produced by the packaging script.
+  GmeAppId:
+    Type: Number
+    Default: 1400802321
+    MinValue: 1
+    MaxValue: 2147483647
+  GmeAppKeySecretName:
+    Type: String
+    Default: motocom/gme/app-key
+    AllowedPattern: '[a-zA-Z0-9/_+=.@-]{1,256}'
+    Description: Name of the existing Secrets Manager secret; never the key value.
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: Optional email address for alarm subscription confirmation; leave blank until an operator confirms the destination.
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+Resources:
+  Records:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: one transactional table keeps ride, device reservations, invitation and outbox changes atomic
+        must:
+          - Keep version conditions on every transaction read.
+          - No audio, AppKey, authBuffer or plaintext WebSocket tokens.
+          - ttl uses epoch seconds; business deadlines use epoch milliseconds and never wait for TTL deletion.
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: indexPk
+          AttributeType: S
+        - AttributeName: indexAt
+          AttributeType: N
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: DueIndex
+          KeySchema:
+            - AttributeName: indexPk
+              KeyType: HASH
+            - AttributeName: indexAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+      Tags:
+        - Key: project
+          Value: motocom-gme
+  FunctionLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-control
+      RetentionInDays: 7
+  HttpLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 7
+  FailedDeliveries:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: surfaces exhausted stream delivery retries without dropping the durable outbox silently
+        must:
+          - Keep payloads free of ticket data; message retention is one day.
+    Properties:
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 86400
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: one durable destination fans operational alarms and budget notifications to the confirmed operator without embedding contact data in the app
+        must:
+          - Publish only alarm metadata; never include device keys, request bodies or GME ticket material.
+    Properties:
+      DisplayName: MotoCom GME operations
+      KmsMasterKeyId: alias/aws/sns
+  AlertsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AlertsTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountOwner
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - SNS:AddPermission
+              - SNS:DeleteTopic
+              - SNS:GetTopicAttributes
+              - SNS:ListSubscriptionsByTopic
+              - SNS:Publish
+              - SNS:RemovePermission
+              - SNS:SetTopicAttributes
+              - SNS:Subscribe
+            Resource: !Ref AlertsTopic
+          - Sid: CloudWatchAlarms
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: SNS:Publish
+            Resource: !Ref AlertsTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: !Ref AWS::AccountId
+          - Sid: AWSBudgets
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: SNS:Publish
+            Resource: !Ref AlertsTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: !Ref AWS::AccountId
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+      TopicArn: !Ref AlertsTopic
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: scopes runtime access to this table, stream, socket API, logs and the existing app-key secret
+        must:
+          - No read permission for legacy client-token or room-salt secrets.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: control-plane
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt Records.Arn
+                  - !Sub ${Records.Arn}/index/DueIndex
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource: !GetAtt Records.StreamArn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GmeAppKeySecretName}-??????
+              - Effect: Allow
+                Action: execute-api:ManageConnections
+                Resource: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${SocketApi}/live/POST/@connections/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt FunctionLogs.Arn
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt FailedDeliveries.Arn
+  ControlFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: shares the exact command validators and transaction code across HTTP, socket lifecycle and expiry sweeps
+        must:
+          - Package pinned SDK dependencies; GME key is read from Secrets Manager only.
+          - Structured logs allow only request ID, component and status.
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-control
+      Runtime: nodejs22.x
+      Handler: src/index.handler
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 20
+      Role: !GetAtt FunctionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref ArtifactKey
+      LoggingConfig:
+        LogGroup: !Ref FunctionLogs
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Records
+          GME_APP_ID: !Ref GmeAppId
+          GME_APP_KEY_SECRET_ARN: !Ref GmeAppKeySecretName
+          WS_MANAGEMENT_ENDPOINT: !Sub https://${SocketApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-http
+      ProtocolType: HTTP
+      Description: Signed device commands; no static APK token.
+  HttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ControlFunction.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 20000
+  HttpRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      Target: !Sub integrations/${HttpIntegration}
+  HttpStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      AccessLogSettings:
+        DestinationArn: !GetAtt HttpLogs.Arn
+        Format: '{"requestId":"$context.requestId","status":"$context.status","latency":"$context.responseLatency"}'
+  HttpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ControlFunction
+      Principal: apigateway.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+  SocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: pushes invitations, presence and ride revisions while signed HTTP remains the sole command authority
+        must:
+          - Connection authentication consumes a hashed single-use token within sixty seconds.
+          - Do not log connect query strings, which carry the ephemeral token.
+    Properties:
+      Name: !Sub ${AWS::StackName}-socket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+  SocketIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref SocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ControlFunction.Arn}/invocations
+      TimeoutInMillis: 20000
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Sub integrations/${SocketIntegration}
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SocketApi
+      RouteKey: $disconnect
+      Target: !Sub integrations/${SocketIntegration}
+  SocketDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SocketApi
+      RouteKey: $default
+      Target: !Sub integrations/${SocketIntegration}
+  SocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref SocketApi
+      StageName: live
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+        DataTraceEnabled: false
+  SocketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ControlFunction
+      Principal: apigateway.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${SocketApi}/*
+  OutboxDelivery:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt Records.StreamArn
+      FunctionName: !Ref ControlFunction
+      StartingPosition: TRIM_HORIZON
+      BatchSize: 10
+      MaximumRetryAttempts: 10
+      MaximumRecordAgeInSeconds: 3600
+      BisectBatchOnFunctionError: true
+      FunctionResponseTypes: [ReportBatchItemFailures]
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName":["INSERT"],"dynamodb":{"NewImage":{"kind":{"S":["EVENT"]}}}}'
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt FailedDeliveries.Arn
+  ExpirySweep:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ControlFunction.Arn
+          Id: sweep
+  SweepPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ControlFunction
+      Principal: events.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt ExpirySweep.Arn
+  FunctionErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda execution errors; HTTP business failures are separate status metrics.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ControlFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+  FunctionThrottles:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ControlFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+  FailedEventAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt FailedDeliveries.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+  HttpErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref HttpApi
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+Outputs:
+  HttpEndpoint:
+    Value: !GetAtt HttpApi.ApiEndpoint
+  WebSocketEndpoint:
+    Value: !Sub wss://${SocketApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live
+  RecordsTable:
+    Value: !Ref Records
+  AlertsTopicArn:
+    Value: !Ref AlertsTopic

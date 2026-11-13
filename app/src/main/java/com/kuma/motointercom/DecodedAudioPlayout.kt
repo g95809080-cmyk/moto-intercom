@@ -30,6 +30,8 @@ internal class DecodedAudioPlayout(
 ) : AudioTrackSink, Closeable {
     private data class Frame(val rate: Int, val channels: Int, val bytes: ByteArray)
     private inner class Lease(val revision: Long) {
+        val released=ResourceReleaseBarrier()
+        var releaseSucceeded=true
         val lock = Any()
         val queue = ArrayBlockingQueue<Frame>(10)
         @Volatile var stopped = false
@@ -47,12 +49,15 @@ internal class DecodedAudioPlayout(
     private val lock = Any()
     @Volatile private var active: Lease? = null
     private var closed = false
+    private val releaseFailure=java.util.concurrent.atomic.AtomicBoolean(false)
+    private val live=linkedSetOf<Lease>()
 
     fun resume(revision: Long) = synchronized(lock) {
         if (closed || !permits(revision) || active?.revision == revision) return
         pause()
         val lease = Lease(revision)
         active = lease
+        live.add(lease)
         lease.thread.start()
     }
 
@@ -70,6 +75,17 @@ internal class DecodedAudioPlayout(
     }
 
     override fun close() = synchronized(lock) { closed = true; pause() }
+
+    fun pauseWhenReleased(callback: (Boolean)->Unit) {
+        val leases=synchronized(lock) { pause(); live.toList() }
+        if(leases.isEmpty()) { callback(!releaseFailure.get()); return }
+        val remaining=java.util.concurrent.atomic.AtomicInteger(leases.size)
+        val success=java.util.concurrent.atomic.AtomicBoolean(true)
+        leases.forEach { it.released.whenReleased { ok ->
+            if(!ok) success.set(false)
+            if(remaining.decrementAndGet()==0) callback(success.get() && !releaseFailure.get())
+        } }
+    }
 
     override fun onData(data: ByteBuffer, bits: Int, rate: Int, channels: Int, frames: Int, timestamp: Long) {
         val lease = active ?: return
@@ -121,7 +137,7 @@ internal class DecodedAudioPlayout(
                     if (!lease.current()) return
                     val created = createPlayback(frame.rate, frame.channels)
                     synchronized(lease.lock) {
-                        if (!lease.current()) { created.close(); return }
+                        if (!lease.current()) {runCatching {created.close()}.onFailure {lease.releaseSucceeded=false;releaseFailure.set(true)}.getOrThrow();return}
                         lease.playback = created
                         lease.rate = frame.rate
                         lease.channels = frame.channels
@@ -163,6 +179,8 @@ internal class DecodedAudioPlayout(
                     lease.rejected.get()?.let { if (permits(lease.revision)) onError(it) }
                 }
             }
+            synchronized(lock) { live.remove(lease) }
+            lease.released.complete(lease.releaseSucceeded)
         }
     }
 
@@ -189,7 +207,7 @@ internal class DecodedAudioPlayout(
         lease.published = false
         lease.writtenBytes = 0
         lease.nonzeroWrittenBytes = 0
-        if (device != null) runCatching(device::close)
+        if (device != null) runCatching(device::close).onFailure { lease.releaseSucceeded=false;releaseFailure.set(true) }
     }
 }
 

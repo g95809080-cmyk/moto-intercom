@@ -20,6 +20,19 @@ val betaVersionCode = releaseVersion.getProperty("betaVersionCode").toInt()
 val betaCommit = releaseVersion.getProperty("betaCommit")
 require(betaCommit.matches(Regex("[0-9a-f]{40}")))
 
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+fun localProperty(name: String): String =
+    localProperties.getProperty(name).orEmpty().trim()
+
+fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 android {
     namespace = "com.kuma.motointercom"
     compileSdk = 37
@@ -47,6 +60,9 @@ android {
     defaultConfig {
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         buildConfigField("boolean", "RNNOISE_BETA", "false")
+        buildConfigField("boolean", "GME_ENABLED", localProperty("gme.enabled").equals("true", ignoreCase = true).toString())
+        buildConfigField("String", "GME_CONTROL_PLANE_URL", buildConfigString(localProperty("gme.control.plane.url")))
+        buildConfigField("String", "GME_WEBSOCKET_URL", buildConfigString(localProperty("gme.websocket.url")))
     }
     externalNativeBuild {
         cmake {
@@ -55,6 +71,10 @@ android {
         }
     }
     testBuildType = providers.gradleProperty("testBuildType").orElse("debug").get()
+
+    sourceSets {
+        getByName("main").jniLibs.srcDir("libs/gme")
+    }
 
     buildTypes {
         create("beta") {
@@ -118,10 +138,13 @@ dependencies {
         version { strictly("1.3.9") }
     }
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation(files("libs/gme/gmesdk.jar"))
     ksp("androidx.room:room-compiler:2.7.2")
     testImplementation("androidx.room:room-testing:2.7.2")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")

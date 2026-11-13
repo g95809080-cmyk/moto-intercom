@@ -72,7 +72,11 @@ internal data class SettingsScreenUiState(
     val preferredAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
     val automaticReconnectEnabled: Boolean = true,
     val rnnoiseEnabled: Boolean = false,
-    val canChangeNoiseReduction: Boolean = true
+    val canChangeNoiseReduction: Boolean = true,
+    val cloudVisible: Boolean = false,
+    val cloudSummary: String = "",
+    val cloudAudioActive: Boolean = false,
+    val earpieceAvailable: Boolean = !cloudAudioActive
 )
 
 @Composable
@@ -91,6 +95,7 @@ internal fun MotoComSettingsScreen(
     onAudioRouteSelected: (AudioRouteSelection) -> Unit = {},
     onRnnoiseEnabledChanged: (Boolean) -> Unit = {},
     onAutomaticReconnectChanged: (Boolean) -> Unit = {},
+    onCloudSettings: () -> Unit = {},
     onAudioSectionPositioned: (Int) -> Unit = {},
     theme: MotoComThemeMode = MotoComThemeMode.DAYLIGHT,
     onThemeSelected: (MotoComThemeMode) -> Unit = {},
@@ -137,7 +142,7 @@ internal fun MotoComSettingsScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 150.dp)
+                    .height(160.dp)
                     .testTag("settings_audio_section")
                     .onGloballyPositioned {
                         onAudioSectionPositioned(it.positionInRoot().y.roundToInt())
@@ -156,7 +161,23 @@ internal fun MotoComSettingsScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
-            if (BuildConfig.RNNOISE_BETA) {
+            if (state.cloudAudioActive) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colors.panelRaised.copy(alpha = 0.78f))
+                        .border(1.dp, colors.outline.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "云端使用 GME 语音门控；RNNoise 仅用于本地对讲。",
+                        color = colors.muted,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
+                    )
+                }
+            }
+            if (BuildConfig.RNNOISE_BETA && !state.cloudAudioActive) {
                 MotoComSectionLabel(stringResource(R.string.rnnoise_beta_section))
                 SettingsSwitchCard(
                     icon = R.drawable.ic_mic_24,
@@ -177,7 +198,7 @@ internal fun MotoComSettingsScreen(
                         ),
                         modifier = Modifier.testTag("settings_noise_mode"),
                         color = colors.muted,
-                        style = MaterialTheme.typography.labelSmall
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
                     )
                 }
             }
@@ -194,7 +215,7 @@ internal fun MotoComSettingsScreen(
                     text = state.productState,
                     modifier = Modifier.testTag("settings_product_state"),
                     color = colors.muted,
-                    style = MaterialTheme.typography.labelSmall
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
                 )
             }
             if (state.optionalPermissionNotice != null || state.showOptionalPermissionCta) {
@@ -239,6 +260,69 @@ internal fun MotoComSettingsScreen(
                 }
             }
             MotoComSectionLabel(stringResource(R.string.section_advanced_settings))
+            if (state.cloudVisible) {
+                MotoComPanel(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 58.dp)
+                        .testTag("settings_cloud_button")
+                        .clickable(role = Role.Button, onClick = onCloudSettings),
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = colors.panel.copy(alpha = 0.94f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 13.dp,
+                        vertical = 11.dp
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(colors.accent.copy(alpha = 0.12f))
+                                .border(1.dp, colors.accent.copy(alpha = 0.28f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_globe_24),
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                                tint = colors.accent
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "云端对讲",
+                                color = colors.text,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = 14.sp,
+                                    lineHeight = 18.sp
+                                )
+                            )
+                            if (state.cloudSummary.isNotBlank()) {
+                                Text(
+                                    text = state.cloudSummary,
+                                    color = colors.muted,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp
+                                    )
+                                )
+                            }
+                        }
+                        Icon(
+                            painter = painterResource(R.drawable.ic_chevron_right_24),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = colors.muted
+                        )
+                    }
+                }
+            }
             MoreGrid(
                 onLogs = onLogs,
                 onHelp = onHelp,
@@ -269,9 +353,9 @@ private fun IdentityCard(
     MotoComPanel(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 76.dp),
+            .heightIn(min = 80.dp),
         shape = RoundedCornerShape(22.dp),
-        containerColor = colors.panel.copy(alpha = 0.92f),
+        containerColor = colors.panel.copy(alpha = 0.94f),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             horizontal = 13.dp,
             vertical = 10.dp
@@ -282,7 +366,7 @@ private fun IdentityCard(
                 Modifier
                     .size(46.dp)
                     .clip(CircleShape)
-                    .background(colors.accent.copy(alpha = 0.12f))
+                    .background(colors.accent.copy(alpha = 0.14f))
                     .border(1.dp, colors.accent.copy(alpha = 0.42f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
@@ -298,26 +382,38 @@ private fun IdentityCard(
                 Text(
                     text = stringResource(R.string.settings_nickname_label),
                     color = colors.muted,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp)
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
                 )
                 BasicTextField(
                     value = state.nickname,
                     onValueChange = onNicknameChanged,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 2.dp)
+                        .padding(top = 3.dp)
                         .testTag("settings_nickname_input"),
                     singleLine = true,
                     textStyle = TextStyle(
                         color = colors.text,
                         fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        lineHeight = 21.sp
+                        fontSize = 16.sp,
+                        lineHeight = 20.sp
                     ),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                     decorationBox = { innerTextField ->
-                        Box {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.panelRaised.copy(alpha = 0.65f))
+                                .border(
+                                    1.dp,
+                                    colors.outline.copy(alpha = 0.58f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 9.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
                             if (state.nickname.isBlank()) {
                                 Text(
                                     text = stringResource(R.string.edit_text_hint),
@@ -336,7 +432,7 @@ private fun IdentityCard(
                             .padding(top = 2.dp)
                             .testTag("settings_nickname_feedback"),
                         color = colors.muted,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp)
                     )
                 }
             }
@@ -353,16 +449,16 @@ private fun IdentityCard(
             ) {
                 Box(
                     Modifier
-                        .size(32.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
-                        .background(colors.panelRaised)
-                        .border(1.dp, colors.outline, CircleShape),
+                        .background(colors.accent.copy(alpha = 0.14f))
+                        .border(1.dp, colors.accent.copy(alpha = 0.42f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_check_24),
                         contentDescription = null,
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.size(17.dp),
                         tint = colors.accent
                     )
                 }
@@ -382,26 +478,34 @@ private fun AudioCard(
         Triple(AudioRouteSelection.BLUETOOTH, "耳机", "settings_audio_route_button"),
         Triple(AudioRouteSelection.EARPIECE, "听筒", "settings_audio_earpiece_button"),
         Triple(AudioRouteSelection.SPEAKER, "外放", "settings_audio_speaker_button")
-    )
+    ).filter {state.earpieceAvailable || it.first!=AudioRouteSelection.EARPIECE}
     MotoComPanel(
         modifier = modifier.fillMaxSize(),
         containerColor = colors.panel.copy(alpha = 0.94f),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(13.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                painter = painterResource(R.drawable.ic_headset_24),
-                contentDescription = null,
-                modifier = Modifier.size(15.dp),
-                tint = colors.accent
-            )
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_headset_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = colors.accent
+                )
+            }
             Spacer(Modifier.width(7.dp))
             Text(
                 text = "音频",
                 color = colors.muted,
                 style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = 9.sp,
-                    letterSpacing = 1.5.sp
+                    fontSize = 11.sp,
+                    letterSpacing = 1.2.sp
                 )
             )
         }
@@ -411,14 +515,14 @@ private fun AudioCard(
             modifier = Modifier.testTag("settings_audio_source"),
             color = colors.text,
             style = MaterialTheme.typography.titleMedium.copy(
-                fontSize = 16.sp,
-                lineHeight = 20.sp
+                fontSize = 15.sp,
+                lineHeight = 19.sp
             ),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             routes.forEach { (route, label, tag) ->
                 val selected = state.preferredAudioRoute == route
                 Box(
@@ -436,21 +540,21 @@ private fun AudioCard(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(25.dp)
+                            .height(31.dp)
                             .clip(RoundedCornerShape(50))
                             .background(
                                 if (selected) {
-                                    colors.accent.copy(alpha = 0.15f)
+                                    colors.accent.copy(alpha = 0.18f)
                                 } else {
-                                    colors.panelRaised.copy(alpha = 0.7f)
+                                    colors.panelRaised.copy(alpha = 0.78f)
                                 }
                             )
                             .border(
                                 1.dp,
                                 if (selected) {
-                                    colors.accent.copy(alpha = 0.3f)
+                                    colors.accent.copy(alpha = 0.52f)
                                 } else {
-                                    colors.outline.copy(alpha = 0.55f)
+                                    colors.outline.copy(alpha = 0.65f)
                                 },
                                 RoundedCornerShape(50)
                             ),
@@ -459,7 +563,10 @@ private fun AudioCard(
                         Text(
                             text = label,
                             color = if (selected) colors.accent else colors.muted,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            ),
                             maxLines = 1
                         )
                     }
@@ -498,8 +605,8 @@ private fun VoxCard(
                 text = "VOX",
                 color = colors.muted,
                 style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = 9.sp,
-                    letterSpacing = 1.5.sp
+                    fontSize = 11.sp,
+                    letterSpacing = 1.2.sp
                 )
             )
             Spacer(Modifier.weight(1f))
@@ -518,17 +625,17 @@ private fun VoxCard(
                 style = TextStyle(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 31.sp,
-                    lineHeight = 32.sp,
+                    fontSize = 30.sp,
+                    lineHeight = 31.sp,
                     letterSpacing = (-1).sp
                 )
             )
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
                 text = "灵敏度",
                 modifier = Modifier.padding(bottom = 4.dp),
                 color = colors.muted,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
             )
         }
         Box(
@@ -565,11 +672,11 @@ private fun VoxCard(
                     .clearAndSetSemantics {},
                 enabled = state.voxEnabled,
                 valueRange = 0f..100f,
-                steps = 9,
+                steps = 0,
                 colors = SliderDefaults.colors(
                     thumbColor = colors.accent,
                     activeTrackColor = colors.accent,
-                    inactiveTrackColor = colors.outline,
+                    inactiveTrackColor = colors.outline.copy(alpha = 0.72f),
                     disabledThumbColor = colors.muted,
                     disabledActiveTrackColor = colors.outline,
                     disabledInactiveTrackColor = colors.outline.copy(alpha = 0.5f)
@@ -622,15 +729,16 @@ private fun SettingsSwitchCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(30.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .background(colors.accent.copy(alpha = 0.1f)),
+                    .background(colors.accent.copy(alpha = 0.12f))
+                    .border(1.dp, colors.accent.copy(alpha = 0.24f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     painter = painterResource(icon),
                     contentDescription = null,
-                    modifier = Modifier.size(15.dp),
+                    modifier = Modifier.size(16.dp),
                     tint = colors.accent
                 )
             }
@@ -640,15 +748,18 @@ private fun SettingsSwitchCard(
                     text = title,
                     color = colors.text,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp
                     )
                 )
                 description?.let {
                     Text(
                         text = it,
                         color = colors.muted,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        ),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -662,8 +773,27 @@ private fun SettingsSwitchCard(
             )
         }
         footer?.let {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(colors.outline.copy(alpha = 0.42f))
+            )
             Spacer(Modifier.height(6.dp))
-            it()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (checked) colors.accent.copy(alpha = 0.85f)
+                            else colors.muted.copy(alpha = 0.45f)
+                        )
+                )
+                Spacer(Modifier.width(6.dp))
+                it()
+            }
         }
     }
 }
@@ -693,40 +823,48 @@ private fun MoreGrid(
                     Row(
                         Modifier
                             .weight(1f)
-                            .heightIn(min = 50.dp)
-                            .clip(RoundedCornerShape(17.dp))
-                            .background(colors.panel.copy(alpha = 0.9f))
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(colors.panel.copy(alpha = 0.94f))
                             .border(
                                 1.dp,
-                                colors.hairline.copy(alpha = 0.05f),
-                                RoundedCornerShape(17.dp)
+                                colors.outline.copy(alpha = 0.65f),
+                                RoundedCornerShape(18.dp)
                             )
                             .testTag(tag)
                             .semantics { contentDescription = label }
                             .clickable(role = Role.Button, onClick = onClick)
-                            .padding(horizontal = 11.dp),
+                            .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            painter = painterResource(icon),
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = colors.accent
-                        )
+                        Box(
+                            Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(colors.accent.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(icon),
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = colors.accent
+                            )
+                        }
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = label,
                             modifier = Modifier.weight(1f),
                             color = colors.text,
-                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 11.sp),
+                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Icon(
                             painter = painterResource(R.drawable.ic_chevron_right_24),
                             contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                            tint = colors.outline
+                            modifier = Modifier.size(15.dp),
+                            tint = colors.muted
                         )
                     }
                 }

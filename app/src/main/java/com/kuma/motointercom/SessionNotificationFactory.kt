@@ -22,7 +22,8 @@ internal class SessionNotificationFactory(private val context: Context) {
         state: IntercomState,
         status: String,
         interruption: AudioInterruptionState,
-        running: Boolean
+        running: Boolean,
+        stopIntent: PendingIntent? = null
     ): Notification {
         ensureStatusChannel()
         val text = foregroundNotificationText(state, status, interruption)
@@ -39,6 +40,7 @@ internal class SessionNotificationFactory(private val context: Context) {
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setOngoing(running)
             .setContentIntent(contentIntent)
+            .apply { if (stopIntent != null) addAction(0,"结束对讲",stopIntent) }
             .build()
     }
 
@@ -67,6 +69,23 @@ internal class SessionNotificationFactory(private val context: Context) {
             .setContentIntent(contentIntent)
             .addAction(0, "拒绝本次", rejectIntent)
             .addAction(0, "接受", acceptIntent)
+            .build()
+    }
+
+    fun cloudRequestNotification(name: String,pairing: Boolean,expiresAt: Long,acceptIntent: PendingIntent,rejectIntent: PendingIntent): Notification {
+        ensureIncomingChannel()
+        val title=if(pairing) "$name 请求云端重新配对" else "$name 邀请云端对讲"
+        val openIntent=PendingIntent.getActivity(context,0,
+            android.content.Intent(context,MainActivity::class.java)
+                .setData(android.net.Uri.parse("motointercom://cloud/requests"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return builder(INCOMING_CHANNEL_ID).setSmallIcon(R.mipmap.ic_launcher).setContentTitle(title)
+            .setContentText(if(pairing) "确认后交换设备公钥并建立云端配对" else "接受后才进入云端语音房间")
+            .setCategory(Notification.CATEGORY_CALL).setPriority(Notification.PRIORITY_HIGH)
+            .setAutoCancel(false).setOnlyAlertOnce(true).setContentIntent(openIntent)
+            .addAction(0,"拒绝",rejectIntent).addAction(0,"接受",acceptIntent)
+            .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setTimeoutAfter((expiresAt-System.currentTimeMillis()).coerceAtLeast(1)) }
             .build()
     }
 
@@ -137,5 +156,7 @@ internal class SessionNotificationFactory(private val context: Context) {
         const val INCOMING_CHANNEL_ID = "incoming_confirmation"
         const val STATUS_NOTIFICATION_ID = 2601
         const val INCOMING_NOTIFICATION_ID = 2602
+        const val CLOUD_INVITE_NOTIFICATION_ID = 2603
+        const val CLOUD_PAIRING_NOTIFICATION_ID = 2604
     }
 }

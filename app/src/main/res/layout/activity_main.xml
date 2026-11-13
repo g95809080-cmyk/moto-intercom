@@ -129,7 +129,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:drawableStart="@drawable/ic_home_24"
+                android:drawableTop="@drawable/ic_home_24"
                 android:text="@string/nav_home" />
             <Button
                 android:id="@+id/bottom_nav_discover_button"
@@ -137,7 +137,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:drawableStart="@drawable/ic_radar_24"
+                android:drawableTop="@drawable/ic_radar_24"
                 android:text="@string/nav_discover" />
             <Button
                 android:id="@+id/bottom_nav_settings_button"
@@ -145,7 +145,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:drawableStart="@drawable/ic_settings_24"
+                android:drawableTop="@drawable/ic_settings_24"
                 android:text="@string/nav_settings" />
         </LinearLayout>
     </LinearLayout>

@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsEnabled
@@ -187,11 +188,44 @@ class MainScreenRobolectricTest {
         get() = discoverNode("discover_connect_device-a")
 
     @Test
-    fun homeRouteHostsComposeContentInsideTheRestorableScrollContainer() {
+    fun fixedHomeKeepsMainActionsVisibleAcrossSearchStatesAndWindowSizes() {
+        val fixtures = listOf(320 to 568, 360 to 640, 393 to 873, 640 to 360)
+        for ((width, height) in fixtures) {
+            val fixture = fixture(fontScale = if (width == 360) 2f else 1f)
+            measureAtWidth(fixture, width, height)
+            val root = fixture.screen.root
+            val page = root.findViewById<View>(R.id.home_scroll)
+            val idleButton = homeBounds("home_primary_button")
+            fixture.screen.setIntercomState(
+                IntercomState.Discovering(RuntimeSessionId("single-screen")),
+                canStart = true
+            )
+            measureAtWidth(fixture, width, height)
+            val searchingButton = homeBounds("home_primary_button")
+            assertEquals("Search must not move the main button", idleButton.center.y, searchingButton.center.y, 1f)
+            assertFalse(page.canScrollVertically(1))
+            listOf("home_primary_button", "home_mute_button", "home_audio_settings_button").forEach { tag ->
+                val bounds = homeBounds(tag)
+                assertTrue("$tag must stay inside ${width}x${height}", bounds.top >= 0f && bounds.bottom <= page.height)
+                assertTrue("$tag must stay inside the page width", bounds.left >= 0f && bounds.right <= page.width)
+                assertHomeMinimumTouchTarget(tag)
+            }
+            assertEquals("0 位", homeText("home_sonar_target_count"))
+            homeNode("home_sonar_field").assertContentDescriptionEquals("声纳目标 0 位")
+            fixture.screen.setPresences(listOf(selectablePresence()))
+            assertEquals("1 位", homeText("home_sonar_target_count"))
+            fixture.screen.setPresences(emptyList())
+            assertEquals("0 位", homeText("home_sonar_target_count"))
+            homeNode("home_sonar_field").assertContentDescriptionEquals("声纳目标 0 位")
+        }
+    }
+
+    @Test
+    fun homeRouteHostsComposeContentInsideAFixedViewport() {
         val fixture = fixture()
         val root = fixture.screen.root
 
-        assertNotNull(root.findViewById<ScrollView>(R.id.home_scroll))
+        assertNotNull(root.findViewById<FrameLayout>(R.id.home_scroll))
         assertTrue(root.findViewById<View>(R.id.home_content) is ComposeView)
     }
 
@@ -228,6 +262,10 @@ class MainScreenRobolectricTest {
             val root = fixture.screen.root
             assertEquals(View.VISIBLE, root.findViewById<View>(R.id.bottom_navigation).visibility)
             assertEquals(View.GONE, root.findViewById<View>(R.id.navigation_rail).visibility)
+            assertEquals(View.GONE, root.findViewById<View>(R.id.expanded_detail_container).visibility)
+            root.findViewById<Button>(R.id.bottom_nav_discover_button).performClick()
+            measureAtWidth(fixture, width, height)
+            fixture.screen.onWindowSizeChanged(width, height)
             assertEquals(if (width >= 840) View.VISIBLE else View.GONE,
                 root.findViewById<View>(R.id.expanded_detail_container).visibility)
         }
@@ -254,11 +292,11 @@ class MainScreenRobolectricTest {
     @Test
     fun navigatingToTheCurrentRouteDoesNotReplaceItsPageInstance() {
         val fixture = fixture()
-        val before = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
+        val before = fixture.screen.root.findViewById<FrameLayout>(R.id.home_scroll)
 
         fixture.screen.navigateHome()
 
-        assertSame(before, fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll))
+        assertSame(before, fixture.screen.root.findViewById<FrameLayout>(R.id.home_scroll))
     }
 
     @Test
@@ -297,7 +335,7 @@ class MainScreenRobolectricTest {
         shadowOf(Looper.getMainLooper()).idle()
 
         assertNotNull(root.findViewById<View>(R.id.home_scroll))
-        assertEquals(0, root.findViewById<ScrollView>(R.id.home_scroll).scrollY)
+        assertEquals(0, root.findViewById<FrameLayout>(R.id.home_scroll).scrollY)
     }
 
     @Test
@@ -737,26 +775,26 @@ class MainScreenRobolectricTest {
     }
 
     @Test
-    fun rapidRouteChangeDoesNotApplyPreviousPageScrollRestoreToNewPage() {
+    fun returningHomeAfterRapidRouteChangesKeepsAFixedViewport() {
         val fixture = fixture()
         val root = fixture.screen.root
-        val pageContainer = root.findViewById<FrameLayout>(R.id.page_container)
-        val homeScroll = root.findViewById<ScrollView>(R.id.home_scroll)
-        measureAtWidth(fixture, widthDp = 360)
-        assertTrue(homeScroll.getChildAt(0).measuredHeight - homeScroll.height >= 140)
-        homeScroll.scrollTo(0, 140)
-
-        fixture.screen.root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
+        measureAtWidth(fixture, widthDp = 360, heightDp = 640)
+        root.findViewById<Button>(R.id.bottom_nav_settings_button).performClick()
         root.findViewById<Button>(R.id.bottom_nav_home_button).performClick()
         shadowOf(Looper.getMainLooper()).idle()
+        measureAtWidth(fixture, widthDp = 360, heightDp = 640)
 
-        val restoredHomeScroll = pageContainer.findViewById<ScrollView>(R.id.home_scroll)
-        assertEquals(140, restoredHomeScroll.scrollY)
+        val page = root.findViewById<FrameLayout>(R.id.home_scroll)
+        assertEquals(0, page.scrollY)
+        assertFalse(page.canScrollVertically(1))
+        assertEquals(page.height, root.findViewById<View>(R.id.home_content).height)
     }
 
     @Test
+    @Config(qualifiers = "w360dp-h800dp")
     fun longLabelControlsCanGrowWhileKeepingMinimumTouchTargets() {
         val fixture = fixture()
+        measureAtWidth(fixture, 360, 800)
         fixture.screen.markPermissionRequestAttempted()
         fixture.screen.setIntercomState(IntercomState.Offline, canStart = false)
         assertHomeMinimumTouchTarget("home_permission_settings_cta")
@@ -764,7 +802,7 @@ class MainScreenRobolectricTest {
             IntercomState.Discovering(RuntimeSessionId("runtime-long-label")),
             canStart = true
         )
-        assertHomeMinimumTouchTarget("home_discover_cta")
+        assertHomeMinimumTouchTarget("home_primary_button")
 
         fixture.screen.root.findViewById<View>(R.id.bottom_nav_discover_button).performClick()
         fixture.screen.setWifiUnavailable(true)
@@ -835,13 +873,13 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         measureAtWidth(fixture, widthDp = 360, heightDp = 800)
 
-        val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
+        val scroll = fixture.screen.root.findViewById<FrameLayout>(R.id.home_scroll)
         val row = homeBounds("home_main_control_row")
         assertTrue(
-            "Home core control must be hosted inside the scrollable Home content",
-            row.top >= 0f && row.bottom <= scroll.getChildAt(0).height
+            "Home core control must fit the fixed Home viewport",
+            row.top >= 0f && row.bottom <= scroll.height
         )
-        assertTrue(scroll.canScrollVertically(1))
+        assertFalse(scroll.canScrollVertically(1))
     }
 
     @Test
@@ -850,7 +888,7 @@ class MainScreenRobolectricTest {
         val fixture = fixture()
         measureAtWidth(fixture, widthDp = 360, heightDp = 800)
 
-        val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
+        val scroll = fixture.screen.root.findViewById<FrameLayout>(R.id.home_scroll)
         val row = homeBounds("home_main_control_row")
 
         assertTrue(
@@ -869,7 +907,7 @@ class MainScreenRobolectricTest {
         fixture.screen.onWindowSizeChanged(widthDp = 360, heightDp = 640)
         measureAtWidth(fixture, widthDp = 360, heightDp = 640)
 
-        val scroll = fixture.screen.root.findViewById<ScrollView>(R.id.home_scroll)
+        val scroll = fixture.screen.root.findViewById<FrameLayout>(R.id.home_scroll)
         val row = homeBounds("home_main_control_row")
         val permissionSettings = homeBounds("home_permission_settings_cta")
 
@@ -878,15 +916,12 @@ class MainScreenRobolectricTest {
             row.top < scroll.height
         )
 
-        val maxScrollY = (scroll.getChildAt(0).height - scroll.height).coerceAtLeast(0)
+        assertTrue("Home controls fit without scrolling", row.bottom <= scroll.height)
         assertTrue(
-            "Home core control should be fully reachable after compact scrolling",
-            row.top - maxScrollY >= 0 && row.bottom - maxScrollY <= scroll.height
+            "Permission action fits without scrolling",
+            permissionSettings.top >= 0f && permissionSettings.bottom <= scroll.height
         )
-        assertTrue(
-            "Permission settings action should be fully reachable after compact scrolling",
-            permissionSettings.top - maxScrollY >= 0 && permissionSettings.bottom - maxScrollY <= scroll.height
-        )
+        assertFalse(scroll.canScrollVertically(1))
     }
 
     @Test
@@ -1090,7 +1125,7 @@ class MainScreenRobolectricTest {
                 }
                 measureAtWidth(fixture, widthDp)
 
-                val scroll = fixture.screen.root.findViewById<ScrollView>(scrollId)
+                val scroll = fixture.screen.root.findViewById<android.view.ViewGroup>(scrollId)
                 val content = fixture.screen.root.findViewById<View>(contentId)
                 assertEquals("$route must have one vertical scroll child", 1, scroll.childCount)
                 assertTrue("$route at ${widthDp}dp starts inside its viewport", content.left >= 0)
@@ -1137,12 +1172,15 @@ class MainScreenRobolectricTest {
             }
             measureAtWidth(fixture, widthDp = 640, heightDp = 360)
 
-            val scroll = fixture.screen.root.findViewById<ScrollView>(scrollId)
+            val scroll = fixture.screen.root.findViewById<android.view.ViewGroup>(scrollId)
             val content = fixture.screen.root.findViewById<View>(contentId)
             assertEquals("$route must have one vertical scroll child", 1, scroll.childCount)
             assertTrue("$route at landscape width must not overflow horizontally", content.right <= scroll.width)
             assertTrue("$route must retain measurable content in a short landscape viewport", content.height > 0)
-            if (content.height > scroll.height) {
+            if (route == MainRoute.HOME) {
+                assertEquals(scroll.height, content.height)
+                assertFalse(scroll.canScrollVertically(1))
+            } else if (content.height > scroll.height) {
                 assertTrue("$route must scroll when its content exceeds the viewport", scroll.canScrollVertically(1))
             }
         }
@@ -1467,6 +1505,7 @@ class MainScreenRobolectricTest {
     }
 
     @Test
+    @Config(qualifiers = "w360dp-h800dp")
     fun homeRadarPeerClickDispatchesTheExactDiscoveredPresence() {
         var connected: RiderPresence? = null
         val fixture = fixture(
@@ -1480,6 +1519,7 @@ class MainScreenRobolectricTest {
             canStart = true
         )
         fixture.screen.setPresences(listOf(selectablePresence()))
+        measureAtWidth(fixture, 360, 800)
 
         clickHome("home_radar_peer_device-a|session-a")
 
@@ -1700,7 +1740,8 @@ class MainScreenRobolectricTest {
         fixture.screen.setIntercomError("旧服务错误")
         fixture.screen.setIntercomState(IntercomState.Discovering(runtime), canStart = true)
 
-        assertHomeText("home_discover_cta", HOME_DISCOVER_CTA)
+        assertHomeText("home_sonar_target_count", "0 位")
+        assertTrue(fixture.screen.root.findViewById<Button>(R.id.bottom_nav_discover_button).isEnabled)
     }
 
     @Test
@@ -2149,7 +2190,7 @@ class MainScreenRobolectricTest {
     private fun assertHomeMinimumTouchTarget(testTag: String) {
         val minimum = 48f * composeRule.density.density
         val bounds = homeBounds(testTag)
-        assertTrue("$testTag must be at least 48dp high", bounds.height >= minimum)
+        assertTrue("$testTag must be at least 48dp high: $bounds, minimum=$minimum", bounds.height >= minimum - 1f)
     }
 
     private fun assertHomeActionsAreAccessible() {

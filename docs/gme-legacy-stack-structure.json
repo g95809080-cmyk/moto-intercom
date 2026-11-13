@@ -1,0 +1,86 @@
+{
+  "sourceStack": "motocom-gme-ticket",
+  "region": "ap-southeast-2",
+  "resources": {
+    "TicketFunctionRole": {
+      "type": "AWS::IAM::Role",
+      "properties": [
+        "AssumeRolePolicyDocument",
+        "Policies"
+      ]
+    },
+    "TicketFunction": {
+      "type": "AWS::Lambda::Function",
+      "properties": [
+        "FunctionName",
+        "Description",
+        "Runtime",
+        "Handler",
+        "Code",
+        "MemorySize",
+        "Timeout",
+        "Architectures",
+        "Role",
+        "Environment"
+      ]
+    },
+    "TicketApi": {
+      "type": "AWS::ApiGatewayV2::Api",
+      "properties": [
+        "Name",
+        "ProtocolType",
+        "Description"
+      ]
+    },
+    "TicketIntegration": {
+      "type": "AWS::ApiGatewayV2::Integration",
+      "properties": [
+        "ApiId",
+        "IntegrationType",
+        "IntegrationUri",
+        "PayloadFormatVersion",
+        "TimeoutInMillis"
+      ]
+    },
+    "TicketRoute": {
+      "type": "AWS::ApiGatewayV2::Route",
+      "properties": [
+        "ApiId",
+        "RouteKey",
+        "AuthorizationType",
+        "Target"
+      ]
+    },
+    "TicketStage": {
+      "type": "AWS::ApiGatewayV2::Stage",
+      "properties": [
+        "ApiId",
+        "StageName",
+        "AutoDeploy",
+        "DefaultRouteSettings"
+      ]
+    },
+    "TicketInvokePermission": {
+      "type": "AWS::Lambda::Permission",
+      "properties": [
+        "Action",
+        "FunctionName",
+        "Principal",
+        "SourceArn"
+      ]
+    }
+  },
+  "parameters": [
+    "ProjectName",
+    "GmeAppId",
+    "GmeAppKeySecretArn",
+    "ClientTokenSecretArn",
+    "RoomSaltSecretArn",
+    "TicketTtlSeconds"
+  ],
+  "outputs": [
+    "TicketEndpoint",
+    "FunctionName",
+    "ApiId"
+  ]
+}

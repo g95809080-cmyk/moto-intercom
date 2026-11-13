@@ -82,7 +82,8 @@ internal class WifiDirectTunnel(
     private val localP2pAddressResolver: ((String?) -> Inet4Address?)? = null,
     private val captureConnectionLoss: (ConnectionAttempt) -> ConnectionLossObservation? = { null },
     private val onSelectedGroupLost: (ConnectionAttempt, ConnectionLossObservation) -> Unit = { _, _ -> },
-    private val onTargetedTransportFailed: (ConnectionAttempt, String) -> Unit = { _, _ -> }
+    private val onTargetedTransportFailed: (ConnectionAttempt, String) -> Unit = { _, _ -> },
+    private val onSelectedChannelLost: (ConnectionAttempt) -> Unit = {}
 ) : Closeable {
 
     val observationSource = FreshDiscoverySource(Transport.WIFI_DIRECT)
@@ -159,6 +160,8 @@ internal class WifiDirectTunnel(
     )
     private val closeLock = Any()
     private val closeCallbacks = mutableListOf<() -> Unit>()
+    private val closeRelease = ResourceReleaseBarrier()
+    private var closeSuccessful = true
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -540,6 +543,11 @@ internal class WifiDirectTunnel(
 
     override fun close() = close {}
 
+    internal fun closeWhenReleased(callback: (Boolean) -> Unit) {
+        closeRelease.whenReleased(callback)
+        close()
+    }
+
     internal fun close(onComplete: () -> Unit) {
         observationSource.close()
         var startCleanup = false
@@ -617,7 +625,7 @@ internal class WifiDirectTunnel(
             postDelayed = { callback, delay -> mainHandler.postDelayed(callback, delay) },
             removeCallbacks = mainHandler::removeCallbacks,
             stepTimeoutMillis = CLOSE_STEP_TIMEOUT_MS,
-            onError = { failure -> Log.w(TAG, "close sequence failure", failure) }
+            onError = { failure -> closeSuccessful = false; Log.w(TAG, "close sequence failure", failure) }
         ).start()
     }
 
@@ -659,12 +667,14 @@ internal class WifiDirectTunnel(
                             BUSY_RETRY_DELAY_MS
                         )
                     } else {
+                        closeSuccessful = false
                         onComplete()
                     }
                 }
             })
         } catch (t: Throwable) {
             Log.w(TAG, "removeGroup failure during close", t)
+            closeSuccessful = false
             onComplete()
         }
     }
@@ -683,11 +693,13 @@ internal class WifiDirectTunnel(
 
                 override fun onFailure(reason: Int) {
                     Log.w(TAG, "$label failure during close: ${reasonText(reason)}")
+                    closeSuccessful = false
                     onComplete()
                 }
             })
         } catch (t: Throwable) {
             Log.w(TAG, "$label failure during close", t)
+            closeSuccessful = false
             onComplete()
         }
     }
@@ -706,11 +718,13 @@ internal class WifiDirectTunnel(
                 c?.close()
             } catch (t: Throwable) {
                 Log.w(TAG, "channel close failure", t)
+                closeSuccessful = false
             }
         }
         channel = null
         manager = null
         Log.d(TAG, "close cleanup finished generation=$generation")
+        closeRelease.complete(closeSuccessful)
         notifyCloseCompleted()
     }
 
@@ -1272,6 +1286,7 @@ internal class WifiDirectTunnel(
                     if (selected != null && loss?.sourceAttempt == selected) onSelectedGroupLost(selected, loss)
                     else if (task != null && isTargetedContextCurrent(task))
                         onTargetedTransportFailed(task.attempt, "native P2P group lost")
+                    if (selected != null) onSelectedChannelLost(selected)
                     onDisconnected()
                     if (isCapturedTaskCurrent(task) && !removingGroup) {
                         if (!serviceDiscoveryReady) setupServiceDiscovery() else discoverPeers()

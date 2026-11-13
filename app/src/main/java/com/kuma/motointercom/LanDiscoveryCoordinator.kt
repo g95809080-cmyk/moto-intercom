@@ -43,7 +43,8 @@ internal class LanDiscoveryCoordinator(
         MonotonicTimestamp(SystemClock.elapsedRealtime())
     },
     private val onFreshObservation: (FreshDiscoveryObservation) -> Unit = {},
-    private val onTargetedConnectFailure: (ConnectionAttempt, Throwable) -> Unit = { _, failure -> onError(failure) }
+    private val onTargetedConnectFailure: (ConnectionAttempt, Throwable) -> Unit = { _, failure -> onError(failure) },
+    private val bindBroadcastToWifi: Boolean = false
 ) : Closeable {
     private val context = context.applicationContext
     private val closed = AtomicBoolean(false)
@@ -375,6 +376,7 @@ internal class LanDiscoveryCoordinator(
     private fun runLanUdpBroadcaster(localIp: String) {
         try {
             DatagramSocket().use { socket ->
+                if(bindBroadcastToWifi) resolveWifiSocketRoute().first.bindSocket(socket)
                 socket.broadcast = true
                 val target = InetAddress.getByName("255.255.255.255")
                 while (isActive()) {

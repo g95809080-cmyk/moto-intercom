@@ -1,0 +1,23 @@
+{
+  "name": "motocom-gme-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/control-plane.mjs && node --check src/local-switch.mjs && node --check src/aws-store.mjs && node --check src/index.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-apigatewaymanagementapi": "3.1165.0",
+    "@aws-sdk/client-dynamodb": "3.1165.0",
+    "@aws-sdk/client-secrets-manager": "3.1165.0",
+    "@aws-sdk/lib-dynamodb": "3.1165.0",
+    "@aws-sdk/util-dynamodb": "3.996.9"
+  },
+  "devDependencies": {
+    "ws": "8.22.0"
+  }
+}

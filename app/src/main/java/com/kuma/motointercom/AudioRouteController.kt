@@ -94,6 +94,19 @@ internal class AudioRouteController(
     private val receiverRegistered = AtomicBoolean(false)
     private val audioDeviceCallbackRegistered = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
+    private val releaseBarrier=ResourceReleaseBarrier()
+    private val restoreFailed=AtomicBoolean(false)
+    private var mayRestore: ()->Boolean = { true }
+    private var discardInitialPhoneRoute=false
+    override fun whenReleased(callback: (Boolean)->Unit) = releaseBarrier.whenReleased(callback)
+    fun restrictRestoreTo(allowed: ()->Boolean) { mayRestore=allowed }
+    fun snapshotBeforeSdk(neutralAfterPhone: Boolean=false) {
+        check(!closed.get())
+        discardInitialPhoneRoute=neutralAfterPhone
+        if(neutralAfterPhone) { initialMode=AudioManager.MODE_NORMAL; initialSpeakerphoneOn=false }
+        else captureInitialState()
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) modernRoute()
+    }
     private val routeRequestLock = Any()
     private var routeRequest = VersionedAudioRouteSelection(0, AudioRouteSelection.BLUETOOTH)
 
@@ -408,13 +421,13 @@ internal class AudioRouteController(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val route = modernRoute
                     modernRoute = null
-                    if (restoreInitialState) {
+                    if (restoreInitialState && mayRestore()) {
                         restoreStep { initialMode?.let { audioManager.mode = it } }
                     }
-                    restoreStep { route?.close(restoreInitialState) }
+                    restoreStep { route?.close(restoreInitialState && mayRestore()) }
                 } else {
                     restoreStep { stopLegacySco() }
-                    if (restoreInitialState) {
+                    if (restoreInitialState && mayRestore()) {
                         restoreStep {
                             initialSpeakerphoneOn?.let {
                                 @Suppress("DEPRECATION")
@@ -427,6 +440,7 @@ internal class AudioRouteController(
             } finally {
                 unregisterReceiver()
                 unregisterAudioDeviceCallback()
+                releaseBarrier.complete(!restoreFailed.get())
             }
         }
     }
@@ -444,6 +458,7 @@ internal class AudioRouteController(
         try {
             action()
         } catch (t: Throwable) {
+            restoreFailed.set(true)
             logError(t)
         }
     }
@@ -489,6 +504,7 @@ internal class AudioRouteController(
         return modernRoute ?: (
             modernRouteFactory?.invoke() ?: ModernAudioRoute(
                 audioManager = audioManager,
+                restoreInitialDevice = !discardInitialPhoneRoute,
                 callbackExecutor = ROUTE_EXECUTOR,
                 onBluetoothConnected = { name ->
                     if (!closed.get() && wantBluetoothSco) publishBluetoothConnected(name)

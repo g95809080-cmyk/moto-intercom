@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertContentDescriptionEquals
@@ -35,6 +36,28 @@ import org.robolectric.annotation.Config
 class DiscoverScreenComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun emptyDiscoveryHasNoSyntheticSonarTargets() {
+        val state = mutableStateOf(DiscoverScreenUiState(
+            presentation = DiscoverPresentation(false, false, null, emptyList(), emptyList()),
+            stateText = "正在搜索",
+            supplementalText = null,
+            radarRunning = true,
+            animationsEnabled = false
+        ))
+        composeRule.setContent {
+            MotoComTheme {
+                MotoComDiscoverScreen(
+                    state = state.value,
+                    onBack = {}, onHelp = {}, onStart = {}, onWifiSettings = {},
+                    onRescan = {}, onSelectPresence = {}, onConnect = {}, onManagePairing = {}
+                )
+            }
+        }
+        composeRule.onNodeWithTag("discover_sonar_field")
+            .assertContentDescriptionEquals("声纳目标 0 位")
+    }
 
     @Test
     fun offlinePairingCopyWaitsForAvailabilityRatherThanClaimingIdentityVerification() {

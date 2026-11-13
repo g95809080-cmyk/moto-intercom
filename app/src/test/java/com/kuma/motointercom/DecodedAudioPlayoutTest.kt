@@ -10,6 +10,38 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class DecodedAudioPlayoutTest {
+    @Test fun pauseFenceWaitsForDelayedConstructionAndItsRelease() {
+        val entered=CountDownLatch(1);val finish=CountDownLatch(1);val done=CountDownLatch(1)
+        val device=Device(9)
+        val output=DecodedAudioPlayout({true},{},{},{}) {_,_->
+            entered.countDown()
+            while(finish.count>0)try {finish.await()}catch(_: InterruptedException){}
+            device
+        }
+        try {
+            output.resume(1);send(output);assertTrue(entered.await(2,TimeUnit.SECONDS))
+            var success=false
+            output.pauseWhenReleased {success=it;done.countDown()}
+            assertFalse(done.await(100,TimeUnit.MILLISECONDS))
+            finish.countDown();assertTrue(done.await(2,TimeUnit.SECONDS));assertTrue(success)
+            assertEquals(0,device.closed.count)
+        } finally {finish.countDown();output.close()}
+    }
+    @Test fun failedDeviceReleaseRemainsFailedForLaterSubscribers() {
+        val written=CountDownLatch(1);val done=CountDownLatch(1)
+        val output=DecodedAudioPlayout({true},{},{},{}) {_,_->object : PcmPlayback {
+            override val sessionId=4;override var playing=false
+            override fun play(){playing=true}
+            override fun write(bytes: ByteArray,offset: Int,length: Int): Int {written.countDown();return length}
+            override fun close(){error("Release failed")}
+        }}
+        try {
+            output.resume(1);send(output);assertTrue(written.await(2,TimeUnit.SECONDS))
+            var first=true;output.pauseWhenReleased {first=it;done.countDown()}
+            assertTrue(done.await(2,TimeUnit.SECONDS));assertFalse(first)
+            var later=true;output.pauseWhenReleased {later=it};assertFalse(later)
+        } finally {output.close()}
+    }
     private class Device(override val sessionId: Int) : PcmPlayback {
         @Volatile override var playing = false
         val closed = CountDownLatch(1)

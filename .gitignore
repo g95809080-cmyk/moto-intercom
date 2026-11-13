@@ -21,3 +21,10 @@ hs_err_pid*
 Thumbs.db
 app/libs/*.aar
 app/libs/*.aar.bak
+app/libs/gme/
+**/node_modules/
+backend/gme-control-plane/.build/
+.gme-*.tmp
+__pycache__/
+*.py[cod]
+tmp/

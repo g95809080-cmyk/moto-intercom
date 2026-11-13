@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +57,7 @@ internal class DesignPreviewActivity : ComponentActivity() {
                         SCREEN_DISCOVER -> ConnectedDiscoverPreview()
                         SCREEN_SETTINGS -> ConnectedSettingsPreview()
                         SCREEN_HOME_DISCOVERING -> DiscoveringHomePreview()
+                        "home-empty" -> DiscoveringHomePreview(empty = true)
                         else -> ConnectedHomePreview()
                     }
                 }
@@ -104,9 +107,9 @@ private fun ConnectedHomePreview() {
 }
 
 @androidx.compose.runtime.Composable
-private fun DiscoveringHomePreview() {
+private fun DiscoveringHomePreview(empty: Boolean = false) {
     val previewPeers = remember {
-        listOf(
+        if (empty) emptyList() else listOf(
             RadarPreviewPeer(
                 id = "zhang-yishan",
                 label = "张一山"
@@ -140,7 +143,9 @@ private fun DiscoveringHomePreview() {
             discovering = true,
             connected = false,
             muteEnabled = true,
-            animationsEnabled = true
+            animationsEnabled = true,
+            cloudStatusText = "邀请已配对摩友",
+            cloudActionLabel = "邀请"
         ),
         radarPreviewPeers = previewPeers.map { it.copy(selected = it.id == selectedPeerId) },
         onRadarPreviewPeerClick = { selectedPeerId = it.id },
@@ -245,6 +250,7 @@ private fun previewCandidate(endpointId: String, isAvailable: Boolean) =
 @androidx.compose.runtime.Composable
 private fun ConnectedSettingsPreview() {
     MotoComSettingsScreen(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
         state = SettingsScreenUiState(
             nickname = "骑行者 A",
             nicknameFeedback = "",

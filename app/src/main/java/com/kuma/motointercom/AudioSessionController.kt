@@ -11,6 +11,7 @@ internal interface RiderAudioRoute : Closeable {
     fun select(selection: AudioRouteSelection)
     fun suspendForInterruption(restoreMode: Boolean = false) = Unit
     fun closeRoute(restoreInitialState: Boolean) = close()
+    fun whenReleased(callback: (Boolean)->Unit) { callback(true) }
 }
 
 /** Owns audio platform resources for one online runtime. */
@@ -23,6 +24,7 @@ internal class AudioSessionController(
 
     private val lock = Any()
     private var closed = false
+    private val releaseBarrier=ResourceReleaseBarrier()
     private var activeLease: Any? = null
     private var activeSession: RiderMediaSession? = null
     private var preferredAudioRoute = initialAudioRoute
@@ -190,14 +192,21 @@ internal class AudioSessionController(
         closeSafely(session)
         closeSafely(audioCoordinator)
         closeSafely(engine)
-        runCatching {
-            route.closeRoute(
-                restoreInitialState = !phoneCallActive
-            )
-        }.exceptionOrNull()?.let {
-            if (failure == null) failure = it else failure?.addSuppressed(it)
+        engine.whenReleased { nativeReleased ->
+            // Native stop can reset AudioManager mode; restore routing after it.
+            runCatching {
+                route.closeRoute(restoreInitialState = !phoneCallActive)
+            }.exceptionOrNull()?.let {
+                if (failure == null) failure = it else failure?.addSuppressed(it)
+            }
+            route.whenReleased { releaseBarrier.complete(nativeReleased && it && failure==null) }
         }
         failure?.let { throw it }
+    }
+
+    fun closeWhenReleased(onReleased: (Boolean)->Unit) {
+        runCatching { close() }
+        releaseBarrier.whenReleased(onReleased)
     }
 
     private fun cancelIoCheck() {
@@ -307,11 +316,13 @@ internal class AudioSessionController(
                     onRouteReady = { coordinator?.onRouteReady() },
                     onRouteInvalidated = { coordinator?.reapplyPreferredRoute() }
                 )
+                val phone = AndroidIntercomPhoneState(context)
+                route.restrictRestoreTo { !phone.isCallActiveNow() }
                 coordinator = CommunicationAudioCoordinator(
                     engine = engine,
                     route = route,
                     audioFocus = AndroidIntercomAudioFocus(context),
-                    phoneState = AndroidIntercomPhoneState(context),
+                    phoneState = phone,
                     activateRoute = {
                         route.select(controller?.preferredAudioRoute() ?: initialAudioRoute)
                     },

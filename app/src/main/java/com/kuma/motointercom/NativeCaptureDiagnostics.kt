@@ -7,6 +7,20 @@ import org.webrtc.audio.JavaAudioDeviceModule
  * Field names are pinned with WebRTC 1.3.9 and kept for R8; diagnostic failure is nonfatal.
  */
 internal object NativeCaptureDiagnostics {
+    data class CaptureSnapshot(val record: AudioRecord?,val thread: Thread?)
+    fun captureSnapshot(module: JavaAudioDeviceModule?): CaptureSnapshot? = runCatching {
+        if(module==null)CaptureSnapshot(null,null) else {
+            val input=module.javaClass.getDeclaredField("audioInput").run {isAccessible=true;get(module)}
+            val record=input.javaClass.getDeclaredField("audioRecord").run {isAccessible=true;get(input) as AudioRecord?}
+            val thread=input.javaClass.getDeclaredField("audioThread").run {isAccessible=true;get(input) as Thread?}
+            CaptureSnapshot(record,thread)
+        }
+    }.getOrNull()
+    fun recordingStopped(module: JavaAudioDeviceModule?,previous: Collection<Thread> = emptyList()): Boolean = runCatching {
+        val snapshot=captureSnapshot(module) ?: return false
+        (snapshot.record==null || snapshot.record.recordingState==AudioRecord.RECORDSTATE_STOPPED) &&
+            (snapshot.thread==null || !snapshot.thread.isAlive) && previous.none {it.isAlive}
+    }.getOrDefault(false)
     fun currentProducer(module: JavaAudioDeviceModule?, recording: Boolean): Thread? = runCatching {
         if (module == null) null else {
             val side = if (recording) "audioInput" else "audioOutput"

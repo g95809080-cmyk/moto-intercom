@@ -66,11 +66,12 @@ internal data class RiderAudioIoRouteSnapshot(
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET
 }
 
-internal interface RiderMediaEngine : Closeable {
+internal interface RiderMediaEngine : Closeable, CommunicationAudioTarget {
     fun updateAudioControls(controls: VersionedAudioControls)
     fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
-    fun suspendAudio() = Unit
-    fun resumeAudio() = Unit
+    override fun suspendAudio() = Unit
+    override fun resumeAudio() = Unit
+    fun whenReleased(callback: (Boolean)->Unit) { callback(true) }
 }
 
 internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
@@ -98,10 +99,13 @@ internal class RiderAudioEngine(
         revision = 0,
         settings = AudioControlSettings()
     ),
-    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
+    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
+    initialAudioIoEnabled: Boolean = true,
+    private val opusDtxEnabled: Boolean = true
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
+    private val opusFmtp=if(opusDtxEnabled)OPUS_FMTP else OPUS_FMTP.replace("usedtx=1","usedtx=0")
     private val mainHandler = Handler(Looper.getMainLooper())
     private val rtc: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -146,7 +150,10 @@ internal class RiderAudioEngine(
     // takes this mutex; session registration/removal uses a separate lock.
     private val audioIoLock = Any()
     @Volatile private var activeSession: MediaSession? = null
-    private val audioIoGate = AudioIoGate(audioIoLock, true,
+    private val playouts=java.util.concurrent.ConcurrentLinkedQueue<DecodedAudioPlayout>()
+    private val retiredProducers=java.util.concurrent.ConcurrentLinkedQueue<Thread>()
+    private val captureWitnessFailed=AtomicBoolean(false)
+    private val audioIoGate = AudioIoGate(audioIoLock, initialAudioIoEnabled,
         { work -> runRtc(allowClosed = true, block = work) }, ::applyNativeAudioIo)
     private val audioSuspended get() = !audioIoGate.allows(audioIoGate.revision())
 
@@ -191,6 +198,9 @@ internal class RiderAudioEngine(
     }
 
     private fun revokeNativeProducers() {
+        val snapshot=NativeCaptureDiagnostics.captureSnapshot(audioDeviceModule)
+        if(snapshot==null)captureWitnessFailed.set(true)
+        snapshot?.thread?.let {if(it !in retiredProducers)retiredProducers.add(it)}
         recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
         activeSession?.playout?.pause()
         ioEvidence.recording(false)
@@ -199,6 +209,21 @@ internal class RiderAudioEngine(
 
     override fun resumeAudio() {
         audioIoGate.request(true)
+    }
+
+    override fun whenAudioApplied(enabled: Boolean,callback: (Boolean)->Unit) {
+        val revision=audioIoGate.revision()
+        runRtc(allowClosed=true,onFailure={callback(false)}) {
+            val current=!closed.get() && engineState==EngineState.READY && audioIoGate.revision()==revision &&
+                audioIoGate.allows(revision)==enabled
+            if(!current) callback(false)
+            else if(enabled) callback(true)
+            else {
+                whenPlayoutsReleased { callback(it && !closed.get() && !captureWitnessFailed.get() &&
+                    audioIoGate.revision()==revision && !audioIoGate.allows(revision) &&
+                    NativeCaptureDiagnostics.recordingStopped(audioDeviceModule,retiredProducers)) }
+            }
+        }
     }
 
     private fun applyNativeAudioIo(enabled: Boolean) {
@@ -319,6 +344,19 @@ internal class RiderAudioEngine(
         }
     }
 
+    private val releaseBarrier = ResourceReleaseBarrier()
+    private fun whenPlayoutsReleased(callback: (Boolean)->Unit) {
+        val players=playouts.toList()
+        if(players.isEmpty()) {callback(true);return}
+        val remaining=java.util.concurrent.atomic.AtomicInteger(players.size)
+        val ok=java.util.concurrent.atomic.AtomicBoolean(true)
+        players.forEach {it.pauseWhenReleased {success ->
+            if(!success)ok.set(false)
+            if(remaining.decrementAndGet()==0)callback(ok.get())
+        }}
+    }
+    override fun whenReleased(callback: (Boolean)->Unit) = releaseBarrier.whenReleased(callback)
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         audioIoGate.close()
@@ -327,7 +365,8 @@ internal class RiderAudioEngine(
             activeSession.also { activeSession = null }
         }
         session?.markClosed()
-        runRtc(allowClosed = true, onFailure = ::postEngineError) {
+        runRtc(allowClosed = true, onFailure = { releaseBarrier.complete(false); postEngineError(it) }) {
+            var released=false
             try {
                 engineState = EngineState.CLOSED
                 runAllCleanupSteps(
@@ -335,9 +374,13 @@ internal class RiderAudioEngine(
                     ::disposeMediaSessionResources,
                     ::disposePlatformResources
                 )
+                released=true
             } catch (t: Throwable) {
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
+                val nativeReleased=released
+                whenPlayoutsReleased {releaseBarrier.complete(nativeReleased && it && !captureWitnessFailed.get() &&
+                    NativeCaptureDiagnostics.recordingStopped(audioDeviceModule,retiredProducers))}
                 rtc.shutdown()
             }
         }
@@ -941,7 +984,7 @@ internal class RiderAudioEngine(
             lines[fmtpIndex] = mergeOpusFmtp(lines[fmtpIndex])
         } else {
             val rtpmapIndex = lines.indexOfFirst { it.startsWith("a=rtpmap:$opusPayload") }
-            lines.add(rtpmapIndex + 1, "a=fmtp:$opusPayload ${OPUS_FMTP}")
+            lines.add(rtpmapIndex + 1, "a=fmtp:$opusPayload ${opusFmtp}")
         }
         return lines.joinToString("\r\n", postfix = "\r\n")
     }
@@ -955,7 +998,7 @@ internal class RiderAudioEngine(
                 val value = it.substringAfter('=', "")
                 params[key] = value
             }
-        OPUS_FMTP.split(';').map { it.trim() }.forEach {
+        opusFmtp.split(';').map { it.trim() }.forEach {
             params[it.substringBefore('=')] = it.substringAfter('=', "")
         }
         return prefix + " " + params.entries.joinToString(";") {
@@ -1067,6 +1110,7 @@ internal class RiderAudioEngine(
                 if (activeSession === this && !closed.get()) audioDeviceFailure("playout", error.message ?: error.javaClass.simpleName)
             }
         )
+        .also {playouts.add(it)}
         private val statsPending = AtomicBoolean(false)
 
         override fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) {

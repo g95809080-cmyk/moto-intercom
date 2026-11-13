@@ -23,6 +23,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SignalingControlCoordinatorTest {
+    @Test fun cloudLossEffectWaitsForNativeSelfHealWindowAndIsIssuedOnce() = runBlocking {
+        harness(cloudFallbackEnabled=true).use { h ->
+            val source=NativeConnectionObservationSource()
+            val (connected,_)=connectOwnedNativeSource(h,source)
+            h.drainEffects()
+            observeNativeLoss(h,connected,source)
+            val window=requireNotNull(h.orchestrator.connectedLossWindow)
+            assertTrue(h.drainEffects().none { it is SessionEffect.LocalRideLost })
+            h.advanceBy(2_000)
+            assertTrue(h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window)))
+            assertEquals(listOf(connected.attempt),h.drainEffects().filterIsInstance<SessionEffect.LocalRideLost>().map {it.attempt})
+            h.orchestrator.dispatchAndAwait(SessionEvent.ConnectedLossObservationDue(window))
+            assertTrue(h.drainEffects().none { it is SessionEffect.LocalRideLost })
+        }
+    }
+    @Test fun selfHealedNativeLossAndExplicitPeerEndCannotProduceCloudFallback() = runBlocking {
+        harness(cloudFallbackEnabled=true).use { h ->
+            val source=NativeConnectionObservationSource()
+            val (connected,owner)=connectOwnedNativeSource(h,source)
+            h.drainEffects()
+            observeNativeLoss(h,connected,source)
+            h.advanceBy(100)
+            val healed=requireNotNull(source.capture(org.webrtc.PeerConnection.PeerConnectionState.CONNECTED,h.nowElapsedMs,600L) {error("No new loss")})
+            h.orchestrator.dispatchAndAwait(SessionEvent.WebRtcStateChanged(RUNTIME_A,connected.attemptId,WebRtcConnectionState.CONNECTED,healed.wallMs,healed))
+            assertTrue(h.drainEffects().none {it is SessionEffect.LocalRideLost})
+            h.orchestrator.dispatchAndAwait(SessionEvent.RemoteDisconnect(RUNTIME_A,connected.attemptId,owner.channelId,owner.wireRequestKey,DisconnectReason.parse("LOCAL_DISCONNECT")))
+            val effects=h.drainEffects()
+            assertTrue(effects.any {it is SessionEffect.LocalRideEnded})
+            assertTrue(effects.none {it is SessionEffect.LocalRideLost})
+            h.orchestrator.dispatchAndAwait(SessionEvent.SignalingDisconnected(RUNTIME_A,connected.attemptId))
+            assertTrue(h.drainEffects().none {it is SessionEffect.LocalRideLost})
+        }
+    }
     @Test fun nativeLossAlreadyHealedBeforeBothActorDeliveriesCannotContaminateNextEpisode() = runBlocking {
         harness().use { h ->
             val source = NativeConnectionObservationSource()
@@ -4520,13 +4553,15 @@ class SignalingControlCoordinatorTest {
     private fun harness(
         pairedDeviceIds: Set<String> = emptySet(),
         attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
-        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined
-    ) = Harness(pairedDeviceIds, attemptIdFactory, dispatcher)
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        cloudFallbackEnabled: Boolean = false
+    ) = Harness(pairedDeviceIds, attemptIdFactory, dispatcher,cloudFallbackEnabled)
 
     private class Harness(
         pairedDeviceIds: Set<String>,
         attemptIdFactory: () -> ConnectionAttemptId,
-        dispatcher: CoroutineDispatcher
+        dispatcher: CoroutineDispatcher,
+        cloudFallbackEnabled: Boolean
     ) : AutoCloseable {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         private val effectQueue = Channel<SessionEffect>(Channel.UNLIMITED)
@@ -4542,7 +4577,8 @@ class SignalingControlCoordinatorTest {
             dispatcher = dispatcher,
             elapsedRealtime = { clock.now().elapsedRealtimeMs },
             attemptIdFactory = attemptIdFactory,
-            automaticRecoveryPolicy = recoveryPolicy
+            automaticRecoveryPolicy = recoveryPolicy,
+            cloudFallbackEnabled = cloudFallbackEnabled
         )
 
         init {

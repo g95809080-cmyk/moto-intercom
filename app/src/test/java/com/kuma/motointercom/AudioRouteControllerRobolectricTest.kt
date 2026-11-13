@@ -422,6 +422,22 @@ class AudioRouteControllerRobolectricTest {
         assertEquals(AudioManager.MODE_NORMAL, audioManager.mode)
     }
 
+    @Test fun aCloudHostBornDuringACallDoesNotRestoreTheFinishedCallsModeOrDevice() {
+        val earpiece=audioDevice(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+        val speaker=audioDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        shadowAudioManager.setAvailableCommunicationDevices(listOf(earpiece,speaker))
+        audioManager.setCommunicationDevice(earpiece)
+        audioManager.mode=AudioManager.MODE_IN_CALL
+        val controller=AudioRouteController(context=context)
+        controller.snapshotBeforeSdk(neutralAfterPhone=true)
+        audioManager.mode=AudioManager.MODE_NORMAL
+        controller.select(AudioRouteSelection.SPEAKER); drainRouteExecutor()
+        shadowOf(Looper.getMainLooper()).idle()
+        controller.close(); drainRouteExecutor()
+        assertEquals(AudioManager.MODE_NORMAL,audioManager.mode)
+        assertFalse(audioManager.communicationDevice==earpiece)
+    }
+
     @Test
     @Config(sdk = [28])
     fun legacyPhoneRoutesSwitchBetweenEarpieceAndSpeaker() {

@@ -22,6 +22,31 @@ import org.robolectric.shadow.api.Shadow
 @Config(sdk = [28, 35], shadows = [RecordingP2pInputShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class WifiDirectStartupRegressionTest {
+    @Test fun closeReleaseReportsNativeRemovalFailureAndRetainsThatResult() {
+        Harness().use { h ->
+            h.p2p.holdGroupRemoval=true
+            val results=mutableListOf<Boolean>()
+            h.tunnel.closeWhenReleased {results.add(it)}
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(results.isEmpty())
+            h.p2p.removals.last().onFailure(WifiP2pManager.ERROR)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(false),results)
+            h.tunnel.closeWhenReleased {results.add(it)}
+            assertEquals(listOf(false,false),results)
+        }
+    }
+    @Test fun closeReleaseNeverReportsSuccessAfterNativeRemovalTimeout() {
+        Harness().use { h ->
+            h.p2p.holdGroupRemoval=true
+            val results=mutableListOf<Boolean>()
+            h.tunnel.closeWhenReleased {results.add(it)}
+            shadowOf(Looper.getMainLooper()).idle();h.idle(6)
+            assertEquals(listOf(false),results)
+            h.p2p.removals.last().onSuccess()
+            assertEquals(listOf(false),results)
+        }
+    }
     @Test fun cleanStartupRegistersDiscoveryOnce() {
         Harness().use { h ->
             h.startStartup()

@@ -259,10 +259,9 @@ internal class IncomingConfirmationServiceFixture(val localDeviceId: String = UU
         heldEffects.forEach(main::removeCallbacks)
         pairs.forEach { it.close() }
         val scope = field("serviceScope").get(service) as CoroutineScope
-        val completed = CountDownLatch(1)
-        scope.coroutineContext[Job]?.invokeOnCompletion { completed.countDown() } ?: completed.countDown()
+        val job = scope.coroutineContext[Job]
         controller.destroy()
-        assertTrue("Service scope did not stop", completed.await(5, TimeUnit.SECONDS))
+        awaitCoroutineCompletionWithMainLooper(job, "Service scope did not stop")
         val instance = PairingDatabase::class.java.getDeclaredField("instance").apply { isAccessible = true }
         (instance.get(null) as? PairingDatabase)?.close()
         instance.set(null, null)

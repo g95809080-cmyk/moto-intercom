@@ -69,38 +69,35 @@ internal fun MotoComBackdrop(modifier: Modifier = Modifier) {
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    colors.accent.copy(alpha = 0.075f),
+                    colors.accent.copy(alpha = if (colors.isLight) 0.065f else 0.085f),
                     Color.Transparent
                 ),
-                center = Offset(size.width * 0.5f, size.height * 0.27f),
-                radius = size.width * 0.9f
+                center = Offset(size.width * 0.5f, size.height * 0.22f),
+                radius = size.width * 0.92f
             ),
-            radius = size.width * 0.9f,
-            center = Offset(size.width * 0.5f, size.height * 0.27f)
+            radius = size.width * 0.92f,
+            center = Offset(size.width * 0.5f, size.height * 0.22f)
         )
-        val horizon = size.height * 0.31f
-        drawLine(
-            color = colors.hairline.copy(alpha = 0.035f),
-            start = Offset(0f, horizon),
-            end = Offset(size.width, horizon),
-            strokeWidth = 1.dp.toPx()
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    colors.panelGlow.copy(alpha = if (colors.isLight) 0.55f else 0.22f),
+                    Color.Transparent
+                ),
+                center = Offset(size.width * 0.82f, size.height * 0.08f),
+                radius = size.width * 0.65f
+            ),
+            radius = size.width * 0.65f,
+            center = Offset(size.width * 0.82f, size.height * 0.08f)
         )
-        repeat(5) { index ->
-            val y = horizon + (index + 1) * 18.dp.toPx()
-            drawLine(
-                color = colors.hairline.copy(alpha = 0.018f),
-                start = Offset(0f, y),
-                end = Offset(size.width, y),
-                strokeWidth = 1.dp.toPx()
-            )
-        }
     }
 }
 
 @Composable
 internal fun MotoComTopBar(
     active: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    alignment: Alignment = Alignment.Center
 ) {
     val colors = MotoComThemePalette.current
     Box(
@@ -111,23 +108,36 @@ internal fun MotoComTopBar(
             .clearAndSetSemantics {
                 contentDescription = "摩声"
             },
-        contentAlignment = Alignment.Center
+        contentAlignment = alignment
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            MotoComWordmarkPulse(active)
-            Spacer(Modifier.width(11.dp))
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(colors.accent.copy(alpha = if (colors.isLight) 0.12f else 0.16f))
+                    .border(
+                        1.dp,
+                        colors.accent.copy(alpha = if (active) 0.45f else 0.24f),
+                        RoundedCornerShape(9.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                MotoComWordmarkPulse(active)
+            }
+            Spacer(Modifier.width(10.dp))
             Text(
                 text = "摩声",
                 color = colors.text,
                 style = TextStyle(
                     fontFamily = FontFamily.SansSerif,
                     fontWeight = FontWeight.Black,
-                    fontSize = 25.sp,
-                    lineHeight = 30.sp,
-                    letterSpacing = 2.5.sp
+                    fontSize = 23.sp,
+                    lineHeight = 28.sp,
+                    letterSpacing = 2.sp
                 )
             )
         }
@@ -228,21 +238,30 @@ internal fun MotoComSectionLabel(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 16.dp),
+            .heightIn(min = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            Modifier
+                .width(3.dp)
+                .height(11.dp)
+                .clip(CircleShape)
+                .background(colors.accent.copy(alpha = 0.72f))
+        )
+        Spacer(Modifier.width(7.dp))
         Text(
             text = label,
             color = colors.muted,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 10.sp,
-                letterSpacing = 1.5.sp
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                letterSpacing = 1.sp
             )
         )
         Spacer(Modifier.width(10.dp))
         HorizontalDivider(
             modifier = Modifier.weight(1f),
-            color = colors.outline.copy(alpha = 0.58f),
+            color = colors.outline.copy(alpha = 0.65f),
             thickness = 1.dp
         )
     }
@@ -253,8 +272,8 @@ internal fun MotoComPanel(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(24.dp),
     containerColor: Color = MotoComThemePalette.current.panel,
-    borderColor: Color? = MotoComThemePalette.current.hairline.copy(alpha = 0.055f),
-    contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(13.dp),
+    borderColor: Color? = MotoComThemePalette.current.outline.copy(alpha = 0.72f),
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(14.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
@@ -284,19 +303,30 @@ internal fun MotoComStatusPill(
     Row(
         modifier
             .clip(RoundedCornerShape(50))
-            .background(colors.panelRaised.copy(alpha = 0.82f))
-            .border(1.dp, colors.outline, RoundedCornerShape(50))
-            .padding(horizontal = 11.dp, vertical = 7.dp),
+            .background(
+                if (active) {
+                    colors.accent.copy(alpha = if (colors.isLight) 0.11f else 0.15f)
+                } else {
+                    colors.panelRaised.copy(alpha = 0.9f)
+                }
+            )
+            .border(
+                1.dp,
+                if (active) colors.accent.copy(alpha = 0.34f) else colors.outline,
+                RoundedCornerShape(50)
+            )
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         MotoComPulseDot(active = active, animated = animated)
         Spacer(Modifier.width(7.dp))
         Text(
             text = label,
-            color = colors.text,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 10.sp,
-                letterSpacing = 1.3.sp
+            color = if (active) colors.accent else colors.text,
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                letterSpacing = 0.6.sp
             )
         )
     }
@@ -391,20 +421,26 @@ internal fun MotoComToggle(
     ) {
         Box(
             Modifier
-                .width(39.dp)
-                .height(23.dp)
+                .width(44.dp)
+                .height(25.dp)
                 .clip(CircleShape)
                 .background(
                     if (checked) {
-                        colors.accent.copy(alpha = if (enabled) 0.24f else 0.12f)
+                        colors.accent.copy(
+                            alpha = when {
+                                !enabled -> 0.16f
+                                colors.isLight -> 0.88f
+                                else -> 0.28f
+                            }
+                        )
                     } else {
-                        colors.background.copy(alpha = 0.7f)
+                        colors.panelRaised
                     }
                 )
                 .border(
                     1.dp,
                     if (checked) {
-                        colors.accent.copy(alpha = 0.42f)
+                        colors.accent.copy(alpha = if (enabled) 0.62f else 0.28f)
                     } else {
                         colors.outline
                     },
@@ -415,10 +451,11 @@ internal fun MotoComToggle(
             Box(
                 Modifier
                     .padding(horizontal = 3.dp)
-                    .size(15.dp)
+                    .size(19.dp)
                     .background(
                         when {
                             !enabled -> colors.muted.copy(alpha = 0.45f)
+                            checked && colors.isLight -> colors.accentInk
                             checked -> colors.accent
                             else -> colors.muted
                         },
@@ -440,15 +477,15 @@ internal fun MotoComThemeSelector(
         modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.panel.copy(alpha = 0.9f))
+            .clip(RoundedCornerShape(20.dp))
+            .background(colors.panel)
             .border(
                 1.dp,
-                colors.hairline.copy(alpha = 0.055f),
-                RoundedCornerShape(18.dp)
+                colors.outline.copy(alpha = 0.78f),
+                RoundedCornerShape(20.dp)
             )
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         MotoComThemeMode.entries.forEach { theme ->
             val selected = theme == selectedTheme
@@ -456,10 +493,10 @@ internal fun MotoComThemeSelector(
                 Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(15.dp))
                     .background(
                         if (selected) {
-                            theme.colors.accent.copy(alpha = 0.12f)
+                            colors.accent.copy(alpha = if (colors.isLight) 0.12f else 0.16f)
                         } else {
                             Color.Transparent
                         }
@@ -467,11 +504,11 @@ internal fun MotoComThemeSelector(
                     .border(
                         1.dp,
                         if (selected) {
-                            theme.colors.accent.copy(alpha = 0.3f)
+                            colors.accent.copy(alpha = 0.38f)
                         } else {
                             Color.Transparent
                         },
-                        RoundedCornerShape(14.dp)
+                        RoundedCornerShape(15.dp)
                     )
                     .semantics {
                         this.selected = selected
@@ -484,20 +521,23 @@ internal fun MotoComThemeSelector(
             ) {
                 Box(
                     Modifier
-                        .size(13.dp)
+                        .size(16.dp)
                         .clip(CircleShape)
                         .background(
                             Brush.linearGradient(
                                 listOf(theme.colors.accent, theme.colors.accentDeep)
                             )
                         )
-                        .border(1.dp, theme.colors.text.copy(alpha = 0.18f), CircleShape)
+                        .border(1.dp, colors.outline, CircleShape)
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     text = theme.label,
-                    color = if (selected) theme.colors.accent else colors.muted,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    color = if (selected) colors.text else colors.muted,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    ),
                     maxLines = 1
                 )
             }
@@ -514,24 +554,26 @@ internal fun MotoComDevicePill(
     Row(
         modifier
             .clip(RoundedCornerShape(50))
-            .background(colors.panelRaised.copy(alpha = 0.82f))
+            .background(colors.panelRaised.copy(alpha = 0.92f))
             .border(1.dp, colors.outline, RoundedCornerShape(50))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             painter = painterResource(R.drawable.ic_headset_24),
             contentDescription = null,
-            modifier = Modifier.size(13.dp),
+            modifier = Modifier.size(15.dp),
             tint = colors.accent
         )
         Spacer(Modifier.width(6.dp))
         Text(
             text = label,
             color = colors.text,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 9.sp,
-                letterSpacing = 0.7.sp
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.3.sp
             ),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

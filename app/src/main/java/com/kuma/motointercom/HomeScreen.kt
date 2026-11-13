@@ -1,10 +1,7 @@
 package com.kuma.motointercom
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -17,9 +14,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -30,7 +28,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,6 +39,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,9 +50,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalDensity
@@ -71,8 +71,10 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.launch
 
 internal data class HomeScreenUiState(
     val primaryText: String,
@@ -95,7 +97,12 @@ internal data class HomeScreenUiState(
     val voxEnabled: Boolean = true,
     val voxSensitivity: Int = DEFAULT_VOX_SENSITIVITY,
     val voxState: VoxRuntimeState = VoxRuntimeState.IDLE,
-    val animationsEnabled: Boolean = true
+    val cloudStatusText: String = "",
+    val cloudActionLabel: String = "云端对讲",
+    val cloudActionEnabled: Boolean = true,
+    val cloudActive: Boolean = false,
+    val animationsEnabled: Boolean = true,
+    val cloudCardTitle: String = "云端对讲"
 )
 
 internal data class RadarPreviewPeer(
@@ -112,7 +119,6 @@ internal data class RadarPeerPlacement(
 )
 
 private const val RADAR_MAX_VISIBLE_PEERS = 11
-private const val RADAR_RING_FRACTION = 0.82f
 private const val RADAR_CENTER_NODE_SIZE_DP = 94f
 private const val RADAR_BUBBLE_MIN_DP = 48f
 private const val RADAR_BUBBLE_MAX_DP = 72f
@@ -120,57 +126,29 @@ private const val RADAR_BUBBLE_GAP_DP = 6f
 
 internal fun radarPeerPlacements(
     count: Int,
-    scopeRadiusDp: Float
+    scopeRadiusDp: Float,
+    centerNodeSizeDp: Float = RADAR_CENTER_NODE_SIZE_DP
 ): List<RadarPeerPlacement> {
     if (count <= 0) return emptyList()
-    val visible = visibleRadarPeerCount(count, scopeRadiusDp)
-    if (visible == 1) {
-        val requiredDistance = RADAR_CENTER_NODE_SIZE_DP / 2f +
-            RADAR_BUBBLE_MAX_DP / 2f +
-            RADAR_BUBBLE_GAP_DP
-        val distanceFraction = (requiredDistance / scopeRadiusDp.coerceAtLeast(1f))
-            .coerceIn(0.62f, 0.9f)
-        return listOf(
-            RadarPeerPlacement(
-                angleDegrees = -31f,
-                distanceFraction = distanceFraction,
-                bubbleSizeDp = RADAR_BUBBLE_MAX_DP
-            )
-        )
+    val maximumBubble = min(RADAR_BUBBLE_MAX_DP, scopeRadiusDp - centerNodeSizeDp / 2f - RADAR_BUBBLE_GAP_DP)
+    if (maximumBubble < RADAR_BUBBLE_MIN_DP) return emptyList()
+    for (visible in minOf(count, RADAR_MAX_VISIBLE_PEERS) downTo 1) {
+        val bubbleSize = if (visible == 1) maximumBubble else {
+            val chord = 2f * (scopeRadiusDp - maximumBubble / 2f) * sin(PI.toFloat() / visible)
+            min(maximumBubble, chord - RADAR_BUBBLE_GAP_DP)
+        }
+        if (bubbleSize < RADAR_BUBBLE_MIN_DP) continue
+        val distanceFraction = (scopeRadiusDp - bubbleSize / 2f) / scopeRadiusDp
+        val startAngle = if (visible == 1) -31f else -90f + 180f / visible
+        return List(visible) { index ->
+            RadarPeerPlacement(startAngle + index * 360f / visible, distanceFraction, bubbleSize)
+        }
     }
-    val scopeRadius = scopeRadiusDp.coerceAtLeast(1f)
-    val baseRadius = scopeRadius * RADAR_RING_FRACTION
-    val chord = 2f * baseRadius * sin(PI.toFloat() / visible)
-    val bubbleSize = (chord - RADAR_BUBBLE_GAP_DP)
-        .coerceIn(RADAR_BUBBLE_MIN_DP, RADAR_BUBBLE_MAX_DP)
-    val ringRadius = maxOf(
-        baseRadius,
-        RADAR_CENTER_NODE_SIZE_DP / 2f +
-            bubbleSize / 2f +
-            RADAR_BUBBLE_GAP_DP
-    )
-    val distanceFraction = ringRadius / scopeRadius
-    val startAngle = -90f + 180f / visible
-    return List(visible) { index ->
-        RadarPeerPlacement(
-            angleDegrees = startAngle + index * 360f / visible,
-            distanceFraction = distanceFraction,
-            bubbleSizeDp = bubbleSize
-        )
-    }
+    return emptyList()
 }
 
-internal fun visibleRadarPeerCount(count: Int, scopeRadiusDp: Float): Int {
-    if (count <= 0) return 0
-    val maxVisible = count.coerceAtMost(RADAR_MAX_VISIBLE_PEERS)
-    val ringRadius = scopeRadiusDp.coerceAtLeast(1f) * RADAR_RING_FRACTION
-    val minimumChord = RADAR_BUBBLE_MIN_DP + RADAR_BUBBLE_GAP_DP
-    for (visible in maxVisible downTo 2) {
-        val chord = 2f * ringRadius * sin(PI.toFloat() / visible)
-        if (chord >= minimumChord) return visible
-    }
-    return 1
-}
+internal fun visibleRadarPeerCount(count: Int, scopeRadiusDp: Float): Int =
+    radarPeerPlacements(count, scopeRadiusDp).size
 
 @Composable
 internal fun MotoComHomeScreen(
@@ -184,6 +162,7 @@ internal fun MotoComHomeScreen(
     onMute: (Boolean) -> Unit,
     onAudioSettings: () -> Unit,
     onVox: () -> Unit,
+    onCloudAction: () -> Unit = {},
     modifier: Modifier = Modifier,
     onGuideAnchor: (GuideTarget, Rect) -> Unit = { _, _ -> },
     radarPreviewPeers: List<RadarPreviewPeer> = emptyList(),
@@ -191,94 +170,344 @@ internal fun MotoComHomeScreen(
 ) {
     val colors = MotoComThemePalette.current
     val pageHorizontalPadding = dimensionResource(R.dimen.motocom_page_horizontal_padding)
-    val pageVerticalPadding = dimensionResource(R.dimen.motocom_page_vertical_padding)
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(colors.background),
+    var showStatusDetails by remember { mutableStateOf(false) }
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize().background(colors.background),
         contentAlignment = Alignment.TopCenter
     ) {
         MotoComBackdrop(Modifier.matchParentSize())
+        val landscape = maxWidth >= 520.dp && maxWidth > maxHeight * 1.2f
+        val compact = maxHeight < 620.dp || LocalDensity.current.fontScale > 1.3f
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = dimensionResource(R.dimen.motocom_content_max_width))
-                .padding(
-                    start = pageHorizontalPadding,
-                    top = pageVerticalPadding,
-                    end = pageHorizontalPadding,
-                    bottom = 20.dp
-                )
+            Modifier
+                .then(if (landscape) Modifier else Modifier.widthIn(max = 560.dp))
+                .fillMaxSize()
+                .padding(horizontal = pageHorizontalPadding, vertical = 8.dp)
+                .testTag("home_screen"),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            MotoComTopBar(
-                active = state.animationsEnabled && state.discovering
-            )
-            Spacer(Modifier.height(10.dp))
-            RadarStatusCard(
-                state = state,
-                radarPeers = radarPreviewPeers,
-                onRadarPeerClick = onRadarPreviewPeerClick
-            )
-            Spacer(Modifier.height(12.dp))
-            ControlDeck(
-                state = state,
-                audioLevel = audioLevel,
-                onPrimaryAction = onPrimaryAction,
-                onMute = onMute,
-                onAudioSettings = onAudioSettings,
-                onVox = onVox,
-                onGuideAnchor = onGuideAnchor
-            )
-            if (state.showPermissionGrantCta) {
-                Spacer(Modifier.height(10.dp))
-                SecondaryAction(
-                    text = stringResource(R.string.home_permission_grant_cta),
-                    onClick = onPermissionGrant,
-                    testTag = "home_permission_grant_cta",
-                    modifier = Modifier.guideAnchor(GuideTarget.PERMISSION, onGuideAnchor)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MotoComTopBar(
+                    active = state.animationsEnabled && state.discovering,
+                    modifier = Modifier.weight(1f),
+                    alignment = Alignment.CenterStart
+                )
+                RadarStatusPill(
+                    label = homeStatusLabel(state),
+                    active = state.discovering || state.connected
                 )
             }
-            if (state.showPermissionSettingsCta) {
-                Spacer(Modifier.height(10.dp))
-                SecondaryAction(
-                    text = stringResource(R.string.home_permission_settings_cta),
-                    onClick = onPermissionSettings,
-                    testTag = "home_permission_settings_cta",
-                    modifier = Modifier.guideAnchor(
-                        GuideTarget.PERMISSION_SETTINGS,
-                        onGuideAnchor
+            val sonar: @Composable (Modifier) -> Unit = { sonarModifier ->
+                RadarStatusCard(
+                    state = state,
+                    radarPeers = radarPreviewPeers,
+                    onRadarPeerClick = onRadarPreviewPeerClick,
+                    onDiscover = onDiscover,
+                    modifier = sonarModifier
+                ) {
+                    HomeStatusFooter(
+                        state = state,
+                        peerCount = radarPreviewPeers.size,
+                        onDiscover = onDiscover,
+                        onPermissionGrant = onPermissionGrant,
+                        onPermissionSettings = onPermissionSettings,
+                        onWifiSettings = onWifiSettings,
+                        onDetails = { showStatusDetails = true },
+                        onGuideAnchor = onGuideAnchor
                     )
+                }
+            }
+            val controls: @Composable () -> Unit = {
+                ControlDeck(
+                    state = state,
+                    audioLevel = audioLevel,
+                    onPrimaryAction = onPrimaryAction,
+                    onMute = onMute,
+                    onAudioSettings = onAudioSettings,
+                    onVox = onVox,
+                    onGuideAnchor = onGuideAnchor,
+                    compact = compact
+                )
+                if (state.cloudStatusText.isNotBlank()) {
+                    CloudIntercomCard(state = state, onClick = onCloudAction)
+                }
+            }
+            if (landscape) {
+                Row(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    sonar(Modifier.weight(1.1f).fillMaxHeight())
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)
+                    ) { controls() }
+                }
+            } else {
+                sonar(Modifier.weight(1f).fillMaxWidth())
+                controls()
+            }
+        }
+    }
+    if (showStatusDetails) {
+        AlertDialog(
+            onDismissRequest = { showStatusDetails = false },
+            title = { Text("当前状态") },
+            text = {
+                Text(
+                    listOfNotNull(state.disabledReason, state.supplementalText)
+                        .filter(String::isNotBlank)
+                        .distinct()
+                        .joinToString("\n")
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showStatusDetails = false }) { Text("知道了") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun HomeStatusFooter(
+    state: HomeScreenUiState,
+    peerCount: Int,
+    onDiscover: () -> Unit,
+    onPermissionGrant: () -> Unit,
+    onPermissionSettings: () -> Unit,
+    onWifiSettings: () -> Unit,
+    onDetails: () -> Unit,
+    onGuideAnchor: (GuideTarget, Rect) -> Unit
+) {
+    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    val hasNotice = !state.disabledReason.isNullOrBlank() || !state.supplementalText.isNullOrBlank()
+    val action = when {
+        state.showPermissionGrantCta -> Triple("授权", "home_permission_grant_cta", onPermissionGrant)
+        state.showPermissionSettingsCta -> Triple("去设置", "home_permission_settings_cta", onPermissionSettings)
+        state.showWifiSettingsCta -> Triple("开启 Wi-Fi", "home_wifi_settings_cta", onWifiSettings)
+        else -> null
+    }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            if (hasNotice && !state.discovering && !state.connected && state.peerText.isNotBlank()) {
+                Text(
+                    state.peerText,
+                    Modifier.testTag("home_peer_name"),
+                    color = colors.text,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            if (state.showWifiSettingsCta) {
-                Spacer(Modifier.height(10.dp))
-                SecondaryAction(
-                    text = stringResource(R.string.wifi_settings_cta),
-                    onClick = onWifiSettings,
-                    testTag = "home_wifi_settings_cta",
-                    modifier = Modifier.guideAnchor(GuideTarget.WIFI, onGuideAnchor)
-                )
-            }
-            if (state.showDiscoverCta) {
-                Spacer(Modifier.height(10.dp))
-                SecondaryAction(
-                    text = state.discoverCtaLabel,
-                    onClick = onDiscover,
-                    testTag = "home_discover_cta"
+            state.disabledReason?.takeIf(String::isNotBlank)?.let {
+                Text(
+                    it,
+                    Modifier.testTag("home_disabled_reason"),
+                    color = colors.amber,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             state.supplementalText?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = it,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("home_status_supplemental"),
+                    it,
+                    Modifier.testTag("home_status_supplemental"),
                     color = colors.muted,
                     style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            if (!hasNotice) {
+                val label = when {
+                    state.connected -> "正在与${state.peerText.ifBlank { "摩友" }}对讲"
+                    state.discovering && peerCount == 0 -> "尚未发现摩友"
+                    state.discovering -> "点击摩友开始对讲"
+                    state.peerText.isNotBlank() -> state.peerText
+                    else -> "启动后搜索附近摩友"
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .then(
+                            if (state.showDiscoverCta) Modifier
+                                .testTag("home_discover_cta")
+                                .clickable(role = Role.Button, onClick = onDiscover)
+                            else Modifier
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        label,
+                        Modifier.testTag("home_peer_name"),
+                        color = colors.muted,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        if (hasNotice) {
+            TextButton(
+                onClick = onDetails,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("home_status_details")
+            ) { Text("详情", color = colors.text) }
+        }
+        if (action != null) {
+            val guideTarget = when (action.second) {
+                "home_permission_grant_cta" -> GuideTarget.PERMISSION
+                "home_permission_settings_cta" -> GuideTarget.PERMISSION_SETTINGS
+                else -> GuideTarget.WIFI
+            }
+            Box(
+                Modifier
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(colors.accent.copy(alpha = 0.16f))
+                    .testTag(action.second)
+                    .guideAnchor(guideTarget, onGuideAnchor)
+                    .clickable(role = Role.Button, onClick = action.third)
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(action.first, color = colors.accent, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CloudIntercomCard(
+    state: HomeScreenUiState,
+    onClick: () -> Unit
+) {
+    val colors = MotoComThemePalette.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 56.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(
+                if (state.cloudActive) {
+                    Brush.linearGradient(listOf(colors.panelGlow, colors.panel))
+                } else {
+                    Brush.linearGradient(listOf(colors.panel, colors.panel))
+                }
+            )
+            .border(
+                1.dp,
+                if (state.cloudActive) {
+                    colors.accent.copy(alpha = 0.48f)
+                } else {
+                    colors.outline.copy(alpha = 0.85f)
+                },
+                RoundedCornerShape(22.dp)
+            )
+            .testTag("home_cloud_card")
+            .clickable(
+                enabled = state.cloudActionEnabled,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(
+                    if (state.cloudActive) {
+                        colors.accent.copy(alpha = 0.16f)
+                    } else {
+                        colors.panelRaised
+                    }
+                )
+                .border(
+                    1.dp,
+                    if (state.cloudActive) {
+                        colors.accent.copy(alpha = 0.36f)
+                    } else {
+                        colors.outline
+                    },
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_globe_24),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (state.cloudActive || state.cloudActionEnabled) colors.accent else colors.muted
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = state.cloudCardTitle,
+                color = colors.text,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = state.cloudStatusText,
+                color = colors.muted,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(
+                    if (state.cloudActionEnabled) {
+                        colors.accent.copy(alpha = if (colors.isLight) 0.12f else 0.16f)
+                    } else {
+                        colors.panelRaised
+                    }
+                )
+                .border(
+                    1.dp,
+                    if (state.cloudActionEnabled) {
+                        colors.accent.copy(alpha = 0.32f)
+                    } else {
+                        colors.outline
+                    },
+                    RoundedCornerShape(50)
+                )
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = state.cloudActionLabel,
+                color = if (state.cloudActionEnabled) colors.accent else colors.muted,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp
+                ),
+                textAlign = TextAlign.End,
+                maxLines = 1
+            )
         }
     }
 }
@@ -294,96 +523,108 @@ private fun homeStatusLabel(state: HomeScreenUiState): String = when {
 private fun RadarStatusCard(
     state: HomeScreenUiState,
     radarPeers: List<RadarPreviewPeer>,
-    onRadarPeerClick: (RadarPreviewPeer) -> Unit
+    onRadarPeerClick: (RadarPreviewPeer) -> Unit,
+    onDiscover: () -> Unit,
+    modifier: Modifier,
+    footer: @Composable () -> Unit
 ) {
     val colors = MotoComThemeMode.NIGHTRIDE.colors
-    BoxWithConstraints(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(0.86f)
-            .clip(RoundedCornerShape(32.dp))
-            .background(colors.panel)
-            .border(1.dp, colors.hairline.copy(alpha = 0.075f), RoundedCornerShape(32.dp))
-            .semantics {
-                if (state.primaryText.isNotBlank()) {
-                    contentDescription = state.primaryText
+    val peers = when {
+        state.connected && state.peerText.isNotBlank() -> listOf(
+            RadarPreviewPeer("connected", state.peerText, selected = true)
+        )
+        state.discovering -> radarPeers
+        else -> emptyList()
+    }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(28.dp))
+            .background(Brush.verticalGradient(listOf(colors.panelGlow, colors.panel, colors.backgroundDeep)))
+            .border(1.dp, colors.outline, RoundedCornerShape(28.dp))
+            .semantics { if (state.primaryText.isNotBlank()) contentDescription = state.primaryText }
+            .testTag("home_discovery_radar")
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (state.connected) "当前通话" else "附近摩友",
+                Modifier.weight(1f),
+                color = colors.muted,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1
+            )
+            Text(
+                "${peers.size} 位",
+                Modifier.testTag("home_sonar_target_count"),
+                color = colors.text,
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val fieldSide = min(maxWidth.value, maxHeight.value)
+            val scopeRadius = (fieldSide * 0.44f).dp
+            val centerSize = when {
+                fieldSide < 210f -> 48.dp
+                fieldSide < 260f -> 56.dp
+                else -> RADAR_CENTER_NODE_SIZE_DP.dp
+            }
+            val placements = remember(peers.size, scopeRadius, centerSize) {
+                radarPeerPlacements(peers.size, scopeRadius.value, centerSize.value)
+            }
+            val visiblePeers = peers.take(placements.size)
+            val targets = remember(placements, scopeRadius) {
+                placements.map {
+                    SonarTarget(it.angleDegrees, it.distanceFraction, it.bubbleSizeDp / (2f * scopeRadius.value))
                 }
             }
-            .testTag("home_discovery_radar")
-    ) {
-        val scopeRadius = min(maxWidth.value * 0.44f, maxHeight.value * 0.32f).dp
-        RadarCanvas(state = state, scopeRadius = scopeRadius)
-        RadarStatusPill(
-            label = homeStatusLabel(state),
-            active = state.connected || state.discovering,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 20.dp)
-        )
-        RadarCenterNode(
-            state = state,
-            modifier = Modifier.align(Alignment.Center)
-        )
-        if (!state.connected) {
-            state.peerText.takeIf(String::isNotBlank)?.let {
-                Text(
-                    text = it,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 38.dp)
-                        .widthIn(max = 220.dp)
-                        .testTag("home_peer_name"),
-                    color = colors.text,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 10.sp,
-                        lineHeight = 13.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
+            val manualPing = remember(state.discovering, state.connected, visiblePeers.map { it.id }) { Animatable(0f) }
+            val coroutineScope = rememberCoroutineScope()
+            val automatic = rememberSonarMotion(
+                (state.discovering || state.connected) && state.animationsEnabled,
+                visiblePeers.map { it.id }
+            )
+            val manualActive = manualPing.isRunning && state.animationsEnabled
+            val manualWave = if (manualActive) 0.14f + manualPing.value * 1.6f else 0f
+            val pulse = maxOf(
+                automatic.pulse,
+                if (manualActive) (1f - manualPing.value / 0.18f).coerceAtLeast(0f).pow(1.6f) else 0f
+            )
+            val waves = listOf(automatic.waveFraction, manualWave).filter { it > 0f }
+            RadarCanvas(scopeRadius, centerSize, targets, waves, pulse)
+            RadarCenterNode(
+                state = state,
+                pingPulse = pulse,
+                nodeSize = centerSize,
+                onManualPing = {
+                    if (state.animationsEnabled) coroutineScope.launch {
+                        manualPing.snapTo(0f)
+                        manualPing.animateTo(1f, tween(2400, easing = LinearEasing))
+                    }
+                },
+                modifier = Modifier.align(Alignment.Center)
+            )
+            visiblePeers.forEachIndexed { index, peer ->
+                val placement = placements[index]
+                val angle = placement.angleDegrees * PI.toFloat() / 180f
+                val distance = scopeRadius * placement.distanceFraction
+                PeerBubble(
+                    peer = peer,
+                    size = placement.bubbleSizeDp.dp,
+                    echoStrength = waves.maxOfOrNull { sonarEchoEnergy(it, targets[index]) } ?: 0f,
+                    onClick = { onRadarPeerClick(peer) },
+                    modifier = Modifier.align(Alignment.Center).offsetDp(distance * cos(angle), distance * sin(angle))
+                )
+            }
+            val hiddenPeers = peers.size - visiblePeers.size
+            if (hiddenPeers > 0) {
+                RadarOverflowBadge(
+                    hiddenCount = hiddenPeers,
+                    onClick = onDiscover,
+                    modifier = Modifier.align(Alignment.TopEnd)
                 )
             }
         }
-        val peers = when {
-            state.connected && state.peerText.isNotBlank() -> listOf(
-                RadarPreviewPeer(
-                    id = "connected",
-                    label = state.peerText,
-                    selected = true
-                )
-            )
-            state.discovering -> radarPeers
-            else -> emptyList()
-        }
-        val placements = remember(peers.size, scopeRadius) {
-            radarPeerPlacements(peers.size, scopeRadius.value)
-        }
-        val visiblePeers = peers.take(placements.size)
-        visiblePeers.forEachIndexed { index, peer ->
-            val placement = placements[index]
-            val angle = placement.angleDegrees * PI.toFloat() / 180f
-            val distance = scopeRadius * placement.distanceFraction
-            PeerBubble(
-                peer = peer,
-                size = placement.bubbleSizeDp.dp,
-                onClick = { onRadarPeerClick(peer) },
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .offsetDp(
-                        x = distance * cos(angle),
-                        y = distance * sin(angle)
-                    )
-            )
-        }
-        val hiddenPeers = peers.size - visiblePeers.size
-        if (hiddenPeers > 0) {
-            RadarOverflowBadge(
-                hiddenCount = hiddenPeers,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 20.dp, end = 16.dp)
-            )
-        }
+        footer()
     }
 }
 
@@ -393,11 +634,11 @@ private fun RadarStatusPill(
     active: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val colors = MotoComThemeMode.NIGHTRIDE.colors
+    val colors = MotoComThemePalette.current
     Row(
         modifier
             .clip(RoundedCornerShape(50))
-            .background(colors.background.copy(alpha = 0.62f))
+            .background(if (active) colors.accent.copy(alpha = 0.12f) else colors.panelRaised)
             .border(1.dp, colors.outline.copy(alpha = 0.72f), RoundedCornerShape(50))
             .testTag("home_radar_status")
             .padding(horizontal = 14.dp, vertical = 7.dp)
@@ -422,7 +663,7 @@ private fun RadarStatusPill(
         Spacer(Modifier.width(8.dp))
         Text(
             text = label,
-            color = if (active) colors.text else colors.muted,
+            color = if (active) colors.accent else colors.text,
             style = MaterialTheme.typography.labelLarge.copy(
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
@@ -435,12 +676,17 @@ private fun RadarStatusPill(
 @Composable
 private fun RadarCenterNode(
     state: HomeScreenUiState,
+    pingPulse: Float = 0f,
+    nodeSize: Dp = RADAR_CENTER_NODE_SIZE_DP.dp,
+    onManualPing: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemeMode.NIGHTRIDE.colors
+    val active = state.connected || state.discovering || pingPulse > 0.01f
     Box(
         modifier
-            .size(RADAR_CENTER_NODE_SIZE_DP.dp)
+            .size(nodeSize)
+            .clickable(enabled = state.animationsEnabled, role = Role.Button, onClick = onManualPing)
             .testTag("home_radar_center")
             .semantics {
                 contentDescription = when {
@@ -453,21 +699,39 @@ private fun RadarCenterNode(
     ) {
         Box(
             Modifier
-                .size(RADAR_CENTER_NODE_SIZE_DP.dp)
-                .border(1.dp, colors.accent.copy(alpha = 0.12f), CircleShape)
+                .size(nodeSize)
+                .clip(CircleShape)
+                .background(
+                    colors.accent.copy(
+                        alpha = if (active) (0.08f + pingPulse * 0.16f) else 0.03f
+                    )
+                )
+                .border(
+                    width = (1f + pingPulse * 0.8f).dp,
+                    color = colors.accent.copy(
+                        alpha = if (active) (0.28f + pingPulse * 0.48f) else 0.14f
+                    ),
+                    CircleShape
+                )
         )
         Box(
             Modifier
-                .size(72.dp)
+                .size(nodeSize * 0.76f)
                 .clip(CircleShape)
                 .background(colors.background.copy(alpha = 0.94f))
-                .border(1.dp, colors.accent.copy(alpha = 0.56f), CircleShape),
+                .border(
+                    width = (1.5f + pingPulse * 0.7f).dp,
+                    color = colors.accent.copy(
+                        alpha = if (active) (0.72f + pingPulse * 0.28f) else 0.48f
+                    ),
+                    CircleShape
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_rider_24),
                 contentDescription = null,
-                modifier = Modifier.size(31.dp),
+                modifier = Modifier.size(nodeSize * 0.33f),
                 tint = colors.accent
             )
         }
@@ -478,6 +742,7 @@ private fun RadarCenterNode(
 private fun PeerBubble(
     peer: RadarPreviewPeer,
     size: Dp,
+    echoStrength: Float = 0f,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -497,14 +762,15 @@ private fun PeerBubble(
     } else {
         colors.background.copy(alpha = 0.93f)
     }
+    val borderAlpha = (if (peer.selected) 0.9f else 0.46f + echoStrength * 0.52f).coerceIn(0f, 1f)
     Column(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
             .background(container)
             .border(
-                width = if (peer.selected) 1.7.dp else 1.dp,
-                color = colors.accent.copy(alpha = if (peer.selected) 0.9f else 0.46f),
+                width = if (peer.selected || echoStrength > 0.35f) 1.8.dp else 1.1.dp,
+                color = colors.accent.copy(alpha = borderAlpha),
                 shape = CircleShape
             )
             .testTag("home_radar_peer_${peer.id}")
@@ -554,6 +820,7 @@ private fun PeerBubble(
 @Composable
 private fun RadarOverflowBadge(
     hiddenCount: Int,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemeMode.NIGHTRIDE.colors
@@ -562,10 +829,10 @@ private fun RadarOverflowBadge(
             .clip(RoundedCornerShape(50))
             .background(colors.background.copy(alpha = 0.88f))
             .border(1.dp, colors.outline.copy(alpha = 0.72f), RoundedCornerShape(50))
+            .heightIn(min = 48.dp)
             .testTag("home_radar_overflow")
-            .clearAndSetSemantics {
-                contentDescription = "另有 $hiddenCount 位车友"
-            }
+            .semantics { contentDescription = "另有 $hiddenCount 位车友" }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -584,219 +851,51 @@ private fun Modifier.offsetDp(x: Dp, y: Dp): Modifier =
     this.then(Modifier.offset(x = x, y = y))
 
 @Composable
-private fun RadarCanvas(state: HomeScreenUiState, scopeRadius: Dp) {
+private fun RadarCanvas(
+    scopeRadius: Dp,
+    centerSize: Dp,
+    targets: List<SonarTarget>,
+    waves: List<Float>,
+    pulse: Float
+) {
     val colors = MotoComThemeMode.NIGHTRIDE.colors
-    val motion = rememberRadarMotion(state.discovering && state.animationsEnabled)
-    val density = LocalDensity.current
-    Canvas(Modifier.fillMaxSize()) {
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val radius = with(density) { scopeRadius.toPx() }
-        val ringAlpha = when {
-            state.discovering -> 0.33f
-            state.connected -> 0.23f
-            else -> 0.16f
-        }
-
-        drawRect(
-            brush = Brush.linearGradient(
-                colors = listOf(colors.panelGlow, colors.panel, colors.backgroundDeep),
-                start = Offset(size.width / 2f, 0f),
-                end = Offset(size.width / 2f, size.height)
-            )
-        )
+    Canvas(Modifier.fillMaxSize().testTag("home_sonar_field").semantics {
+        contentDescription = "声纳目标 ${targets.size} 位"
+    }) {
+        val origin = center
+        val radius = scopeRadius.toPx()
+        if (radius <= 0f) return@Canvas
         drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(colors.accent.copy(alpha = 0.055f), Color.Transparent),
-                center = Offset(size.width / 2f, size.height * 0.28f),
-                radius = size.width * 0.72f
-            ),
-            radius = size.width * 0.72f,
-            center = Offset(size.width / 2f, size.height * 0.28f)
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    colors.accent.copy(alpha = 0.115f),
-                    colors.accent.copy(alpha = 0.025f),
-                    Color.Transparent
-                ),
-                center = center,
+            Brush.radialGradient(
+                listOf(colors.accent.copy(alpha = 0.08f + pulse * 0.08f), Color.Transparent),
+                center = origin,
                 radius = radius
             ),
-            radius = radius,
-            center = center
+            radius,
+            origin
         )
-
-        listOf(1f, 0.73f, 0.47f).forEachIndexed { index, scale ->
+        listOf(1f, 0.73f, 0.47f).forEachIndexed { index, fraction ->
             drawCircle(
-                color = colors.accent.copy(alpha = ringAlpha * if (index == 0) 1f else 0.62f),
-                radius = radius * scale,
-                center = center,
-                style = Stroke(if (index == 0) 1.3.dp.toPx() else 0.8.dp.toPx())
+                colors.accent.copy(alpha = if (index == 0) 0.28f else 0.14f),
+                radius * fraction,
+                origin,
+                style = Stroke(if (index == 0) 1.2.dp.toPx() else 0.8.dp.toPx())
             )
         }
-        drawLine(
-            color = colors.accent.copy(alpha = 0.13f),
-            start = Offset(center.x - radius, center.y),
-            end = Offset(center.x + radius, center.y),
-            strokeWidth = 0.7.dp.toPx()
-        )
-        drawLine(
-            color = colors.accent.copy(alpha = 0.13f),
-            start = Offset(center.x, center.y - radius),
-            end = Offset(center.x, center.y + radius),
-            strokeWidth = 0.7.dp.toPx()
-        )
+        drawLine(colors.accent.copy(alpha = 0.1f), origin - Offset(radius, 0f), origin + Offset(radius, 0f))
+        drawLine(colors.accent.copy(alpha = 0.1f), origin - Offset(0f, radius), origin + Offset(0f, radius))
         repeat(36) { index ->
-            val major = index % 3 == 0
-            rotate(degrees = index * 10f, pivot = center) {
+            rotate(index * 10f, origin) {
                 drawLine(
-                    color = colors.accent.copy(alpha = if (major) 0.36f else 0.16f),
-                    start = Offset(center.x + radius * 0.91f, center.y),
-                    end = Offset(
-                        center.x + radius * if (major) 0.965f else 0.945f,
-                        center.y
-                    ),
-                    strokeWidth = if (major) 1.dp.toPx() else 0.55.dp.toPx(),
-                    cap = StrokeCap.Round
+                    colors.accent.copy(alpha = if (index % 3 == 0) 0.34f else 0.16f),
+                    origin + Offset(radius * 0.93f, 0f),
+                    origin + Offset(radius * 0.985f, 0f),
+                    strokeWidth = 0.9.dp.toPx()
                 )
             }
         }
-
-        when {
-            state.discovering -> {
-                rotate(degrees = motion.sweep, pivot = center) {
-                    val wedge = Path().apply {
-                        moveTo(center.x, center.y)
-                        arcTo(
-                            rect = Rect(
-                                left = center.x - radius,
-                                top = center.y - radius,
-                                right = center.x + radius,
-                                bottom = center.y + radius
-                            ),
-                            startAngleDegrees = -42f,
-                            sweepAngleDegrees = 42f,
-                            forceMoveTo = false
-                        )
-                        close()
-                    }
-                    drawPath(
-                        path = wedge,
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                colors.accent.copy(alpha = 0.22f),
-                                colors.accent.copy(alpha = 0.055f),
-                                Color.Transparent
-                            ),
-                            center = center,
-                            radius = radius
-                        )
-                    )
-                    drawLine(
-                        color = colors.accent.copy(alpha = 0.88f),
-                        start = center,
-                        end = Offset(center.x + radius * 0.975f, center.y),
-                        strokeWidth = 1.4.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-                listOf(0f, 0.5f).forEach { offset ->
-                    val progress = (motion.pulse + offset) % 1f
-                    drawCircle(
-                        color = colors.accent.copy(alpha = (1f - progress) * 0.22f),
-                        radius = radius * (0.13f + progress * 0.81f),
-                        center = center,
-                        style = Stroke(1.dp.toPx())
-                    )
-                }
-            }
-            state.connected -> {
-                val peerAngle = -31f * PI.toFloat() / 180f
-                val peer = Offset(
-                    center.x + cos(peerAngle) * radius * 0.62f,
-                    center.y + sin(peerAngle) * radius * 0.62f
-                )
-                drawLine(
-                    color = colors.accent.copy(alpha = 0.42f),
-                    start = center,
-                    end = peer,
-                    strokeWidth = 1.2.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(
-                        floatArrayOf(7.dp.toPx(), 8.dp.toPx())
-                    )
-                )
-                drawCircle(
-                    color = colors.accent.copy(alpha = 0.12f),
-                    radius = radius * 0.42f,
-                    center = center,
-                    style = Stroke(1.dp.toPx())
-                )
-                drawCircle(colors.accent.copy(alpha = 0.16f), 15.dp.toPx(), peer)
-                drawCircle(colors.accent, 3.2.dp.toPx(), peer)
-            }
-            else -> {
-                drawCircle(
-                    color = colors.accent.copy(alpha = 0.1f),
-                    radius = radius * 0.34f,
-                    center = center,
-                    style = Stroke(1.dp.toPx())
-                )
-                drawCircle(colors.muted.copy(alpha = 0.38f), 3.dp.toPx(), center)
-            }
-        }
-
-        val frameInset = 13.dp.toPx()
-        drawRoundRect(
-            color = colors.accent.copy(alpha = 0.08f),
-            topLeft = Offset(frameInset, frameInset),
-            size = Size(size.width - frameInset * 2f, size.height - frameInset * 2f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(22.dp.toPx()),
-            style = Stroke(0.8.dp.toPx())
-        )
-        val laneY = size.height - 23.dp.toPx()
-        drawLine(
-            color = colors.hairline.copy(alpha = 0.055f),
-            start = Offset(size.width * 0.08f, laneY),
-            end = Offset(size.width * 0.92f, laneY),
-            strokeWidth = 1.dp.toPx()
-        )
-        repeat(5) { index ->
-            val x = size.width * (0.27f + index * 0.115f)
-            drawLine(
-                color = colors.accent.copy(alpha = 0.13f),
-                start = Offset(x, laneY - 4.dp.toPx()),
-                end = Offset(x, laneY + 4.dp.toPx()),
-                strokeWidth = 1.dp.toPx()
-            )
-        }
+        drawActiveSonar(origin, radius, centerSize.toPx() / 2f, waves, pulse, targets, colors.accent)
     }
-}
-
-private data class RadarMotion(val sweep: Float, val pulse: Float)
-
-@Composable
-private fun rememberRadarMotion(active: Boolean): RadarMotion {
-    if (!active) return RadarMotion(sweep = 0f, pulse = 0f)
-    val transition = rememberInfiniteTransition(label = "home_radar")
-    val sweep = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3000, easing = LinearEasing)
-        ),
-        label = "home_radar_sweep"
-    ).value
-    val pulse = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2300, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "home_radar_pulse"
-    ).value
-    return RadarMotion(sweep = sweep, pulse = pulse)
 }
 
 @Composable
@@ -807,34 +906,44 @@ private fun ControlDeck(
     onMute: (Boolean) -> Unit,
     onAudioSettings: () -> Unit,
     onVox: () -> Unit,
-    onGuideAnchor: (GuideTarget, Rect) -> Unit
+    onGuideAnchor: (GuideTarget, Rect) -> Unit,
+    compact: Boolean = false
 ) {
     val colors = MotoComThemePalette.current
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
-            .background(colors.panel.copy(alpha = 0.96f))
-            .border(1.dp, colors.outline, RoundedCornerShape(28.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .background(colors.panel)
+            .border(1.dp, colors.outline.copy(alpha = 0.85f), RoundedCornerShape(28.dp))
+            .padding(horizontal = 14.dp, vertical = if (compact) 8.dp else 12.dp)
     ) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_headset_24),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = colors.accent
-            )
-            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent.copy(alpha = if (colors.isLight) 0.1f else 0.14f))
+                    .border(1.dp, colors.accent.copy(alpha = 0.24f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_headset_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = colors.accent
+                )
+            }
+            Spacer(Modifier.width(10.dp))
             Text(
                 text = audioSourceLabel(state.audioSourceText),
                 color = colors.text,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp
                 ),
                 modifier = Modifier
                     .weight(1f)
@@ -842,15 +951,16 @@ private fun ControlDeck(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            Spacer(Modifier.width(8.dp))
             VoxStatus(
                 state = state,
                 audioLevel = audioLevel,
                 onClick = onVox
             )
         }
-        Spacer(Modifier.height(12.dp))
-        HorizontalDivider(color = colors.outline.copy(alpha = 0.78f), thickness = 1.dp)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(if (compact) 4.dp else 9.dp))
+        HorizontalDivider(color = colors.outline.copy(alpha = 0.68f), thickness = 1.dp)
+        Spacer(Modifier.height(if (compact) 5.dp else 10.dp))
         Column(
             Modifier
                 .fillMaxWidth()
@@ -877,12 +987,15 @@ private fun ControlDeck(
                     tag = "home_mute_button",
                     enabled = state.muteEnabled,
                     selected = state.muted,
-                    onClick = { onMute(!state.muted) }
+                    onClick = { onMute(!state.muted) },
+                    modifier = Modifier.weight(1f),
+                    compact = compact
                 )
                 DeckPrimaryControl(
                     state = state,
                     onPrimaryAction = onPrimaryAction,
-                    onGuideAnchor = onGuideAnchor
+                    onGuideAnchor = onGuideAnchor,
+                    compact = compact
                 )
                 DeckSideControl(
                     icon = R.drawable.ic_tune_24,
@@ -891,22 +1004,13 @@ private fun ControlDeck(
                     tag = "home_audio_settings_button",
                     enabled = true,
                     selected = false,
-                    onClick = onAudioSettings
+                    onClick = onAudioSettings,
+                    modifier = Modifier.weight(1f),
+                    compact = compact
                 )
             }
         }
-        state.disabledReason?.takeIf(String::isNotBlank)?.let {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = it,
-                color = colors.muted,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("home_disabled_reason")
-            )
-        }
+
     }
 }
 
@@ -925,48 +1029,67 @@ private fun VoxStatus(
         VoxRuntimeState.OPEN -> stringResource(R.string.vox_state_open)
         VoxRuntimeState.HANGOVER -> stringResource(R.string.vox_state_hangover)
     }
-    val level = if (state.connected) {
-        audioLevel.coerceIn(0f, 1f)
-    } else {
-        (state.voxSensitivity / 100f).coerceIn(0f, 1f)
-    }
+    val level = if (state.connected) audioLevel.coerceIn(0f, 1f) else 0f
+    val activeTransmit = state.connected && (
+        state.voxState == VoxRuntimeState.OPEN ||
+            state.voxState == VoxRuntimeState.HANGOVER
+    )
     Column(
         Modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.panelRaised.copy(alpha = 0.78f))
+            .border(1.dp, colors.outline.copy(alpha = 0.75f), RoundedCornerShape(14.dp))
             .testTag("home_vox_card")
             .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
             .semantics {
                 contentDescription = "VOX $stateLabel，灵敏度 ${state.voxSensitivity}，打开设置"
             },
-        horizontalAlignment = Alignment.End
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = stringResource(R.string.home_vox_pill, stateLabel),
                 modifier = Modifier.testTag("home_vox_pill"),
                 color = colors.text,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 9.sp,
-                    lineHeight = 12.sp
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp
                 )
             )
             Spacer(Modifier.width(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 repeat(5) { index ->
                     val lit = index < (level * 5f).roundToInt().coerceIn(0, 5)
                     Box(
                         Modifier
-                            .width(5.dp)
-                            .height(if (lit) 9.dp else 5.dp)
+                            .width(4.dp)
+                            .height(if (lit) 10.dp else 6.dp)
                             .clip(CircleShape)
-                            .background(if (lit) colors.accent else colors.outline)
+                            .background(
+                                when {
+                                    !lit -> colors.outline
+                                    activeTransmit -> colors.accent
+                                    else -> colors.accent.copy(alpha = 0.52f)
+                                }
+                            )
                     )
                 }
             }
         }
+        Spacer(Modifier.height(2.dp))
         Text(
             text = stringResource(R.string.settings_vox_sensitivity, state.voxSensitivity),
             color = colors.muted,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp)
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.sp,
+                lineHeight = 13.sp
+            )
         )
     }
 }
@@ -979,26 +1102,28 @@ private fun DeckSideControl(
     tag: String,
     enabled: Boolean,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
     val colors = MotoComThemePalette.current
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         val interactionSource = remember { MutableInteractionSource() }
         Box(
             Modifier
-                .size(52.dp)
+                .size(if (compact) 48.dp else 56.dp)
                 .motoComPressScale(interactionSource, enabled)
                 .clip(CircleShape)
                 .background(
                     if (selected) {
-                        colors.accent.copy(alpha = 0.14f)
+                        colors.accent.copy(alpha = if (colors.isLight) 0.14f else 0.2f)
                     } else {
                         colors.panelRaised
                     }
                 )
                 .border(
                     1.dp,
-                    if (selected) colors.accent.copy(alpha = 0.4f) else colors.outline,
+                    if (selected) colors.accent.copy(alpha = 0.48f) else colors.outline,
                     CircleShape
                 )
                 .testTag(tag)
@@ -1019,14 +1144,28 @@ private fun DeckSideControl(
                 painter = painterResource(icon),
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
-                tint = if (enabled) colors.text else colors.muted.copy(alpha = 0.45f)
+                tint = when {
+                    !enabled -> colors.muted.copy(alpha = 0.45f)
+                    selected -> colors.accent
+                    else -> colors.text
+                }
             )
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             text = label,
-            color = if (enabled) colors.muted else colors.muted.copy(alpha = 0.45f),
-            style = MaterialTheme.typography.labelSmall
+            color = when {
+                !enabled -> colors.muted.copy(alpha = 0.45f)
+                selected -> colors.accent
+                else -> colors.muted
+            },
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            ),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -1035,22 +1174,27 @@ private fun DeckSideControl(
 private fun DeckPrimaryControl(
     state: HomeScreenUiState,
     onPrimaryAction: () -> Unit,
-    onGuideAnchor: (GuideTarget, Rect) -> Unit
+    onGuideAnchor: (GuideTarget, Rect) -> Unit,
+    compact: Boolean = false
 ) {
     val colors = MotoComThemePalette.current
+    val actionLabel = if (state.discovering) "停止搜索" else state.primaryActionLabel
+    val displayedLabel = if (compact && LocalDensity.current.fontScale > 1.6f && actionLabel.length == 4) {
+        actionLabel.take(2) + "\n" + actionLabel.drop(2)
+    } else actionLabel
     val interactionSource = remember { MutableInteractionSource() }
     val disabledDescription = state.disabledReason?.let {
         stringResource(R.string.home_primary_disabled_description, state.primaryActionLabel, it)
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(92.dp),
+            Modifier.size(if (compact) 88.dp else 94.dp),
             contentAlignment = Alignment.Center
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        listOf(colors.accent.copy(alpha = 0.16f), Color.Transparent),
+                        listOf(colors.accent.copy(alpha = 0.2f), Color.Transparent),
                         center = center,
                         radius = size.minDimension / 2f
                     ),
@@ -1058,17 +1202,17 @@ private fun DeckPrimaryControl(
                     center = center
                 )
                 drawCircle(
-                    color = colors.accent.copy(alpha = 0.2f),
-                    radius = size.minDimension * 0.4f,
+                    color = colors.accent.copy(alpha = 0.26f),
+                    radius = size.minDimension * 0.46f,
                     center = center,
-                    style = Stroke(1.dp.toPx())
+                    style = Stroke(1.2.dp.toPx())
                 )
             }
             Button(
                 onClick = onPrimaryAction,
                 enabled = state.primaryActionEnabled,
                 modifier = Modifier
-                    .size(76.dp)
+                    .size(if (compact) 76.dp else 78.dp)
                     .motoComPressScale(interactionSource, state.primaryActionEnabled)
                     .testTag("home_primary_button")
                     .guideAnchor(GuideTarget.START, onGuideAnchor)
@@ -1092,21 +1236,31 @@ private fun DeckPrimaryControl(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_mic_24),
-                        contentDescription = null,
-                        modifier = Modifier.size(27.dp),
-                        tint = colors.accentInk
-                    )
+                    if (state.discovering || state.connected) {
+                        Box(
+                            Modifier
+                                .size(if (compact) 18.dp else 21.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(colors.accentInk)
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_mic_24),
+                            contentDescription = null,
+                            modifier = Modifier.size(if (compact) 20.dp else 25.dp),
+                            tint = colors.accentInk
+                        )
+                        }
+                    Spacer(Modifier.height(3.dp))
                     Text(
-                        text = state.primaryActionLabel,
+                        text = displayedLabel,
                         color = colors.accentInk,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.sp,
-                            lineHeight = 11.sp
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontSize = if (compact) 10.sp else 11.sp,
+                            lineHeight = if (compact) 12.sp else 14.sp
                         ),
                         textAlign = TextAlign.Center,
-                        maxLines = 1
+                        maxLines = 2
                     )
                 }
             }

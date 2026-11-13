@@ -1,11 +1,5 @@
 package com.kuma.motointercom
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,17 +26,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -238,10 +230,10 @@ private fun DiscoveryHero(
             )
             .border(
                 1.dp,
-                colors.hairline.copy(alpha = 0.07f),
+                colors.outline.copy(alpha = 0.85f),
                 RoundedCornerShape(28.dp)
             )
-            .padding(16.dp)
+            .padding(18.dp)
     ) {
         Row(
             Modifier
@@ -251,14 +243,14 @@ private fun DiscoveryHero(
         ) {
             Column(
                 Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
                     text = "附近车友",
                     color = colors.accent,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 10.sp,
-                        letterSpacing = 1.8.sp
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontSize = 12.sp,
+                        letterSpacing = 1.2.sp
                     )
                 )
                 Row(verticalAlignment = Alignment.Bottom) {
@@ -266,26 +258,29 @@ private fun DiscoveryHero(
                         text = onlineCount.toString(),
                         color = colors.text,
                         style = TextStyle(
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = FontFamily.SansSerif,
                             fontWeight = FontWeight.Black,
-                            fontSize = 46.sp,
+                            fontSize = 44.sp,
                             lineHeight = 48.sp,
-                            letterSpacing = (-2).sp
+                            letterSpacing = (-1.5).sp
                         )
                     )
-                    Spacer(Modifier.width(7.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = "位在线",
                         modifier = Modifier.padding(bottom = 8.dp),
                         color = colors.muted,
-                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp)
+                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp)
                     )
                 }
                 Text(
                     text = state.stateText,
                     modifier = Modifier.testTag("discover_state_text"),
-                    color = colors.muted,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = colors.text.copy(alpha = 0.84f),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -294,14 +289,20 @@ private fun DiscoveryHero(
                         text = it,
                         modifier = Modifier.testTag("discover_status_supplemental"),
                         color = colors.muted,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
+            Spacer(Modifier.width(12.dp))
             MiniRadar(
                 running = state.radarRunning && state.animationsEnabled,
+                targetIds = state.presentation.orderedPresences.mapIndexedNotNull { index, presence ->
+                    if (state.presentation.cards.getOrNull(index)?.connectVisible == true) {
+                        "${presence.deviceId}:${presence.sessionId}"
+                    } else null
+                },
                 modifier = Modifier.size(118.dp)
             )
         }
@@ -327,87 +328,46 @@ private fun DiscoveryHero(
 @Composable
 private fun MiniRadar(
     running: Boolean,
+    targetIds: List<String>,
     modifier: Modifier = Modifier
 ) {
     val colors = MotoComThemeMode.NIGHTRIDE.colors
-    val sweep = if (running) {
-        val transition = rememberInfiniteTransition(label = "discover_mini_radar")
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 3000, easing = LinearEasing)
-            ),
-            label = "discover_mini_sweep"
-        ).value
-    } else {
-        0f
+    val motion = rememberSonarMotion(running, targetIds)
+    val targets = remember(targetIds) {
+        val count = minOf(targetIds.size, 11)
+        List(count) { index ->
+            SonarTarget(-31f + index * 360f / count, 0.68f, 0.065f)
+        }
     }
-    Box(modifier) {
-        Canvas(Modifier.fillMaxSize()) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = size.minDimension * 0.43f
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(colors.accent.copy(alpha = 0.075f), Color.Transparent),
-                    center = center,
-                    radius = radius
-                ),
-                radius = radius,
-                center = center
-            )
-            listOf(1f, 0.68f, 0.36f).forEachIndexed { index, scale ->
+    Box(
+        modifier
+            .clip(CircleShape)
+            .background(Brush.radialGradient(listOf(colors.panelGlow, colors.panel, colors.backgroundDeep)))
+            .border(1.5.dp, colors.outline.copy(alpha = 0.9f), CircleShape)
+    ) {
+        Canvas(Modifier.fillMaxSize().testTag("discover_sonar_field").semantics {
+            contentDescription = "声纳目标 ${targetIds.size} 位"
+        }) {
+            val radius = size.minDimension * 0.44f
+            listOf(1f, 0.68f, 0.36f).forEach { fraction ->
                 drawCircle(
-                    color = colors.accent.copy(
-                        alpha = if (index == 0) 0.34f else 0.16f
-                    ),
-                    radius = radius * scale,
-                    center = center,
-                    style = Stroke(if (index == 0) 1.dp.toPx() else 0.7.dp.toPx())
+                    colors.accent.copy(alpha = 0.2f),
+                    radius * fraction,
+                    center,
+                    style = Stroke(0.8.dp.toPx())
                 )
             }
-            repeat(24) { index ->
-                rotate(degrees = index * 15f, pivot = center) {
-                    drawLine(
-                        color = colors.accent.copy(
-                            alpha = if (index % 3 == 0) 0.32f else 0.13f
-                        ),
-                        start = Offset(center.x + radius * 0.91f, center.y),
-                        end = Offset(
-                            center.x + radius * if (index % 3 == 0) 0.97f else 0.95f,
-                            center.y
-                        ),
-                        strokeWidth = if (index % 3 == 0) 0.9.dp.toPx() else 0.55.dp.toPx()
-                    )
-                }
-            }
-            if (running) {
-                rotate(degrees = sweep, pivot = center) {
-                    drawArc(
-                        color = colors.accent.copy(alpha = 0.13f),
-                        startAngle = -38f,
-                        sweepAngle = 38f,
-                        useCenter = true,
-                        topLeft = Offset(center.x - radius, center.y - radius),
-                        size = Size(radius * 2f, radius * 2f)
-                    )
-                    drawLine(
-                        color = colors.accent.copy(alpha = 0.72f),
-                        start = center,
-                        end = Offset(center.x + radius * 0.96f, center.y),
-                        strokeWidth = 1.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-            }
-            listOf(-28f to 0.72f, 72f to 0.54f, 156f to 0.76f).forEach { point ->
-                val radians = point.first * PI.toFloat() / 180f
-                val dot = Offset(
-                    center.x + cos(radians) * radius * point.second,
-                    center.y + sin(radians) * radius * point.second
-                )
-                drawCircle(colors.accent.copy(alpha = 0.18f), 6.dp.toPx(), dot)
-                drawCircle(colors.accent, 2.dp.toPx(), dot)
+            drawActiveSonar(
+                center, radius, 19.dp.toPx(),
+                listOf(motion.waveFraction).filter { it > 0f },
+                motion.pulse, targets, colors.accent
+            )
+            for (target in targets) {
+                val angle = target.angleDegrees * PI.toFloat() / 180f
+                val point = center + Offset(cos(angle), sin(angle)) * (target.distanceFraction * radius)
+                val energy = sonarEchoEnergy(motion.waveFraction, target)
+                drawCircle(colors.accent.copy(alpha = 0.15f + energy * 0.3f), 5.dp.toPx(), point)
+                drawCircle(colors.accent, 2.dp.toPx(), point)
             }
         }
         Box(
@@ -416,13 +376,13 @@ private fun MiniRadar(
                 .size(38.dp)
                 .clip(CircleShape)
                 .background(colors.backgroundDeep)
-                .border(1.dp, colors.accent.copy(alpha = 0.63f), CircleShape),
+                .border((1.2f + motion.pulse * 0.8f).dp, colors.accent.copy(alpha = 0.72f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                painter = painterResource(R.drawable.ic_rider_24),
+                painterResource(R.drawable.ic_rider_24),
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(17.dp),
                 tint = colors.accent
             )
         }
@@ -480,15 +440,23 @@ private fun DiscoverGroup(
     val colors = MotoComThemePalette.current
     Column(
         modifier = Modifier.testTag(tag),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 18.dp)
+                .heightIn(min = 22.dp)
                 .padding(top = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(11.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent.copy(alpha = 0.72f))
+            )
+            Spacer(Modifier.width(7.dp))
             Text(
                 text = stringResource(
                     when (tag) {
@@ -500,23 +468,35 @@ private fun DiscoverGroup(
                 ),
                 modifier = Modifier.testTag("${tag}_label"),
                 color = colors.muted,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = 10.sp,
-                    letterSpacing = 1.6.sp
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontSize = 12.sp,
+                    letterSpacing = 1.sp
                 )
             )
             Spacer(Modifier.weight(1f))
-            Text(
-                text = cards.size.toString().padStart(2, '0'),
-                color = colors.outline,
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 9.sp)
-            )
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.panelRaised)
+                    .border(1.dp, colors.outline.copy(alpha = 0.7f), RoundedCornerShape(50))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = cards.size.toString().padStart(2, '0'),
+                    color = colors.muted,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
         }
         MotoComPanel(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            containerColor = colors.panel.copy(alpha = 0.9f),
-            borderColor = colors.hairline.copy(alpha = 0.055f),
+            shape = RoundedCornerShape(22.dp),
+            containerColor = colors.panel,
+            borderColor = colors.outline.copy(alpha = 0.8f),
             contentPadding = PaddingValues(0.dp)
         ) {
             cards.forEachIndexed { index, indexed ->
@@ -529,8 +509,8 @@ private fun DiscoverGroup(
                 )
                 if (index != cards.lastIndex) {
                     HorizontalDivider(
-                        modifier = Modifier.padding(start = 62.dp, end = 12.dp),
-                        color = colors.outline.copy(alpha = 0.62f),
+                        modifier = Modifier.padding(start = 66.dp, end = 14.dp),
+                        color = colors.outline.copy(alpha = 0.65f),
                         thickness = 1.dp
                     )
                 }
@@ -560,8 +540,8 @@ private fun DiscoverRiderRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 64.dp)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .defaultMinSize(minHeight = 68.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
             .testTag("discover_card_$cardId"),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -575,7 +555,7 @@ private fun DiscoverRiderRow(
         ) {
             Box(
                 Modifier
-                    .size(38.dp),
+                    .size(42.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -584,7 +564,7 @@ private fun DiscoverRiderRow(
                         .clip(CircleShape)
                         .background(
                             if (online) {
-                                colors.accent.copy(alpha = 0.1f)
+                                colors.accent.copy(alpha = if (colors.isLight) 0.11f else 0.15f)
                             } else {
                                 colors.panelRaised
                             }
@@ -592,7 +572,7 @@ private fun DiscoverRiderRow(
                         .border(
                             1.dp,
                             if (online) {
-                                colors.accent.copy(alpha = 0.32f)
+                                colors.accent.copy(alpha = 0.36f)
                             } else {
                                 colors.outline
                             },
@@ -604,7 +584,7 @@ private fun DiscoverRiderRow(
                         text = card.title.firstOrNull()?.uppercase() ?: "·",
                         color = if (online) colors.accent else colors.muted,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -612,36 +592,40 @@ private fun DiscoverRiderRow(
                 Box(
                     Modifier
                         .align(Alignment.BottomEnd)
-                        .size(10.dp)
+                        .size(11.dp)
                         .clip(CircleShape)
                         .background(colors.panel)
                         .padding(2.dp)
                         .background(if (online) colors.accent else colors.muted, CircleShape)
                 )
             }
-            Spacer(Modifier.width(11.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = card.title,
                     color = if (online) colors.text else colors.muted,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 14.sp,
-                        lineHeight = 18.sp
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(2.dp))
                 Row {
                     Text(
                         text = status,
-                        color = colors.muted.copy(alpha = if (online) 1f else 0.7f),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (online) colors.accent else colors.muted.copy(alpha = 0.75f),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         maxLines = 1
                     )
                     Text(
                         text = " · ${card.deviceText}",
-                        color = colors.muted.copy(alpha = if (online) 1f else 0.7f),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = colors.muted.copy(alpha = if (online) 1f else 0.75f),
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -649,7 +633,42 @@ private fun DiscoverRiderRow(
             }
         }
         Spacer(Modifier.width(8.dp))
-        Column(horizontalAlignment = Alignment.End) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (card.paired) {
+                val manageDescription = stringResource(
+                    R.string.discover_manage_pairing_description,
+                    card.title
+                )
+                Box(
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .testTag("discover_manage_$cardId")
+                        .semantics { contentDescription = manageDescription }
+                        .clickable(role = Role.Button) { onManagePairing(presence) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.panelRaised)
+                            .border(1.dp, colors.outline, RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(R.string.discover_manage_pairing),
+                            color = colors.muted,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp
+                            )
+                        )
+                    }
+                }
+            }
             if (card.connectVisible) {
                 val connectionLabel = stringResource(
                     if (card.connectEnabled) {
@@ -673,7 +692,7 @@ private fun DiscoverRiderRow(
                             .clip(RoundedCornerShape(50))
                             .background(
                                 if (card.connectEnabled) {
-                                    colors.accent.copy(alpha = 0.13f)
+                                    colors.accent.copy(alpha = if (colors.isLight) 0.13f else 0.18f)
                                 } else {
                                     colors.panelRaised
                                 }
@@ -681,13 +700,13 @@ private fun DiscoverRiderRow(
                             .border(
                                 1.dp,
                                 if (card.connectEnabled) {
-                                    colors.accent.copy(alpha = 0.22f)
+                                    colors.accent.copy(alpha = 0.34f)
                                 } else {
                                     colors.outline
                                 },
                                 RoundedCornerShape(50)
                             )
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                            .padding(horizontal = 13.dp, vertical = 7.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -695,39 +714,18 @@ private fun DiscoverRiderRow(
                             modifier = Modifier.testTag("discover_connect_${cardId}_text"),
                             color = if (card.connectEnabled) colors.accent else colors.muted,
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontSize = 10.sp,
-                                lineHeight = 12.sp
+                                fontSize = 12.sp,
+                                lineHeight = 15.sp
                             )
                         )
                     }
                 }
-            } else {
+            } else if (!card.paired) {
                 Text(
                     text = status,
                     color = colors.muted,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp)
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp)
                 )
-            }
-            if (card.paired) {
-                val manageDescription = stringResource(
-                    R.string.discover_manage_pairing_description,
-                    card.title
-                )
-                Box(
-                    modifier = Modifier
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                        .testTag("discover_manage_$cardId")
-                        .semantics { contentDescription = manageDescription }
-                        .clickable(role = Role.Button) { onManagePairing(presence) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(R.string.discover_manage_pairing),
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        color = colors.muted,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
-                    )
-                }
             }
         }
     }

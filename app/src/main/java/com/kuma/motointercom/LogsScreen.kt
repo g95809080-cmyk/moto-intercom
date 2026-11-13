@@ -130,16 +130,32 @@ internal fun MotoComLogsScreen(
             }
             MotoComPanel(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                containerColor = colors.panel.copy(alpha = 0.94f)
-            ) {
-                Text(
-                    text = state.scopeText,
-                    modifier = Modifier.testTag("logs_scope_text"),
-                    color = colors.muted,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2
+                shape = RoundedCornerShape(20.dp),
+                containerColor = colors.panel.copy(alpha = 0.94f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 14.dp,
+                    vertical = 11.dp
                 )
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(colors.accent)
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        text = state.scopeText,
+                        modifier = Modifier.testTag("logs_scope_text"),
+                        color = colors.muted,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        ),
+                        maxLines = 2
+                    )
+                }
             }
             Text(
                 text = state.logText,
@@ -154,9 +170,9 @@ internal fun MotoComLogsScreen(
                         RoundedCornerShape(20.dp)
                     )
                     .verticalScroll(logScroll)
-                    .padding(12.dp)
+                    .padding(14.dp)
                     .testTag("logs_text"),
-                color = MotoComThemeMode.NIGHTRIDE.colors.muted,
+                color = MotoComThemeMode.NIGHTRIDE.colors.text.copy(alpha = 0.88f),
                 fontSize = 12.sp,
                 lineHeight = 19.sp,
                 fontFamily = FontFamily.Monospace
@@ -169,21 +185,28 @@ internal fun MotoComLogsScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            LogsButton(
-                text = stringResource(
-                    if (state.exporting) R.string.logs_export_preparing else R.string.logs_export_all
-                ),
-                tag = "logs_export_button",
-                onClick = onExport,
-                enabled = state.exportEnabled && !state.exporting,
-                primary = true
-            )
-            LogsButton(
-                text = stringResource(R.string.logs_copy_all),
-                tag = "logs_copy_button",
-                onClick = onCopy,
-                enabled = state.copyEnabled
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                LogsButton(
+                    text = stringResource(
+                        if (state.exporting) R.string.logs_export_preparing else R.string.logs_export_all
+                    ),
+                    tag = "logs_export_button",
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f),
+                    enabled = state.exportEnabled && !state.exporting,
+                    primary = true
+                )
+                LogsButton(
+                    text = stringResource(R.string.logs_copy_all),
+                    tag = "logs_copy_button",
+                    onClick = onCopy,
+                    modifier = Modifier.weight(1f),
+                    enabled = state.copyEnabled
+                )
+            }
             LogsButton(
                 text = stringResource(R.string.logs_close),
                 tag = "logs_close_button",
@@ -198,12 +221,13 @@ private fun LogsButton(
     text: String,
     tag: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
     primary: Boolean = false
 ) {
     val colors = MotoComThemePalette.current
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(16.dp))

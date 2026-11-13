@@ -17,12 +17,19 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.media.AudioManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -147,9 +154,14 @@ class IntercomService : Service() {
         fun onAudioControlsChanged(snapshot: AudioControlSnapshot) = Unit
         fun onLog(message: String)
         fun onToast(message: String) = Unit
+        fun onPairingsChanged(records: List<PairingRecord>) = Unit
         fun onRemoteRiderIdentified(name: String) = Unit
         fun onIncomingConfirmation(prompt: IncomingConfirmationPrompt) = Unit
         fun onIncomingConfirmationCanceled(actionNonce: String) = Unit
+        fun onCloudStateChanged(state: CloudIntercomState) = Unit
+        fun onCloudInvitation(prompt: CloudInvitePrompt?) = Unit
+        fun onCloudPairingPrompt(prompt: CloudPairingPrompt?) = Unit
+        fun onCloudPeersChanged(peers: List<CloudPeerInfo>) = Unit
         fun onError(message: String)
     }
 
@@ -305,6 +317,27 @@ class IntercomService : Service() {
     private var listener: Listener? = null
     private var runtimeKeepAlive: IntercomRuntimeKeepAlive? = null
     private var audioSessionController: AudioSessionController? = null
+    private var cloudSession: GmeCloudSession? = null
+    private var cloudAudioController: CloudAudioSessionController? = null
+    private var rideAudioArbiter: RideAudioArbiter?=null
+    private var localRide: CloudLocalRideSession?=null
+    private var localRideReleasePending=false
+    private var leavingCloudForLocal=false
+    private var cloudOwnerRideId: String?=null
+    private var localToCloudReservation: Long?=null
+    private var cloudRouteReleasePending=false
+    private var cloudNativeReleased=true
+    private var cloudRuntime: CloudIntercomRuntime? = null
+    private var cloudStartJob: Job? = null
+    private var cloudStartPending = false
+    private var cloudStartGeneration = 0L
+    private var cloudHandoverGeneration = 0L
+    private var localStopJob: Job? = null
+    private var cloudOwnership: Any? = null
+    private var cloudKeepAlive: IntercomRuntimeKeepAlive? = null
+    private var cloudState: CloudIntercomState = CloudIntercomState.Idle
+    private var stopAfterCloudCloses = false
+    private var destroying = false
     private var wifiTunnel: WifiDirectTunnel? = null
     private val wifiTunnelCloseOwner = PendingCloseOwner<WifiDirectTunnel> { tunnel, onComplete ->
         tunnel.close(onComplete)
@@ -332,6 +365,7 @@ class IntercomService : Service() {
     private var preferredAudioRoute = AudioRouteSelection.BLUETOOTH
     private var requestedRiderName = ""
     private var remoteRiderName: String? = null
+    private var pairingRecords: List<PairingRecord> = emptyList()
     private var appInForeground = false
     private var activeSession: SessionGeneration.Token? = null
     private var activeRuntimeSessionId: RuntimeSessionId? = null
@@ -353,12 +387,14 @@ class IntercomService : Service() {
             onLog = ::publishLog,
             onError = ::handleError,
             elapsedRealtime = SystemClock::elapsedRealtime,
-            automaticRecoveryPolicy = automaticRecoveryPolicy
+            automaticRecoveryPolicy = automaticRecoveryPolicy,
+            cloudFallbackEnabled = BuildConfig.GME_ENABLED
         )
         incomingConfirmationSurface = IncomingConfirmationSurface(
             incomingConfirmationScheduler,
             confirmationHost
         )
+        if (BuildConfig.GME_ENABLED) createCloudRuntime()
         serviceScope.launch {
             orchestrator.state.collect { state ->
                 dispatchOnMain {
@@ -378,14 +414,147 @@ class IntercomService : Service() {
         }
         serviceScope.launch {
             pairingRepository.observeAll().collect { records ->
+                val snapshot = records.toList()
                 dispatchOnMain {
-                    publishPresenceSnapshot(presenceAggregator.updatePairings(records))
+                    pairingRecords = snapshot
+                    listener?.onPairingsChanged(snapshot)
+                    publishPresenceSnapshot(presenceAggregator.updatePairings(snapshot))
                 }
             }
         }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    private fun createCloudRuntime() {
+        if (cloudRuntime != null || !BuildConfig.GME_ENABLED) return
+        cloudRuntime = CloudIntercomRuntime(this,serviceScope,identityStore,pairingRepository,
+            available = { appInForeground || hasForegroundSession() },
+            busy = { running || orchestrator.state.value != IntercomState.Offline ||
+                (LegacyRuntimeOwnership.hasOwner() && cloudSession == null) },
+            channelCurrent = { session ->
+                val token=activeSession; val attempt=orchestrator.currentAttempt
+                val candidate=attempt?.let(session::toConnectionCandidateContext)
+                token != null && candidate != null && activeMediaSession === session &&
+                    canUseMediaCandidate(isSessionCurrent(token),attempt,orchestrator.activeControlAttempt,candidate,session)
+            },peerName = { id -> pairingRecords.firstOrNull { it.remoteDeviceId==id }?.let(::pairingRiderName)
+                ?: activeMediaSession?.peer?.takeIf { it.deviceId==id }?.nickname?.ifBlank { "车友" } ?: "车友" },
+            onState = ::handleCloudState,onInvitation=::publishCloudInvitation,onPairingPrompt=::publishCloudPairingPrompt,
+            onPeers = { listener?.onCloudPeersChanged(it) },notice=::publishToast,
+            startMedia=::prepareApprovedCloudIntercom,stopMedia=::stopAllRideMedia,
+            onLocalRide=::updateLocalRide,hasLocalMedia={id->localRide?.let {it.rideId==id && it.ownsLocalMedia}==true})
+    }
+
+    private fun currentRideAudioReady()=audioInterruptionState==AudioInterruptionState.NORMAL &&
+        if(rideAudioArbiter?.source==RideAudioSource.LOCAL) localRide?.audioReady==true else cloudSession?.audioIsReady==true
+
+    private fun updateLocalRide(ride: RideSession,access: LocalRideAccess) {
+        if(Build.VERSION.SDK_INT<26)return
+        localRide?.takeIf {it.rideId==ride.rideId}?.let {it.update(ride);return}
+        if(ride.state!=RideState.CLOUD_ACTIVE || ride.localSwitchAttempts>=3 || cloudSession==null || destroying || localRideReleasePending)return
+        val owner=cloudOwnership ?: return
+        fun live()=cloudOwnership===owner && !destroying
+        val host=object : LocalRideAudioHost {
+            override val localSelected get()=rideAudioArbiter?.source==RideAudioSource.LOCAL
+            override fun canSwitch()=live() && access.current() && audioInterruptionState==AudioInterruptionState.NORMAL && rideAudioArbiter?.authorized==true
+            override fun bind(engine: RiderMediaEngine) {if(live())rideAudioArbiter?.local(engine)}
+            override suspend fun activateLocal(budgetMs: Long): Boolean {
+                publishAudioReady(false)
+                return live() && access.current() && rideAudioArbiter?.select(RideAudioSource.LOCAL,{
+                    cloudAudioController?.updateRoute(cloudAudioController!!.preferredRoute())
+                },budgetMs)==true
+            }
+            override fun released(engine: RiderMediaEngine,success: Boolean) {
+                if(!live())return
+                rideAudioArbiter?.localReleased(engine,success)
+                if(!success) {
+                    audioInterruptionState=AudioInterruptionState.ROUTE_UNAVAILABLE
+                    listener?.onAudioInterruptionChanged(audioInterruptionState)
+                    publishStatus(AUDIO_ROUTE_UNAVAILABLE_STATUS)
+                }
+                publishAudioReady(currentRideAudioReady())
+            }
+            override suspend fun resumeCloud(): Boolean = live() && access.current() && rideAudioArbiter?.select(RideAudioSource.CLOUD,{
+                cloudAudioController?.updateRoute(cloudAudioController!!.preferredRoute())
+            },3_000)==true
+            override fun committed(transport: Transport) {
+                if(!live() || !access.current())return
+                leavingCloudForLocal=true
+                cloudSession?.stop()
+            }
+            override fun changed() {if(live())publishAudioReady(currentRideAudioReady())}
+            override fun level(level: Float) {if(live())listener?.onAudioLevelChanged(level)}
+            override fun vox(controls: VersionedAudioControls,state: VoxRuntimeState) {
+                if(live() && controls.revision==audioControlRevision && controls.settings==audioControls) {voxRuntimeState=state;publishAudioControls()}
+            }
+        }
+        localRide=CloudLocalRideSession(this,ride,access,{VersionedAudioControls(audioControlRevision,audioControls)},host).also {it.start()}
+    }
+
+    private fun closeLocalRide(onReleased: (Boolean)->Unit = {}) {
+        val local=localRide ?: run {onReleased(!localRideReleasePending);return}
+        localRide=null;localRideReleasePending=true;leavingCloudForLocal=false
+        local.closeWhenReleased {success ->dispatchOnMain {
+            if(success) {
+                localRideReleasePending=false
+                if(cloudSession==null && localToCloudReservation==null) {
+                    releaseCloudResources()
+                    if(!cloudState.ownsCloudSession && !running) {stopForegroundCompat();if(!destroying)stopSelf()}
+                }
+            } else publishStatus("音频设备尚未完成释放，请重新打开应用")
+            onReleased(success)
+        }}
+    }
+    private fun stopAllRideMedia() {
+        rideAudioArbiter?.close();closeLocalRide()
+        if(cloudSession!=null)cloudSession?.stop() else if(!localRideReleasePending)releaseCloudResources()
+    }
+
+    internal fun cloudSettingsChanged() { dispatchOnMain { createCloudRuntime(); cloudRuntime?.settingsChanged() } }
+    internal fun requestCloudPairing(peer: String) { dispatchOnMain { cloudRuntime?.requestPairing(peer) } }
+    internal fun requestResumeCloud(rideId: String) { dispatchOnMain {
+        if (running || !hasCloudRuntimePermissions()) { publishToast("请先结束本地对讲并允许录音和电话状态权限"); return@dispatchOnMain }
+        if (cloudRuntime?.preferences?.enabled != true || !GmeConfig.fromBuildConfig().canConnect) return@dispatchOnMain
+        resetSessionAudioControls(); cloudStartPending=true
+        if (retainCloudForeground()) cloudRuntime?.resume(rideId)
+    } }
+    internal fun respondCloudAction(kind: String,id: String,nonce: String,accepted: Boolean): Boolean {
+        val runtime=cloudRuntime ?: return false
+        if (kind == "invite") {
+            val p=runtime.invitation?.takeIf { it.invitation.inviteId==id && it.actionNonce==nonce } ?: return false
+            if (p.expiresAtLocal <= System.currentTimeMillis()) return false
+            if (accepted && !hasCloudRuntimePermissions()) { publishToast("接受云端对讲需要录音和电话状态权限"); return false }
+            if (accepted && !running && orchestrator.state.value == IntercomState.Offline) {
+                resetSessionAudioControls(); cloudStartPending=true
+                if (!retainCloudForeground()) return false
+            }
+            runtime.respond(p.invitation.inviteId,accepted,nonce)
+        } else if (kind == "pair") {
+            runtime.pairingPrompt?.takeIf { it.pairId==id && it.actionNonce==nonce } ?: return false
+            runtime.approvePairing(id,nonce,accepted)
+        } else return false
+        return true
+    }
+
+    private fun publishCloudInvitation(prompt: CloudInvitePrompt?) {
+        listener?.onCloudInvitation(prompt)
+        publishCloudRequestNotification("invite",prompt?.invitation?.inviteId,prompt?.actionNonce,
+            prompt?.peerName,prompt?.expiresAtLocal,SessionNotificationFactory.CLOUD_INVITE_NOTIFICATION_ID)
+    }
+    private fun publishCloudPairingPrompt(prompt: CloudPairingPrompt?) {
+        listener?.onCloudPairingPrompt(prompt)
+        publishCloudRequestNotification("pair",prompt?.pairId,prompt?.actionNonce,prompt?.peerName,prompt?.expiresAt,
+            SessionNotificationFactory.CLOUD_PAIRING_NOTIFICATION_ID)
+    }
+    private fun publishCloudRequestNotification(kind: String,id: String?,nonce: String?,name: String?,expires: Long?,notificationId: Int) {
+        val manager=getSystemService(NotificationManager::class.java) ?: return
+        if (id == null || nonce == null || expires == null || appInForeground) { manager.cancel(notificationId); return }
+        if (!notifications.incomingConfirmationAvailable()) return
+        manager.notify(notificationId,notifications.cloudRequestNotification(name.orEmpty(),kind=="pair",expires,
+            cloudRequestPendingIntent(kind,id,nonce,true),cloudRequestPendingIntent(kind,id,nonce,false)))
+    }
+    private fun cloudRequestPendingIntent(kind: String,id: String,nonce: String,accepted: Boolean): PendingIntent =
+        PendingIntent.getActivity(this,0,cloudUiActionIntent(this,kind,id,nonce,accepted),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun rejectForegroundStart(startId: Int, status: String) {
         try {
@@ -407,9 +576,71 @@ class IntercomService : Service() {
         }
     }
 
+    private fun keepExistingForeground(status: String) {
+        try {
+            startForegroundForCurrentRuntime()
+        } catch (error: RuntimeException) {
+            handleError(error)
+        }
+        publishStatus(status)
+    }
+
+    private fun hasCloudForeground(): Boolean =
+        cloudSession != null || cloudStartPending || cloudState.ownsCloudSession
+
+    private fun startCloudForeground() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
+    }
+
+    private fun retainCloudForeground(): Boolean = try {
+        // Accept/resume may arrive on a service created only by BIND_AUTO_CREATE.
+        // Enter the started lifecycle while its Activity is visible, before unbind.
+        val intent=Intent(this,IntercomService::class.java).setAction(ACTION_KEEP_CLOUD_SERVICE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        startCloudForeground()
+        true
+    } catch (_: RuntimeException) {
+        handleCloudState(CloudIntercomState.Failed("车友","无法启动前台语音服务，请返回应用重试"))
+        false
+    }
+
+    private fun startForegroundForCurrentRuntime(
+        notification: Notification = buildNotification()
+    ) {
+        if (hasCloudForeground() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_KEEP_CLOUD_SERVICE -> {
+                when {
+                    running -> keepExistingForeground(lastStatus)
+                    hasCloudForeground() && hasCloudRuntimePermissions() -> startCloudForeground()
+                    else -> rejectForegroundStart(startId,"云端请求已失效")
+                }
+                return START_NOT_STICKY
+            }
             ACTION_START_INTERCOM -> {
+                if (!running && (cloudSession != null || cloudStartPending || cloudState.blocksLocalStart)) {
+                    keepExistingForeground("云端对讲进行中，请先结束云端对讲")
+                    return START_NOT_STICKY
+                }
                 if (!running && LegacyRuntimeOwnership.hasOwner()) {
                     rejectForegroundStart(startId, "网络正在释放，请稍后重试")
                     return START_NOT_STICKY
@@ -456,9 +687,53 @@ class IntercomService : Service() {
                 }
                 return START_NOT_STICKY
             }
+            ACTION_START_CLOUD_INTERCOM -> {
+                val peerDeviceId = intent.getStringExtra(EXTRA_CLOUD_PEER_DEVICE_ID).orEmpty().trim()
+                val peerName = intent.getStringExtra(EXTRA_CLOUD_PEER_NAME).orEmpty().trim()
+                if (peerDeviceId.isBlank()) {
+                    rejectForegroundStart(startId, "缺少云端车友标识")
+                    return START_NOT_STICKY
+                }
+                if (running || orchestrator.state.value != IntercomState.Offline) {
+                    keepExistingForeground("本地对讲进行中，请先结束本地对讲")
+                    return START_NOT_STICKY
+                }
+                if (cloudSession != null || cloudStartPending) {
+                    keepExistingForeground(cloudState.statusText())
+                    return START_NOT_STICKY
+                }
+                if (!hasCloudRuntimePermissions()) {
+                    rejectForegroundStart(startId, "缺少麦克风权限，无法启动云端对讲")
+                    return START_NOT_STICKY
+                }
+                if (LegacyRuntimeOwnership.hasOwner()) {
+                    rejectForegroundStart(startId, "网络正在释放，请稍后重试")
+                    return START_NOT_STICKY
+                }
+                if (
+                    !runSafelyOrStop(
+                        action = {
+                            cloudStartPending = true
+                            startCloudForeground()
+                            beginCloudIntercom(peerDeviceId, peerName)
+                        },
+                        onFailure = ::handleError,
+                        onStop = {
+                            abandonCloudIntercom()
+                            stopSelf(startId)
+                        }
+                    )
+                ) {
+                    return START_NOT_STICKY
+                }
+                return START_NOT_STICKY
+            }
+            ACTION_STOP_CLOUD_INTERCOM -> {
+                stopCloudIntercom(destroying = false, stopServiceWhenClosed = true)
+                return START_NOT_STICKY
+            }
             ACTION_STOP_INTERCOM -> {
-                stopIntercom()
-                stopSelf()
+                requestStop()
                 return START_NOT_STICKY
             }
             ACTION_ACCEPT_INCOMING -> {
@@ -474,10 +749,19 @@ class IntercomService : Service() {
     }
 
     override fun onDestroy() {
-        stopIntercom()
-        orchestrator.close()
+        destroying = true
         serviceScope.cancel()
-        super.onDestroy()
+        try {
+            runCatching { rideAudioArbiter?.close() }
+            runCatching { closeLocalRide() }
+            runCatching { cloudRuntime?.close() }
+            cloudRuntime = null
+            runCatching { abandonCloudIntercom() }
+            runCatching { stopIntercom() }
+            runCatching { orchestrator.close() }
+        } finally {
+            super.onDestroy()
+        }
     }
 
     internal fun setListener(listener: Listener?) {
@@ -490,6 +774,11 @@ class IntercomService : Service() {
         listener?.onAudioRouteSelectionChanged(preferredAudioRoute)
         listener?.onAudioControlsChanged(currentAudioControlSnapshot())
         listener?.onPresencesChanged(presenceAggregator.snapshot().presences)
+        listener?.onPairingsChanged(pairingRecords)
+        listener?.onCloudStateChanged(cloudState)
+        listener?.onCloudInvitation(cloudRuntime?.invitation)
+        listener?.onCloudPairingPrompt(cloudRuntime?.pairingPrompt)
+        listener?.onCloudPeersChanged(cloudRuntime?.peerInfos.orEmpty())
         remoteRiderName?.let { listener?.onRemoteRiderIdentified(it) }
         listener?.let(::replayActiveIncomingConfirmation)
     }
@@ -508,11 +797,18 @@ class IntercomService : Service() {
         dispatchOnMain {
             appInForeground = foreground
             publishConfirmationAvailability()
+            cloudRuntime?.updateAvailability()
+            publishCloudInvitation(cloudRuntime?.invitation)
+            publishCloudPairingPrompt(cloudRuntime?.pairingPrompt)
         }
     }
 
     internal fun setMuted(muted: Boolean) {
         dispatchOnMain {
+            if (cloudSession != null || cloudStartPending || cloudState.ownsCloudSession) {
+                applyAudioControls(audioControls.copy(muted=muted))
+                return@dispatchOnMain
+            }
             applyAudioControls(audioControls.copy(muted = running && muted))
         }
     }
@@ -548,6 +844,7 @@ class IntercomService : Service() {
                 DiagnosticLog.i("IntercomService", "Audio route requested selection=$selection source=$source")
                 controller?.updateAudioRoute(selection,
                     resetIoRecoveryBudget = source == AudioRouteRequestSource.USER_SELECTION)
+                cloudAudioController?.updateRoute(selection,force=source!=AudioRouteRequestSource.ACTIVITY_REBIND)
             } catch (error: RuntimeException) {
                 handleError(error)
             }
@@ -619,8 +916,9 @@ class IntercomService : Service() {
             return
         }
         dispatchOnMain {
-            automaticRecoveryPolicy.cancelTarget(normalizedDeviceId)
-            cancelFutureRecovery(normalizedDeviceId)
+            runCatching { automaticRecoveryPolicy.cancelTarget(normalizedDeviceId) }
+            runCatching { cancelFutureRecovery(normalizedDeviceId) }
+            runCatching { cloudRuntime?.invalidatePeer(normalizedDeviceId) }
         serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
             pairingMutationMutex.withLock {
                 try {
@@ -636,6 +934,7 @@ class IntercomService : Service() {
                     } else {
                         publishMissingPairing(riderName)
                     }
+                    if (forgotten) runCatching { cloudRuntime?.forgetPeer(normalizedDeviceId) }
                 } catch (canceled: CancellationException) {
                     throw canceled
                 } catch (error: Exception) {
@@ -674,7 +973,7 @@ class IntercomService : Service() {
 
     private fun applyAudioControls(requested: AudioControlSettings) {
         val next = requested.normalized().let {
-            if (running) it else it.copy(muted = false)
+            if (running || hasCloudForeground()) it else it.copy(muted = false)
         }
         if (next == audioControls) return
         val previous = audioControls
@@ -690,9 +989,15 @@ class IntercomService : Service() {
         }
         audioControls = next
         audioControlRevision = nextVersioned.revision
+        cloudSession?.updateAudioControls(nextVersioned)
+        localRide?.updateControls(nextVersioned)
+        if (cloudSession != null || localRide!=null) {
+            publishAudioControls()
+            return
+        }
         DiagnosticLog.i("IntercomService", "Audio controls revision=$audioControlRevision muted=${next.muted} vox=${next.voxEnabled} sensitivity=${next.voxSensitivity}")
         when {
-            !running -> {
+            !running && !hasCloudForeground() -> {
                 voxRuntimeState = if (next.voxEnabled) {
                     VoxRuntimeState.IDLE
                 } else {
@@ -797,14 +1102,67 @@ class IntercomService : Service() {
     fun requestStart(riderName: String = "") {
         mainHandler.post {
             requestedRiderName = riderName.trim()
-            if (hasRequiredRuntimePermissions()) startIntercom() else publishStatus("缺少必要权限，无法启动摩声")
+            if (cloudSession != null || cloudStartPending) {
+                publishStatus("云端对讲进行中，请先结束云端对讲")
+            } else if (hasRequiredRuntimePermissions()) {
+                startIntercom()
+            } else {
+                publishStatus("缺少必要权限，无法启动摩声")
+            }
         }
     }
 
     fun requestStop() {
         dispatchOnMain {
-            stopIntercom()
-            stopSelf()
+            if (running) {
+                if(localStopJob?.isActive==true) return@dispatchOnMain
+                val runtime=cloudRuntime
+                var stopped=false
+                var endFinished=runtime==null
+                runtime?.endLocal { endFinished=true; if(stopped && !running && !hasCloudForeground()) stopSelf() }
+                fun finishStop() {
+                    stopIntercom(); stopped=true
+                    if(endFinished && !hasCloudForeground()) stopSelf()
+                }
+                val attempt=(orchestrator.state.value as? IntercomState.Connected)?.attempt
+                if(BuildConfig.GME_ENABLED && attempt!=null && orchestrator.activeControlAttempt?.mediaOwnerChannelId!=null) {
+                    automaticRecoveryPolicy.cancelAutomaticStarts(attempt)
+                    cancelFutureRecovery()
+                    publishStatus("正在结束对讲…")
+                    localStopJob=serviceScope.launch(Dispatchers.Main.immediate) {
+                        stopLocalAfterDisconnect(attempt) {
+                            stopped=true
+                            if(endFinished && !hasCloudForeground()) stopSelf()
+                        }
+                    }
+                } else finishStop()
+                return@dispatchOnMain
+            }
+            if (cloudSession != null || cloudStartPending || cloudState.ownsCloudSession) {
+                stopCloudIntercom(destroying = false, stopServiceWhenClosed = true)
+            } else {
+                stopAfterCloudCloses = false
+                stopForegroundCompat()
+                stopSelf()
+            }
+        }
+    }
+
+    internal suspend fun stopLocalAfterDisconnect(attempt: ConnectionAttempt,onStopped: ()->Unit = {}) {
+        // Give the existing TERMINATING/send/flush path a bounded chance to
+        // deliver user intent. Stop covers recovery already claimed in this runtime.
+        withTimeoutOrNull(1_000) {
+            orchestrator.dispatchAndAwait(SessionEvent.DisconnectRequested(attempt.runtimeSessionId,attempt.id))
+            orchestrator.state.first { it.connectionAttemptOrNull()!=attempt }
+        }
+        if(activeRuntimeSessionId==attempt.runtimeSessionId && !destroying) {
+            stopIntercom(); onStopped()
+        }
+    }
+
+    fun requestStopCloudIntercom() {
+        dispatchOnMain {
+            stopCloudIntercom(destroying = false, stopServiceWhenClosed = true)
         }
     }
 
@@ -822,6 +1180,7 @@ class IntercomService : Service() {
                 ?: return@dispatchOnMain
             automaticRecoveryPolicy.cancelAutomaticStarts((orchestrator.state.value as? IntercomState.Connected)?.attempt)
             cancelFutureRecovery()
+            cloudRuntime?.endLocal()
             orchestrator.dispatch(SessionEvent.DisconnectRequested(runtimeSessionId, attempt.id))
         }
     }
@@ -831,6 +1190,7 @@ class IntercomService : Service() {
         request: PresenceConnectRequest
     ): Boolean {
         if (Looper.myLooper() != Looper.getMainLooper()) return false
+        if(localStopJob?.isActive==true) return false
         val token = activeSession ?: return false
         if (!isPresenceConnectRuntimeCurrent(token, request.runtimeSessionId) ||
             request.requestId.isBlank() || request.targetDeviceId.isBlank() ||
@@ -838,6 +1198,7 @@ class IntercomService : Service() {
             selectedPresence.sessionId != request.targetSessionId
         ) return false
         automaticRecoveryPolicy.manualChoice(request.targetDeviceId, (orchestrator.state.value as? IntercomState.Connected)?.attempt)
+        cloudRuntime?.endLocal()
         cancelFutureRecovery()
         revokePresenceAdmission(latestPresenceAdmission)
         revokePresenceAdmission(autoConnectAdmission)
@@ -974,7 +1335,326 @@ class IntercomService : Service() {
         }
     }
 
+    private fun beginCloudIntercom(peerDeviceId: String, peerName: String) {
+        if (destroying) return
+        if (!GmeConfig.fromBuildConfig().canConnect || cloudRuntime?.preferences?.enabled != true) {
+            handleCloudState(CloudIntercomState.Failed(peerName,"请先配置并启用云端对讲"))
+            stopForegroundCompat(); stopSelf(); return
+        }
+        resetSessionAudioControls()
+        cloudRuntime?.invite(peerDeviceId)
+    }
+
+    internal suspend fun prepareApprovedCloudIntercom(ride: ApprovedCloudRide,ticketSource: GmeTicketSource,current: ()->Boolean): Boolean =
+        withContext(Dispatchers.Main.immediate) {
+            if(!current() || destroying) return@withContext false
+            val handover=++cloudHandoverGeneration
+            try {
+                if(localRide?.ownsLocalMedia==true && (cloudSession==null || leavingCloudForLocal)) {
+                    localToCloudReservation=handover
+                    cloudStartPending=true
+                    val released=CompletableDeferred<Boolean>()
+                    closeLocalRide {released.complete(it)}
+                    val ready=withTimeoutOrNull(15_000) {
+                        val localReleased=released.await()
+                        if(localReleased)while(cloudSession!=null)delay(10)
+                        localReleased
+                    }==true
+                    if(!ready || !current() || destroying)return@withContext false
+                }
+                if(running) {
+                    if(ride.reason!=CloudEntryReason.LOCAL_FAILURE || activeRuntimeSessionId==null) return@withContext false
+                    val released=CompletableDeferred<Boolean>()
+                    stopIntercom(forCloud=true,onReleased={ released.complete(it) })
+                    cloudStartPending=true
+                    val ready=withTimeoutOrNull(15_000) {
+                        val ok=released.await()
+                        if(ok) orchestrator.state.first { it==IntercomState.Offline }
+                        ok
+                    }==true
+                    if(!ready || !current() || destroying) return@withContext false
+                }
+                if(!current()) return@withContext false
+                beginApprovedCloudIntercom(ride,ticketSource)
+            } finally {
+                if(localToCloudReservation==handover)localToCloudReservation=null
+                if(handover==cloudHandoverGeneration && cloudSession==null) {
+                    cloudStartPending=false
+                    if(localRide==null && cloudOwnership!=null)releaseCloudResources()
+                    if(!running && !cloudState.ownsCloudSession) { stopForegroundCompat(); if(!destroying) stopSelf() }
+                }
+            }
+        }
+
+    internal fun beginApprovedCloudIntercom(ride: ApprovedCloudRide, ticketSource: GmeTicketSource): Boolean {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        // A pending foreground invitation/resume belongs to this approved intent.
+        if (destroying || cloudSession != null) return false
+        if (running || orchestrator.state.value != IntercomState.Offline) return false
+        if (!GmeConfig.fromBuildConfig().canConnect || cloudRuntime?.preferences?.enabled != true || !hasCloudRuntimePermissions()) return false
+        val retained=cloudOwnership!=null && cloudOwnerRideId==ride.rideId && cloudAudioController!=null && !localRideReleasePending
+        if(retained && !cloudNativeReleased)return false
+        val ownership = if(retained) cloudOwnership!! else LegacyRuntimeOwnership.acquire() ?: return false
+        cloudOwnership = ownership
+        cloudOwnerRideId=ride.rideId
+        cloudStartPending = true
+        val generation = ++cloudStartGeneration
+        try {
+            if(!retained)cloudKeepAlive = IntercomRuntimeKeepAlive.acquire(this)
+            stopAfterCloudCloses = false
+            startCloudForeground()
+            voxRuntimeState = if (audioControls.muted) VoxRuntimeState.MUTED else VoxRuntimeState.DISABLED
+            publishAudioControls()
+            val session = GmeCloudSession(
+                context = this, ticketSource = ticketSource,
+                onState = { if (generation == cloudStartGeneration && !leavingCloudForLocal) cloudRuntime?.mediaState(it) ?: handleCloudState(it) },
+                onClosed = { if (generation == cloudStartGeneration) onCloudSessionClosed() },
+                onLog = ::publishLog,
+                initialAudioControls=VersionedAudioControls(audioControlRevision,audioControls),
+                onVoxState={ controls,state ->
+                    if(generation==cloudStartGeneration && rideAudioArbiter?.source!=RideAudioSource.LOCAL && controls.revision==audioControlRevision && controls.settings==audioControls) {
+                        voxRuntimeState=state; publishAudioControls()
+                    }
+                },onAudioLevel={ if(generation==cloudStartGeneration && rideAudioArbiter?.source!=RideAudioSource.LOCAL) listener?.onAudioLevelChanged(it) },
+                onRouteRequired={ if(generation==cloudStartGeneration && rideAudioArbiter?.source==RideAudioSource.CLOUD) cloudAudioController?.updateRoute(cloudAudioController?.preferredRoute() ?: preferredAudioRoute) },
+                onUsageWarning={ if(generation==cloudStartGeneration) {
+                    publishToast("本次云端额度不足 30 分钟，到期后可手动延长")
+                    publishStatus("云端额度不足 30 分钟，到期后可手动延长")
+                } }
+            )
+            cloudSession = session
+            leavingCloudForLocal=false
+            val arbiter=rideAudioArbiter ?: RideAudioArbiter(::dispatchOnMain).also {rideAudioArbiter=it}
+            arbiter.cloud(session)
+            if(retained) {
+                cloudStartPending=false;session.start(ride)
+                serviceScope.launch(Dispatchers.Main.immediate) {
+                    arbiter.select(RideAudioSource.CLOUD,{cloudAudioController?.updateRoute(cloudAudioController!!.preferredRoute())},15_000)
+                }
+                return true
+            }
+            fun live()=cloudOwnership===ownership && !destroying
+            cloudAudioController=CloudAudioSessionController.create(this,arbiter,preferredAudioRoute,
+                onScoConnected={ if(live()) publishAudioSource("当前音频源：蓝牙耳机 ($it)",true) },
+                onScoDisconnected={ if(live()) publishStatus(BLUETOOTH_RETRY_STATUS) },
+                onSpeakerFallback={ if(live()) publishAudioSource(AUDIO_SPEAKER_STATUS,false) },
+                onEarpieceActive={ if(live()) publishAudioSource(AUDIO_EARPIECE_STATUS,false) },
+                onExternalAudioActive={ if(live()) publishAudioSource("当前音频源：$it",false) },
+                onError={ if(live()) {
+                    audioInterruptionState=AudioInterruptionState.ROUTE_UNAVAILABLE
+                    listener?.onAudioInterruptionChanged(audioInterruptionState)
+                    publishAudioReady(false); arbiter.suspendAudio(); publishStatus(AUDIO_ROUTE_UNAVAILABLE_STATUS)
+                } },
+                onInterruption={ state -> if(live()) {
+                    audioInterruptionState=state; listener?.onAudioInterruptionChanged(state)
+                    localRide?.audioPolicyChanged(state)
+                    publishAudioReady(state==AudioInterruptionState.NORMAL && currentRideAudioReady())
+                    publishStatus(if(state==AudioInterruptionState.NORMAL) cloudState.statusText() else when(state) {
+                        AudioInterruptionState.PHONE_RINGING,AudioInterruptionState.PHONE_ACTIVE -> AUDIO_PAUSED_STATUS
+                        AudioInterruptionState.FOCUS_LOST -> AUDIO_FOCUS_LOST_STATUS
+                        AudioInterruptionState.ROUTE_UNAVAILABLE -> AUDIO_ROUTE_UNAVAILABLE_STATUS
+                        else -> AUDIO_RESUMING_STATUS
+                    })
+                } })
+            cloudAudioController!!.start()
+            cloudStartPending = false
+            session.start(ride)
+            return true
+        } catch (error: Throwable) {
+            if(error is CloudAudioStartupFailure) {
+                cloudRouteReleasePending=true
+                error.whenReleased { success -> dispatchOnMain {
+                    if(success) {
+                        cloudRouteReleasePending=false
+                        if(cloudSession==null) releaseCloudResources()
+                    } else publishStatus("音频设备尚未完成释放，请重新打开应用")
+                } }
+            }
+            if (cloudSession != null) cloudSession?.stop() else failPendingCloudStart(ride.peerName,error)
+            return false
+        }
+    }
+
+    private fun handleCloudState(state: CloudIntercomState) {
+        val previous = cloudState
+        val wasPending = cloudStartPending
+        if (state != CloudIntercomState.Idle) cloudStartPending = false
+        cloudState = state
+        listener?.onCloudStateChanged(state)
+        if (running) return
+        if (state.ownsCloudSession && hasCloudRuntimePermissions()) {
+            runCatching { startCloudForeground() }
+        } else if (cloudSession == null && !cloudStartPending && !localRideReleasePending && (previous.ownsCloudSession || wasPending)) {
+            stopForegroundCompat(); stopSelf()
+        }
+        when (state) {
+            is CloudIntercomState.WaitingForPeer,
+            is CloudIntercomState.Connected,
+            is CloudIntercomState.LocalConnected,
+            is CloudIntercomState.SwitchingLocal -> {
+                publishAudioReady(currentRideAudioReady())
+            }
+            is CloudIntercomState.Reconnecting,
+            is CloudIntercomState.Failed,
+            is CloudIntercomState.Stopping -> publishAudioReady(false)
+            CloudIntercomState.Idle,
+            is CloudIntercomState.Inviting,
+            is CloudIntercomState.ResumeAvailable,
+            is CloudIntercomState.LimitReached,
+            is CloudIntercomState.Preparing,
+            is CloudIntercomState.JoiningRoom -> Unit
+        }
+        if (state is CloudIntercomState.Failed) {
+            publishLog("Cloud intercom failed: ${state.message}")
+            publishToast("云端对讲失败：${state.message}")
+        }
+        publishStatus(state.statusText(audioInterruptionState))
+    }
+
+    private fun publishCloudState() {
+        listener?.onCloudStateChanged(cloudState)
+        publishStatus(cloudState.statusText())
+    }
+
+    private fun failPendingCloudStart(peerName: String, error: Throwable) {
+        cloudStartPending = false
+        cloudStartJob = null
+        cloudState = CloudIntercomState.Failed(
+            peerName = peerName,
+            message = error.message ?: "无法准备云端对讲"
+        )
+        handleCloudState(cloudState)
+        releaseCloudResources()
+        publishAudioReady(false)
+        publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
+        resetSessionAudioControls()
+        publishAudioControls()
+        stopForegroundCompat()
+        if (!running) stopSelf()
+    }
+
+    private fun onCloudSessionClosed() {
+        cloudNativeReleased=cloudSession?.nativeReleaseSucceeded != false
+        cloudSession = null
+        rideAudioArbiter?.cloud(null)
+        if(localToCloudReservation!=null) {leavingCloudForLocal=false;publishAudioReady(false);return}
+        if(leavingCloudForLocal && localRide?.committed==true && !destroying) {
+            leavingCloudForLocal=false
+            cloudStartPending=false
+            if(getSystemService(AudioManager::class.java).mode!=AudioManager.MODE_IN_COMMUNICATION)
+                cloudAudioController?.updateRoute(cloudAudioController!!.preferredRoute())
+            publishAudioReady(currentRideAudioReady())
+            cloudRuntime?.updateAvailability()
+            return
+        }
+        rideAudioArbiter?.close();closeLocalRide()
+        cloudStartPending = false
+        cloudStartJob?.cancel(); cloudStartJob = null
+        releaseCloudResources()
+        publishAudioReady(false)
+        publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
+        resetSessionAudioControls(); publishAudioControls()
+        cloudRuntime?.mediaClosed()
+        if (cloudRuntime == null && cloudState !is CloudIntercomState.Failed) {
+            cloudState = CloudIntercomState.Idle
+            listener?.onCloudStateChanged(cloudState)
+        }
+        if (!running && !cloudState.ownsCloudSession) {
+            stopForegroundCompat(); if (!destroying) stopSelf()
+        }
+        stopAfterCloudCloses = false
+        cloudRuntime?.updateAvailability()
+    }
+
+    private fun stopCloudIntercom(destroying: Boolean, stopServiceWhenClosed: Boolean) {
+        if (!destroying && cloudRuntime != null) {
+            // The runtime persists cancellation before publishing Idle.
+            cloudStartPending=false
+            if (!cloudState.ownsCloudSession) cloudState=CloudIntercomState.Preparing("","车友")
+            cloudRuntime?.endCurrent(); return
+        }
+        if (destroying) {
+            abandonCloudIntercom()
+            return
+        }
+        stopAfterCloudCloses = stopAfterCloudCloses || stopServiceWhenClosed
+        cloudSession?.let {
+            it.stop()
+            return
+        }
+        if (cloudStartPending || cloudOwnership != null) {
+            cloudStartGeneration++
+            cloudStartPending = false
+            cloudStartJob?.cancel()
+            cloudStartJob = null
+            releaseCloudResources()
+            cloudState = CloudIntercomState.Idle
+            listener?.onCloudStateChanged(cloudState)
+            publishAudioReady(false)
+            publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
+            resetSessionAudioControls()
+            publishAudioControls()
+            publishStatus(READY_STATUS)
+            stopForegroundCompat()
+            if (!running && stopServiceWhenClosed) stopSelf()
+            return
+        }
+        if (!running && stopServiceWhenClosed) {
+            stopAfterCloudCloses = false
+            stopForegroundCompat()
+            stopSelf()
+        }
+    }
+
+    private fun abandonCloudIntercom() {
+        rideAudioArbiter?.close();closeLocalRide()
+        // Keep the process-wide audio owner until the adapter has run Uninit,
+        // including onDestroy. Its independent scope finishes the close handshake.
+        cloudSession?.let {
+            it.close()
+            return
+        }
+        cloudStartGeneration++
+        cloudStartPending = false
+        cloudStartJob?.cancel()
+        cloudStartJob = null
+        releaseCloudResources()
+        cloudState = CloudIntercomState.Idle
+        stopAfterCloudCloses = false
+        publishAudioReady(false)
+    }
+
+    private fun releaseCloudResources() {
+        if(cloudRouteReleasePending || localRideReleasePending) return
+        val controller=cloudAudioController
+        cloudAudioController=null
+        if(controller!=null) {
+            cloudRouteReleasePending=true
+            controller.closeWhenReleased { success -> dispatchOnMain {
+                if(success && cloudNativeReleased) { cloudRouteReleasePending=false; releaseCloudOwnership() }
+                else publishStatus("音频设备尚未完成释放，请重新打开应用")
+            } }
+        } else if(cloudNativeReleased) releaseCloudOwnership()
+    }
+    private fun releaseCloudOwnership() {
+        cloudOwnerRideId=null
+        rideAudioArbiter?.close();rideAudioArbiter=null
+        try {
+            cloudKeepAlive?.close()
+        } catch (error: Throwable) {
+            handleError(error)
+        } finally {
+            cloudKeepAlive = null
+            cloudOwnership?.let(LegacyRuntimeOwnership::release)
+            cloudOwnership = null
+        }
+    }
+
     private fun startIntercom() {
+        if (cloudSession != null || cloudStartPending || cloudState.blocksLocalStart) {
+            publishStatus("请先继续或结束云端骑行")
+            return
+        }
         if (running) {
             publishStatus(lastStatus)
             return
@@ -1004,6 +1684,8 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
+        cloudRuntime?.localBecameBusy()
+        cloudRuntime?.updateAvailability()
         invalidatePresenceConnectRequests()
         resetSessionAudioControls()
         publishAudioControls()
@@ -1336,6 +2018,12 @@ class IntercomService : Service() {
         val runtimeSessionId = session.pinnedIdentity.localSessionId
         val channelId = session.channel.channelId
         val event = when (val message = envelope.message) {
+            is SignalingMessageV2.CloudShadow -> { closeControlChannel(session); return }
+            is SignalingMessageV2.CloudPairingOffer,
+            is SignalingMessageV2.CloudPairingProof -> {
+                cloudRuntime?.localFrame(session,message)
+                return
+            }
             is SignalingMessageV2.ConnectRequest -> {
                 publishConfirmationAvailability(runtimeSessionId)
                 SessionEvent.IncomingConnectRequest(
@@ -1514,6 +2202,7 @@ class IntercomService : Service() {
     }
 
     private fun closeActiveMediaContext() {
+        cloudRuntime?.localClosed()
         val manager = intercomManager
         activeMediaContext = null
         activeMediaSession = null
@@ -1633,6 +2322,7 @@ class IntercomService : Service() {
 
         activeMediaContext = candidate
         activeMediaSession = session
+        cloudRuntime?.localAccepted(session,effect.attempt.trigger)
         attemptMilestoneScheduler.cancel(effect.attempt)
         lanDiscovery?.retainPassiveIngress(effect.attempt)
         if (candidate.transport == Transport.LAN) {
@@ -1747,6 +2437,7 @@ class IntercomService : Service() {
                                 }
                             attemptDeadlineScheduler.cancel(candidate.attempt)
                             mediaConnected = true
+                            signalingSessions[candidate.channelId]?.let { cloudRuntime?.localConnected(it,candidate.attempt) }
                             publishStatus(VOICE_CONNECTED_STATUS)
                         }
                     }
@@ -1758,6 +2449,7 @@ class IntercomService : Service() {
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.CLOSED -> {
                     mediaConnected = false
+                    cloudRuntime?.localDisconnected()
                     publishAudioReady(false)
                     publishStatus(SIGNAL_LOST_STATUS)
                 }
@@ -1961,7 +2653,8 @@ class IntercomService : Service() {
         postForMediaContext(token, candidate) { listener?.onAudioLevelChanged(level) }
     }
 
-    private fun stopIntercom() {
+    private fun stopIntercom(forCloud: Boolean=false,onReleased: (Boolean)->Unit = {}) {
+        if (cloudSession != null || cloudStartPending) return
         automaticRecoveryPolicy.cancelAutomaticStarts((orchestrator.state.value as? IntercomState.Connected)?.attempt)
         cancelFutureRecovery()
         invalidatePresenceConnectRequests(notifyCancellation = true)
@@ -1991,27 +2684,46 @@ class IntercomService : Service() {
         lanDiscovery?.close()
         lanDiscovery = null
 
+        var cleanupSucceeded=true
         try {
             intercomManager?.close()
         } catch (t: Throwable) {
             handleError(t)
+            cleanupSucceeded=false
         }
+        val release=ResourceReleaseBarrier()
+        var wifiReleased=false
+        var audioReleased=false
+        fun finishRelease()=dispatchOnMain {
+            if(wifiReleased && audioReleased) {
+                if(cleanupSucceeded) {
+                    try { keepAliveToRelease?.close() } finally { ownershipToRelease?.let(LegacyRuntimeOwnership::release) }
+                }
+                release.complete(cleanupSucceeded)
+            }
+        }
+        release.whenReleased(onReleased)
         val wifiToClose = wifiTunnel
         wifiTunnel = null
         wifiTunnelCloseOwner.closeAll(
             additionalResources = listOfNotNull(wifiToClose),
-            onError = ::handleError
+            onError = { error -> dispatchOnMain { cleanupSucceeded=false; handleError(error) } }
         ) {
-            try { keepAliveToRelease?.close() } finally { ownershipToRelease?.let(LegacyRuntimeOwnership::release) }
+            dispatchOnMain { wifiReleased=true; finishRelease() }
         }
         try {
-            audioSessionController?.close()
+            val controller=audioSessionController
+            if(controller==null) { audioReleased=true; finishRelease() }
+            else controller.closeWhenReleased { success -> dispatchOnMain {
+                audioReleased=true; cleanupSucceeded=cleanupSucceeded && success; finishRelease()
+            } }
         } catch (t: Throwable) {
             handleError(t)
+            audioReleased=true; cleanupSucceeded=false; finishRelease()
         }
         intercomManager = null
         audioSessionController = null
-        resetSessionAudioControls()
+        if(!forCloud) resetSessionAudioControls()
         publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
@@ -2020,11 +2732,12 @@ class IntercomService : Service() {
         audioInterruptionState = AudioInterruptionState.NORMAL
         remoteRiderName = null
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
-        publishStatus(ENDED_STATUS)
+        publishStatus(if(forCloud) "本地链路已释放，正在切换云端…" else ENDED_STATUS)
         if (runtimeSessionId != null) {
             orchestrator.dispatch(SessionEvent.RuntimeStopped(runtimeSessionId))
         }
-        stopForegroundCompat()
+        if(!forCloud) stopForegroundCompat()
+        cloudRuntime?.updateAvailability()
     }
 
     private fun isSessionCurrent(token: SessionGeneration.Token): Boolean =
@@ -2082,6 +2795,8 @@ class IntercomService : Service() {
 
     private fun handleSessionEffect(effect: SessionEffect) {
         when (effect) {
+            is SessionEffect.LocalRideLost -> cloudRuntime?.localFailure(effect.attempt)
+            is SessionEffect.LocalRideEnded -> cloudRuntime?.endLocal()
             is SessionEffect.ScheduleConnectedLossObservation -> scheduleConnectedLossTimer(effect.window)
             is SessionEffect.CancelConnectedLossObservation -> cancelConnectedLossTimer(effect.window)
             is SessionEffect.ProbeRecoveryDiscovery -> scheduleRecoveryDiscoveryProbe(effect)
@@ -2861,16 +3576,20 @@ class IntercomService : Service() {
         }
     }
 
+    private fun hasCloudRuntimePermissions(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            PermissionPolicy.cloudPermissions().all { checkSelfPermission(it)==PackageManager.PERMISSION_GRANTED }
+
     private fun isIncomingNotificationAvailable(): Boolean =
         notifications.incomingConfirmationAvailable()
 
     private fun updateNotification() {
         val notification = buildNotification()
-        if (running) {
+        if (hasForegroundSession()) {
             runCatching {
                 // MIUI can keep the original foreground-service record when the
                 // same notification is updated only through NotificationManager.
-                startForeground(NOTIFICATION_ID, notification)
+                startForegroundForCurrentRuntime(notification)
             }.onFailure {
                 getSystemService(NotificationManager::class.java)
                     ?.notify(NOTIFICATION_ID, notification)
@@ -2885,8 +3604,12 @@ class IntercomService : Service() {
         orchestrator.state.value,
         lastStatus,
         audioInterruptionState,
-        running
+        hasForegroundSession(),
+        if (cloudState.ownsCloudSession) PendingIntent.getService(this,0,cloudStopIntent(this),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) else null
     )
+
+    private fun hasForegroundSession(): Boolean =
+        running || cloudSession != null || cloudStartPending || cloudState.ownsCloudSession
 
     private fun buildIncomingConfirmationNotification(
         prompt: IncomingConfirmationPrompt
@@ -2929,9 +3652,19 @@ class IntercomService : Service() {
     companion object {
         private const val LOSER_CHANNEL_CLOSE_TIMEOUT_MS = 1_000L
         const val ACTION_START_INTERCOM = "com.kuma.motointercom.action.START_INTERCOM"
+        private const val ACTION_KEEP_CLOUD_SERVICE = "com.kuma.motointercom.action.KEEP_CLOUD_SERVICE"
+        const val ACTION_START_CLOUD_INTERCOM =
+            "com.kuma.motointercom.action.START_CLOUD_INTERCOM"
+        const val ACTION_STOP_CLOUD_INTERCOM =
+            "com.kuma.motointercom.action.STOP_CLOUD_INTERCOM"
         const val ACTION_STOP_INTERCOM = "com.kuma.motointercom.action.STOP_INTERCOM"
         const val ACTION_ACCEPT_INCOMING = "com.kuma.motointercom.action.ACCEPT_INCOMING"
         const val ACTION_REJECT_INCOMING = "com.kuma.motointercom.action.REJECT_INCOMING"
+        internal const val ACTION_CLOUD_UI = "com.kuma.motointercom.action.CLOUD_UI"
+        internal const val EXTRA_CLOUD_KIND = "cloud_kind"
+        internal const val EXTRA_CLOUD_ENTITY = "cloud_entity"
+        internal const val EXTRA_CLOUD_ACTION_NONCE = "cloud_action_nonce"
+        internal const val EXTRA_CLOUD_ACCEPTED = "cloud_accepted"
         const val EXTRA_RIDER_NAME = "com.kuma.motointercom.extra.RIDER_NAME"
         private const val EXTRA_VOX_ENABLED = "com.kuma.motointercom.extra.VOX_ENABLED"
         private const val EXTRA_VOX_SENSITIVITY = "com.kuma.motointercom.extra.VOX_SENSITIVITY"
@@ -2940,6 +3673,10 @@ class IntercomService : Service() {
             "com.kuma.motointercom.extra.PREFERRED_AUDIO_ROUTE"
         private const val EXTRA_AUTOMATIC_RECONNECT_ENABLED =
             "com.kuma.motointercom.extra.AUTOMATIC_RECONNECT_ENABLED"
+        private const val EXTRA_CLOUD_PEER_DEVICE_ID =
+            "com.kuma.motointercom.extra.CLOUD_PEER_DEVICE_ID"
+        private const val EXTRA_CLOUD_PEER_NAME =
+            "com.kuma.motointercom.extra.CLOUD_PEER_NAME"
         private const val EXTRA_RUNTIME_SESSION_ID = "com.kuma.motointercom.extra.RUNTIME_SESSION_ID"
         private const val EXTRA_ATTEMPT_ID = "com.kuma.motointercom.extra.ATTEMPT_ID"
         private const val EXTRA_CHANNEL_ID = "com.kuma.motointercom.extra.CHANNEL_ID"
@@ -2989,6 +3726,26 @@ class IntercomService : Service() {
 
         fun stopIntent(context: Context): Intent =
             Intent(context, IntercomService::class.java).setAction(ACTION_STOP_INTERCOM)
+
+        internal fun cloudStartIntent(
+            context: Context,
+            peerDeviceId: String,
+            peerName: String
+        ): Intent =
+            Intent(context, IntercomService::class.java)
+                .setAction(ACTION_START_CLOUD_INTERCOM)
+                .putExtra(EXTRA_CLOUD_PEER_DEVICE_ID, peerDeviceId)
+                .putExtra(EXTRA_CLOUD_PEER_NAME, peerName)
+
+        internal fun cloudStopIntent(context: Context): Intent =
+            Intent(context, IntercomService::class.java).setAction(ACTION_STOP_CLOUD_INTERCOM)
+
+        internal fun cloudUiActionIntent(context: Context,kind: String,id: String,nonce: String,accepted: Boolean): Intent =
+            Intent(context,MainActivity::class.java).setAction(ACTION_CLOUD_UI)
+                .setData(Uri.parse("motointercom://cloud/$kind/$id/$nonce/$accepted"))
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_CLOUD_KIND,kind).putExtra(EXTRA_CLOUD_ENTITY,id)
+                .putExtra(EXTRA_CLOUD_ACTION_NONCE,nonce).putExtra(EXTRA_CLOUD_ACCEPTED,accepted)
 
         internal fun incomingConfirmationActionIntent(
             context: Context,

@@ -1083,12 +1083,11 @@ class MainActivityRobolectricTest {
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(ready.getBoolean(screen(activity)))
         } finally {
-            controller.destroy()
             val scope = admissionField(service, "serviceScope").get(service) as CoroutineScope
-            val stopped = CountDownLatch(1)
-            scope.coroutineContext[Job]?.invokeOnCompletion { stopped.countDown() } ?: stopped.countDown()
+            val job = scope.coroutineContext[Job]
+            controller.destroy()
             serviceController.destroy()
-            assertTrue("Service scope did not stop", stopped.await(5L, TimeUnit.SECONDS))
+            awaitCoroutineCompletionWithMainLooper(job, "Service scope did not stop")
             val databaseField = PairingDatabase::class.java.getDeclaredField("instance").apply {
                 isAccessible = true
             }
@@ -1215,11 +1214,10 @@ class MainActivityRobolectricTest {
             }
         } finally {
             val scope = admissionField(service, "serviceScope").get(service) as CoroutineScope
-            val stopped = CountDownLatch(1)
-            scope.coroutineContext[Job]?.invokeOnCompletion { stopped.countDown() } ?: stopped.countDown()
+            val job = scope.coroutineContext[Job]
             try {
                 controller.destroy()
-                assertTrue("Service scope did not stop", stopped.await(5L, TimeUnit.SECONDS))
+                awaitCoroutineCompletionWithMainLooper(job, "Service scope did not stop")
             } finally {
                 ownership?.let(LegacyRuntimeOwnership::release)
                 (databaseField.get(null) as? PairingDatabase)?.close()

@@ -19,7 +19,11 @@ import android.provider.Settings
 import com.kuma.motointercom.DiagnosticLog as Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 import java.util.UUID
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 /** Owns permissions, service lifecycle, preferences, and callback forwarding. */
 internal class MainActivity : ComponentActivity(), IntercomService.Listener {
@@ -28,6 +32,13 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private var bindingRegistered = false
     private var serviceConnected = false
     private var intercomState: IntercomState = IntercomState.Offline
+    private var cloudState: CloudIntercomState = CloudIntercomState.Idle
+    private val cloudPreferences by lazy { CloudPreferences(this) }
+    private var pendingCloudStart: Pair<String,String>? = null
+    private var pendingCloudResume: String?=null
+    private val cloudRequests by lazy { CloudRequestUi(this,cloudPreferences,{ intercomService!=null },
+        { kind,id,nonce,accepted -> intercomService?.respondCloudAction(kind,id,nonce,accepted)==true },
+        { PermissionPolicy.cloudPermissions().all(::hasPermission) },::requestCloudMicrophone,::cloudSettingsChanged) }
     private var lastToggleElapsed: Long? = null
     private var replayingServiceSnapshot = false
     private var incomingConfirmationDialog: AlertDialog? = null
@@ -41,6 +52,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private val appearancePreferences by lazy { AppearancePreferences(this) }
     private var bluetoothPermissionGranted: Boolean? = null
     private var automaticReconnectEnabled = true
+    private var pairingObservationJob: Job? = null
+    private val pairingRepository by lazy {
+        RoomPairingRepository(PairingDatabase.getInstance(this).pairingDao())
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -66,6 +81,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 replayingServiceSnapshot = false
             }
             intercomService?.setAppForeground(true)
+            cloudRequests.connected()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -96,6 +112,14 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                 it.getString(KEY_PROCESS_SESSION_TOKEN) == PROCESS_SESSION_TOKEN
             },
             onToggleIntercom = {
+                if (cloudState.blocksLocalStart) {
+                    Toast.makeText(
+                        this,
+                        "云端对讲进行中，请先结束云端对讲",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@MainScreen
+                }
                 val now = SystemClock.elapsedRealtime()
                 if (shouldIgnoreToggle(now, lastToggleElapsed)) return@MainScreen
                 val action = primaryIntercomAction(intercomState)
@@ -207,6 +231,11 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
                     true
                 }
             },
+            onStartCloudIntercom = ::startCloudIntercom,
+            onStopCloudIntercom = ::stopCloudIntercom,
+            onCloudPreferencesChanged = ::cloudSettingsChanged,
+            onCloudPairingRequested = { intercomService?.requestCloudPairing(it) },
+            onCloudResumeRequested = ::resumeCloudIntercom,
             onSendFeedback = ::sendFeedback,
             onboardingPreferences = OnboardingPreferences(this)
         )
@@ -215,6 +244,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         refreshCorePermissionPresentation()
         refreshWifiAvailability()
         refreshOptionalPermissionPresentation()
+        cloudRequests.intent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -226,9 +256,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onStart() {
         super.onStart()
         screen.resumeDiagnostics()
-        if (!bindIntercomService(flags = 0)) {
+        startPairingObservation()
+        if (!bindIntercomService(flags = if(BuildConfig.GME_ENABLED && cloudPreferences.enabled) Context.BIND_AUTO_CREATE else 0)) {
             screen.clearServiceOwnedFacts()
             setIntercomState(IntercomState.Offline)
+            cloudState = CloudIntercomState.Idle
+            screen.setCloudState(CloudIntercomState.Idle)
             screen.setStatus(SERVICE_UNAVAILABLE_STATUS)
         }
         refreshWifiAvailability()
@@ -252,6 +285,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         // onCreate's restore pass; apply the saved route position once more.
         screen.onWindowSizeChanged()
         screen.restoreCurrentPageScrollAfterResume()
+        cloudRequests.resume()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -261,8 +295,11 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     }
 
     override fun onStop() {
+        cloudRequests.stop()
         screen.abandonPresenceConnectRequest()
         screen.pauseDiagnostics()
+        pairingObservationJob?.cancel()
+        pairingObservationJob = null
         intercomService?.setAppForeground(false)
         intercomService?.setListener(null)
         if (bindingRegistered) {
@@ -284,6 +321,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         super.onDestroy()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        cloudRequests.intent(intent)
+    }
+
     @SuppressLint("GestureBackNavigation")
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
@@ -298,6 +341,16 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
+            REQUEST_CLOUD_MICROPHONE -> {
+                val granted = PermissionPolicy.cloudPermissions().all(::hasPermission)
+                cloudRequests.permissionResult(granted)
+                val start = pendingCloudStart
+                pendingCloudStart = null
+                if (granted && start != null) startCloudIntercom(start.first, start.second)
+                val resume=pendingCloudResume; pendingCloudResume=null
+                if(granted && resume!=null) intercomService?.requestResumeCloud(resume)
+                refreshCorePermissionPresentation()
+            }
             REQUEST_CORE_PERMISSIONS -> {
                 refreshCorePermissionPresentation()
                 refreshOptionalPermissionPresentation()
@@ -329,6 +382,26 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
     }
 
+    override fun onCloudStateChanged(state: CloudIntercomState) {
+        runOnUiThread {
+            if (!serviceConnected) return@runOnUiThread
+            cloudState = state
+            screen.setCloudState(state)
+        }
+    }
+
+    override fun onCloudInvitation(prompt: CloudInvitePrompt?) {
+        runOnUiThread { if (serviceConnected) cloudRequests.invitation(prompt) }
+    }
+
+    override fun onCloudPairingPrompt(prompt: CloudPairingPrompt?) {
+        runOnUiThread { if (serviceConnected) cloudRequests.pairing(prompt) }
+    }
+
+    override fun onCloudPeersChanged(peers: List<CloudPeerInfo>) {
+        runOnUiThread { if (serviceConnected) screen.setCloudPeers(peers) }
+    }
+
     override fun onAudioReadyChanged(ready: Boolean) {
         runOnUiThread { if (serviceConnected) screen.setAudioReady(ready) }
     }
@@ -342,6 +415,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onAudioInterruptionChanged(state: AudioInterruptionState) {
         runOnUiThread {
             if (!serviceConnected) return@runOnUiThread
+            screen.setCloudAudioInterruption(state)
             screen.setStatus(
                 when (state) {
                     AudioInterruptionState.PHONE_RINGING,
@@ -367,6 +441,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onPresencesChanged(presences: List<RiderPresence>) {
         runOnUiThread {
             if (serviceConnected) screen.setPresences(presences)
+        }
+    }
+
+    override fun onPairingsChanged(records: List<PairingRecord>) {
+        runOnUiThread {
+            if (serviceConnected) screen.setPairings(records)
         }
     }
 
@@ -595,6 +675,79 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         return true
     }
 
+    private fun startCloudIntercom(peerDeviceId: String, peerName: String): Boolean {
+        if (cloudState.blocksLocalStart || !cloudPreferences.enabled) return false
+        if (!PermissionPolicy.cloudPermissions().all(::hasPermission)) {
+            screen.setPermissionStatus("启动云端对讲需要录音和电话状态权限")
+            pendingCloudStart = peerDeviceId to peerName
+            requestCloudMicrophone()
+            return false
+        }
+        val intent = IntercomService.cloudStartIntent(
+            context = this,
+            peerDeviceId = peerDeviceId,
+            peerName = peerName
+        )
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "failed to start cloud intercom", error)
+            showServiceUnavailable()
+            return false
+        }
+        if (!bindIntercomService(intent, Context.BIND_AUTO_CREATE)) {
+            showServiceUnavailable()
+            return false
+        }
+        return true
+    }
+
+    private fun requestCloudMicrophone() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(PermissionPolicy.cloudPermissions().filterNot(::hasPermission).toTypedArray(), REQUEST_CLOUD_MICROPHONE)
+        }
+    }
+    private fun resumeCloudIntercom(rideId: String) {
+        if(!PermissionPolicy.cloudPermissions().all(::hasPermission)) {
+            pendingCloudResume=rideId; requestCloudMicrophone()
+        } else intercomService?.requestResumeCloud(rideId)
+    }
+
+    private fun cloudSettingsChanged() {
+        screen.cloudPreferencesChanged()
+        intercomService?.cloudSettingsChanged()
+        if (BuildConfig.GME_ENABLED && cloudPreferences.enabled && !serviceConnected) {
+            bindIntercomService(flags = Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    private fun startPairingObservation() {
+        pairingObservationJob?.cancel()
+        pairingObservationJob = lifecycleScope.launch {
+            pairingRepository.observeAll().collect { records ->
+                screen.setPairings(records)
+            }
+        }
+    }
+
+    private fun stopCloudIntercom() {
+        val service = intercomService
+        if (service != null) {
+            service.requestStopCloudIntercom()
+            return
+        }
+        try {
+            startService(IntercomService.cloudStopIntent(this))
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "failed to stop cloud intercom", error)
+            showServiceUnavailable()
+        }
+    }
+
     private fun refreshWifiAvailability() {
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         screen.setWifiUnavailable(!wifiManager.isWifiEnabled)
@@ -744,6 +897,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private companion object {
         const val REQUEST_CORE_PERMISSIONS = 1001
         const val REQUEST_OPTIONAL_PERMISSIONS = 1002
+        const val REQUEST_CLOUD_MICROPHONE = 1003
         const val RC_WIFI_PANEL = 1003
         const val PREFS_NAME = "moto_intercom"
         const val KEY_RIDER_NAME = "rider_name"

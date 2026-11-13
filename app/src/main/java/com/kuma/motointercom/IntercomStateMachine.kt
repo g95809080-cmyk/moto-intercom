@@ -254,6 +254,8 @@ internal sealed interface SessionEvent {
 }
 
 internal sealed interface SessionEffect {
+    data class LocalRideLost(val attempt: ConnectionAttempt) : SessionEffect
+    data class LocalRideEnded(val attempt: ConnectionAttempt) : SessionEffect
     data class ScheduleConnectedLossObservation(val window: ConnectedLossWindow) : SessionEffect
     data class CancelConnectedLossObservation(val window: ConnectedLossWindow) : SessionEffect
     data class RefreshDiscovery(

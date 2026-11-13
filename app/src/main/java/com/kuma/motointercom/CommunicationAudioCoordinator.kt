@@ -331,13 +331,26 @@ internal class AndroidIntercomPhoneState(context: Context) : IntercomPhoneState 
             appContext.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) ==
             PackageManager.PERMISSION_GRANTED
 
+    // Also used after callbacks are unregistered, just before queued route restoration.
+    internal fun isCallActiveNow(): Boolean {
+        if(!hasPermission()) return true
+        return runCatching { subscriptionManagers().any { it.manager.callState != TelephonyManager.CALL_STATE_IDLE } }.getOrDefault(true)
+    }
+
     companion object {
         private const val DEFAULT_SUBSCRIPTION_KEY = -1
     }
 }
 
+internal interface CommunicationAudioTarget {
+    fun suspendAudio() = Unit
+    fun resumeAudio() = Unit
+    fun whenAudioApplied(enabled: Boolean,callback: (Boolean)->Unit) { callback(false) }
+    fun suspendForHandover(callback: (Boolean)->Unit) {suspendAudio();whenAudioApplied(false,callback)}
+}
+
 internal class CommunicationAudioCoordinator(
-    private val engine: RiderMediaEngine,
+    private val engine: CommunicationAudioTarget,
     private val route: RiderAudioRoute,
     private val audioFocus: IntercomAudioFocus,
     private val phoneState: IntercomPhoneState,

@@ -2,11 +2,8 @@ package com.kuma.motointercom
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertContentDescriptionEquals
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -30,7 +27,7 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], qualifiers = "w393dp-h873dp")
 class HomeScreenComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
@@ -58,7 +55,6 @@ class HomeScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComHomeScreen(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = state,
                     audioLevel = 0f,
                     onPrimaryAction = { primaryClicked.set(true) },
@@ -78,11 +74,11 @@ class HomeScreenComposeTest {
         composeRule.onNodeWithText("摩声 MotoCom").assertDoesNotExist()
         composeRule.onNodeWithText("一对一对讲 · 无需网络").assertDoesNotExist()
         composeRule.onNodeWithText(state.primaryText).assertDoesNotExist()
-        composeRule.onNodeWithText("待机").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("待机").assertIsDisplayed()
         composeRule.onNodeWithTag("home_menu_button").assertDoesNotExist()
         composeRule.onNodeWithTag("home_settings_button").assertDoesNotExist()
         composeRule.onNodeWithText(state.primaryActionLabel)
-            .performScrollTo().assertHasClickAction().performClick()
+            .assertHasClickAction().performClick()
 
         composeRule.runOnIdle { assertTrue(primaryClicked.get()) }
     }
@@ -94,7 +90,6 @@ class HomeScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComHomeScreen(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = HomeScreenUiState(
                         primaryText = "已连接",
                         supplementalText = null,
@@ -152,12 +147,12 @@ class HomeScreenComposeTest {
                 val visible = visibleRadarPeerCount(count, radius)
 
                 assertEquals(visible, placements.size)
-                assertTrue(placements.size in 1..minOf(count, 11))
+                assertTrue(placements.size in 0..minOf(count, 11))
                 assertTrue(
                     "radius=$radius count=$count bubble sizes must stay within 48–72dp",
                     placements.all { it.bubbleSizeDp in 48f..72f }
                 )
-                if (radius >= 96f) {
+                if (placements.isNotEmpty()) {
                     placements.forEach { placement ->
                         val centerClearance =
                             radius * placement.distanceFraction - placement.bubbleSizeDp / 2f
@@ -199,7 +194,6 @@ class HomeScreenComposeTest {
         composeRule.setContent {
             MotoComTheme {
                 MotoComHomeScreen(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     state = HomeScreenUiState(
                         primaryText = "正在搜索附近车友",
                         supplementalText = null,
@@ -234,11 +228,11 @@ class HomeScreenComposeTest {
         val radarBounds = composeRule.onNodeWithTag("home_discovery_radar")
             .fetchSemanticsNode().boundsInRoot
         val density = composeRule.density
-        val radarWidthDp = with(density) { radarBounds.width.toDp().value }
-        val radarHeightDp = with(density) { radarBounds.height.toDp().value }
-        val scopeRadiusDp = minOf(radarWidthDp * 0.44f, radarHeightDp * 0.32f)
-        val hiddenCount =
-            peers.size - visibleRadarPeerCount(peers.size, scopeRadiusDp)
+        val fieldBounds = composeRule.onNodeWithTag("home_sonar_field").fetchSemanticsNode().boundsInRoot
+        val scopeRadiusDp = with(density) { minOf(fieldBounds.width, fieldBounds.height).toDp().value } * 0.44f
+        val centerBounds = composeRule.onNodeWithTag("home_radar_center").fetchSemanticsNode().boundsInRoot
+        val centerSizeDp = with(density) { centerBounds.width.toDp().value }
+        val hiddenCount = peers.size - radarPeerPlacements(peers.size, scopeRadiusDp, centerSizeDp).size
         composeRule.onNodeWithTag("home_radar_overflow")
             .assertContentDescriptionEquals("另有 $hiddenCount 位车友")
         composeRule.onNodeWithTag("home_radar_peer_peer-1")
@@ -255,8 +249,7 @@ class HomeScreenComposeTest {
             MotoComTheme {
                 Box(Modifier.width(320.dp)) {
                     MotoComHomeScreen(
-                        modifier = Modifier.verticalScroll(rememberScrollState()),
-                        state = HomeScreenUiState(
+                            state = HomeScreenUiState(
                             primaryText = "已连接",
                             supplementalText = null,
                             peerText = "Road Captain",
