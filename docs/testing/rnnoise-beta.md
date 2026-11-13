@@ -21,7 +21,9 @@
 
 ## 版本和构建
 
-正式版本字段保留原值。实验包身份也统一保存在 `version.properties`：`betaVersion`、`betaVersionCode`、`betaCommit`，Beta variant 输出 `betaVersion+短betaCommit`。本轮为 `1.3.0-beta.1` / code9；固定功能提交由最终审查与验证记录指定。
+正式版本字段保留原值。实验包身份也统一保存在 `version.properties`：`betaVersion`、`betaVersionCode`、`betaCommit`，Beta variant 输出 `betaVersion+短betaCommit`。本轮为 `1.3.0-beta.2+e73b9e8` / code10，功能提交为 `e73b9e8f0f0ec9557b5a52947039a1986eead91a`。
+
+Beta.2 修复两个问题：Wi-Fi Direct 初始化期间，空闲断线广播会中断服务注册，导致重新扫描也找不到设备；SDK 静音填充推进缓冲区游标后，RNNoise 会把完整帧误判为空帧并停止对讲。捕获桥现在提供完整帧视图，SDK 原游标、格式检查、静音和 VOX 门控继续保留。
 
 ```powershell
 $env:JAVA_HOME = 'F:/Android/jbr'
