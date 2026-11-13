@@ -12,6 +12,8 @@ param(
     [int]$FirstPort = 5554,
     [ValidateRange(2, 250)]
     [int]$SharedNetBase = 10,
+    [ValidateRange(1024, 65535)]
+    [int]$WifiPortBase = 56100,
     [ValidateRange(30, 900)]
     [int]$BootTimeoutSeconds = 300,
     [ValidateRange(1024, 4096)]
@@ -75,6 +77,13 @@ for ($index = 0; $index -lt $Count; $index++) {
         "-shared-net-id", "$($SharedNetBase + $index)",
         "-no-metrics"
     )
+    # The shared network only forwards traffic once one instance listens and the
+    # others connect; -shared-net-id alone just assigns 10.1.2.<id> and stays local.
+    if ($index -eq 0) {
+        $arguments += @("-wifi-server-port", "$WifiPortBase")
+    } else {
+        $arguments += @("-wifi-client-port", "$WifiPortBase")
+    }
     if (-not $Windowed) { $arguments += "-no-window" }
 
     $startArgs = @{
