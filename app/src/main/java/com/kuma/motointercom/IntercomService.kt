@@ -6,9 +6,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.net.Network
+import android.net.wifi.WifiManager
 import android.net.Uri
 import android.os.Binder
 import android.os.Build
@@ -16,6 +21,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -28,9 +34,11 @@ import kotlinx.coroutines.sync.withLock
 import org.webrtc.PeerConnection
 import java.io.IOException
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.CancellationException
 
 private const val PEER_RECONNECT_BACKOFF_MS = 1_500L
+private const val AUDIO_READY_TIMEOUT_MS = 10_000L
 
 internal class DiscoveryRefreshGate {
     private var nextGeneration = 0L
@@ -133,9 +141,15 @@ class IntercomService : Service() {
         val actionNonce: String
     )
 
+    private data class BleBootstrapPeerCandidate(
+        val device: BluetoothDevice,
+        val advertisement: CrossPlatformCapabilityAdvertisement
+    )
+
     internal interface Listener {
         fun onStatusChanged(status: String, running: Boolean)
         fun onIntercomStateChanged(state: IntercomState) = Unit
+        fun onAudioReadyChanged(ready: Boolean) = Unit
         fun onAudioSourceChanged(status: String, bluetooth: Boolean) = Unit
         fun onAudioInterruptionChanged(state: AudioInterruptionState) = Unit
         fun onAudioRouteSelectionChanged(selection: AudioRouteSelection) = Unit
@@ -246,6 +260,24 @@ class IntercomService : Service() {
     }
     private var intercomManager: IntercomManager? = null
     private var lanDiscovery: LanDiscoveryCoordinator? = null
+    private var bleBootstrap: BleBootstrapCoordinator? = null
+    private var networkBootstrap: AndroidNetworkBootstrapCoordinator? = null
+    private var activeBlePeer: BluetoothDevice? = null
+    private val bleConnectAttempts = mutableSetOf<String>()
+    private val bleConnectRetries = mutableMapOf<String, Runnable>()
+    private val blePeerCandidates = linkedMapOf<String, BleBootstrapPeerCandidate>()
+    private val bleBootstrapRequests = mutableSetOf<String>()
+    private var blePeerSelection: Runnable? = null
+    private var pendingBleEndpoint: LanRiderDevice? = null
+    private var localCapabilities: CrossPlatformCapabilities? = null
+    private var localCapabilityAdvertisement: CrossPlatformCapabilityAdvertisement? = null
+    private var activeRemoteCapabilityAdvertisement: CrossPlatformCapabilityAdvertisement? = null
+    private var preparedBleBootstrapKey: String? = null
+    private var networkBootstrapGeneration = 0L
+    private var networkBootstrapRetry: Runnable? = null
+    private var networkBootstrapRetryAttempts = 0
+    private var awaitingWifiJoinResult = false
+    private var networkDiscoveryRetry: Runnable? = null
     private val signalingSessions = linkedMapOf<ControlChannelId, SignalingSessionV2>()
     private val pendingMediaMessages =
         linkedMapOf<ConnectionCandidateContext, MutableList<SignalingMessageV2>>()
@@ -255,6 +287,14 @@ class IntercomService : Service() {
     private var bluetoothReady = false
     private var physicalLinkReady = false
     private var mediaConnected = false
+    private var remoteAudioTrackAttached = false
+    private var remoteAudioFrameReceived = false
+    private var audioRouteReady = false
+    private var audioReady = false
+    private var audioReadyPending = false
+    @Volatile
+    private var audioReadyEpoch = 0L
+    private var audioReadyTimeout: Runnable? = null
     private var audioControls = AudioControlSettings()
     private var audioControlRevision = 0L
     private var voxRuntimeState = VoxRuntimeState.IDLE
@@ -282,7 +322,8 @@ class IntercomService : Service() {
             pairingRepository,
             onLog = ::publishLog,
             onError = ::handleError,
-            elapsedRealtime = SystemClock::elapsedRealtime
+            elapsedRealtime = SystemClock::elapsedRealtime,
+            audioReadyEpoch = { audioReadyEpoch }
         )
         serviceScope.launch {
             orchestrator.state.collect { state ->
@@ -380,6 +421,7 @@ class IntercomService : Service() {
         this.listener = listener
         listener?.onStatusChanged(lastStatus, running)
         listener?.onIntercomStateChanged(orchestrator.state.value)
+        listener?.onAudioReadyChanged(audioReady)
         listener?.onAudioSourceChanged(audioSourceStatus, audioSourceBluetooth)
         listener?.onAudioInterruptionChanged(audioInterruptionState)
         listener?.onAudioRouteSelectionChanged(preferredAudioRoute)
@@ -626,6 +668,21 @@ class IntercomService : Service() {
 
     private fun onAudioInterruptionChanged(state: AudioInterruptionState) {
         audioInterruptionState = state
+        audioReadyEpoch++
+        audioReadyPending = false
+        if (state != AudioInterruptionState.NORMAL) {
+            setAudioReady(false)
+            audioRouteReady = false
+            cancelAudioReadyTimeout()
+        } else {
+            audioRouteReady = audioSourceStatus != AUDIO_STANDBY_STATUS
+            activeMediaContext?.let { candidate ->
+                if (!audioReady) {
+                    activeSession?.let { token -> scheduleAudioReadyTimeout(token, candidate) }
+                }
+            }
+            maybePublishAudioReady()
+        }
         listener?.onAudioInterruptionChanged(state)
         when (state) {
             AudioInterruptionState.PHONE_RINGING,
@@ -755,11 +812,17 @@ class IntercomService : Service() {
         activeSession = token
         activeRuntimeSessionId = runtimeSessionId
         running = true
+        audioReadyEpoch++
         autoConnectTargetKey = null
         resetSessionAudioControls()
         publishAudioControls()
         bluetoothReady = false
         physicalLinkReady = false
+        remoteAudioTrackAttached = false
+        remoteAudioFrameReceived = false
+        audioRouteReady = false
+        setAudioReady(false)
+        audioReadyPending = false
         audioInterruptionState = AudioInterruptionState.NORMAL
         remoteRiderName = null
         publishPresenceSnapshot(presenceAggregator.clear())
@@ -780,7 +843,19 @@ class IntercomService : Service() {
                         action = {
                             localDeviceId = deviceId
                             requestedRiderName = nickname
+                            val capabilities = currentLocalCapabilities()
+                            val advertisement = CrossPlatformCapabilityAdvertisement(
+                                platform = PeerPlatform.ANDROID,
+                                deviceId = deviceId,
+                                sessionId = runtimeSessionId.value,
+                                capabilities = capabilities.capabilities,
+                                networkRole = capabilities.networkRole,
+                                tcpPort = CrossPlatformCapabilityAdvertisement.DEFAULT_TCP_PORT
+                            )
+                            localCapabilities = capabilities
+                            localCapabilityAdvertisement = advertisement
                             startAudioSession(runtimeSessionId)
+                            startCrossPlatformBootstrap(token, advertisement, capabilities)
                             startDiscoveryTransports(token, deviceId, runtimeSessionId)
                         },
                         onFailure = ::handleError,
@@ -796,6 +871,587 @@ class IntercomService : Service() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun currentLocalCapabilities(): CrossPlatformCapabilities {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val wifiEnabled = wifiManager?.isWifiEnabled == true
+        val wifiPermissionReady = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) ==
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        }
+        val bluetoothManager = applicationContext.getSystemService(BLUETOOTH_SERVICE)
+            as? BluetoothManager
+        val bluetoothAdapter = bluetoothManager?.adapter
+        val legacyLocationReady = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            true
+        } else {
+            val locationManager = getSystemService(LOCATION_SERVICE) as? LocationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                locationManager?.isLocationEnabled == true
+            } else {
+                runCatching {
+                    locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true ||
+                        locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+                }.getOrDefault(false)
+            }
+        }
+        val legacyBleLocationPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ||
+            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        val blePermission =
+            packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE) &&
+                bluetoothAdapter?.isEnabled == true &&
+                legacyLocationReady &&
+                legacyBleLocationPermission &&
+                PermissionPolicy.canBootstrap(Build.VERSION.SDK_INT) { permission ->
+                    checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+                }
+        val wifiCapabilityReady = wifiEnabled &&
+            wifiPermissionReady &&
+            legacyLocationReady
+        return CrossPlatformCapabilities.localAndroid(
+            apiLevel = Build.VERSION.SDK_INT,
+            blePermission = blePermission,
+            wifiEnabled = wifiCapabilityReady,
+            wifiDirectSupported = packageManager.hasSystemFeature(
+                PackageManager.FEATURE_WIFI_DIRECT
+            ) && wifiCapabilityReady
+        )
+    }
+
+    private fun startCrossPlatformBootstrap(
+        token: SessionGeneration.Token,
+        advertisement: CrossPlatformCapabilityAdvertisement,
+        capabilities: CrossPlatformCapabilities
+    ) {
+        installNetworkBootstrap(token, capabilities)
+        activeBlePeer = null
+        bleConnectAttempts.clear()
+        blePeerCandidates.clear()
+        bleBootstrapRequests.clear()
+        activeRemoteCapabilityAdvertisement = null
+        preparedBleBootstrapKey = null
+
+        var coordinator: BleBootstrapCoordinator? = null
+        coordinator = BleBootstrapCoordinator(
+            context = this,
+            localAdvertisement = advertisement,
+            onScanDevice = { device ->
+                postForSession(token) {
+                    val address = device.address?.trim().orEmpty()
+                    if (address.isBlank() || !bleConnectAttempts.add(address)) return@postForSession
+                    if (coordinator?.connect(device) != true) {
+                        bleConnectAttempts.remove(address)
+                        scheduleBleConnectRetry(token, device)
+                    }
+                }
+            },
+            onPeerDiscovered = { device, remoteAdvertisement ->
+                postForSession(token) {
+                    val address = device.address?.trim().orEmpty()
+                    if (address.isBlank()) return@postForSession
+                    // Receiving capabilities is the response to the request sent
+                    // by this side; the remote device does not have to open a
+                    // second, reverse GATT connection for bootstrap to proceed.
+                    bleBootstrapRequests += address
+                    blePeerCandidates[address] = BleBootstrapPeerCandidate(device, remoteAdvertisement)
+                    if (activeBlePeer?.address == address) {
+                        queueNetworkBootstrapPreparation(token, address)
+                    } else if (activeBlePeer == null) {
+                        scheduleBlePeerSelection(token)
+                    }
+                }
+            },
+            onMessage = { device, message ->
+                postForSession(token) {
+                    val address = device.address?.trim().orEmpty()
+                    if (address.isBlank()) return@postForSession
+                    if (message.type == BleBootstrapMessageType.BOOTSTRAP_REQUEST) {
+                        val candidate = blePeerCandidates[address]
+                        val requestedApp = message.fields["app"]
+                        val requestedDeviceId = message.fields["deviceId"]
+                        if (
+                            requestedApp != null &&
+                            requestedApp != CrossPlatformCapabilityAdvertisement.APP_ID
+                        ) {
+                            publishLog("忽略非 MotoCom BLE bootstrap 请求")
+                            return@postForSession
+                        }
+                        if (
+                            candidate != null &&
+                            requestedDeviceId != null &&
+                            requestedDeviceId != candidate.advertisement.deviceId
+                        ) {
+                            publishLog("忽略 BLE bootstrap 请求：设备身份与能力声明不一致")
+                            return@postForSession
+                        }
+                        bleBootstrapRequests += address
+                        if (activeBlePeer?.address == address) {
+                            queueNetworkBootstrapPreparation(token, address)
+                        } else if (activeBlePeer == null) {
+                            scheduleBlePeerSelection(token)
+                        }
+                    }
+                    if (activeBlePeer?.address == address) {
+                        handleBleBootstrapMessage(device, message)
+                    }
+                }
+            },
+            onConnectionChanged = { device, connected ->
+                postForSession(token) {
+                    val address = device.address?.trim().orEmpty()
+                    if (address.isBlank()) return@postForSession
+                    if (connected) {
+                        bleConnectRetries.remove(address)?.let(mainHandler::removeCallbacks)
+                    } else {
+                        bleConnectAttempts.remove(address)
+                        bleBootstrapRequests.remove(address)
+                        blePeerCandidates.remove(address)
+                        if (activeBlePeer?.address == address) {
+                            activeBlePeer = null
+                            activeRemoteCapabilityAdvertisement = null
+                            preparedBleBootstrapKey = null
+                            awaitingWifiJoinResult = false
+                            val hasEstablishedIpLink = physicalLinkReady || mediaConnected
+                            if (!hasEstablishedIpLink) {
+                                pendingBleEndpoint = null
+                                networkBootstrapRetry?.let(mainHandler::removeCallbacks)
+                                networkBootstrapRetry = null
+                                networkBootstrapRetryAttempts = 0
+                                networkDiscoveryRetry?.let(mainHandler::removeCallbacks)
+                                networkDiscoveryRetry = null
+                                networkBootstrap?.close()
+                                networkBootstrap = null
+                                networkBootstrapGeneration++
+                                localCapabilities?.let { installNetworkBootstrap(token, it) }
+                            }
+                            if (blePeerCandidates.isNotEmpty()) {
+                                scheduleBlePeerSelection(token)
+                            }
+                        }
+                        scheduleBleConnectRetry(token, device)
+                    }
+                }
+            },
+            onError = { error ->
+                postForSession(token) {
+                    publishLog("BLE 建联准备失败：${error.message ?: error.javaClass.simpleName}")
+                    publishToast("蓝牙发现不可用，请检查蓝牙开关和权限")
+                }
+            }
+        )
+        bleBootstrap = coordinator
+        if (!capabilities.supports(MotoComCapability.BLE_BOOTSTRAP)) {
+            publishLog("当前设备 BLE 能力不可用；跳过 BLE 自动引导，保留局域网/已有传输")
+        } else if (!coordinator.start()) {
+            publishLog("BLE 自动发现不可用；可继续使用局域网、Wi-Fi Direct 或系统网络设置")
+        }
+    }
+
+    private fun installNetworkBootstrap(
+        token: SessionGeneration.Token,
+        capabilities: CrossPlatformCapabilities
+    ) {
+        networkBootstrap?.close()
+        val generation = ++networkBootstrapGeneration
+        preparedBleBootstrapKey = null
+        networkBootstrap = AndroidNetworkBootstrapCoordinator(
+            context = this,
+            localCapabilities = capabilities,
+            onEvent = { event ->
+                postForSession(token) {
+                    if (generation == networkBootstrapGeneration) {
+                        handleNetworkBootstrapEvent(token, event)
+                    }
+                }
+            }
+        )
+    }
+
+    private fun scheduleBleConnectRetry(
+        token: SessionGeneration.Token,
+        device: BluetoothDevice
+    ) {
+        val address = device.address?.trim().orEmpty()
+        if (address.isBlank() || bleConnectRetries.containsKey(address)) return
+        val retry = Runnable {
+            bleConnectRetries.remove(address)
+            if (!isSessionCurrent(token) || bleConnectAttempts.contains(address)) return@Runnable
+            bleConnectAttempts += address
+            if (bleBootstrap?.connect(device) != true) {
+                bleConnectAttempts.remove(address)
+                scheduleBleConnectRetry(token, device)
+            }
+        }
+        bleConnectRetries[address] = retry
+        mainHandler.postDelayed(retry, BLE_RECONNECT_BACKOFF_MS)
+    }
+
+    private fun scheduleBlePeerSelection(token: SessionGeneration.Token) {
+        if (blePeerSelection != null) return
+        val selection = Runnable {
+            blePeerSelection = null
+            if (!isSessionCurrent(token) || activeBlePeer != null) return@Runnable
+            val selected = blePeerCandidates.values
+                .minWithOrNull(compareBy<BleBootstrapPeerCandidate>({ it.advertisement.deviceId }, { it.device.address }))
+                ?: return@Runnable
+            activeBlePeer = selected.device
+            activeRemoteCapabilityAdvertisement = selected.advertisement
+            publishLog(
+                "BLE 选定 ${selected.advertisement.platform} 设备：" +
+                    "${selected.advertisement.deviceId.take(8)}，等待 bootstrap 请求"
+            )
+            queueNetworkBootstrapPreparation(token, selected.device.address)
+        }
+        blePeerSelection = selection
+        mainHandler.postDelayed(selection, BLE_PEER_SELECTION_DELAY_MS)
+    }
+
+    private fun queueNetworkBootstrapPreparation(
+        token: SessionGeneration.Token,
+        address: String
+    ) {
+        if (activeBlePeer?.address != address || address !in bleBootstrapRequests) return
+        val candidate = blePeerCandidates[address] ?: return
+        val commonLan = hasCommonLan(candidate.advertisement)
+        val key = "$address:${candidate.advertisement.deviceId}:${candidate.advertisement.sessionId}:$commonLan"
+        if (preparedBleBootstrapKey == key) return
+        preparedBleBootstrapKey = key
+        activeRemoteCapabilityAdvertisement = candidate.advertisement
+        networkBootstrap?.prepare(
+            remoteCapabilities = candidate.advertisement.toCapabilities(),
+            commonLanAvailable = commonLan,
+            hostPreference = automaticBootstrapHostPreference(candidate.advertisement)
+        )
+    }
+
+    private fun automaticBootstrapHostPreference(
+        remoteAdvertisement: CrossPlatformCapabilityAdvertisement
+    ): BootstrapHostPreference {
+        val localAdvertisement = localCapabilityAdvertisement ?: return BootstrapHostPreference.AUTOMATIC
+        val local = localCapabilities ?: return BootstrapHostPreference.AUTOMATIC
+        if (
+            localAdvertisement.platform != PeerPlatform.ANDROID ||
+            remoteAdvertisement.platform != PeerPlatform.ANDROID ||
+            local.supports(MotoComCapability.ANDROID_WIFI_DIRECT) ||
+            !remoteAdvertisement.capabilities.contains(MotoComCapability.ANDROID_WIFI_DIRECT)
+        ) return BootstrapHostPreference.AUTOMATIC
+
+        val remote = remoteAdvertisement.toCapabilities()
+        val localCanHost = local.canHostAndroidLocalOnlyHotspot()
+        val remoteCanHost = remote.canHostAndroidLocalOnlyHotspot()
+        return when {
+            localCanHost && !remoteCanHost -> BootstrapHostPreference.LOCAL
+            !localCanHost && remoteCanHost -> BootstrapHostPreference.REMOTE
+            localCanHost && remoteCanHost -> if (
+                localAdvertisement.deviceId <= remoteAdvertisement.deviceId
+            ) {
+                BootstrapHostPreference.LOCAL
+            } else {
+                BootstrapHostPreference.REMOTE
+            }
+            else -> BootstrapHostPreference.AUTOMATIC
+        }
+    }
+
+    private fun hasCommonLan(
+        remoteAdvertisement: CrossPlatformCapabilityAdvertisement
+    ): Boolean = presenceAggregator.snapshot().presences.any { presence ->
+        presence.deviceId == remoteAdvertisement.deviceId &&
+            presence.sessionId?.value == remoteAdvertisement.sessionId &&
+            Transport.LAN in presence.availableTransports
+    }
+
+    private fun maybeReprepareBootstrapAfterLanChange(token: SessionGeneration.Token) {
+        activeBlePeer?.address?.let { queueNetworkBootstrapPreparation(token, it) }
+    }
+
+    private fun handleBleBootstrapMessage(
+        device: BluetoothDevice,
+        message: BleBootstrapMessage
+    ) {
+        when (message.type) {
+            BleBootstrapMessageType.HOTSPOT_READY -> {
+                val ttlMs = message.fields["ttlMs"]?.let { raw ->
+                    raw.toLongOrNull()
+                        ?.takeIf { it in MIN_HOTSPOT_TTL_MS..MAX_HOTSPOT_TTL_MS }
+                        ?: run {
+                            publishLog("收到已过期或无效的 BLE 热点时效：$raw")
+                            return
+                        }
+                } ?: DEFAULT_REMOTE_HOTSPOT_TTL_MS
+                val credentials = runCatching {
+                    HotspotCredentials(
+                        ssid = message.fields.getValue("ssid"),
+                        passphrase = message.fields.get("passphrase").orEmpty(),
+                        security = message.fields.getValue("security").uppercase(Locale.ROOT),
+                        hostAddress = message.fields.get("hostAddress")
+                            ?.takeIf(String::isNotBlank),
+                        tcpPort = message.fields.get("tcpPort")?.toIntOrNull()
+                            ?: CrossPlatformCapabilityAdvertisement.DEFAULT_TCP_PORT,
+                        expiresAtElapsedRealtimeMs =
+                            ttlMs + SystemClock.elapsedRealtime()
+                    )
+                }.getOrElse {
+                    publishLog("收到无效的 BLE 热点参数：${it.message}")
+                    return
+                }
+                activeBlePeer = device
+                awaitingWifiJoinResult = true
+                networkBootstrap?.acceptHotspotReady(credentials)
+            }
+            BleBootstrapMessageType.WIFI_JOIN_RESULT -> {
+                publishLog("BLE 对端网络接入结果：${message.fields.get("result").orEmpty()}")
+            }
+            BleBootstrapMessageType.ENDPOINT_READY -> {
+                val endpoint = lanDeviceFromBleEndpointOrNull(message)
+                if (endpoint == null) {
+                    publishLog("BLE 对端发布了无效局域网端点，忽略直接连接")
+                    return
+                }
+                val remoteAdvertisement = activeRemoteCapabilityAdvertisement
+                if (
+                    remoteAdvertisement != null &&
+                    (
+                        endpoint.deviceId != remoteAdvertisement.deviceId ||
+                            endpoint.sessionId?.value != remoteAdvertisement.sessionId
+                        )
+                ) {
+                    publishLog("BLE 端点身份与当前能力声明不一致，忽略直接连接")
+                    return
+                }
+                pendingBleEndpoint = endpoint
+                val installed = lanDiscovery?.rememberExternalEndpoint(endpoint) == true
+                publishLog(
+                    "BLE 端点已接收：${endpoint.ip}:${endpoint.port}，" +
+                        "已加入直接 TCP fallback=$installed"
+                )
+            }
+            BleBootstrapMessageType.BOOTSTRAP_CANCEL -> {
+                publishLog("对端取消了跨平台建联准备")
+                networkBootstrapRetry?.let(mainHandler::removeCallbacks)
+                networkBootstrapRetry = null
+                networkBootstrap?.close()
+                networkBootstrap = null
+                networkBootstrapGeneration++
+                val canceledPeer = activeBlePeer
+                if (canceledPeer != null) {
+                    bleBootstrapRequests.remove(canceledPeer.address)
+                    blePeerCandidates.remove(canceledPeer.address)
+                }
+                activeBlePeer = null
+                pendingBleEndpoint = null
+                awaitingWifiJoinResult = false
+                activeRemoteCapabilityAdvertisement = null
+                preparedBleBootstrapKey = null
+            }
+            BleBootstrapMessageType.BOOTSTRAP_REQUEST,
+            BleBootstrapMessageType.BOOTSTRAP_CAPABILITIES -> Unit
+        }
+    }
+
+    private fun handleNetworkBootstrapEvent(
+        token: SessionGeneration.Token,
+        event: NetworkBootstrapEvent
+    ) {
+        when (event) {
+            is NetworkBootstrapEvent.PathSelected -> {
+                publishLog("跨平台网络路径：${event.path}")
+            }
+            is NetworkBootstrapEvent.HotspotReady -> {
+                restartLanDiscoveryWhenNetworkReady(token)
+                val peer = activeBlePeer
+                if (peer == null) {
+                    publishLog("临时热点已创建，但尚未找到 BLE 对端")
+                    return
+                }
+                val credentials = event.credentials
+                val sent = bleBootstrap?.send(
+                    peer,
+                    BleBootstrapMessage(
+                        type = BleBootstrapMessageType.HOTSPOT_READY,
+                        requestId = UUID.randomUUID().toString(),
+                        fields = mapOf(
+                            "ssid" to credentials.ssid,
+                            "passphrase" to credentials.passphrase,
+                            "security" to credentials.security,
+                             "hostAddress" to credentials.hostAddress.orEmpty(),
+                             "tcpPort" to credentials.tcpPort.toString(),
+                             "ttlMs" to credentials.expiresAtElapsedRealtimeMs
+                                 ?.let { (it - SystemClock.elapsedRealtime()).coerceAtLeast(0L) }
+                                 ?.toString().orEmpty()
+                         )
+                     )
+                ) == true
+                publishLog(
+                    "临时热点已准备：${credentials.redactedSummary()}；" +
+                        "已发送=$sent，不修改或持久化用户热点密码"
+                )
+                sendEndpointReady(peer, credentials.hostAddress, credentials.tcpPort)
+                networkBootstrapRetryAttempts = 0
+            }
+            is NetworkBootstrapEvent.NetworkReady -> {
+                publishLog("离线网络已接入${event.network?.let { "，已绑定临时网络" }.orEmpty()}")
+                restartLanDiscoveryWhenNetworkReady(token)
+                activeBlePeer?.let { peer ->
+                    sendEndpointReady(peer, networkHostAddress(event.network), CrossPlatformCapabilityAdvertisement.DEFAULT_TCP_PORT)
+                }
+                networkBootstrapRetryAttempts = 0
+                if (awaitingWifiJoinResult) {
+                    awaitingWifiJoinResult = false
+                    activeBlePeer?.let { peer ->
+                        bleBootstrap?.send(
+                            peer,
+                            BleBootstrapMessage(
+                                type = BleBootstrapMessageType.WIFI_JOIN_RESULT,
+                                requestId = UUID.randomUUID().toString(),
+                                fields = mapOf("result" to "SUCCESS")
+                            )
+                        )
+                    }
+                }
+            }
+            is NetworkBootstrapEvent.ManualActionRequired -> {
+                publishLog("需要手动完成网络设置：${event.reason}")
+                publishToast(event.reason)
+                publishStatus(SIGNAL_LOST_STATUS)
+                openNetworkSettingsForBootstrap()
+            }
+            is NetworkBootstrapEvent.Failed -> {
+                publishLog("跨平台网络准备失败：${event.reason}")
+                publishToast("网络准备失败，正在尝试恢复：${event.reason}")
+                publishStatus(SIGNAL_LOST_STATUS)
+                scheduleNetworkBootstrapRecovery(token, event.reason)
+            }
+        }
+    }
+
+    private fun sendEndpointReady(
+        peer: BluetoothDevice,
+        hostAddress: String?,
+        tcpPort: Int
+    ) {
+        if (hostAddress.isNullOrBlank()) {
+            publishLog("当前离线 Wi‑Fi 接口尚未提供私有地址，等待 Bonjour/NSD")
+            return
+        }
+        val advertisement = localCapabilityAdvertisement ?: return
+        bleBootstrap?.send(
+            peer,
+            BleBootstrapMessage(
+                type = BleBootstrapMessageType.ENDPOINT_READY,
+                requestId = UUID.randomUUID().toString(),
+                fields = mapOf(
+                    "hostAddress" to hostAddress.orEmpty(),
+                    "tcpPort" to tcpPort.toString(),
+                    "deviceId" to advertisement.deviceId,
+                    "sessionId" to advertisement.sessionId,
+                    "platform" to advertisement.platform.name,
+                    "protocolVersion" to advertisement.protocolVersion.toString(),
+                    "nickname" to requestedRiderName,
+                    "deviceName" to Build.MODEL.orEmpty(),
+                    "networkRole" to advertisement.networkRole.name
+                )
+            ).copy(capabilities = advertisement.capabilities)
+        )
+    }
+
+    private fun bootstrapRequestMessage(): BleBootstrapMessage {
+        val advertisement = localCapabilityAdvertisement
+            ?: error("Local BLE advertisement is unavailable")
+        return BleBootstrapMessage(
+            type = BleBootstrapMessageType.BOOTSTRAP_REQUEST,
+            requestId = UUID.randomUUID().toString(),
+            fields = mapOf(
+                "app" to advertisement.app,
+                "platform" to advertisement.platform.name,
+                "deviceId" to advertisement.deviceId,
+                "sessionId" to advertisement.sessionId
+            )
+        )
+    }
+
+    private fun networkHostAddress(network: Network?): String? {
+        val linkProperties = network?.let { connectivityManager()?.getLinkProperties(it) }
+        return linkProperties?.linkAddresses
+            ?.asSequence()
+            ?.map { it.address }
+            ?.filterIsInstance<java.net.Inet4Address>()
+            ?.mapNotNull { it.hostAddress }
+            ?.firstOrNull { java.net.InetAddress.getByName(it).isSiteLocalAddress }
+            ?: localPrivateWifiAddress(this)
+    }
+
+    private fun connectivityManager(): android.net.ConnectivityManager? =
+        getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+
+    private fun scheduleNetworkBootstrapRecovery(
+        token: SessionGeneration.Token,
+        reason: String
+    ) {
+        if (!isSessionCurrent(token) || activeRemoteCapabilityAdvertisement == null) return
+        if (networkBootstrapRetry != null) return
+        if (++networkBootstrapRetryAttempts > MAX_NETWORK_BOOTSTRAP_RETRIES) {
+            publishToast("网络无法自动恢复，请按提示检查热点或 Wi‑Fi 设备互通")
+            openNetworkSettingsForBootstrap()
+            return
+        }
+        networkBootstrap?.close()
+        networkBootstrap = null
+        networkBootstrapGeneration++
+        val retry = Runnable {
+            networkBootstrapRetry = null
+            if (!isSessionCurrent(token)) return@Runnable
+            val capabilities = localCapabilities ?: return@Runnable
+            installNetworkBootstrap(token, capabilities)
+            activeBlePeer?.let { peer ->
+                bleBootstrap?.send(peer, bootstrapRequestMessage())
+            }
+            activeBlePeer?.address?.let { queueNetworkBootstrapPreparation(token, it) }
+        }
+        networkBootstrapRetry = retry
+        mainHandler.postDelayed(retry, NETWORK_BOOTSTRAP_RETRY_DELAY_MS)
+        publishLog("网络恢复已排队：$reason")
+    }
+
+    private fun openNetworkSettingsForBootstrap() {
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }.onFailure {
+            publishLog("无法打开系统 Wi‑Fi 设置：${it.message ?: it.javaClass.simpleName}")
+        }
+    }
+
+    private fun restartLanDiscoveryWhenNetworkReady(token: SessionGeneration.Token) {
+        networkDiscoveryRetry?.let(mainHandler::removeCallbacks)
+        var attempts = 0
+        val retry = object : Runnable {
+            override fun run() {
+                if (!isSessionCurrent(token)) {
+                    if (networkDiscoveryRetry === this) networkDiscoveryRetry = null
+                    return
+                }
+                val restarted = lanDiscovery?.restartOnCurrentNetwork() == true
+                if (restarted) {
+                    pendingBleEndpoint?.let { lanDiscovery?.rememberExternalEndpoint(it) }
+                }
+                if (restarted || ++attempts >= 20) {
+                    if (networkDiscoveryRetry === this) networkDiscoveryRetry = null
+                    return
+                }
+                mainHandler.postDelayed(this, NETWORK_DISCOVERY_RETRY_DELAY_MS)
+            }
+        }
+        networkDiscoveryRetry = retry
+        mainHandler.post(retry)
+    }
+
     private fun startAudioSession(runtimeSessionId: RuntimeSessionId) {
         if (audioSessionController != null) return
         audioSessionController = AudioSessionController.start(
@@ -803,14 +1459,21 @@ class IntercomService : Service() {
             onScoConnected = { deviceName ->
                 postForRuntime(runtimeSessionId) {
                     bluetoothReady = true
+                    audioRouteReady = true
                     publishAudioSource("当前音频源：蓝牙耳机 ($deviceName)", bluetooth = true)
                     publishToast("头盔蓝牙已连线，对讲音频已就绪")
+                    maybePublishAudioReady()
                     updateStageStatus()
                 }
             },
             onScoDisconnected = {
                 postForRuntime(runtimeSessionId) {
                     bluetoothReady = false
+                    audioRouteReady = false
+                    setAudioReady(false)
+                    audioReadyEpoch++
+                    audioReadyPending = false
+                    cancelAudioReadyTimeout()
                     publishToast(BLUETOOTH_RETRY_STATUS)
                     publishLog(BLUETOOTH_RETRY_STATUS)
                     updateStageStatus()
@@ -819,22 +1482,28 @@ class IntercomService : Service() {
             onSpeakerFallback = { noBluetooth ->
                 postForRuntime(runtimeSessionId) {
                     bluetoothReady = false
+                    audioRouteReady = true
                     publishAudioSource(AUDIO_SPEAKER_STATUS, bluetooth = false)
                     if (noBluetooth) publishToast("未检测到头盔蓝牙，已切换至手机外放")
+                    maybePublishAudioReady()
                     updateStageStatus()
                 }
             },
             onEarpieceActive = {
                 postForRuntime(runtimeSessionId) {
                     bluetoothReady = false
+                    audioRouteReady = true
                     publishAudioSource(AUDIO_EARPIECE_STATUS, bluetooth = false)
+                    maybePublishAudioReady()
                     updateStageStatus()
                 }
             },
             onExternalAudioActive = { outputLabel ->
                 postForRuntime(runtimeSessionId) {
                     bluetoothReady = false
+                    audioRouteReady = true
                     publishAudioSource("当前音频源：$outputLabel", bluetooth = false)
+                    maybePublishAudioReady()
                     updateStageStatus()
                 }
             },
@@ -863,6 +1532,7 @@ class IntercomService : Service() {
         targetAttempt: ConnectionAttempt? = null
     ) {
         publishStatus(SEARCHING_STATUS)
+        val capabilities = localCapabilities ?: currentLocalCapabilities()
         val recoveryStartup = RecoveryTransportStartup(targetAttempt) { event ->
             postForSession(token) { orchestrator.dispatch(event) }
         }
@@ -879,6 +1549,9 @@ class IntercomService : Service() {
             localNickname = requestedRiderName.ifBlank { "骑士" },
             localDeviceName = Build.MODEL.orEmpty(),
             sessionId = runtimeSessionId,
+            localPlatform = PeerPlatform.ANDROID,
+            localCapabilities = capabilities.capabilities,
+            localNetworkRole = capabilities.networkRole,
             onPeersChanged = { peers ->
                 postForSession(token) {
                     publishPresenceSnapshot(
@@ -936,6 +1609,9 @@ class IntercomService : Service() {
             riderName = requestedRiderName.ifBlank { "骑士" },
             deviceName = Build.MODEL.orEmpty(),
             protocolVersion = SignalingV2Codec.PROTOCOL_VERSION,
+            localPlatform = PeerPlatform.ANDROID,
+            localCapabilities = capabilities.capabilities,
+            localNetworkRole = capabilities.networkRole,
             onDevicesChanged = { devices ->
                 postForSession(token) {
                     publishPresenceSnapshot(
@@ -952,15 +1628,19 @@ class IntercomService : Service() {
                                         sourceSessionId = device.sessionId,
                                         nickname = device.name,
                                         deviceName = device.deviceName,
-                                        protocolVersion = device.protocolVersion
+                                        protocolVersion = device.protocolVersion,
+                                        platform = device.platform,
+                                        capabilities = device.capabilities,
+                                        networkRole = device.networkRole
                                     )
                                 )
                             }
                         )
                     )
-                    if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
-                }
-            },
+                     if (!physicalLinkReady && devices.isNotEmpty()) publishStatus(PEER_FOUND_STATUS)
+                     maybeReprepareBootstrapAfterLanChange(token)
+                 }
+             },
             onControlChannelReady = { session ->
                 registerControlChannel(token, session)
             },
@@ -969,7 +1649,10 @@ class IntercomService : Service() {
             initialTargetAttempt = targetAttempt
         )
             },
-            installLan = { lanDiscovery = it },
+            installLan = {
+                lanDiscovery = it
+                pendingBleEndpoint?.let(it::rememberExternalEndpoint)
+            },
             startLan = { it.start() }
         )
     }
@@ -1244,6 +1927,12 @@ class IntercomService : Service() {
         activeMediaSession = null
         intercomManager = null
         mediaConnected = false
+        remoteAudioTrackAttached = false
+        remoteAudioFrameReceived = false
+        setAudioReady(false)
+        audioReadyPending = false
+        audioReadyEpoch++
+        cancelAudioReadyTimeout()
         runCatching { manager?.close() }.onFailure(::handleError)
     }
 
@@ -1272,6 +1961,11 @@ class IntercomService : Service() {
             clearConnectionState = {
                 physicalLinkReady = false
                 mediaConnected = false
+                remoteAudioTrackAttached = false
+                remoteAudioFrameReceived = false
+                setAudioReady(false)
+                audioReadyPending = false
+                audioReadyEpoch++
                 remoteRiderName = null
                 listener?.onRemoteRiderIdentified("")
             },
@@ -1369,6 +2063,11 @@ class IntercomService : Service() {
 
         physicalLinkReady = true
         mediaConnected = false
+        remoteAudioTrackAttached = false
+        remoteAudioFrameReceived = false
+        setAudioReady(false)
+        audioReadyPending = false
+        audioReadyEpoch++
         remoteRiderName = effect.peer.nickname
         publishStatus(SIGNALING_CONNECTED_STATUS)
 
@@ -1381,6 +2080,12 @@ class IntercomService : Service() {
             },
             onConnectionStateChanged = {
                 onConnectionStateChanged(token, candidate, it)
+            },
+            onRemoteAudioTrack = {
+                onRemoteAudioTrack(token, candidate)
+            },
+            onRemoteAudioFrameReceived = {
+                onRemoteAudioFrameReceived(token, candidate)
             },
             onAudioLevelChanged = { onAudioLevelChanged(token, candidate, it) },
             onError = { error ->
@@ -1396,6 +2101,7 @@ class IntercomService : Service() {
             publishStatus(MEDIA_INITIALIZING_STATUS)
             it.start()
         }
+        scheduleAudioReadyTimeout(token, candidate)
         pendingMediaMessages.remove(candidate)
             .orEmpty()
             .forEach { intercomManager?.handleRemoteSignaling(it) }
@@ -1426,10 +2132,11 @@ class IntercomService : Service() {
                                 ?.takeIf { it.matchesCandidate(candidate) }
                                 ?.let {
                                     runCatching(it::markMediaConnected).onFailure(::handleError)
-                                }
+                            }
                             attemptDeadlineScheduler.cancel(candidate.attempt)
                             mediaConnected = true
-                            publishStatus(VOICE_CONNECTED_STATUS)
+                            maybePublishAudioReady()
+                            updateStageStatus()
                         }
                     }
                 }
@@ -1440,11 +2147,100 @@ class IntercomService : Service() {
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.CLOSED -> {
                     mediaConnected = false
+                    remoteAudioTrackAttached = false
+                    remoteAudioFrameReceived = false
+                    setAudioReady(false)
+                    audioReadyPending = false
+                    audioReadyEpoch++
+                    cancelAudioReadyTimeout()
                     publishStatus(SIGNAL_LOST_STATUS)
                 }
                 else -> updateStageStatus()
             }
         }
+    }
+
+    private fun onRemoteAudioTrack(
+        token: SessionGeneration.Token,
+        candidate: ConnectionCandidateContext
+    ) {
+        postForMediaContext(token, candidate) {
+            remoteAudioTrackAttached = true
+            publishLog("远端音频轨已到达，等待可播放音频与本地路由确认")
+            maybePublishAudioReady()
+        }
+    }
+
+    private fun onRemoteAudioFrameReceived(
+        token: SessionGeneration.Token,
+        candidate: ConnectionCandidateContext
+    ) {
+        postForMediaContext(token, candidate) {
+            remoteAudioFrameReceived = true
+            publishLog("已收到远端音频 RTP 帧，等待本地路由确认")
+            maybePublishAudioReady()
+        }
+    }
+
+    private fun maybePublishAudioReady() {
+        val candidate = activeMediaContext ?: return
+        if (
+            audioReady ||
+            audioReadyPending ||
+            !mediaConnected ||
+            !remoteAudioTrackAttached ||
+            !remoteAudioFrameReceived ||
+            !audioRouteReady ||
+            audioInterruptionState != AudioInterruptionState.NORMAL ||
+            !isCurrentMediaContext(activeSession ?: return, candidate)
+        ) return
+        val readinessEpoch = audioReadyEpoch
+        val remoteFrameReady = remoteAudioFrameReceived
+        val routeReady = audioRouteReady
+        val interruptionState = audioInterruptionState
+        audioReadyPending = true
+        val queued = orchestrator.dispatch(
+            SessionEvent.AudioReady(
+                runtimeSessionId = candidate.runtimeSessionId,
+                attemptId = candidate.attemptId,
+                occurredAt = System.currentTimeMillis(),
+                remoteAudioFrameReceived = remoteFrameReady,
+                audioRouteReady = routeReady,
+                phoneInterrupted = interruptionState != AudioInterruptionState.NORMAL,
+                readinessEpoch = readinessEpoch
+            )
+        ) { accepted ->
+            dispatchOnMain {
+                val currentToken = activeSession
+                if (
+                    currentToken == null ||
+                    !isCurrentMediaContext(currentToken, candidate) ||
+                    readinessEpoch != audioReadyEpoch ||
+                    audioInterruptionState != AudioInterruptionState.NORMAL ||
+                    !mediaConnected ||
+                    !remoteAudioTrackAttached ||
+                    !remoteAudioFrameReceived ||
+                    !audioRouteReady
+                ) {
+                    audioReadyPending = false
+                    return@dispatchOnMain
+                }
+                audioReadyPending = false
+                if (accepted) {
+                    cancelAudioReadyTimeout()
+                    setAudioReady(true)
+                    publishLog(
+                        "AUDIO_READY：远端音频轨、RTP 音频帧、本地音频路由和非电话状态均已确认"
+                    )
+                    publishStatus(VOICE_CONNECTED_STATUS)
+                } else {
+                    setAudioReady(false)
+                    publishLog("AUDIO_READY 事件未被当前 session 接受")
+                    updateStageStatus()
+                }
+            }
+        }
+        if (!queued) audioReadyPending = false
     }
 
     private fun onIntercomDisconnected(
@@ -1532,6 +2328,9 @@ class IntercomService : Service() {
             clearConnectionState = {
                 physicalLinkReady = false
                 mediaConnected = false
+                remoteAudioTrackAttached = false
+                remoteAudioFrameReceived = false
+                setAudioReady(false)
                 remoteRiderName = null
                 publishStatus(cleanupStatus)
             },
@@ -1642,6 +2441,7 @@ class IntercomService : Service() {
         val runtimeSessionId = activeRuntimeSessionId
         val keepAliveToRelease = runtimeKeepAlive
         runtimeKeepAlive = null
+        audioReadyEpoch++
         if (runtimeSessionId != null) {
             orchestrator.dispatch(SessionEvent.StopRequested(runtimeSessionId))
         }
@@ -1659,22 +2459,46 @@ class IntercomService : Service() {
         autoConnectTargetKey = null
         publishPresenceSnapshot(presenceAggregator.clear())
         drainSignalingSessions().forEach(SignalingSessionV2::close)
-        lanDiscovery?.close()
-        lanDiscovery = null
-
         try {
             intercomManager?.close()
         } catch (t: Throwable) {
             handleError(t)
         }
+        intercomManager = null
+        lanDiscovery?.close()
+        lanDiscovery = null
         val wifiToClose = wifiTunnel
         wifiTunnel = null
         wifiTunnelCloseOwner.closeAll(
             additionalResources = listOfNotNull(wifiToClose),
-            onError = ::handleError
-        ) {
-            keepAliveToRelease?.close()
-        }
+            onError = ::handleError,
+            onComplete = { keepAliveToRelease?.close() }
+        )
+        bleBootstrap?.close()
+        bleBootstrap = null
+        networkBootstrap?.close()
+        networkBootstrap = null
+        networkBootstrapGeneration++
+        networkDiscoveryRetry?.let(mainHandler::removeCallbacks)
+        networkDiscoveryRetry = null
+        networkBootstrapRetry?.let(mainHandler::removeCallbacks)
+        networkBootstrapRetry = null
+        networkBootstrapRetryAttempts = 0
+        blePeerSelection?.let(mainHandler::removeCallbacks)
+        blePeerSelection = null
+        bleConnectRetries.values.forEach(mainHandler::removeCallbacks)
+        bleConnectRetries.clear()
+        blePeerCandidates.clear()
+        bleBootstrapRequests.clear()
+        pendingBleEndpoint = null
+        activeRemoteCapabilityAdvertisement = null
+        preparedBleBootstrapKey = null
+        activeBlePeer = null
+        bleConnectAttempts.clear()
+        localCapabilities = null
+        localCapabilityAdvertisement = null
+        awaitingWifiJoinResult = false
+
         try {
             audioSessionController?.close()
         } catch (t: Throwable) {
@@ -1687,6 +2511,12 @@ class IntercomService : Service() {
         bluetoothReady = false
         physicalLinkReady = false
         mediaConnected = false
+        remoteAudioTrackAttached = false
+        remoteAudioFrameReceived = false
+        audioRouteReady = false
+        setAudioReady(false)
+        audioReadyPending = false
+        cancelAudioReadyTimeout()
         audioInterruptionState = AudioInterruptionState.NORMAL
         remoteRiderName = null
         publishAudioSource(AUDIO_STANDBY_STATUS, bluetooth = false)
@@ -2240,6 +3070,11 @@ class IntercomService : Service() {
         intercomManager = null
         physicalLinkReady = false
         mediaConnected = false
+        remoteAudioTrackAttached = false
+        remoteAudioFrameReceived = false
+        setAudioReady(false)
+        audioReadyPending = false
+        cancelAudioReadyTimeout()
         publishStatus(SIGNAL_LOST_STATUS)
 
         val delayMillis = effect.attempt.boundedTimeoutMillis(
@@ -2282,6 +3117,10 @@ class IntercomService : Service() {
             pendingMediaMessages.clear()
             activeMediaContext = null
             activeMediaSession = null
+            setAudioReady(false)
+            audioReadyPending = false
+            audioReadyEpoch++
+            cancelAudioReadyTimeout()
         }
 
     private fun updateStageStatus() {
@@ -2299,7 +3138,7 @@ class IntercomService : Service() {
             return
         }
         when {
-            mediaConnected -> publishStatus(VOICE_CONNECTED_STATUS)
+            audioReady -> publishStatus(VOICE_CONNECTED_STATUS)
             physicalLinkReady -> publishStatus(MEDIA_INITIALIZING_STATUS)
             bluetoothReady -> publishStatus(SEARCHING_STATUS)
             running -> publishStatus(SEARCHING_STATUS)
@@ -2351,6 +3190,43 @@ class IntercomService : Service() {
         if (!queued && autoConnectTargetKey == target.key) {
             autoConnectTargetKey = null
         }
+    }
+
+    private fun scheduleAudioReadyTimeout(
+        token: SessionGeneration.Token,
+        candidate: ConnectionCandidateContext
+    ) {
+        cancelAudioReadyTimeout()
+        if (audioInterruptionState != AudioInterruptionState.NORMAL) return
+        val timeout = Runnable {
+            if (
+                !audioReady &&
+                audioInterruptionState == AudioInterruptionState.NORMAL &&
+                isCurrentMediaContext(token, candidate)
+            ) {
+                publishLog("AUDIO_READY 超时：未确认远端可播放音频或本地路由")
+                publishStatus(SIGNAL_LOST_STATUS)
+                orchestrator.dispatch(
+                    SessionEvent.SignalingDisconnected(
+                        runtimeSessionId = candidate.runtimeSessionId,
+                        attemptId = candidate.attemptId
+                    )
+                )
+            }
+        }
+        audioReadyTimeout = timeout
+        mainHandler.postDelayed(timeout, AUDIO_READY_TIMEOUT_MS)
+    }
+
+    private fun cancelAudioReadyTimeout() {
+        audioReadyTimeout?.let(mainHandler::removeCallbacks)
+        audioReadyTimeout = null
+    }
+
+    private fun setAudioReady(ready: Boolean) {
+        if (audioReady == ready) return
+        audioReady = ready
+        listener?.onAudioReadyChanged(ready)
     }
 
     private fun markDiscoveryUnavailable() {
@@ -2446,7 +3322,8 @@ class IntercomService : Service() {
         val notificationText = foregroundNotificationText(
             orchestrator.state.value,
             lastStatus,
-            audioInterruptionState
+            audioInterruptionState,
+            audioReady
         )
 
         val contentIntent = PendingIntent.getActivity(
@@ -2604,6 +3481,14 @@ class IntercomService : Service() {
         private const val AUDIO_RESUMING_STATUS = "正在恢复对讲音频"
         private const val AUDIO_FOCUS_LOST_STATUS = "音频被其他应用占用"
         private const val AUDIO_ROUTE_UNAVAILABLE_STATUS = "通信设备暂不可用"
+        private const val NETWORK_DISCOVERY_RETRY_DELAY_MS = 500L
+        private const val BLE_RECONNECT_BACKOFF_MS = 1_500L
+        private const val BLE_PEER_SELECTION_DELAY_MS = 750L
+        private const val NETWORK_BOOTSTRAP_RETRY_DELAY_MS = 1_500L
+        private const val MAX_NETWORK_BOOTSTRAP_RETRIES = 3
+        private const val MIN_HOTSPOT_TTL_MS = 1_000L
+        private const val MAX_HOTSPOT_TTL_MS = 10 * 60 * 1000L
+        private const val DEFAULT_REMOTE_HOTSPOT_TTL_MS = 5 * 60 * 1000L
 
         internal fun startIntent(
             context: Context,

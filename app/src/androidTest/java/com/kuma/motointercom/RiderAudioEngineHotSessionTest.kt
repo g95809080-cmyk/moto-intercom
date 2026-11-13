@@ -115,6 +115,56 @@ class RiderAudioEngineHotSessionTest {
         }
     }
 
+    @Test
+    fun debugExternalCapturePostProcessingHooksSurviveSessionRebuildAndRepeatedClose() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            instrumentation.uiAutomation.grantRuntimePermission(
+                context.packageName,
+                Manifest.permission.RECORD_AUDIO
+            )
+        }
+
+        val errors = LinkedBlockingQueue<Throwable>()
+        val engine = RiderAudioEngine(
+            context = context,
+            onEngineError = errors::offer,
+            isRuntimeCurrent = { true },
+            noiseReductionConfig = AudioNoiseReductionConfig(
+                requestedMode = AudioNoiseReductionMode.EXTERNAL_CAPTURE_POST_PROCESSING,
+                internalExperimentEnabled = true
+            )
+        )
+        try {
+            awaitNoiseSnapshot(engine) {
+                it.activeMode == AudioNoiseReductionMode.EXTERNAL_CAPTURE_POST_PROCESSING
+            }
+            assertTrue("external factory was not created", field(engine, "externalAudioProcessingFactory") != null)
+
+            val firstSdp = CountDownLatch(1)
+            val first = engine.openSession(callbacks(firstSdp, errors))
+            first.createOffer()
+            assertTrue("first SDP was not generated", firstSdp.await(10, TimeUnit.SECONDS))
+            awaitNoiseSnapshot(engine) { it.externalProcessorFrameCount > 0L }
+            first.close()
+
+            val secondSdp = CountDownLatch(1)
+            val second = engine.openSession(callbacks(secondSdp, errors))
+            second.createOffer()
+            assertTrue("second SDP was not generated", secondSdp.await(10, TimeUnit.SECONDS))
+            second.close()
+            assertNull("unexpected media error", errors.poll(2, TimeUnit.SECONDS))
+        } finally {
+            engine.close()
+            engine.close()
+            assertTrue(
+                "audio platform resources were not cleared after repeated close",
+                awaitPlatformResourcesCleared(engine)
+            )
+        }
+    }
+
     private fun callbacks(
         sdp: CountDownLatch,
         errors: LinkedBlockingQueue<Throwable>
@@ -148,5 +198,39 @@ class RiderAudioEngineHotSessionTest {
             SystemClock.sleep(10L)
         }
         return false
+    }
+
+    private fun awaitPlatformResourcesCleared(engine: RiderAudioEngine): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + 2_000L
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (
+                field(engine, "audioDeviceModule") == null &&
+                field(engine, "factory") == null &&
+                field(engine, "externalAudioProcessingFactory") == null &&
+                field(engine, "externalCaptureProcessor") == null &&
+                field(engine, "externalProcessorGuard") == null
+            ) {
+                return true
+            }
+            SystemClock.sleep(10L)
+        }
+        return false
+    }
+
+    private fun awaitNoiseSnapshot(
+        engine: RiderAudioEngine,
+        predicate: (AudioNoiseRuntimeSnapshot) -> Boolean
+    ): AudioNoiseRuntimeSnapshot {
+        val deadline = SystemClock.elapsedRealtime() + 10_000L
+        var last: AudioNoiseRuntimeSnapshot? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val diagnostics = field(engine, "noiseDiagnostics") as? AudioNoiseDiagnostics
+            diagnostics?.snapshot()?.let {
+                last = it
+                if (predicate(it)) return it
+            }
+            SystemClock.sleep(20L)
+        }
+        throw AssertionError("audio noise diagnostic condition was not met: $last")
     }
 }

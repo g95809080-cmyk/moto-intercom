@@ -1,0 +1,128 @@
+﻿WifiP2pService:
+ total records=83
+ rec[0]: time=08-04 09:04:54.361 processed=DefaultState org=P2pDisabledState dest=<null> what=DISABLE_P2P sender=null(-1)
+ rec[1]: time=08-04 09:04:55.667 processed=DefaultState org=P2pDisabledState dest=<null> what=AsyncChannel.CMD_CHANNEL_FULL_CONNECTION sender=android(1000)
+ rec[2]: time=08-04 09:04:55.674 processed=DefaultState org=P2pDisabledState dest=<null> what=AsyncChannel.CMD_CHANNEL_HALF_CONNECTED sender=null(-1)
+ rec[3]: time=08-04 09:05:00.755 processed=DefaultState org=P2pDisabledState dest=<null> what=BLOCK_DISCOVERY sender=android(1000)
+ rec[4]: time=08-04 09:05:00.923 processed=DefaultState org=P2pDisabledState dest=<null> what=BLOCK_DISCOVERY sender=android(1000)
+ rec[5]: time=08-04 09:06:02.215 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.UPDATE_CHANNEL_INFO sender=com.kuma.motointercom(10150)
+ rec[6]: time=08-04 09:06:02.218 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.REQUEST_GROUP_INFO sender=com.kuma.motointercom(10150)
+ rec[7]: time=08-04 09:06:02.263 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CANCEL_CONNECT sender=com.kuma.motointercom(10150)
+ rec[8]: time=08-04 09:06:02.771 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[9]: time=08-04 09:06:03.775 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[10]: time=08-04 09:06:04.777 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[11]: time=08-04 09:06:05.780 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[12]: time=08-04 09:06:06.784 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[13]: time=08-04 09:06:07.787 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[14]: time=08-04 09:06:08.790 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[15]: time=08-04 09:06:09.792 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[16]: time=08-04 09:06:10.800 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[17]: time=08-04 09:06:11.810 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[18]: time=08-04 09:06:12.814 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[19]: time=08-04 09:06:13.819 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[20]: time=08-04 09:06:14.823 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[21]: time=08-04 09:06:15.826 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[22]: time=08-04 09:06:16.830 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[23]: time=08-04 09:06:17.835 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[24]: time=08-04 09:06:18.838 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[25]: time=08-04 09:06:19.841 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[26]: time=08-04 09:06:20.843 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[27]: time=08-04 09:06:21.850 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[28]: time=08-04 09:06:22.855 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[29]: time=08-04 09:06:23.858 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[30]: time=08-04 09:06:24.864 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[31]: time=08-04 09:06:25.868 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[32]: time=08-04 09:06:26.876 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[33]: time=08-04 09:06:27.880 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[34]: time=08-04 09:06:28.885 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[35]: time=08-04 09:06:29.890 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[36]: time=08-04 09:06:30.894 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[37]: time=08-04 09:06:31.897 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[38]: time=08-04 09:06:32.901 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[39]: time=08-04 09:06:33.911 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[40]: time=08-04 09:06:34.915 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[41]: time=08-04 09:06:35.921 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[42]: time=08-04 09:06:36.932 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[43]: time=08-04 09:06:37.935 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[44]: time=08-04 09:06:38.938 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[45]: time=08-04 09:06:39.940 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[46]: time=08-04 09:06:40.943 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[47]: time=08-04 09:06:41.945 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[48]: time=08-04 09:06:42.949 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[49]: time=08-04 09:06:43.952 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[50]: time=08-04 09:06:44.956 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[51]: time=08-04 09:06:45.960 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[52]: time=08-04 09:06:46.963 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[53]: time=08-04 09:06:47.966 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[54]: time=08-04 09:06:48.969 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[55]: time=08-04 09:06:49.973 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[56]: time=08-04 09:06:50.976 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[57]: time=08-04 09:06:51.980 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[58]: time=08-04 09:06:52.984 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[59]: time=08-04 09:06:53.987 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[60]: time=08-04 09:06:54.991 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[61]: time=08-04 09:06:55.993 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[62]: time=08-04 09:06:56.996 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[63]: time=08-04 09:06:58.002 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[64]: time=08-04 09:06:59.006 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[65]: time=08-04 09:07:00.010 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[66]: time=08-04 09:07:01.014 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[67]: time=08-04 09:07:02.019 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[68]: time=08-04 09:07:03.021 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[69]: time=08-04 09:07:04.025 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[70]: time=08-04 09:07:05.029 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[71]: time=08-04 09:07:06.035 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[72]: time=08-04 09:07:07.040 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[73]: time=08-04 09:07:08.043 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[74]: time=08-04 09:07:09.046 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[75]: time=08-04 09:07:10.050 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[76]: time=08-04 09:07:11.054 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[77]: time=08-04 09:07:12.057 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[78]: time=08-04 09:07:13.060 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[79]: time=08-04 09:07:14.063 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[80]: time=08-04 09:07:15.067 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[81]: time=08-04 09:07:16.072 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+ rec[82]: time=08-04 09:07:17.076 processed=DefaultState org=P2pDisabledState dest=<null> what=WifiP2pManager.CLEAR_LOCAL_SERVICES sender=com.kuma.motointercom(10150)
+curState=P2pDisabledState
+mWifiP2pInfo groupFormed: false isGroupOwner: false groupOwnerIpAddress: none
+mGroup null
+mSavedPeerConfig 
+ address: 
+ wps:  setup: 0
+ BSSID: null
+ pin: null
+
+ groupOwnerIntent: -1
+ persist: -2
+ networkName: 
+ passphrase: <empty>
+ pccModeConnectionType: 0
+ groupOwnerBand: 0
+ groupClientIpProvisioningMode: 0
+ joinExistingGroup: false
+ vendorData: []
+ Group Owner Version: 0
+ Pairing bootstrapping config : <null>
+ authorizeConnectionFromPeerEnabled: false
+mGroups 
+
+WifiP2pMetrics:
+mConnectionEvents:
+mGroupEvents:
+mWifiP2pStatsProto.numPersistentGroup=0
+mWifiP2pStatsProto.numTotalPeerScans=0
+mWifiP2pStatsProto.numTotalServiceScans=0
+mAutonomousGroup false
+mJoinExistingGroup false
+mDiscoveryStarted false
+mListenStarted false
+mDetailedState IDLE
+mTemporarilyDisconnectedWifi false
+ServiceDiscoveryInfo WifiP2pOngoingServiceDiscoveryRequestInfo:
+ serviceDiscoveryType: 0
+ sessionId: 
+mDeathDataByBinder {android.os.BinderProxy@43e03f2=mUid=10150, deathRecipient=com.android.server.wifi.p2p.WifiP2pServiceImpl$$ExternalSyntheticLambda0@e28a735, messenger=android.os.Messenger@2c79a43, worksource=WorkSource{10150 com.kuma.motointercom}, displayId=0}
+mClientInfoList 1
+mActiveClients {}
+mPeerAuthorizingTimestamp{}
+

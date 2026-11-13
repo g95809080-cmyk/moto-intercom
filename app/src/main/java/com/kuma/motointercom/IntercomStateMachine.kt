@@ -204,6 +204,16 @@ internal sealed interface SessionEvent {
         val occurredAt: Long
     ) : SessionEvent
 
+    data class AudioReady(
+        val runtimeSessionId: RuntimeSessionId,
+        val attemptId: ConnectionAttemptId,
+        val occurredAt: Long,
+        val remoteAudioFrameReceived: Boolean = true,
+        val audioRouteReady: Boolean = true,
+        val phoneInterrupted: Boolean = false,
+        val readinessEpoch: Long = 0L
+    ) : SessionEvent
+
     data class SignalingDisconnected(
         val runtimeSessionId: RuntimeSessionId,
         val attemptId: ConnectionAttemptId
@@ -421,6 +431,7 @@ internal fun reduceIntercomState(
     is SessionEvent.AttemptTimedOut,
     is SessionEvent.AttemptMilestoneElapsed,
     is SessionEvent.WebRtcStateChanged,
+    is SessionEvent.AudioReady,
     is SessionEvent.SignalingDisconnected,
     is SessionEvent.RecoveryExhausted,
     is SessionEvent.DisconnectRequested -> null

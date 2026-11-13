@@ -1,0 +1,8 @@
+320dp-hole-gesture-home.xml viewport=840x2400 max-right=840 max-bottom=2400 scrollable-nodes=1 overflow=0
+360dp-font13-hole-gesture-home.xml viewport=945x2400 max-right=945 max-bottom=2400 scrollable-nodes=1 overflow=0
+360dp-hole-gesture-home.xml viewport=945x2400 max-right=945 max-bottom=2400 scrollable-nodes=1 overflow=0
+411dp-corner-gesture-home.xml viewport=1080x2400 max-right=1080 max-bottom=2400 scrollable-nodes=1 overflow=0
+600dp-corner-gesture-home.xml viewport=1575x2400 max-right=1575 max-bottom=2400 scrollable-nodes=1 overflow=0
+gesture-cutout-home.xml viewport=1080x2400 max-right=1080 max-bottom=2400 scrollable-nodes=1 overflow=0
+gesture-hole-home.xml viewport=1080x2400 max-right=1080 max-bottom=2400 scrollable-nodes=1 overflow=0
+landscape-corner-gesture-home.xml viewport=2100x1080 max-right=2100 max-bottom=1080 scrollable-nodes=1 overflow=0

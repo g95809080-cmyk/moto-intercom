@@ -67,6 +67,9 @@ internal class WifiDirectTunnel(
     private val localNickname: String = "骑士",
     private val localDeviceName: String,
     private val sessionId: RuntimeSessionId,
+    private val localPlatform: PeerPlatform = PeerPlatform.ANDROID,
+    private val localCapabilities: Set<String> = emptySet(),
+    private val localNetworkRole: BootstrapNetworkRole = BootstrapNetworkRole.EITHER,
     private val onPeersChanged: (List<WifiDirectRiderDevice>) -> Unit = {},
     private val onDiscoveryStatus: (String) -> Unit = {},
     private val onDisconnected: () -> Unit = {},
@@ -807,7 +810,10 @@ internal class WifiDirectTunnel(
             TXT_DEVICE_ID to localDeviceId,
             TXT_NICKNAME to localNickname.ifBlank { "骑士" },
             TXT_DEVICE_NAME to localDeviceName,
-            TXT_SESSION_ID to sessionId.value
+            TXT_SESSION_ID to sessionId.value,
+            TXT_PLATFORM to localPlatform.name,
+            TXT_CAPABILITIES to localCapabilities.sorted().joinToString(","),
+            TXT_NETWORK_ROLE to localNetworkRole.name
         )
         val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
             P2pServiceInstanceCodec.encode(localDeviceId, sessionId),
@@ -865,7 +871,21 @@ internal class WifiDirectTunnel(
                 ?.let(::RuntimeSessionId),
             nickname = record[TXT_NICKNAME].orEmpty().trim(),
             deviceName = record[TXT_DEVICE_NAME].orEmpty().trim().ifBlank { device.deviceName },
-            protocolVersion = record[TXT_PROTOCOL_VERSION]?.toIntOrNull() ?: 0
+            protocolVersion = record[TXT_PROTOCOL_VERSION]?.toIntOrNull() ?: 0,
+            platform = PeerPlatform.parse(record[TXT_PLATFORM].orEmpty()),
+            capabilities = record[TXT_CAPABILITIES]
+                .orEmpty()
+                .split(',')
+                .asSequence()
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .filter { capability ->
+                    capability.length <= 64 && capability.all {
+                        it in 'A'..'Z' || it in '0'..'9' || it == '_'
+                    }
+                }
+                .toSet(),
+            networkRole = BootstrapNetworkRole.parse(record[TXT_NETWORK_ROLE].orEmpty())
         )
         acceptPeer(
             device,
@@ -2008,7 +2028,8 @@ internal class WifiDirectTunnel(
                     localDeviceName = localDeviceName,
                     originatingAttempt = taskContext?.attempt,
                     expectedRemoteTargetLock = expectedTargetLock,
-                    monotonicClock = monotonicClock
+                    monotonicClock = monotonicClock,
+                    localCapabilities = localCapabilities
                 )
             },
             onFailure = { failure ->
@@ -2223,6 +2244,9 @@ internal class WifiDirectTunnel(
         private const val TXT_NICKNAME = "nickname"
         private const val TXT_DEVICE_NAME = "deviceName"
         private const val TXT_SESSION_ID = "sessionId"
+        private const val TXT_PLATFORM = "platform"
+        private const val TXT_CAPABILITIES = "capabilities"
+        private const val TXT_NETWORK_ROLE = "networkRole"
 
         fun requiredPermissions(): Array<String> {
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

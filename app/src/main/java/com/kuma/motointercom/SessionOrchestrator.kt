@@ -23,7 +23,8 @@ internal class SessionOrchestrator(
     private val onError: (Throwable) -> Unit = {},
     elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
     attemptTimeoutMs: Long = 10_000L,
-    attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create
+    attemptIdFactory: () -> ConnectionAttemptId = ConnectionAttemptId::create,
+    private val audioReadyEpoch: () -> Long = { 0L }
 ) : Closeable {
     private data class QueuedEvent(
         val event: SessionEvent,
@@ -41,6 +42,7 @@ internal class SessionOrchestrator(
         attemptIdFactory = attemptIdFactory
     )
     private var confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
+    private val audioReadyAttempts = mutableSetOf<ConnectionAttemptId>()
     private val persistedConnectedAttempts = mutableSetOf<ConnectionAttemptId>()
 
     val state: StateFlow<IntercomState> = mutableState.asStateFlow()
@@ -91,6 +93,20 @@ internal class SessionOrchestrator(
 
     private suspend fun handle(event: SessionEvent): Boolean {
         val previous = mutableState.value
+        if (event is SessionEvent.AudioReady) {
+            val connected = previous as? IntercomState.Connected ?: return false
+            if (
+                connected.runtimeSessionId != event.runtimeSessionId ||
+                connected.attemptId != event.attemptId ||
+                !event.remoteAudioFrameReceived ||
+                !event.audioRouteReady ||
+                event.phoneInterrupted ||
+                event.readinessEpoch != audioReadyEpoch()
+            ) return false
+            audioReadyAttempts += event.attemptId
+            maybePersistConnectedPeer(IntercomState.Offline, connected)
+            return true
+        }
         if (event is SessionEvent.ConfirmationAvailabilityChanged) {
             if (previous.runtimeSessionId != event.runtimeSessionId) return false
             confirmationAvailability = event.availability
@@ -139,6 +155,7 @@ internal class SessionOrchestrator(
     ) {
         if (event is SessionEvent.RuntimeStarted || next == IntercomState.Offline) {
             confirmationAvailability = ConfirmationAvailability.UNAVAILABLE
+            audioReadyAttempts.clear()
             persistedConnectedAttempts.clear()
         }
     }
@@ -149,6 +166,13 @@ internal class SessionOrchestrator(
     ) {
         val connected = state as? IntercomState.Connected ?: return
         if (previous is IntercomState.Connected && previous.attempt == connected.attempt) return
+        if (connected.attemptId !in audioReadyAttempts) {
+            onLog(
+                "Pairing deferred until AUDIO_READY for " +
+                    "runtime=${connected.runtimeSessionId.value} attempt=${connected.attemptId.value}"
+            )
+            return
+        }
         val deviceId = connected.peer.deviceId?.takeIf(String::isNotBlank)
         if (deviceId == null || !connected.peer.isVerifiedFor(connected.attempt.targetLock)) {
             onLog(

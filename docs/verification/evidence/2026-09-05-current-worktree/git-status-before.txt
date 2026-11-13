@@ -1,0 +1,610 @@
+ M .codex/skills/rasen-apply-change/SKILL.md
+ M .codex/skills/rasen-archive-change/SKILL.md
+ M .codex/skills/rasen-auto/SKILL.md
+ M .codex/skills/rasen-benchmark/SKILL.md
+ M .codex/skills/rasen-bulk-archive-change/SKILL.md
+ M .codex/skills/rasen-careful/SKILL.md
+ M .codex/skills/rasen-careful/bin/check-careful.sh
+ M .codex/skills/rasen-chrome-use/SKILL.md
+ M .codex/skills/rasen-chrome-use/references/cdp-api.md
+ M .codex/skills/rasen-chrome-use/scripts/cdp-proxy.mjs
+ M .codex/skills/rasen-chrome-use/scripts/check-deps.mjs
+ M .codex/skills/rasen-chrome-use/scripts/match-site.mjs
+ M .codex/skills/rasen-codebase-design/DEEPENING.md
+ M .codex/skills/rasen-codebase-design/DESIGN-IT-TWICE.md
+ M .codex/skills/rasen-codebase-design/SKILL.md
+ M .codex/skills/rasen-codex/SKILL.md
+ M .codex/skills/rasen-continue-change/SKILL.md
+ M .codex/skills/rasen-cso/SKILL.md
+ M .codex/skills/rasen-design-consultation/SKILL.md
+ M .codex/skills/rasen-design-review/SKILL.md
+ M .codex/skills/rasen-explore/SKILL.md
+ D .codex/skills/rasen-ff-change/SKILL.md
+ D .codex/skills/rasen-freeze/SKILL.md
+ D .codex/skills/rasen-freeze/bin/check-freeze.sh
+ D .codex/skills/rasen-goal-iterate/SKILL.md
+ D .codex/skills/rasen-goal-plan/SKILL.md
+ D .codex/skills/rasen-goal-report/SKILL.md
+ M .codex/skills/rasen-goal/SKILL.md
+ D .codex/skills/rasen-guard/SKILL.md
+ M .codex/skills/rasen-handoff/SKILL.md
+ M .codex/skills/rasen-help/SKILL.md
+ M .codex/skills/rasen-investigate/SKILL.md
+ M .codex/skills/rasen-investigate/scripts/hitl-loop.template.sh
+ M .codex/skills/rasen-navigator/SKILL.md
+ M .codex/skills/rasen-new-change/SKILL.md
+ M .codex/skills/rasen-office-hours-command/SKILL.md
+ M .codex/skills/rasen-office-hours/SKILL.md
+ M .codex/skills/rasen-onboard/SKILL.md
+ M .codex/skills/rasen-propose/SKILL.md
+ M .codex/skills/rasen-prototype/LOGIC.md
+ M .codex/skills/rasen-prototype/SKILL.md
+ M .codex/skills/rasen-prototype/UI.md
+ M .codex/skills/rasen-qa-only/SKILL.md
+ M .codex/skills/rasen-qa/SKILL.md
+ M .codex/skills/rasen-qa/references/issue-taxonomy.md
+ M .codex/skills/rasen-qa/templates/qa-report-template.md
+ M .codex/skills/rasen-retro/SKILL.md
+ M .codex/skills/rasen-review-cycle/SKILL.md
+ M .codex/skills/rasen-review/SKILL.md
+ M .codex/skills/rasen-review/TODOS-format.md
+ M .codex/skills/rasen-review/checklist.md
+ M .codex/skills/rasen-review/design-checklist.md
+ M .codex/skills/rasen-review/greptile-triage.md
+ M .codex/skills/rasen-ship/SKILL.md
+ M .codex/skills/rasen-sync-specs/SKILL.md
+ M .codex/skills/rasen-tdd/SKILL.md
+ M .codex/skills/rasen-tdd/mocking.md
+ M .codex/skills/rasen-tdd/tests.md
+ D .codex/skills/rasen-unfreeze/SKILL.md
+ M .codex/skills/rasen-verify-change/SKILL.md
+ M .codex/skills/rasen-verify-enhanced/SKILL.md
+ M app/build.gradle.kts
+ M app/src/androidTest/java/com/kuma/motointercom/RiderAudioEngineHotSessionTest.kt
+ M app/src/main/AndroidManifest.xml
+ M app/src/main/java/com/kuma/motointercom/AudioRouteController.kt
+ M app/src/main/java/com/kuma/motointercom/AudioSessionController.kt
+ M app/src/main/java/com/kuma/motointercom/IntercomManager.kt
+ M app/src/main/java/com/kuma/motointercom/IntercomService.kt
+ M app/src/main/java/com/kuma/motointercom/IntercomStateMachine.kt
+ M app/src/main/java/com/kuma/motointercom/IntercomStatusText.kt
+ M app/src/main/java/com/kuma/motointercom/LanDiscoveryCoordinator.kt
+ M app/src/main/java/com/kuma/motointercom/LanRiderDevice.kt
+ M app/src/main/java/com/kuma/motointercom/MainActivity.kt
+ M app/src/main/java/com/kuma/motointercom/MainScreen.kt
+ M app/src/main/java/com/kuma/motointercom/MainUiPolicy.kt
+ M app/src/main/java/com/kuma/motointercom/PermissionPolicy.kt
+ M app/src/main/java/com/kuma/motointercom/PresenceAggregator.kt
+ M app/src/main/java/com/kuma/motointercom/RiderAudioEngine.kt
+ M app/src/main/java/com/kuma/motointercom/SessionOrchestrator.kt
+ M app/src/main/java/com/kuma/motointercom/SignalingSessionV2.kt
+ M app/src/main/java/com/kuma/motointercom/WifiDirectTunnel.kt
+ M app/src/test/java/com/kuma/motointercom/IntercomServiceRobolectricTest.kt
+ M app/src/test/java/com/kuma/motointercom/IntercomStatusTextTest.kt
+ M app/src/test/java/com/kuma/motointercom/LanDiscoveryDeviceRegistryTest.kt
+ M app/src/test/java/com/kuma/motointercom/MainUiPolicyTest.kt
+ M app/src/test/java/com/kuma/motointercom/PermissionPolicyTest.kt
+ M app/src/test/java/com/kuma/motointercom/RiderAudioEngineCleanupTest.kt
+ M app/src/test/java/com/kuma/motointercom/SessionOrchestratorTest.kt
+ M rasen/config.yaml
+?? .codex/config.toml
+?? .codex/hooks.json
+?? .codex/skills/rasen-qa-only/references/issue-taxonomy.md
+?? .codex/skills/rasen-qa-only/templates/qa-report-template.md
+?? .codex/skills/rasen-retain/SKILL.md
+?? .codex/skills/rasen-retain/codify.md
+?? .codex/skills/rasen-retain/report.md
+?? .codex/skills/rasen-workflow-author/SKILL.md
+?? .codex/skills/rasen-workflow-review/SKILL.md
+?? .codex/skills/rasen-workflow-review/checklist.md
+?? app/src/main/java/com/kuma/motointercom/AndroidNetworkBootstrapCoordinator.kt
+?? app/src/main/java/com/kuma/motointercom/AudioBluetoothProfile.kt
+?? app/src/main/java/com/kuma/motointercom/AudioNoiseDiagnostics.kt
+?? app/src/main/java/com/kuma/motointercom/AudioNoiseExternalProcessorGuard.kt
+?? app/src/main/java/com/kuma/motointercom/AudioNoiseReductionConfig.kt
+?? app/src/main/java/com/kuma/motointercom/BleBootstrapCoordinator.kt
+?? app/src/main/java/com/kuma/motointercom/BleBootstrapProtocol.kt
+?? app/src/main/java/com/kuma/motointercom/CrossPlatformCapabilities.kt
+?? app/src/test/java/com/kuma/motointercom/AudioBluetoothProfileTest.kt
+?? app/src/test/java/com/kuma/motointercom/AudioNoiseDiagnosticsTest.kt
+?? app/src/test/java/com/kuma/motointercom/AudioNoiseExternalProcessorGuardTest.kt
+?? app/src/test/java/com/kuma/motointercom/AudioNoiseReductionConfigTest.kt
+?? app/src/test/java/com/kuma/motointercom/BleBootstrapEndpointTest.kt
+?? app/src/test/java/com/kuma/motointercom/BleBootstrapProtocolTest.kt
+?? app/src/test/java/com/kuma/motointercom/CrossPlatformCapabilitiesTest.kt
+?? docs/development/2026-08-22-motocom-android-cross-platform-development.md
+?? docs/development/2026-08-22-motocom-ios-cross-platform-development.md
+?? docs/product/2026-07-17-motocom-ui-redesign-prd.md
+?? docs/product/2026-08-14-motocom-call-noise-reduction-prd.md
+?? docs/product/2026-08-22-motocom-ios-cross-platform-pairing-prd.md
+?? docs/superpowers/plans/2026-08-14-motocom-audio-noise-reduction-spike.md
+?? gradle/gradle-daemon-jvm.properties
+?? rasen/changes/kum-46-ui-redesign/.openspec.yaml
+?? rasen/changes/kum-46-ui-redesign/design.md
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-after-cta.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-after-foreground-connect.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-after-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-connected-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-connected.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-current-binary.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-current-final.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-current.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-discover-bottom-live.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-discover-card-live.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-discover-paired.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-discover-paired.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-discover-unpaired.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-final-offline.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-home-discover-back.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-home-unpaired-bottom.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-pre-unpaired-connect.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-route.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-card-retry.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-card-retry2.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-connect-final.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-discover-active.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-discover-after-b-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-discover-run.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-prestart.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-9688-unpaired-ready.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-acceptance-2026-08-05.md
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-after-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-before-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-connected-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-connected.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-current-after-timeout.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-current-binary.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-current.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-discover.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-final-offline-2.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-final-offline.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-home-bottom.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-home-discover-back.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-incoming-confirmation.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-offline.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-reopen-after-timeout.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-stop-final.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-before-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-confirmation-app.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-confirmation-notification-live.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-confirmation-notification.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-discover-run.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-incoming-foreground.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-incoming-live.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-incoming.png
+?? rasen/changes/kum-46-ui-redesign/evidence/device-efcb-unpaired-prestart.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/00-launcher.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/00-software-launcher.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/01-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/01-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/02-nav-panel-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/02-nav-panel.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/02-nav-panel.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/03-discover-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/03-discover.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/03-discover.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/04-placeholder-dialog-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/04-placeholder-dialog.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/05-placeholder-dismissed-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/05-placeholder-dismissed.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/06-home-after-discover-back.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/07-settings-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/07-settings.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/07-settings.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/08-settings-scrolled-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/08-settings-scrolled.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/09-logs-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/09-logs.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/09-logs.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/10-settings-after-logs-back-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/10-settings-after-logs-back.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/11-home-after-settings-back-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/11-home-after-settings-back.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/12-home-mute-placeholder-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/12-home-mute-placeholder.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/13-home-mute-dismissed.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/14-start-permission-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/14-start-permission.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/15-home-discovering-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/15-home-discovering.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/16-home-after-stop-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/16-home-after-stop.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/17-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/17-top-activity.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/18-device-profile.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/320dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/320dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/360dp-font13-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/360dp-font13-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/360dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/360dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/411dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/411dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/600dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/600dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/landscape-800dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/landscape-800dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/responsive/responsive-check.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/runtime-evidence.md
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-api36-2026-08-04/shell-launcher.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/00-boot.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/01-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/01-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/01-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/02-nav-panel-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/02-nav-panel.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/02-nav-panel.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/03-discover-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/03-discover.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/03-discover.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/04-placeholder-dialog-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/04-placeholder-dialog.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/04-placeholder-dialog.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/05-discover-after-confirm-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/05-discover-after-confirm.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/05-discover-after-confirm.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/06-settings-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/06-settings.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/06-settings.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/07-settings-scrolled-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/07-settings-scrolled.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/07-settings-scrolled.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/08-logs-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/08-logs.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/08-logs.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/09-home-before-start-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/09-home-before-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/09-home-before-start.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/09-settings-top-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/09-settings-top.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/10-home-for-start-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/10-home-for-start.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/10-home-for-start.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/11-permission-dialog-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/11-permission-dialog.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/11-permission-dialog.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/12-home-permissions-scrolled-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/12-home-permissions-scrolled.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/12-home-permissions-scrolled.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/13-system-permission-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/13-system-permission.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/13-system-permission.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/14-permission-next.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/15-after-nearby-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/15-after-nearby.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/15-permission-next.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/16-home-discovering-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/16-home-discovering.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/16-home-discovering.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/17-home-discovering-top-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/17-home-discovering-top.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/17-home-discovering-top.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/18-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/18-home-after-stop-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/18-home-after-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/18-home-after-stop.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/19-home-restored-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/19-home-restored.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/20-home-active-bottom-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/20-home-active-bottom.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/21-audio-cta-settings-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/21-audio-cta-settings.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/21-audio-cta-settings.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/22-audio-cta-back-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/22-audio-cta-back-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/22-audio-cta-back-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/23-mute-placeholder-dialog-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/23-mute-placeholder-dialog.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/23-mute-placeholder-dialog.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/24-after-stop-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/24-after-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/24-after-stop.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/24-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/25-cold-restart-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/25-cold-restart.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/25-cold-restart.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/25-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/26-home-compact-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/26-home-compact.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/26-home-compact.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/26-settings-draft-start.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/27-home-ready-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/27-home-ready.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/27-home-ready.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/27-settings-draft-filled.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/28-settings-after-reset.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/28-settings-after-resize.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/28-settings-before-resize.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/28-settings-draft-before-resize.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/28-settings-landscape-recreated.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/28-settings-landscape-recreated.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/29-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/29-settings-after-reset.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/29-settings-after-resize.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/29-settings-draft-before-resize.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/29-settings-restored.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/29-settings-restored.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/30-home-discovering-before-background.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/30-settings-scrolled-draft.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/31-foreground-rebind-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/31-home-after-foreground-rebind.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/31-settings-scrolled-landscape.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/32-home-after-rebind-stop.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/32-settings-pre-rotate-scroll.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/33-home-after-stop.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/33-settings-post-rotate-scroll.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/34-retest-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/34-retest-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/35-retest-settings.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/36-retest-pre-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/37-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/37-retest-post-rotate.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/37-retest-post-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/38-qa-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/38-qa-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/39-qa-settings.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/40-qa-pre-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/41-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/41-qa-post-rotate.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/41-qa-post-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/42-qa2-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/42-qa2-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/43-qa2-pre-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/44-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/44-qa2-post.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/44-qa2-post.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/45-qa3-pre-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/45-qa3-pre-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/46-qa3-post-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/46-qa3-post.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/46-qa3-post.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/47-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/47-qa3-restored.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/47-qa3-restored.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/48-startnow-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/48-startnow.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/49-settings-now.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/50-final-pre-rotate.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/50-final-pre-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/51-final-post-rotate.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/51-final-post-rotate.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/52-portrait-now.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/53-before-new.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/54-pre-new-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/54-pre-new.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/54-pre-new.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/55-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/55-post-new-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/55-post-new.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/55-post-new.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/56-launch-final-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/56-launch-final.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/57-launch-final.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/58-settings-final.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/59-pre-final2-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/59-pre-final2.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/59-pre-final2.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/60-crash-buffer.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/60-post-final2-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/60-post-final2.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/60-post-final2.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/61-post-return2.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/61-post-return2.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/62-now-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/62-now.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/63-pre-config.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/63-pre-config.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/63-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/64-post-config.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/64-post-config.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/64-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/65-always-finish-land.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/66-home-ready-fixed-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/66-home-ready-fixed.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/66-home-ready-fixed.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/67-foreground-rebind-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/67-home-after-foreground-rebind.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/67-home-after-foreground-rebind.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/67-home-discovering-before-background.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/67-home-ready-before-start.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/68-home-after-rebind-stop-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/68-home-after-rebind-stop.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/68-home-after-rebind-stop.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/69-home-offline-before-recreation.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/69-settings-before-recreation.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/70-settings-draft-scrolled-before-recreation.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/71-settings-after-size-recreation.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/71-settings-after-size-recreation.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/71-settings-recreation-logcat.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/72-settings-after-size-reset.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/73-home-after-recreation-cleanup.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/74-home-after-recreation-cleanup.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/75-a-home-ready.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/75-b-home-ready.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-a-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-a-discovering.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-a-logcat.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-a-wifip2p.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-b-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-b-discovering.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-b-logcat.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/76-b-wifip2p.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/77-a-shared-network-nsd-server.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/77-b-shared-network-nsd-client.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/active-bottom.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/active-bottom.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/active-current.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/active-current.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/audit-current-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/audit-current.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/current-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/current.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/inspect-now.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/320dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/320dp-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/320dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/360dp-font13-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/360dp-font13-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/360dp-font13-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/360dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/360dp-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/360dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/411dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/411dp-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/411dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/600dp-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/600dp-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/600dp-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/landscape-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/landscape-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/landscape-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/responsive/responsive-check.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/runtime-evidence.md
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/320dp-hole-gesture-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/320dp-hole-gesture-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/320dp-hole-gesture-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/360dp-font13-hole-gesture-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/360dp-font13-hole-gesture-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/360dp-font13-hole-gesture-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/360dp-hole-gesture-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/360dp-hole-gesture-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/360dp-hole-gesture-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/411dp-corner-gesture-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/411dp-corner-gesture-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/411dp-corner-gesture-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/600dp-corner-gesture-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/600dp-corner-gesture-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/600dp-corner-gesture-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/README.md
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-cutout-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-cutout-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-cutout-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-cutout-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-hole-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-hole-home-summary.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-hole-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/gesture-hole-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/hole-profile.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/landscape-corner-gesture-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/landscape-corner-gesture-home.png
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/landscape-corner-gesture-home.xml
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/profile.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/restore-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/restore-final-crash.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/emulator-graphics-api36-2026-08-04/shapes/shape-responsive-check.txt
+?? rasen/changes/kum-46-ui-redesign/evidence/non-device-audit-2026-08-10.md
+?? rasen/changes/kum-46-ui-redesign/exit-criteria-evidence.md
+?? rasen/changes/kum-46-ui-redesign/planning-context.md
+?? rasen/changes/kum-46-ui-redesign/proposal.md
+?? rasen/changes/kum-46-ui-redesign/specs/motocom-multipage-ui/spec.md
+?? rasen/changes/kum-46-ui-redesign/tasks.md
+?? tmp/android-cli/design-connected-discover-final.png
+?? tmp/android-cli/design-connected-discover-insets.png
+?? tmp/android-cli/design-connected-discover.png
+?? tmp/android-cli/design-connected-home-clean.png
+?? tmp/android-cli/design-connected-home-final.png
+?? tmp/android-cli/design-connected-home-insets.png
+?? tmp/android-cli/design-connected-home-layout.json
+?? tmp/android-cli/design-connected-home-windowed.png
+?? tmp/android-cli/design-connected-home.png
+?? tmp/android-cli/design-connected-settings-final.png
+?? tmp/android-cli/design-connected-settings-insets.png
+?? tmp/android-cli/design-connected-settings-layout.json
+?? tmp/android-cli/design-connected-settings.png
+?? tmp/android-cli/design-final-discover-layout.json
+?? tmp/android-cli/design-final-discover-v3.png
+?? tmp/android-cli/design-final-discover-v4.png
+?? tmp/android-cli/design-final-discover.png
+?? tmp/android-cli/design-final-home-layout.json
+?? tmp/android-cli/design-final-home-v3.png
+?? tmp/android-cli/design-final-home-v4.png
+?? tmp/android-cli/design-final-home.png
+?? tmp/android-cli/design-final-settings-layout.json
+?? tmp/android-cli/design-final-settings-v3.png
+?? tmp/android-cli/design-final-settings-v4.png
+?? tmp/android-cli/design-final-settings-v5.png
+?? tmp/android-cli/design-final-settings.png
+?? tmp/android-cli/design-final2-discover.png
+?? tmp/android-cli/design-final2-home-layout.json
+?? tmp/android-cli/design-final2-home.png
+?? tmp/android-cli/design-final2-settings.png
+?? tmp/android-cli/design-navigation-layout.json
+?? tmp/android-cli/design-no-bottom-discover.png
+?? tmp/android-cli/design-no-bottom-home-layout.json
+?? tmp/android-cli/design-no-bottom-home.png
+?? tmp/android-cli/design-no-bottom-settings.png
+?? tmp/android-cli/design-review-discover-v2-cli.png
+?? tmp/android-cli/design-review-discover-v2.png
+?? tmp/android-cli/design-review-home-v2.png
+?? tmp/android-cli/design-review-home-v3.png
+?? tmp/android-cli/design-review-settings-v2-cli.png
+?? tmp/android-cli/design-review-settings-v2-layout.json
+?? tmp/android-cli/design-review-settings-v2.png
+?? tmp/android-cli/design-review-settings-v3-layout.json
+?? tmp/android-cli/design-review-settings-v3.png
+?? tmp/android-cli/design-review-settings-v4-layout.json
+?? tmp/android-cli/design-review-settings-v4.png
+?? tmp/android-cli/design-review-settings-v5-layout.json
+?? tmp/android-cli/design-review-settings-v5.png
+?? tmp/android-cli/design-review-settings-v6-layout.json
+?? tmp/android-cli/design-review-settings-v6.png
+?? tmp/android-cli/design-v2-home-layout.json
+?? tmp/android-cli/design-v2-home-relaunched.png
+?? tmp/android-cli/design-v2-home.png
+?? tmp/android-cli/design-v3-discover-layout.json
+?? tmp/android-cli/design-v3-discover.png
+?? tmp/android-cli/design-v3-home-layout.json
+?? tmp/android-cli/design-v3-home.png
+?? tmp/android-cli/design-v3-settings-layout.json
+?? tmp/android-cli/design-v3-settings.png
+?? tmp/android-cli/discover-compose-final-layout.json
+?? tmp/android-cli/discover-compose-final.png
+?? tmp/android-cli/discover-compose-layout.json
+?? tmp/android-cli/discover-compose.png
+?? tmp/android-cli/final-main-home-offline-layout.json
+?? tmp/android-cli/final-main-home-offline.png
+?? tmp/android-cli/home-compose-final-layout.json
+?? tmp/android-cli/home-compose-final.png
+?? tmp/android-cli/home-compose-layout.json
+?? tmp/android-cli/home-compose.png
+?? tmp/android-cli/home-current.png
+?? tmp/android-cli/home-layout.json
+?? tmp/android-cli/iteration-home-layout.json
+?? tmp/android-cli/iteration-home.png
+?? tmp/android-cli/logs-compose-final-layout.json
+?? tmp/android-cli/logs-compose-final.png
+?? tmp/android-cli/logs-compose-layout.json
+?? tmp/android-cli/logs-compose.png
+?? tmp/android-cli/matrix-320x800-font1.3-home-layout.json
+?? tmp/android-cli/matrix-320x800-font1.3-home.png
+?? tmp/android-cli/matrix-320x800-home-layout.json
+?? tmp/android-cli/matrix-320x800-home.png
+?? tmp/android-cli/matrix-600x800-home-layout.json
+?? tmp/android-cli/matrix-600x800-home.png
+?? tmp/android-cli/matrix-landscape-home-layout.json
+?? tmp/android-cli/matrix-landscape-home.png
+?? tmp/android-cli/matrix-restored-home-layout.json
+?? tmp/android-cli/matrix-restored-home.png
+?? tmp/android-cli/post-cleanup-home-layout.json
+?? tmp/android-cli/post-cleanup-home.png
+?? tmp/android-cli/settings-compose-final-layout.json
+?? tmp/android-cli/settings-compose-final-scrolled-layout.json
+?? tmp/android-cli/settings-compose-final-scrolled.png
+?? tmp/android-cli/settings-compose-final-scrolled2-layout.json
+?? tmp/android-cli/settings-compose-final-scrolled2.png
+?? tmp/android-cli/settings-compose-final.png
+?? tmp/android-cli/settings-compose-layout-scrolled.json
+?? tmp/android-cli/settings-compose-layout-scrolled2.json
+?? tmp/android-cli/settings-compose-layout.json
+?? tmp/android-cli/settings-compose-scrolled.png
+?? tmp/android-cli/settings-compose.png
+?? tmp/android-cli/v110-home.png
+?? tmp/android-cli/v110-layout.json
+?? tmp/dual-device-qa/$s-home.png
+?? tmp/dual-device-qa/mi6-home.png
+?? tmp/dual-device-qa/xiaomi13-home.png
+?? tmp/qa-current/mi6-reconnected-layout.json
+?? tmp/rider_helmet_avatar_256.png
+?? tmp/rider_helmet_avatar_dark_256.png

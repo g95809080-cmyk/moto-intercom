@@ -1,0 +1,28 @@
+{
+  "Head": "78d16b7bac433e89dce4540e9ab0a08f933c3ff3",
+  "Branch": "feat/multi-audio-intercom",
+  "RecordedAt": "2026-09-05T09:48:17.8248921+08:00",
+  "SourceManifestSHA256": "579C27F7F6C861AED17AC1900A0A1745676B373E88D21AE2CA07FE5CC6CFB05D",
+  "SourceChangedDuringRun": false,
+  "Suites": 76,
+  "Tests": 585.0,
+  "Failures": 0.0,
+  "Errors": 0.0,
+  "Skipped": 0.0,
+  "LintErrors": 0,
+  "LintWarnings": 63,
+  "Apks": [
+    {
+      "Path": "N:\\app\\build\\outputs\\apk\\debug\\app-debug.apk",
+      "Bytes": 57598743,
+      "SHA256": "B7FC0A08BC414AB47D03A3BA194A4962C7D36DEBB59A3986C1BDB18B3D1AD41B",
+      "Modified": "2026-09-05T09:46:24.3881085+08:00"
+    },
+    {
+      "Path": "N:\\app\\build\\outputs\\apk\\androidTest\\debug\\app-debug-androidTest.apk",
+      "Bytes": 1197233,
+      "SHA256": "50B397E2F040D38BE1E6E55FE91DC2EB5CBAFDD7DFF7FA8569C6596A5D502D25",
+      "Modified": "2026-09-05T09:46:39.8223605+08:00"
+    }
+  ]
+}

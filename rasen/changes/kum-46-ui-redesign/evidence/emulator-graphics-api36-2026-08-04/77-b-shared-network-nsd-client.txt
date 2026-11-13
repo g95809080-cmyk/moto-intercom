@@ -1,0 +1,11 @@
+Target: emulator-5556 (MotoIntercom_Graphics_API36, ordinary GPU AVD)
+Test: com.kuma.motointercom.SharedNetworkNsdTest#exchange, role=client
+Result: FAIL
+Time: 30.032s
+Failure: java.lang.AssertionError: NSD service was not resolved
+Stack: com.kuma.motointercom.SharedNetworkNsdTest.runClient(SharedNetworkNsdTest.kt:113)
+        com.kuma.motointercom.SharedNetworkNsdTest.exchange(SharedNetworkNsdTest.kt:29)
+Instrumentation code: -1
+
+Environment snapshot: wifi_on=1; accessibility_enabled=0; enabled_accessibility_services=null; TalkBack package not installed.
+Wi-Fi Direct: curState=P2pDisabledState; mWifiP2pInfo groupFormed=false, isGroupOwner=false, groupOwnerIpAddress=none.

@@ -1,0 +1,1201 @@
+﻿--------- beginning of main
+08-04 09:06:01.621   479   513 I netd    : tetherGetStats() -> {[]} <0.49ms>
+08-04 09:06:01.717  1272  1530 D SatelliteController: iisInCarrierRoamingNbIotNtn: satellite is disabled
+08-04 09:06:01.848  1313  1313 D TaskbarManager: dispatchTouchEvent:  displayId=0 isDefaultDisplay=true
+08-04 09:06:01.856   701  1146 I WifiService: getWifiEnabledState uid=10150 state=3
+08-04 09:06:01.868   552   586 W AudioFlinger: createTrack_l(): mismatch between requested flags (00000004) and output flags (00000002)
+08-04 09:06:01.869   552   586 I AF::PthrPatchRecord: creating track with enforcement level 0
+08-04 09:06:01.869   552   586 W AF::TrackHandle: OpPlayAudio: not muting track:55 usage:13 for service UID 1000
+--------- beginning of system
+08-04 09:06:01.882   701  1146 I ActivityManager: Background started FGS: Allowed [callingPackage: com.kuma.motointercom; callingUid: 10150; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { act=com.kuma.motointercom.action.START_INTERCOM xflg=0x4 cmp=com.kuma.motointercom/.IntercomService (has extras) }; code:PROC_STATE_TOP; tempAllowListReason:<null>; allowWiu:12; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:0; bindFromPackage:null: isBindService:false]
+08-04 09:06:01.893   701  1820 W AS.PlaybackActivityMon: No piid assigned for invalid/internal port id 15
+08-04 09:06:01.914   494  2658 W libprocessgroup: A JoinCgroup action in the SystemMemoryProcess profile is used for controller memory in the cgroup v2 hierarchy and will be ignored
+08-04 09:06:02.048  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:02.048  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:02.048  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:02.055   701  1820 I ActivityManager: Background started FGS: Allowed [callingPackage: com.kuma.motointercom; callingUid: 10150; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { cmp=com.kuma.motointercom/.IntercomService }; code:PROC_STATE_TOP; tempAllowListReason:<null>; allowWiu:12; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:0; bindFromPackage:null: isBindService:false]; startForegroundDelayMs:28503
+08-04 09:06:02.057   701  1045 D BackgroundInstallControlService: Package event received: 0
+08-04 09:06:02.060  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:02.062  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:02.062  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:02.063   701  1243 I WifiService: acquireWifiLock uid=10150 lockMode=3 packageName=com.kuma.motointercom
+08-04 09:06:02.063   701   996 D WifiLockManager: addLock: WifiLock{com.kuma.motointercom:intercom type=4 uid=1000 workSource=WorkSource{10150 com.kuma.motointercom}}
+08-04 09:06:02.063   701   996 I WifiLockManager: Broadcasting IWifiLowLatencyLockListener#onOwnershipChanged: UIDs [10150]
+08-04 09:06:02.063  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:02.064  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:02.064  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:02.064   701   996 D WifiLockManager: Current opMode: 0 New LockMode: 4
+08-04 09:06:02.064   701   996 D WifiClientModeImpl[49339:wlan0]: Request to set power save for: wlan0 to: false requested by: 2, mPowerSaveDisableRequests = 0
+08-04 09:06:02.064   701   996 D WifiClientModeImpl[49339:wlan0]: Setting power save to: false, mPowerSaveDisableRequests = 2
+08-04 09:06:02.065  1327  1327 D wpa_supplicant: nl80211: set_p2p_powersave (legacy_ps=0 opp_ps=-1 ctwindow=-1)
+08-04 09:06:02.065   701   996 I WifiLockManager: Broadcasting IWifiLowLatencyLockListener#onActivatedStateChanged activated=true
+08-04 09:06:02.065   701   996 I WifiLockManager: Broadcasting IWifiLowLatencyLockListener#onActiveUsersChanged: UIDs [10150]
+08-04 09:06:02.070  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:02.070  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:02.070  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:02.081  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:02.081  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:02.081  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:02.092  2565  2565 D MotoIntercomUi: service connected
+08-04 09:06:02.092  2565  2565 D MotoIntercomUi: service status running=true status=无线配对中，请把两台手机靠近..
+08-04 09:06:02.098  2565  2565 D MotoIntercomUi: intercom UI state Offline -> Discovering(runtimeSessionId=RuntimeSessionId(value=9dc0eab3-f6aa-4474-93a1-6060f59aee3d))
+08-04 09:06:02.185  2565  2669 I RiderAudioEngine: PeerConnectionFactory 初始化 开始
+08-04 09:06:02.189  2565  2565 D MotoIntercomUi: service status running=true status=无线配对中，请把两台手机靠近..
+08-04 09:06:02.190  2565  2669 I org.webrtc.Logging: NativeLibrary: Loading native library: jingle_peerconnection_so
+08-04 09:06:02.191  2565  2669 I org.webrtc.Logging: NativeLibrary: Loading library: jingle_peerconnection_so
+08-04 09:06:02.193  2565  2670 D AudioSystem: onNewService: media.audio_policy service obtained 0x759e07ecb9c0
+08-04 09:06:02.195  2565  2670 D AudioSystem: getService: checking for service media.audio_policy: 0x759e07ecb9c0
+08-04 09:06:02.203  2565  2669 D nativeloader: Load /data/app/~~AuTdbhNtXck9ith1x2IrOQ==/com.kuma.motointercom-1fo3NM2qnTVRUgtCl3GdMA==/base.apk!/lib/x86_64/libjingle_peerconnection_so.so using class loader ns clns-9 (caller=/data/app/~~AuTdbhNtXck9ith1x2IrOQ==/com.kuma.motointercom-1fo3NM2qnTVRUgtCl3GdMA==/base.apk): ok
+08-04 09:06:02.204  2565  2669 I org.webrtc.Logging: PeerConnectionFactory: PeerConnectionFactory was initialized without an injected Loggable. Any existing Loggable will be deleted.
+08-04 09:06:02.206  2565  2670 I AudioRouteController: modern route: AudioDeviceCallback registered
+08-04 09:06:02.209  2565  2669 D AudioSystem: onNewServiceWithAdapter: media.audio_flinger service obtained 0x759fe7e6f600
+08-04 09:06:02.211  2565  2669 D AudioSystem: getService: checking for service media.audio_flinger: 0x759e07e99830
+08-04 09:06:02.212   701  1820 D WifiP2pService: getMessenger: uid=10150, binder=android.os.BinderProxy@43e03f2, messenger=android.os.Messenger@2c79a43
+08-04 09:06:02.214   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.UPDATE_CHANNEL_INFO { when=0 what=139360 obj=AttributionSource { uid = 10150, packageName = com.kuma.motointercom, attributionTag = null, token = android.os.BinderProxy@2bf979f, deviceId = 0, next = null } target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.215   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.UPDATE_CHANNEL_INFO { when=0 what=139360 obj=AttributionSource { uid = 10150, packageName = com.kuma.motointercom, attributionTag = null, token = android.os.BinderProxy@2bf979f, deviceId = 0, next = null } target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.215   701   996 D WifiP2pService: add a new client
+08-04 09:06:02.217   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.REQUEST_GROUP_INFO { when=0 what=139287 arg2=1 obj=AttributionSource { uid = 10150, packageName = com.kuma.motointercom, attributionTag = null, token = android.os.BinderProxy@2bf979f, deviceId = 0, next = null } target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.217   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.REQUEST_GROUP_INFO { when=0 what=139287 arg2=1 obj=AttributionSource { uid = 10150, packageName = com.kuma.motointercom, attributionTag = null, token = android.os.BinderProxy@2bf979f, deviceId = 0, next = null } target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.218   701   996 V WifiPermissionsUtil: enforceNearbyDevicesPermission(attributionSource=AttributionSource { uid = 10150, packageName = com.kuma.motointercom, attributionTag = null, token = android.os.BinderProxy@2bf979f, deviceId = 0, next = null }, checkForLocation=true
+08-04 09:06:02.218   701   996 V WifiPermissionsUtil: pkg=com.kuma.motointercom has NEARBY_WIFI_DEVICES permission.
+08-04 09:06:02.218   701   996 V WifiPermissionsUtil: package=com.kuma.motointercom UID=10150 has declared neverForLocation - bypassing location check.
+08-04 09:06:02.221   701  1243 I WifiService: getConnectionInfo uid=10150
+08-04 09:06:02.222   701  1243 V WifiPermissionsUtil: checkCallersLocationPermission(com.kuma.motointercom): uid 10150 doesn't have permission android.permission.ACCESS_FINE_LOCATION
+08-04 09:06:02.222   701  1243 V WifiPermissionsUtil: enforceCanAccessScanResults(pkg=com.kuma.motointercom, uid=10150): canCallingUidAccessLocation=false, canAppPackageUseLocation=false
+08-04 09:06:02.222   701  1243 V WifiService: Keeping REDACT_FOR_ACCESS_FINE_LOCATION:java.lang.SecurityException: UID 10150 has no location permission
+08-04 09:06:02.229  2565  2669 I org.webrtc.Logging: WebRtcAudioManagerExternal: Sample rate is set to 48000 Hz
+08-04 09:06:02.230  2565  2669 I org.webrtc.Logging: WebRtcAudioManagerExternal: Sample rate is set to 48000 Hz
+08-04 09:06:02.230  2565  2669 E org.webrtc.Logging: JavaAudioDeviceModule: HW AEC not supported
+08-04 09:06:02.230  2565  2669 E org.webrtc.Logging: JavaAudioDeviceModule: HW NS not supported
+08-04 09:06:02.230  2565  2669 I org.webrtc.Logging: JavaAudioDeviceModule: createAudioDeviceModule
+08-04 09:06:02.230  2565  2669 I org.webrtc.Logging: JavaAudioDeviceModule: HW NS will not be used.
+08-04 09:06:02.230  2565  2669 I org.webrtc.Logging: JavaAudioDeviceModule: HW AEC will not be used.
+08-04 09:06:02.230  2565  2669 I org.webrtc.Logging: JavaAudioDeviceModule: Low latency mode will be used.
+08-04 09:06:02.232  2565  2669 I org.webrtc.Logging: WebRtcAudioEffectsExternal: ctor@[name=pool-5-thread-1, id=58]
+08-04 09:06:02.232  2565  2669 I org.webrtc.Logging: WebRtcAudioRecordExternal: ctor@[name=pool-5-thread-1, id=58]
+08-04 09:06:02.234  2565  2669 I org.webrtc.Logging: WebRtcAudioTrackExternal: ctor@[name=pool-5-thread-1, id=58]
+08-04 09:06:02.237  2565  2565 W NsdServiceInfo: Key lengths > 9 are discouraged: deviceName
+08-04 09:06:02.238  2565  2565 W NsdServiceInfo: Key lengths > 9 are discouraged: protocolVersion
+08-04 09:06:02.241   701  1006 I serviceDiscovery: [MdnsSocketProvider] Start monitoring sockets.
+08-04 09:06:02.243   701  1006 D CompatChangeReporter: Compat change id reported: 349487600; UID 1000; state: ENABLED
+08-04 09:06:02.243   701  1006 I TetheringManager: registerTetheringEventCallback caller:android
+08-04 09:06:02.244   701  1002 D ConnectivityService: NetReassign [no changes] [c 0] [a 0] [i 0]
+08-04 09:06:02.245   701  1006 I serviceDiscovery: [MdnsAdvertiser] Adding service name: MotoCom-fcfccda1-9dc0eab3, type: _motocom._tcp, subtypes: , hostAddresses: , hostname: null, port: 8890, network: null, expirationTime: null, txtRecord: {id=fcfccda1-b0c5-4a5e-acea-7c27e18627b6, name=0xE9AA91E5A3AB, sessionId=9dc0eab3-f6aa-4474-93a1-6060f59aee3d, deviceName=Android SDK built for x86_64, protocolVersion=2} with ID 2 and subtypes {} advertisingOptions MdnsAdvertisingOptions{mIsOnlyUpdate=false, mTtl=null}
+08-04 09:06:02.246  2565  2565 I AudioRouteController: modern route: AudioDeviceCallback added[0]=id=2, type=TYPE_BUILTIN_SPEAKER(2), productName=Android SDK built for x86_64, address=-
+08-04 09:06:02.246  2565  2565 I AudioRouteController: modern route: AudioDeviceCallback added[1]=id=5, type=TYPE_18(18), productName=Android SDK built for x86_64, address=-
+08-04 09:06:02.246  2565  2565 I AudioRouteController: modern route: AudioDeviceCallback added[2]=id=8, type=TYPE_15(15), productName=Android SDK built for x86_64, address=bottom
+08-04 09:06:02.246  2565  2565 I AudioRouteController: modern route: AudioDeviceCallback added[3]=id=10, type=TYPE_18(18), productName=Android SDK built for x86_64, address=-
+08-04 09:06:02.246  2565  2565 I AudioRouteController: modern route: AudioDeviceCallback added[4]=id=14, type=TYPE_25(25), productName=Android SDK built for x86_64, address=0
+08-04 09:06:02.246  2565  2565 I AudioRouteController: modern route: AudioDeviceCallback added[5]=id=12, type=TYPE_16(16), productName=Android SDK built for x86_64, address=-
+08-04 09:06:02.261   701  1006 I serviceDiscovery: [MdnsDiscoveryManager] Registering listener for serviceType: _motocom._tcp.local
+08-04 09:06:02.263   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CANCEL_CONNECT { when=0 what=139274 arg2=2 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.263   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CANCEL_CONNECT { when=0 what=139274 arg2=2 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.275   701   729 I DropBoxManagerService: add tag=system_server_strictmode isTagEnabled=true flags=0x2
+08-04 09:06:02.278   701  1006 I WifiService: acquireMulticastLock uid=1000 lockTag=NsdService
+08-04 09:06:02.285   701   996 D WifiVendorHal: installPacketFilter filter length 1757
+08-04 09:06:02.286  1197  1358 D IpClient.wlan0: set max DTIM multiplier to 1
+08-04 09:06:02.287   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$ConnectableState screen=on len=1757
+08-04 09:06:02.289   701   996 E WifiStaIfaceAidlImpl: setDtimMultiplier failed with service-specific exception: android.os.ServiceSpecificException:  (code 4)
+08-04 09:06:02.289   701   996 D WifiClientModeImpl: Set maximum DTIM Multiplier to 1 FAIL
+08-04 09:06:02.289   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$ConnectableState screen=on maximum multiplier=1
+08-04 09:06:02.345   701  1018 I AS.AudioService: onUpdateContextualVolumes: absolute volume driving streams 0 avrcp supported: false
+08-04 09:06:02.345   552   585 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_HEADSET, connection: bt-le}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 0
+08-04 09:06:02.345   552   585 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x20000000, enabled 1, streamToDriveAbs 0
+08-04 09:06:02.346   552   585 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_HEARING_AID, connection: wireless}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 0
+08-04 09:06:02.346   552   585 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x8000000, enabled 1, streamToDriveAbs 0
+08-04 09:06:02.346   552   585 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_SPEAKER, connection: bt-le}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 0
+08-04 09:06:02.346   552   585 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x20000001, enabled 1, streamToDriveAbs 0
+08-04 09:06:02.347   552   585 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_BROADCAST, connection: bt-le}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 0
+08-04 09:06:02.347   552   585 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x20000002, enabled 1, streamToDriveAbs 0
+08-04 09:06:02.353  2565  2670 I AudioRouteController: modern route[start]: communicationDevice=id=2, type=TYPE_2(2), productName=Android SDK built for x86_64, address=-, available=[id=2, type=TYPE_2(2), productName=Android SDK built for x86_64, address=-]
+08-04 09:06:02.354  2565  2669 I RiderAudioEngine: PeerConnectionFactory 初始化 成功
+08-04 09:06:02.355  2565  2669 I RiderAudioEngine: local audio track 创建 开始
+08-04 09:06:02.355  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:02.356  2565  2670 W AudioRouteController: modern route[start]: no Bluetooth communication device
+08-04 09:06:02.356  2565  2670 I AudioRouteController: fallback to phone: reason=no communication Bluetooth, noBluetooth=true
+08-04 09:06:02.356  2565  2678 I org.webrtc.Logging: PeerConnectionFactory: onWorkerThreadReady
+08-04 09:06:02.357  2565  2679 I org.webrtc.Logging: PeerConnectionFactory: onSignalingThreadReady
+08-04 09:06:02.358  2565  2677 I org.webrtc.Logging: PeerConnectionFactory: onNetworkThreadReady
+08-04 09:06:02.359   701  1015 I AS.AudioDeviceBroker: setCommunicationRouteForClient for uid: 10150 device: AudioDeviceAttributes: role:output type:speaker addr: name:Android SDK built for x86_64 profiles:[] descriptors:[] isPrivileged: false from API: setCommunicationDevice() from u/pid:10150/2565
+08-04 09:06:02.365  2565  2669 I RiderAudioEngine: VOX 初始化 enabled=true trackEnabled=true volume=0.0
+08-04 09:06:02.365  2565  2669 I RiderAudioEngine: local audio track 创建 成功
+08-04 09:06:02.365  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:02.577  2565  2670 I AudioRouteController: modern route[device added]: communicationDevice=id=2, type=TYPE_2(2), productName=Android SDK built for x86_64, address=-, available=[id=2, type=TYPE_2(2), productName=Android SDK built for x86_64, address=-]
+08-04 09:06:02.578  2565  2670 W AudioRouteController: modern route[device added]: no Bluetooth communication device
+08-04 09:06:02.578  2565  2670 I AudioRouteController: fallback to phone: reason=no communication Bluetooth, noBluetooth=true
+08-04 09:06:02.581   701  1015 I AS.AudioDeviceBroker: setCommunicationRouteForClient for uid: 10150 device: AudioDeviceAttributes: role:output type:speaker addr: name:Android SDK built for x86_64 profiles:[] descriptors:[] isPrivileged: false from API: setCommunicationDevice() from u/pid:10150/2565
+08-04 09:06:02.592  2565  2565 D MotoIntercomUi: service status running=true status=无线配对中，请把两台手机靠近..
+08-04 09:06:02.594  1087  1087 I ndroid.systemui: AssetManager2(0x759e77e71338) locale list changing from [] to [en-US]
+08-04 09:06:02.598  1087  1087 I ndroid.systemui: AssetManager2(0x759e77e388f8) locale list changing from [] to [en-US]
+08-04 09:06:02.613  2565  2565 D MotoIntercomUi: service status running=true status=无线配对中，请把两台手机靠近..
+08-04 09:06:02.664   479  2688 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:02.664   479  2687 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:02.664   479  2688 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6f50
+08-04 09:06:02.665   479  2687 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9c5ae3bf0
+08-04 09:06:02.670   479  2689 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:02.670   479  2689 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adb040
+08-04 09:06:02.670   479  2690 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:02.672   479  2690 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad8290
+08-04 09:06:02.673  1197  2686 D NetworkMonitor/100: PROBE_DNS connectivitycheck.gstatic.com 12ms OK 58.63.233.98
+08-04 09:06:02.675   479  2691 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+08-04 09:06:02.675   479  2692 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:02.675   479  2693 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:02.676   479  2692 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9c5ae3bf0
+08-04 09:06:02.676   479  2692 I resolv  : doQuery: rcode=0, ancount=0, return value=107
+08-04 09:06:02.676   479  2693 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adb040
+08-04 09:06:02.676   479  2693 I resolv  : doQuery: rcode=0, ancount=1, return value=321
+08-04 09:06:02.676  1197  2685 D NetworkMonitor/100: PROBE_DNS www.google.com 16ms OK 31.13.92.37,2001::1
+08-04 09:06:02.678   479  2694 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+08-04 09:06:02.679   479  2695 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:02.679   479  2696 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:02.679   479  2695 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6f50
+08-04 09:06:02.680   479  2695 I resolv  : doQuery: rcode=0, ancount=1, return value=308
+08-04 09:06:02.680   479  2696 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad8290
+08-04 09:06:02.681   479  2696 I resolv  : doQuery: rcode=0, ancount=1, return value=296
+08-04 09:06:02.770   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=3 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.770   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=3 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:02.772  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:03.019  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:03.019  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:03.020  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:03.083   701  1018 I AS.AudioService: onUpdateContextualVolumes: absolute volume driving streams 0 avrcp supported: false
+08-04 09:06:03.202   701  1006 I serviceDiscovery: [MdnsAdvertiser.wlan0] Probing finished for service 2
+08-04 09:06:03.209   701  1006 I serviceDiscovery: [MdnsDiscoveryManager._motocom._tcp.local-100/16] Handling response from service: MotoCom-fcfccda1-9dc0eab3, newInCache: true, serviceBecomesComplete: false, responseIsComplete: true
+08-04 09:06:03.264   701  1006 I serviceDiscovery: [MdnsDiscoveryManager._motocom._tcp.local-100/16] Handling response from service: MotoCom-19aa00fe-8ef42b7f, newInCache: true, serviceBecomesComplete: false, responseIsComplete: true
+08-04 09:06:03.269   701  1006 I serviceDiscovery: [MdnsDiscoveryManager] Registering listener for serviceType: _motocom._tcp.local
+08-04 09:06:03.270   701  1006 W NsdServiceInfo: Key lengths > 9 are discouraged: deviceName
+08-04 09:06:03.270   701  1006 W NsdServiceInfo: Key lengths > 9 are discouraged: protocolVersion
+08-04 09:06:03.270   701  1006 I serviceDiscovery: [MdnsDiscoveryManager] Unregistering listener for serviceType:_motocom._tcp.local
+08-04 09:06:03.272  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:03.350  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:03.356  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:03.686  1197  2686 D NetworkMonitor/100: PROBE_HTTP http://connectivitycheck.gstatic.com/generate_204 time=1011ms ret=204 request={Connection=[close], User-Agent=[Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.32 Safari/537.36]} headers={null=[HTTP/1.1 204 No Content], Connection=[close], Cross-Origin-Resource-Policy=[cross-origin], Date=[Tue, 04 Aug 2026 09:06:06 GMT], X-Android-Received-Millis=[1785834363686], X-Android-Response-Source=[NETWORK 204], X-Android-Selected-Protocol=[http/1.1], X-Android-Sent-Millis=[1785834362681]}
+08-04 09:06:03.774   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=4 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:03.775   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=4 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:03.776  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:03.862   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:03.862   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:03.863   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:03.863   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:03.863   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:03.864   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=2 freq=2447 RxLinkSpeed=2
+08-04 09:06:03.864   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:03.864   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:03.864   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:03.865   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:03.865   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:03.865   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:03.865   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:03.865   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:03.866   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:03.866   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:03.867   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:03.867   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 2Mbps, Tx Link speed: 2Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:03.868   701   996 D WifiScoreCard: txRate: 8 txSpeed: 2
+08-04 09:06:03.868   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 2
+08-04 09:06:03.868   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=2 tx=7.0, 0.0, 0.0 rx=9.7 bcn=0 [on:0 tx:0 rx:0 period:3007] from screen [on:0 period:-872031268] score=60
+08-04 09:06:04.228  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:04.228  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:04.228  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:04.252  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:04.252  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:04.252  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:04.253  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:04.253  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:04.254  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:04.353  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:04.356  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:04.408  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:04.408  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:04.408  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:04.777   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=5 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:04.777   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=5 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:04.777  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:04.899  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:04.899  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:04.899  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:04.910  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:04.910  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:04.910  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:05.041   494  2658 D android.hardware.audio@7.1-impl.ranchu: threadLoop: entering standby, frames: 149056
+08-04 09:06:05.041   494  2658 D android.hardware.audio@7.1-impl.ranchu: ~TinyalsaSink: joining consumeThread
+08-04 09:06:05.052   494  2659 D android.hardware.audio@7.1-impl.ranchu: consumeThread: exiting
+08-04 09:06:05.053   494  2658 D android.hardware.audio@7.1-impl.ranchu: ~TinyalsaSink: stopping PCM stream
+08-04 09:06:05.242  1197  1358 D ApfFilter: (wlan0): Ignoring RA RA fe80::2 -> ff02::1 1800s fec0::/64 86400s/14400s  which matches RA fe80::2 -> ff02::1 1800s fec0::/64 86400s/14400s 
+08-04 09:06:05.259   701  1006 V serviceDiscovery: [MdnsAdvertiser.wlan0] VERBOSE Parsed packet with transactionId(3): 1 questions, 0 answers, 0 authority, 0 additional from /10.0.2.16:5353
+08-04 09:06:05.260   701  1006 V serviceDiscovery: [MdnsAdvertiser.wlan0] VERBOSE Parsed packet with transactionId(3): 1 questions, 0 answers, 0 authority, 0 additional from /[fe80::c3e9:8a3e:bf86:7e37%wlan0]:5353
+08-04 09:06:05.352  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:05.356  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:05.429  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:05.429  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:05.429  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:05.440  2404  2428 I Dialer  : OmtpVvmCarrierCfgHlpr - OmtpEvent:CONFIG_STATUS_SMS_TIME_OUT
+08-04 09:06:05.441  2404  2404 I Dialer  : RetryPolicy - discarding deferred status: configuration_state=4
+08-04 09:06:05.442  2404  2404 I Dialer  : VvmTaskExecutor - no more tasks, stopping service if no task are added in 5000 millis
+08-04 09:06:05.442  2404  2404 I Dialer  : VvmTaskReceiver - task received
+08-04 09:06:05.443  2404  2404 I Dialer  : VvmTaskReceiver - TaskExecutor already running
+08-04 09:06:05.443  2404  2404 I Dialer  : Task.createTask - create task:com.android.voicemail.impl.ActivationTask
+08-04 09:06:05.443  2404  2404 I Dialer  : RetryPolicy - retry #1 for com.android.voicemail.impl.ActivationTask@b932cfe queued, executing in 5000
+08-04 09:06:05.443  2404  2404 I Dialer  : VvmTaskExecutor - com.android.voicemail.impl.ActivationTask@b932cfe added
+08-04 09:06:05.443  2404  2404 I Dialer  : VvmTaskExecutor - minimal wait time:5000
+08-04 09:06:05.443  2404  2404 I Dialer  : VvmTaskExecutor - sleep for 5000 millis
+08-04 09:06:05.501  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: allSubInfos.size()=1
+08-04 09:06:05.501  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: newSubsInfoListPerPriority.size()=0
+08-04 09:06:05.501  1272  1530 D SatelliteController: evaluateESOSProfilesPrioritization: no satellite subscription available
+08-04 09:06:05.661   479  2697 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+08-04 09:06:05.662   479  2698 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:05.662   479  2699 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:05.663   479  2698 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa955add270
+08-04 09:06:05.663   479  2698 I resolv  : doQuery: rcode=0, ancount=8, return value=503
+08-04 09:06:05.663   479  2699 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9d5adba50
+08-04 09:06:05.663   479  2699 I resolv  : doQuery: rcode=0, ancount=1, return value=53
+08-04 09:06:05.779   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=6 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:05.780   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=6 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:05.780  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:05.782   701  1976 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:06.354  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:06.358  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:06.681  1197  2684 D NetworkMonitor/100: PROBE_FALLBACK http://play.googleapis.com/generate_204 time=1020ms ret=204 request={Connection=[close], User-Agent=[Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.32 Safari/537.36]} headers={null=[HTTP/1.1 204 No Content], Connection=[close], Cross-Origin-Resource-Policy=[cross-origin], Date=[Tue, 04 Aug 2026 09:06:09 GMT], X-Android-Received-Millis=[1785834366680], X-Android-Response-Source=[NETWORK 204], X-Android-Selected-Protocol=[http/1.1], X-Android-Sent-Millis=[1785834365669]}
+08-04 09:06:06.689   701  1062 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@9ec0809
+08-04 09:06:06.784   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=7 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:06.784   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=7 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:06.786  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:06.868   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:06.869   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:06.869   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:06.869   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:06.869   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:06.870   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:06.870   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:06.870   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:06.871   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:06.871   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:06.871   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:06.871   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:06.871   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:06.871   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:06.872   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:06.872   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:06.872   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:06.872   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:06.872   701   996 D WifiScoreCard: txRate: 10 txSpeed: 1
+08-04 09:06:06.873   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 1
+08-04 09:06:06.873   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=9.1, 0.0, 0.0 rx=13.6 bcn=0 [on:0 tx:0 rx:0 period:3004] from screen [on:0 period:-872028263] score=60
+08-04 09:06:07.355  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:07.358  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:07.444  1327  1327 D wpa_supplicant: nl80211: Drv Event 64 (NL80211_CMD_NOTIFY_CQM) received for wlan0
+08-04 09:06:07.444  1327  1327 D wpa_supplicant: nl80211: Beacon loss event
+08-04 09:06:07.444  1327  1327 D wpa_supplicant: wlan0: Event BEACON_LOSS (53) received
+08-04 09:06:07.444  1327  1327 I wpa_supplicant: wlan0: CTRL-EVENT-BEACON-LOSS 
+08-04 09:06:07.787   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=8 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:07.787   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=8 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:07.787  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:07.788   701  1976 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:08.283   701  1018 I AS.AudioService: onUpdateContextualVolumes: absolute volume driving streams 3 avrcp supported: false
+08-04 09:06:08.284   552   552 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_HEADSET, connection: bt-le}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 3
+08-04 09:06:08.284   552   552 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x20000000, enabled 1, streamToDriveAbs 3
+08-04 09:06:08.285   552   552 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_HEARING_AID, connection: wireless}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 3
+08-04 09:06:08.285   552   552 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x8000000, enabled 1, streamToDriveAbs 3
+08-04 09:06:08.285   552   552 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_SPEAKER, connection: bt-le}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 3
+08-04 09:06:08.285   552   552 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x20000001, enabled 1, streamToDriveAbs 3
+08-04 09:06:08.286   552   552 I AudioPolicyInterfaceImpl: setDeviceAbsoluteVolumeEnabled: deviceAidl AudioDevice{type: AudioDeviceDescription{type: OUT_BROADCAST, connection: bt-le}, address: AudioDeviceAddress{id: }}, enabled 1, streamToDriveAbsAidl 3
+08-04 09:06:08.286   552   552 I APM_AudioPolicyManager: setDeviceAbsoluteVolumeEnabled: deviceType 0x20000002, enabled 1, streamToDriveAbs 3
+08-04 09:06:08.286   701  1015 I AS.AudioDeviceBroker: setCommunicationRouteForClient for uid: 10150 device: AudioDeviceAttributes: role:output type:speaker addr: name:Android SDK built for x86_64 profiles:[] descriptors:[] isPrivileged: false from API: setNewModeOwner
+08-04 09:06:08.357  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:08.360  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:08.788   701  1018 I AS.AudioService: onUpdateContextualVolumes: absolute volume driving streams 3 avrcp supported: false
+08-04 09:06:08.790   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=9 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:08.790   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=9 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:08.790  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:08.791   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:09.358  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:09.362  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:09.792   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=10 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:09.792   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=10 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:09.793  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:09.794   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:09.874   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:09.874   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:09.874   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:09.874   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:09.874   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:09.875   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:09.875   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:09.875   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:09.875   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:09.875   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:09.875   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:09.876   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:09.876   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:09.876   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:09.876   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:09.876   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:09.876   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:09.877   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:09.877   701   996 D WifiScoreCard: txRate: 6 txSpeed: 1
+08-04 09:06:09.877   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 1
+08-04 09:06:09.877   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=5.6, 0.0, 0.0 rx=8.1 bcn=0 [on:0 tx:0 rx:0 period:3004] from screen [on:0 period:-872025259] score=60
+08-04 09:06:10.373  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:10.378  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:10.448  2404  2428 I Dialer  : VvmTaskExecutor - executing task com.android.voicemail.impl.ActivationTask@b932cfe
+08-04 09:06:10.448  2404  2428 I Dialer  : PreOMigrationHandler - ComponentInfo{com.android.phone/com.android.services.telephony.TelephonyConnectionService}, 1, UserHandle{0} already migrated
+08-04 09:06:10.455   701  1976 D OomAdjuster: Not killing cached processes
+08-04 09:06:10.456   701  1976 D ActivityManager: sync unfroze 1873 android.process.acore for 7
+08-04 09:06:10.476  1873  2496 I VoicemailNotifier: receivers for android.intent.action.PROVIDER_CHANGED :[]
+08-04 09:06:10.477  2404  2428 I Dialer  : VvmActivationTask - VVM content provider configured - vvm_type_cvvm
+08-04 09:06:10.477  2404  2428 I Dialer  : OmtpVvmCarrierCfgHlpr - OmtpEvent:CONFIG_ACTIVATING
+08-04 09:06:10.480   479   513 I netd    : tetherGetStats() -> {[]} <0.51ms>
+08-04 09:06:10.483  1873  2496 I VoicemailNotifier: receivers for android.intent.action.PROVIDER_CHANGED :[]
+08-04 09:06:10.492  1272  1663 I RemoteVvmTaskManager: getRemotePackage: found package null
+08-04 09:06:10.501   701   804 D ActivityManager: freezing 1545 com.android.devicelockcontroller
+08-04 09:06:10.506   701  1002 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+08-04 09:06:10.506  1272  1663 I RemoteVvmTaskManager: getRemotePackage: found package null
+08-04 09:06:10.507   701  1002 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+08-04 09:06:10.508   701  1002 D InetDiagMessage: Destroyed live tcp sockets for uids={10142} in 2ms
+08-04 09:06:10.518  1272  1663 D SmsNumberUtils: enter filterDestAddr. destAddr="[BajqU4K5_YhSYbs-7QUn0dOwcmI]"
+08-04 09:06:10.519  1272  1663 D SmsNumberUtils: destAddr is not formatted.
+08-04 09:06:10.523  1272  1663 D SmsNumberUtils: leave filterDestAddr, new destAddr="[BajqU4K5_YhSYbs-7QUn0dOwcmI]"
+08-04 09:06:10.614  1272  1272 D SatelliteController: iisInCarrierRoamingNbIotNtn: satellite is disabled
+08-04 09:06:10.624  1272  1272 D SatelliteController: iisInCarrierRoamingNbIotNtn: satellite is disabled
+08-04 09:06:10.773   701  1062 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@bcdf76e
+08-04 09:06:10.799   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=11 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:10.799   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=11 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:10.807  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:11.378  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:11.382  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:11.597   701   804 D ActivityManager: freezing 1090 com.android.permissioncontroller
+08-04 09:06:11.599   701  1002 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+08-04 09:06:11.599   701  1002 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+08-04 09:06:11.599   701  1002 D InetDiagMessage: Destroyed live tcp sockets for uids={10127} in 2ms
+08-04 09:06:11.717  1272  1530 D SatelliteController: iisInCarrierRoamingNbIotNtn: satellite is disabled
+08-04 09:06:11.810   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=12 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:11.810   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=12 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:11.810  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:11.812   701  1976 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:12.380  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:12.386  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:12.813   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=13 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:12.813   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=13 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:12.814  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:12.818   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:12.878   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:12.878   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:12.878   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:12.879   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:12.879   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:12.879   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:12.880   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:12.880   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:12.880   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:12.880   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:12.881   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:12.881   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:12.881   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:12.881   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:12.881   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:12.882   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:12.882   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:12.883   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:12.883   701   996 D WifiScoreCard: txRate: 6 txSpeed: 1
+08-04 09:06:12.883   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 1
+08-04 09:06:12.884   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=5.0, 0.0, 0.0 rx=7.4 bcn=0 [on:0 tx:0 rx:0 period:3007] from screen [on:0 period:-872022252] score=60
+08-04 09:06:13.385  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:13.389  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:13.818   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=14 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:13.819   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=14 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:13.819  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:13.821   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:14.295   701  1015 W AS.BtHelper: requestScoState: failed to disconnect in state 0, scoAudioMode=0
+08-04 09:06:14.387  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:14.392  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:14.400  1197  2633 D NetworkMonitor/101: PROBE_HTTPS https://www.google.com/generate_204 Probe failed with exception java.net.SocketTimeoutException: failed to connect to www.google.com/2001::1 (port 443) from /fec0::5054:ff:fe12:3456 (port 37574) after 10000ms
+08-04 09:06:14.523  1197  2685 D NetworkMonitor/100: PROBE_HTTPS https://www.google.com/generate_204 Probe failed with exception javax.net.ssl.SSLHandshakeException: connection closed
+08-04 09:06:14.524  1197  2684 D NetworkMonitor/100: isCaptivePortal: isSuccessful()=false isPortal()=false RedirectUrl=null isPartialConnectivity()=true Time=11865ms
+08-04 09:06:14.525   701  1002 D ConnectivityService: [100 WIFI] validation failed
+08-04 09:06:14.823   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=15 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:14.823   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=15 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:14.823  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:14.854   701  1062 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@297f5d
+08-04 09:06:15.380  1327  1327 D wpa_supplicant: nl80211: Drv Event 64 (NL80211_CMD_NOTIFY_CQM) received for wlan0
+08-04 09:06:15.380  1327  1327 D wpa_supplicant: nl80211: Beacon loss event
+08-04 09:06:15.380  1327  1327 D wpa_supplicant: wlan0: Event BEACON_LOSS (53) received
+08-04 09:06:15.380  1327  1327 I wpa_supplicant: wlan0: CTRL-EVENT-BEACON-LOSS 
+08-04 09:06:15.389  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:15.393  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:15.666   701   996 D WifiNetworkSelector: Current connected network: 0
+08-04 09:06:15.666   701   996 D WifiNetworkSelector: Current network has [1] no-internet access reports
+08-04 09:06:15.667   701   996 V WifiConnectivityManager: schedulePeriodicScanTimer intervalMs 80000
+08-04 09:06:15.667   701  1000 I WifiScanningService: Registering listener= com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@bdd181e uid=1000 packageName=null workSource=WorkSource{1000}
+08-04 09:06:15.667   701  1000 I WifiScanningService: start scan: ClientInfo[uid=1000, package=null, attributionTag=null, com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@bdd181e] package null AttributionTag null
+08-04 09:06:15.667   701  1000 I WifiScanningService: addSingleScanRequest: ClientInfo[uid=1000, package=null, attributionTag=null, com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@bdd181e],WorkSource{1010}, ScanSettings {  type:HIGH ACCURACY band:24Ghz & 5Ghz (DFS incl) & 6Ghz ignoreLocationSettings:false period:0 reportEvents:3 numBssidsPerScan:0 maxScansToCache:0 rnrSetting:1 6GhzPscOnlyEnabled:true channels:[  ]  } 
+08-04 09:06:15.667   701  1000 D WifiScanningService: replySucceeded onSuccess
+08-04 09:06:15.671  1327  1327 D wpa_supplicant: nl80211: Drv Event 33 (NL80211_CMD_TRIGGER_SCAN) received for wlan0
+08-04 09:06:15.671  1327  1327 D wpa_supplicant: wlan0: nl80211: Scan trigger
+08-04 09:06:15.672  1327  1327 D wpa_supplicant: wlan0: Event SCAN_STARTED (47) received
+08-04 09:06:15.672  1327  1327 D wpa_supplicant: wlan0: External program started a scan
+08-04 09:06:15.826   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=16 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:15.826   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=16 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:15.826  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:15.828   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:15.884   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:15.885   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:15.885   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:15.885   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:15.885   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:15.885   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:15.886   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:15.886   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:15.886   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:15.886   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:15.886   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:15.886   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:15.886   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:15.887   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:15.887   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:15.887   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:15.887   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:15.887   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:15.887   701   996 D WifiScoreCard: txRate: 4 txSpeed: 1
+08-04 09:06:15.888   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 1
+08-04 09:06:15.888   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=3.3, 0.0, 0.0 rx=5.6 bcn=0 [on:0 tx:0 rx:0 period:3004] from screen [on:0 period:-872019248] score=60
+08-04 09:06:16.390  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:16.394  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:16.511   701   737 D OomAdjuster: Not killing cached processes
+08-04 09:06:16.533   479   513 I netd    : tetherGetStats() -> {[]} <0.55ms>
+08-04 09:06:16.830   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=17 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:16.830   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=17 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:16.830  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:16.832   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:17.391  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:17.396  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:17.473  1197  2632 D NetworkMonitor/101: PROBE_FALLBACK http://play.googleapis.com/generate_204 Probe failed with exception java.net.SocketTimeoutException: failed to connect to play.googleapis.com/2001:4860:4843:400:: (port 80) from /fec0::5054:ff:fe12:3456 (port 50624) after 10000ms
+08-04 09:06:17.474  1197  2632 D NetworkMonitor/101: isCaptivePortal: isSuccessful()=false isPortal()=false RedirectUrl=null isPartialConnectivity()=true Time=23106ms
+08-04 09:06:17.474   701  1002 D ConnectivityService: [101 CELLULAR] validation failed
+08-04 09:06:17.834   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=18 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:17.834   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=18 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:17.837  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:17.839   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:18.394  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:18.399  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:18.838   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=19 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:18.838   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=19 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:18.839  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:18.889   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:18.889   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:18.890   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:18.890   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:18.890   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:18.890   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=5 freq=2447 RxLinkSpeed=2
+08-04 09:06:18.891   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:18.891   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:18.891   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:18.891   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:18.892   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 5Mbps, Tx Link speed: 5Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:18.892   701   996 D WifiScoreCard: txRate: 4 txSpeed: 5
+08-04 09:06:18.892   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 5
+08-04 09:06:18.893   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=5 tx=3.3, 0.0, 0.0 rx=5.8 bcn=0 [on:0 tx:0 rx:0 period:3005] from screen [on:0 period:-872016243] score=60
+08-04 09:06:18.937   701  1062 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@bdd9585
+08-04 09:06:19.396  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:19.401  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: nl80211: Drv Event 34 (NL80211_CMD_NEW_SCAN_RESULTS) received for wlan0
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: wlan0: nl80211: New scan results available
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: nl80211: Scan probed for SSID ''
+08-04 09:06:19.456   701  1062 D WifiNl80211Manager: Scan result ready event
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: nl80211: Scan included frequencies: 2412 2417 2422 2427 2432 2437 2442 2447 2452 2457 2462 2467 2472 2484 5180 5200 5220 5240 5260 5280 5300 5320 5500 5520 5540 5560 5580 5600 5620 5640 5660 5680 5700 5745 5765 5785 5805 5825
+08-04 09:06:19.456   701  1062 D WifiNative: Scan result ready event
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: wlan0: Event SCAN_RESULTS (3) received
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: nl80211: Received scan results (1 BSSes)
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: nl80211: Scan results indicate BSS status with 00:13:10:85:fe:01 as associated
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: wlan0: BSS: Start scan result update 5
+08-04 09:06:19.456  1327  1327 D wpa_supplicant: BSS: last_scan_res_used=1/32
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: wlan0: New scan results available (own=0 ext=1)
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: wlan0: Do not use results from externally requested scan operation for network selection
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: p2p-dev-wlan0: Updating scan results from sibling
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: nl80211: Received scan results (1 BSSes)
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: p2p-dev-wlan0: BSS: Start scan result update 5
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: BSS: last_scan_res_used=1/32
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: p2p-dev-wlan0: New scan results available (own=0 ext=1)
+08-04 09:06:19.457  1327  1327 D wpa_supplicant: p2p-dev-wlan0: Do not use results from externally requested scan operation for network selection
+08-04 09:06:19.457   701  1000 D WifiNl80211Manager: get 1 scan results from wificond
+08-04 09:06:19.458   701  1000 D WifiNative: get 1 scan results from wificond
+08-04 09:06:19.458   701  1000 I WifiScanningService: singleScanResults: ClientInfo[uid=1000, package=null, attributionTag=null, com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@bdd181e],results=1
+08-04 09:06:19.458   701  1000 I WifiScanningService: singleScanResults listener: ClientInfo[uid=1000, package=android, attributionTag=null, com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@1f88650],results=1
+08-04 09:06:19.459   701  1000 I WifiScanningService: singleScanResults listener: ClientInfo[uid=1000, package=android, attributionTag=null, com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@b4b30b2],results=1
+08-04 09:06:19.459   701  1000 I WifiScanningService: singleScanResults listener: ClientInfo[uid=1000, package=android, attributionTag=null, com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@388a22d],results=1
+08-04 09:06:19.459   701   996 D WifiScanRequestProxy: Scan results received
+08-04 09:06:19.459   701   996 D WifiScanRequestProxy: Received 1 scan results
+08-04 09:06:19.459   701  1000 I WifiScanningService: Unregistering listener= com.android.server.wifi.scanner.WifiScannerInternal$ScanListener@bdd181e uid=1000 packageName=null workSource=WorkSource{1000}
+08-04 09:06:19.460   701   996 D WifiHealthMonitor:  2G scanResult count: 1, Above2g scanResult count: 0
+08-04 09:06:19.460   701   996 V WifiConfigManager: getSavedNetworkFromScanResult Found "AndroidWifi"NONE for AndroidWifi[[ESS]]
+08-04 09:06:19.460   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:19.460   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:19.460   701  1062 I WifiService: getScanResults uid=10124
+08-04 09:06:19.461   701  1976 I WifiService: getScanResults uid=10124
+08-04 09:06:19.463   701   996 I HalDevMgr: bestIfaceCreationProposal is null, requestIface=STA, existingIface=[name=wlan0 type=STA]
+08-04 09:06:19.464   701   996 V WifiConnectivityManager: Clearing blocklist for REASON_FRAMEWORK_DISCONNECT_FAST_RECONNECT
+08-04 09:06:19.464   701   996 V WifiConnectivityManager: AllSingleScanListener onResults: start network selection
+08-04 09:06:19.464   701   996 V WifiConfigManager: getSavedNetworkFromScanResult Found "AndroidWifi"NONE for AndroidWifi[[ESS]]
+08-04 09:06:19.464   701   996 D WifiNetworkSelector: Current connected network: 0
+08-04 09:06:19.465   701   996 D WifiNetworkSelector: Current network has [1] no-internet access reports
+08-04 09:06:19.465   701   996 D WifiNetworkSelector: wlan0: Current connected network is not sufficient.
+08-04 09:06:19.465   701   996 D WifiThroughputPredictor: AP Nss: 1, Device Nss: 2, freq: 2447
+08-04 09:06:19.465   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:19.465   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 4 symDur: 3600 snrDb 30 bitPerTone: 5000 rate: 72 throughput: 49
+08-04 09:06:19.465   701   996 V WifiConfigManager: Clear network candidate scan result for 0
+08-04 09:06:19.465   701   996 D WifiNetworkSelector: Disabled configured networks:
+08-04 09:06:19.465   701   996 D WifiNetworkSelector:   "AndroidWifi":0 reason=NETWORK_SELECTION_DISABLED_NO_INTERNET_PERMANENT, count=2; 
+08-04 09:06:19.465   701   996 D WifiNetworkSelector: 
+08-04 09:06:19.465   701   996 D WifiNetworkSelector: About to run SavedNetworkNominator :
+08-04 09:06:19.465   701   996 V WifiConfigManager: getSavedNetworkFromScanResult Found "AndroidWifi"NONE for AndroidWifi[[ESS]]
+08-04 09:06:19.466   701   996 D WifiNetworkSelector: About to run NetworkSuggestionNominator :
+08-04 09:06:19.466   701   996 D WifiNetworkSelector: Connectable: 0 Candidates: 1
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog: updateAvailableNetworks: size = 0
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog: mWatchdogFeatureEnabled: true
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog: mWatchdogAllowedToTrigger: true
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog: mRecentAvailableNetworks: 1
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog:  00:13:10:85:fe:01: "AndroidWifi" HasEverConnected: false, Failures: {Assoc: 0, Auth: 0, Dhcp: 0}, Age: 4
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog: mSsidFailureCount:
+08-04 09:06:19.467   701   996 V WifiLastResortWatchdog: "AndroidWifi": 1, HasEverConnected: false, Failures: {Assoc: 0, Auth: 0, Dhcp: 0}
+08-04 09:06:19.468   701   996 D ThroughputScorer: Score for candidate: SSID: "AndroidWifi" BSSID: 00:13:10:85:fe:01 rssiScore: 48 throughputScore: 13 currentNetworkBoost: 0 securityAward: 0 unmeteredAward: 1000 savedNetworkAward: 500 trustedAward: 1000 notOemPaidAward: 500 notOemPrivateAward: 500 frequencyScore: 0 final score: 1000061
+08-04 09:06:19.468   701   996 D WifiNetworkSelector: Candidate { config = 0, bssid = 00:13:10:85:fe:01, freq = 2447, channelWidth = 0, rssi = -50, Mbps = 49, nominator = 5, pInternet = 33, numRebootsSinceLastUse = 0, lastSelectionWeight = 0.997, connected, current, saved, trusted, noInternet, open }
+08-04 09:06:19.468   701   996 D WifiNetworkSelector: BubbleFunScorer_v2 would choose 0 score 285.6664377547797+/-0.30216115261975496 expid 42598152
+08-04 09:06:19.468   701   996 D WifiNetworkSelector: CompatibilityScorer would choose 0 score -4382.05+/-10.0 expid 42504592
+08-04 09:06:19.468   701   996 D WifiScoreCard: Histogram SIGNAL_POLL RSSI{[-50,-49)=27}
+08-04 09:06:19.468   701   996 D WifiNetworkSelector: ScoreCardBasedScorer would choose 0 score -4382.0+/-10.0 expid 42902385
+08-04 09:06:19.469   701   996 D ThroughputScorer: Score for candidate: SSID: "AndroidWifi" BSSID: 00:13:10:85:fe:01 rssiScore: 48 throughputScore: 13 currentNetworkBoost: 0 securityAward: 0 unmeteredAward: 1000 savedNetworkAward: 500 trustedAward: 1000 notOemPaidAward: 500 notOemPrivateAward: 500 frequencyScore: 0 final score: 1000061
+08-04 09:06:19.469   701   996 D WifiNetworkSelector: ThroughputScorer chooses 0 score 1000060.95+/-10.0 expid 42330058
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: AllSingleScanListener:  WNS candidate-"AndroidWifi"
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: connectToNetwork(ConcreteClientModeManager{id=48878 iface=wlan0 role=ROLE_CLIENT_PRIMARY}): bad candidate - - DSBLE ID: 0 SSID: "AndroidWifi" PROVIDER-NAME: null BSSID: null FQDN: null HOME-PROVIDER-NETWORK: false PRIO: 0 HIDDEN: false PMF: false CarrierId: -1 SubscriptionId: -1 SubscriptionGroup: null Currently Connected: true User Selected: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  NetworkSelectionStatus NETWORK_SELECTION_PERMANENTLY_DISABLED
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  mNetworkSelectionDisableReason NETWORK_SELECTION_DISABLED_NO_INTERNET_PERMANENT
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: NETWORK_SELECTION_DISABLED_NO_INTERNET_PERMANENT counter:2
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  hasEverConnected: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  hasNeverDetectedCaptivePortal: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  hasEverValidatedInternetAccess: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  mCandidateSecurityParams: null mLastUsedSecurityParams: Security Parameters:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Type: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Enabled: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  KeyMgmt: NONE
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Protocols: WPA RSN
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  AuthAlgorithms:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  PairwiseCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupMgmtCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  SuiteBCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  RequirePmf: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsAddedByAutoUpgrade: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsSaeH2eOnlyMode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsSaePkOnlyMode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  numAssociation 1
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  numNoInternetAccessReports 1
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  shared trusted
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  macRandomizationSetting: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  mRandomizedMacAddress: 76:99:30:92:a8:93
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  randomizedMacExpirationTimeMs: 2026-08-05T09:05:00.920
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  randomizedMacLastModifiedTimeMs: 2026-08-04T09:04:53.524
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  mIsSendDhcpHostnameEnabled: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  deletionPriority: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  KeyMgmt: NONE Protocols: WPA RSN
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  AuthAlgorithms:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  PairwiseCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupMgmtCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  SuiteBCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  PSK/SAE: 
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: SecurityParams List:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: Security Parameters:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Type: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Enabled: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  KeyMgmt: NONE
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Protocols: WPA RSN
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  AuthAlgorithms:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  PairwiseCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupMgmtCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  SuiteBCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  RequirePmf: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsAddedByAutoUpgrade: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsSaeH2eOnlyMode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsSaePkOnlyMode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: Security Parameters:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Type: 6
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Enabled: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  KeyMgmt: OWE
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  Protocols: RSN
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  AuthAlgorithms:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  PairwiseCiphers: CCMP GCMP_256 GCMP_128
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupCiphers: CCMP GCMP_256 GCMP_128
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  GroupMgmtCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  SuiteBCiphers:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  RequirePmf: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsAddedByAutoUpgrade: true
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsSaeH2eOnlyMode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  IsSaePkOnlyMode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: 
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: Enterprise config:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  ocsp: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  trust_on_first_use: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  user_approve_no_ca_cert: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  selected_rcoi: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  minimum_tls_version: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  enable_conservative_peer_mode: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  tofu_dialog_state: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  tofu_connection_state: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: IP config:
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: IP assignment: DHCP
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: Proxy settings: NONE
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  cuid=10121 cname=com.android.sdksetup luid=10121 lname=com.android.sdksetup lcuid=10121 allowAutojoin=true noInternetAccessExpected=false mostRecentlyConnected=false 
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: lastConnected: 2026-08-04T09:05:01.060 
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: 
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: lastUpdated: 2026-08-04T09:04:53.494 
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: numRebootsSinceLastUse: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: recentFailure: Association Rejection code: 0, last update time: 0
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: bssidAllowlist unset
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: vendorData unset
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: IsDppConfigurator: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager: HasEncryptedPreSharedKey: false
+08-04 09:06:19.469   701   996 V WifiConnectivityManager:  setWifi7Enabled=true scanResult is null!
+08-04 09:06:19.841   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=20 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:19.841   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=20 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:19.841  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:19.843   701  1976 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:20.397  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:20.404  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:20.843   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=21 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:20.843   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=21 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:20.844  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:20.847   701  1976 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:21.402  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:21.408  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:21.486   479  2707 I resolv  : ResNSendHandler::run: 0 / {101 983141 101 983141 1073 1}
+08-04 09:06:21.486   479  2707 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6bd0
+08-04 09:06:21.489   479  2708 I resolv  : ResNSendHandler::run: 0 / {101 983141 101 983141 1073 1}
+08-04 09:06:21.489   479  2708 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9c5ae1490
+08-04 09:06:21.490   479  2709 I resolv  : ResNSendHandler::run: 0 / {101 983141 101 983141 1073 1}
+08-04 09:06:21.490   479  2709 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa35ae3f80
+08-04 09:06:21.493   479  2710 I resolv  : ResNSendHandler::run: 0 / {101 983141 101 983141 1073 1}
+08-04 09:06:21.493   479  2710 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adadf0
+08-04 09:06:21.497  1197  2705 D NetworkMonitor/101: PROBE_DNS www.google.com 15ms OK 31.13.92.37,2001::1
+08-04 09:06:21.502  1197  2706 D NetworkMonitor/101: PROBE_DNS connectivitycheck.gstatic.com 19ms OK 58.63.233.98
+08-04 09:06:21.503   479  2711 I resolv  : GetAddrInfoHandler::run: {101 983141 101 983141 1073 1}
+08-04 09:06:21.504   479  2712 I resolv  : GetAddrInfoHandler::run: {101 983141 101 983141 1073 1}
+08-04 09:06:21.504   479  2713 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:21.504   479  2714 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:21.505   479  2713 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6bd0
+08-04 09:06:21.505   479  2713 I resolv  : doQuery: rcode=0, ancount=1, return value=308
+08-04 09:06:21.505   479  2714 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa35ae3f80
+08-04 09:06:21.505   479  2714 I resolv  : doQuery: rcode=0, ancount=1, return value=48
+08-04 09:06:21.505   479  2715 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:21.506   479  2715 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9c5ae1490
+08-04 09:06:21.505   479  2716 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:21.506   479  2715 I resolv  : doQuery: rcode=0, ancount=0, return value=107
+08-04 09:06:21.506   479  2716 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adadf0
+08-04 09:06:21.506   479  2716 I resolv  : doQuery: rcode=0, ancount=1, return value=321
+08-04 09:06:21.552  1197  2706 D NetworkMonitor/101: PROBE_HTTP http://connectivitycheck.gstatic.com/generate_204 time=48ms ret=204 request={Connection=[close], User-Agent=[Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.32 Safari/537.36]} headers={null=[HTTP/1.1 204 No Content], Connection=[close], Content-Length=[0], Cross-Origin-Resource-Policy=[cross-origin], Date=[Tue, 04 Aug 2026 09:06:24 GMT], X-Android-Received-Millis=[1785834381551], X-Android-Response-Source=[NETWORK 204], X-Android-Selected-Protocol=[http/1.1], X-Android-Sent-Millis=[1785834381519]}
+08-04 09:06:21.718  1272  1530 D SatelliteController: iisInCarrierRoamingNbIotNtn: satellite is disabled
+08-04 09:06:21.849   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=22 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:21.849   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=22 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:21.853  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:21.857   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:21.894   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:21.894   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:21.895   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:21.895   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:21.895   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:21.896   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=2 freq=2447 RxLinkSpeed=2
+08-04 09:06:21.896   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:21.897   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:21.897   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:21.897   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:21.897   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:21.897   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:21.897   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:21.898   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:21.898   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:21.898   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:21.898   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:21.899   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 2Mbps, Tx Link speed: 2Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:21.899   701   996 D WifiScoreCard: txRate: 3 txSpeed: 2
+08-04 09:06:21.900   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed -1
+08-04 09:06:21.900   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=2 tx=2.5, 0.0, 0.0 rx=4.8 bcn=0 [on:0 tx:0 rx:0 period:3007] from screen [on:0 period:-872013236] score=60
+08-04 09:06:22.403  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:22.407  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:22.854   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=23 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:22.855   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=23 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:22.855  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:23.023   701  1062 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@ce25183
+08-04 09:06:23.157  2720  2720 D AndroidRuntime: >>>>>> START com.android.internal.os.RuntimeInit uid 2000 <<<<<<
+08-04 09:06:23.161  2720  2720 I AndroidRuntime: Using default boot image
+08-04 09:06:23.161  2720  2720 I AndroidRuntime: Leaving lock profiling enabled
+08-04 09:06:23.164  2720  2720 I app_process: Core platform API reporting enabled, enforcing=false
+08-04 09:06:23.164  2720  2720 I app_process: Using CollectorTypeCMC GC.
+08-04 09:06:23.243  2720  2720 D nativeloader: InitDefaultPublicLibraries for_preload=1: libandroid.so:libaaudio.so:libamidi.so:libbinder_ndk.so:libc.so:libcamera2ndk.so:libdl.so:libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libicu.so:libicui18n.so:libicuuc.so:libjnigraphics.so:liblog.so:libmediandk.so:libm.so:libnativehelper.so:libnativewindow.so:libOpenMAXAL.so:libOpenSLES.so:libRS.so:libstdc++.so:libsync.so:libvulkan.so:libwebviewchromium_plat_support.so:libz.so
+08-04 09:06:23.253  2720  2720 D nativeloader: Load libicu_jni.so using APEX ns com_android_art for caller /apex/com.android.art/javalib/core-oj.jar: ok
+08-04 09:06:23.253  2720  2720 D app_process: u_setTimeZoneFilesDirectory("/apex/com.android.tzdata/etc/tz/versioned/9/icu") succeeded. 
+08-04 09:06:23.253  2720  2720 D app_process: I18n APEX ICU file found: /apex/com.android.i18n/etc/icu/icudt76l.dat
+08-04 09:06:23.254  2720  2720 D nativeloader: Load libjavacore.so using APEX ns com_android_art for caller /apex/com.android.art/javalib/core-oj.jar: ok
+08-04 09:06:23.255  2720  2720 D nativeloader: Load libopenjdk.so using APEX ns com_android_art for caller /apex/com.android.art/javalib/core-oj.jar: ok
+08-04 09:06:23.256  2720  2720 W app_process: Unexpected CPU variant for x86: x86_64.
+08-04 09:06:23.256  2720  2720 W app_process: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, goldmont-without-sha-xsaves, tremont, kabylake, alderlake, default
+08-04 09:06:23.257  2720  2720 W app_process: ClassLoaderContext shared library size mismatch. Expected=2, found=0 (PCL[]{PCL[/system/framework/android.test.base.jar*2789897741]#PCL[/system/framework/android.test.mock.jar*3361312393]} | PCL[])
+08-04 09:06:23.258  2720  2720 W app_process: ClassLoaderContext classpath size mismatch. expected=0, found=1 (PCL[]{PCL[/system/framework/android.test.runner.jar*895143020]#PCL[/system/framework/android.test.base.jar*2789897741]} | PCL[/system/framework/android.test.runner.jar*895143020])
+08-04 09:06:23.276  2720  2720 D nativeloader: Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+08-04 09:06:23.276  2720  2720 D AndroidRuntime: Calling main entry com.android.commands.uiautomator.Launcher
+08-04 09:06:23.280  2720  2720 I AconfigPackage: android.media.swcodec.flags is mapped to com.android.media.swcodec
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.settings.keyboard is mapped to system_ext
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.systemui.accessibility.accessibilitymenu is mapped to system_ext
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.server.policy.feature.flags is mapped to system_ext
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.settings.factory_reset is mapped to system_ext
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.settings.media_drm is mapped to system_ext
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.launcher3 is mapped to system_ext
+08-04 09:06:23.280  2720  2720 I AconfigPackage: com.android.settings.accessibility is mapped to system_ext
+08-04 09:06:23.281  2720  2720 I AconfigPackage: com.android.wallpaper is mapped to system_ext
+08-04 09:06:23.281  2720  2720 I AconfigPackage: com.android.settings.flags is mapped to system_ext
+08-04 09:06:23.281  2720  2720 I AconfigPackage: com.android.permission.flags is mapped to com.android.permission
+08-04 09:06:23.281  2720  2720 I AconfigPackage: com.android.icu is mapped to com.android.i18n
+08-04 09:06:23.281  2720  2720 I AconfigPackage: com.android.appsearch.flags is mapped to com.android.appsearch
+08-04 09:06:23.281  2720  2720 I AconfigPackage: android.uprobestats.mainline.flags is mapped to com.android.uprobestats
+08-04 09:06:23.282  2720  2720 I AconfigPackage: android.provider.flags is mapped to com.android.configinfrastructure
+08-04 09:06:23.282  2720  2720 I AconfigPackage: com.android.server.deviceconfig is mapped to com.android.configinfrastructure
+08-04 09:06:23.282  2720  2720 I AconfigPackage: com.android.nfc.flags is mapped to system
+08-04 09:06:23.282  2720  2720 I AconfigPackage: android.app.admin.flags is mapped to system
+08-04 09:06:23.282  2720  2720 I AconfigPackage: android.database.sqlite is mapped to system
+08-04 09:06:23.282  2720  2720 I AconfigPackage: com.android.providers.calendar is mapped to system
+08-04 09:06:23.282  2720  2720 I AconfigPackage: com.android.server.power.feature.flags is mapped to system
+08-04 09:06:23.282  2720  2720 I AconfigPackage: com.android.media.performance.flags is mapped to system
+08-04 09:06:23.282  2720  2720 I AconfigPackage: android.app.contextualsearch.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: android.app.ondeviceintelligence.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: com.android.media.projection.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: android.companion is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: android.service.controls.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: com.android.text.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: com.android.providers.contactkeys.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: com.android.intentresolver is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: android.companion.virtualdevice.flags is mapped to system
+08-04 09:06:23.283  2720  2720 I AconfigPackage: android.uprobestats.flags is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: com.android.net.thread.platform.flags is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: android.view.contentprotection.flags is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: com.android.server.dreams is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: com.android.graphics.surfaceflinger.flags is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: com.android.hardware.input is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: android.sdk is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: com.android.input.flags is mapped to system
+08-04 09:06:23.284  2720  2720 I AconfigPackage: android.tracing is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: com.android.server.biometrics is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: android.view.contentcapture.flags is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: android.app.job is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: android.content.res is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: android.net.platform.flags is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: com.android.aconfig.flags is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: com.android.graphics.flags is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: android.server.app is mapped to system
+08-04 09:06:23.285  2720  2720 I AconfigPackage: android.speech.flags is mapped to system
+08-04 09:06:23.286  2720  2720 I AconfigPackage: com.android.server.stats is mapped to system
+08-04 09:06:23.286  2720  2720 I AconfigPackage: android.hardware.biometrics is mapped to system
+08-04 09:06:23.286  2720  2720 I AconfigPackage: android.car.feature is mapped to system
+08-04 09:06:23.286  2720  2720 I AconfigPackage: android.adpf is mapped to system
+08-04 09:06:23.286  2720  2720 I AconfigPackage: android.location.flags is mapped to system
+08-04 09:06:23.286  2720  2720 I AconfigPackage: com.android.settingslib.flags is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.managedprovisioning.flags is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: android.app.assist.flags is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.server.net is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.settingslib.widget.flags is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.internal.camera.flags is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.hardware.libsensor.flags is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.internal.jank is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.providers.settings is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: android.multiuser is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.server.power.optimization is mapped to system
+08-04 09:06:23.287  2720  2720 I AconfigPackage: com.android.calllogbackup is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.android.media.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.android.server.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.android.graphics.libvulkan.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: android.app.appfunctions.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: android.app.smartspace.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.android.providers.contacts.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.android.shell.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.android.media.aaudio is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: android.hardware.radio is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: com.google.wear.services.infra.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: suspend_service.flags is mapped to system
+08-04 09:06:23.288  2720  2720 I AconfigPackage: android.media.midi is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.libcore.readonly is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.settingslib.widget.selectorwithwidgetpreference.flags is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: android.service.notification is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.systemui.shared is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: android.app.jank is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: android.app.wearable is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.media.audio is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: android.service.chooser is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.server.compat is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.server.alarm is mapped to system
+08-04 09:06:23.289  2720  2720 I AconfigPackage: com.android.apex.flags is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.service.quickaccesswallet is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.app.usage is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: com.android.server.accessibility is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.app.supervision.flags is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: com.android.server.utils is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.chre.flags is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.content.flags is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.media.codec is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: com.android.internal.os is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: com.android.nfc.nci.flags is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.app is mapped to system
+08-04 09:06:23.290  2720  2720 I AconfigPackage: android.security.keystore2 is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: android.crashrecovery.flags is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: com.android.tradeinmode.flags is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: android.hardware.flags is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: com.android.server.telecom.flags is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: com.android.settingslib.media.flags is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: com.android.server.policy is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: android.media.audiopolicy is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: com.android.egg.flags is mapped to system
+08-04 09:06:23.291  2720  2720 I AconfigPackage: com.android.internal.compat.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.security is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.service.autofill is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.example.android.aconfig.demo.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.view.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.companion.virtual.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.aconfig_new_storage is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.server.feature.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.systemui is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.server.power.batterysaver is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.widget.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.media.editing.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.media.codec.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.server.powerstats is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.graphics.egl.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.media.audioserver is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: com.android.server.deviceidle is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.nfc is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.permission.flags is mapped to system
+08-04 09:06:23.292  2720  2720 I AconfigPackage: android.service.voice.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.content.pm is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.server.power.hint is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.os is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.service.dreams is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.graphics.libgui.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.hardware.usb.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.provider is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.server.job is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.internal.foldables.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.internal.telephony.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.webkit is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.credentials.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.server.display.feature.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.server.notification is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.appwidget.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.frameworks.sensorservice.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.printspooler.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.window.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.adaptiveauth is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.net.wifi.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.media.tv.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: com.android.server.usb.flags is mapped to system
+08-04 09:06:23.293  2720  2720 I AconfigPackage: android.os.vibrator is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: android.hardware.devicestate.feature.flags is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.server.usage is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: android.server is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.wm.shell is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: android.view.inputmethod is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.graphics.hwui.flags is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.server.backup is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.internal.pm.pkg.component.flags is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: android.view.accessibility is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.google.wear.sdk is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: android.media.audio is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.server.am is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.media.playback.flags is mapped to system
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.art.flags is mapped to com.android.art
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.libcore is mapped to com.android.art
+08-04 09:06:23.294  2720  2720 I AconfigPackage: com.android.media.extractor.flags is mapped to com.android.media
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.media.mainline.flags is mapped to com.android.media
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.wifi.flags is mapped to com.android.wifi
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.org.conscrypt.flags is mapped to com.android.conscrypt
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.healthfitness.flags is mapped to com.android.healthfitness
+08-04 09:06:23.295  2720  2720 I AconfigPackage: libgooglecamerahal.flags is mapped to vendor
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.ipsec.flags is mapped to com.android.ipsec
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.nfc.module.flags is mapped to com.android.nfcservices
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.adservices.ondevicepersonalization.flags is mapped to com.android.ondevicepersonalization
+08-04 09:06:23.295  2720  2720 I AconfigPackage: com.android.bluetooth.flags is mapped to com.android.bt
+08-04 09:06:23.296  2720  2720 I AconfigPackage: com.android.devicelock.flags is mapped to com.android.devicelock
+08-04 09:06:23.296  2720  2720 I AconfigPackage: android.os.profiling is mapped to com.android.profiling
+08-04 09:06:23.299  2720  2720 I AconfigPackage: com.android.os.statsd.flags is mapped to com.android.os.statsd
+08-04 09:06:23.299  2720  2720 I AconfigPackage: com.android.cellbroadcastreceiver.flags is mapped to com.android.cellbroadcast
+08-04 09:06:23.299  2720  2720 I AconfigPackage: com.android.adservices.flags is mapped to com.android.adservices
+08-04 09:06:23.299  2720  2720 I AconfigPackage: com.android.sdksandbox.flags is mapped to com.android.adservices
+08-04 09:06:23.299  2720  2720 I AconfigPackage: com.android.uwb.flags is mapped to com.android.uwb
+08-04 09:06:23.300  2720  2720 I AconfigPackage: com.android.ranging.flags is mapped to com.android.uwb
+08-04 09:06:23.300  2720  2720 I AconfigPackage: android.graphics.pdf.flags is mapped to com.android.mediaprovider
+08-04 09:06:23.301  2720  2720 I AconfigPackage: com.android.providers.media.flags is mapped to com.android.mediaprovider
+08-04 09:06:23.301  2720  2720 I AconfigPackage: android.graphics.pdf.flags.readonly is mapped to com.android.mediaprovider
+08-04 09:06:23.301  2720  2720 I AconfigPackage: com.android.net.ct.flags is mapped to com.android.tethering
+08-04 09:06:23.301  2720  2720 I AconfigPackage: com.android.net.flags is mapped to com.android.tethering
+08-04 09:06:23.301  2720  2720 I AconfigPackage: android.net.vcn is mapped to com.android.tethering
+08-04 09:06:23.301  2720  2720 I AconfigPackage: com.android.nearby.flags is mapped to com.android.tethering
+08-04 09:06:23.301  2720  2720 I AconfigPackage: android.net.http is mapped to com.android.tethering
+08-04 09:06:23.301  2720  2720 I AconfigPackage: com.android.net.thread.flags is mapped to com.android.tethering
+08-04 09:06:23.301  2720  2720 I AconfigPackage: com.android.system.virtualmachine.flags is mapped to com.android.virt
+08-04 09:06:23.302  2720  2720 E FeatureFlagsImplExport: android.os.flagging.AconfigStorageReadException: ERROR_PACKAGE_NOT_FOUND: package android.xr cannot be found on the device
+08-04 09:06:23.304  2720  2720 D UiAutomationConnection: Created on user UserHandle{0}
+08-04 09:06:23.304  2720  2720 I UiAutomation: Initialized for user 0 on display 0
+08-04 09:06:23.304  2720  2720 W UiAutomation: Created with deprecatead constructor, assumes DEFAULT_DISPLAY
+08-04 09:06:23.305   701  1976 D AccessibilityManagerService: changeCurrentUserForTestAutomationIfNeededLocked(0): ignoring because device doesn't support visible background users
+08-04 09:06:23.305   701  1976 I UiAutomationManager: Registering UiTestAutomationService (id=com.android.server.accessibility/UiAutomation, flags=0x0) when called by user 0
+08-04 09:06:23.305   701  1976 V AccessibilityManagerService: onUserStateChangedLocked for userId: 0, forceUpdate: false
+08-04 09:06:23.306   701  1976 W MagnificationConnectionManager: requestConnection duplicated request: connect=false, mConnectionState=DISCONNECTED
+08-04 09:06:23.307   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.307   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.307   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.307   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.308   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.308   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.308   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.308   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.308  2720  2731 V UiAutomation: Init UiAutomation@8a4dcdf[id=2, displayId=0, flags=0]
+08-04 09:06:23.308   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.309   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.309   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.309   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.310   701   701 D BatterySaverPolicy: accessibility changed to true, updating policy.
+08-04 09:06:23.310   701  1820 V AccessibilityManagerService: onUserStateChangedLocked for userId: 0, forceUpdate: false
+08-04 09:06:23.311   701  1820 W MagnificationConnectionManager: requestConnection duplicated request: connect=false, mConnectionState=DISCONNECTED
+08-04 09:06:23.312   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.312   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.313   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.313   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.313   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.314   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.314   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.314   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:23.403  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:23.408  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:23.858   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=24 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:23.858   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=24 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:23.859  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:23.862   701  1243 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:24.408  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:24.418  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:24.484   479  2732 I resolv  : GetAddrInfoHandler::run: {101 983141 101 983141 1073 1}
+08-04 09:06:24.485   479  2733 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:24.485   479  2734 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:24.486   479  2734 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa35ae3f80
+08-04 09:06:24.486   479  2734 I resolv  : doQuery: rcode=0, ancount=1, return value=48
+08-04 09:06:24.486   479  2733 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6bd0
+08-04 09:06:24.486   479  2733 I resolv  : doQuery: rcode=0, ancount=1, return value=308
+08-04 09:06:24.863   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=25 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:24.863   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=25 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:24.864  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:24.869   701  1243 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:24.901   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:24.902   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:24.902   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:24.902   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:24.902   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:24.903   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:24.903   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:24.904   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:24.904   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:24.904   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:24.904   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:24.904   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:24.904   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:24.905   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:24.905   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:24.905   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:24.905   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:24.906   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:24.906   701   996 D WifiScoreCard: txRate: 3 txSpeed: 1
+08-04 09:06:24.906   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed -1
+08-04 09:06:24.906   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=2.4, 0.0, 0.0 rx=4.5 bcn=0 [on:0 tx:0 rx:0 period:3006] from screen [on:0 period:-872010230] score=60
+08-04 09:06:25.276   701  1006 V serviceDiscovery: [MdnsAdvertiser.wlan0] VERBOSE Parsed packet with transactionId(4): 1 questions, 0 answers, 0 authority, 0 additional from /10.0.2.16:5353
+08-04 09:06:25.281   701  1006 V serviceDiscovery: [MdnsAdvertiser.wlan0] VERBOSE Parsed packet with transactionId(4): 1 questions, 0 answers, 0 authority, 0 additional from /[fe80::944a:66ea:16f4:3180%wlan0]:5353
+08-04 09:06:25.408  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:25.415  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:25.867   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=26 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:25.867   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=26 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:25.869  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:25.873   701  1243 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:26.412  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:26.423  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:26.875   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=27 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:26.876   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=27 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:26.876  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:27.114   701  1243 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@9a717e1
+08-04 09:06:27.412  1327  1327 D wpa_supplicant: nl80211: Drv Event 64 (NL80211_CMD_NOTIFY_CQM) received for wlan0
+08-04 09:06:27.412  1327  1327 D wpa_supplicant: nl80211: Beacon loss event
+08-04 09:06:27.412  1327  1327 D wpa_supplicant: wlan0: Event BEACON_LOSS (53) received
+08-04 09:06:27.412  1327  1327 I wpa_supplicant: wlan0: CTRL-EVENT-BEACON-LOSS 
+08-04 09:06:27.423  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:27.431  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:27.880   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=28 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:27.880   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=28 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:27.881  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:27.884   701  1243 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:27.908   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:27.908   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:27.908   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:27.908   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:27.908   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:27.909   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:27.909   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:27.910   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:27.910   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:27.910   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:27.910   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:27.910   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:27.911   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:27.911   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:27.911   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:27.911   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:27.911   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:27.913   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:27.913   701   996 D WifiScoreCard: txRate: 4 txSpeed: 1
+08-04 09:06:27.913   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 1
+08-04 09:06:27.913   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=3.8, 0.0, 0.0 rx=6.7 bcn=0 [on:0 tx:0 rx:0 period:3007] from screen [on:0 period:-872007223] score=60
+08-04 09:06:28.421  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:28.429  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:28.884   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=29 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:28.885   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=29 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:28.888  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:28.892   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:29.422  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:29.430  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:29.890   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=30 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:29.890   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=30 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:29.891  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:29.892   701  1062 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:30.421  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:30.427  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:30.546   479  2739 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:30.546   479  2740 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:30.547   479  2739 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6f50
+08-04 09:06:30.549   479  2741 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:30.549   479  2741 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad8290
+08-04 09:06:30.550   479  2742 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+08-04 09:06:30.550   479  2742 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adb040
+08-04 09:06:30.554  1197  2737 D NetworkMonitor/100: PROBE_DNS www.google.com 10ms OK 31.13.92.37,2001::1
+08-04 09:06:30.557   479  2743 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+08-04 09:06:30.558   479  2744 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:30.558   479  2745 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:30.558   479  2744 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad6f50
+08-04 09:06:30.558   479  2744 I resolv  : doQuery: rcode=0, ancount=1, return value=308
+08-04 09:06:30.559   479  2745 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7faa55ad8290
+08-04 09:06:30.559   479  2745 I resolv  : doQuery: rcode=0, ancount=1, return value=296
+08-04 09:06:30.842   479  2746 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1000 1}
+08-04 09:06:30.842   479  2747 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:30.842   479  2748 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:30.842   479  2748 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adf350
+08-04 09:06:30.842   479  2748 I resolv  : doQuery: rcode=0, ancount=4, return value=356
+08-04 09:06:30.893   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=31 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:30.893   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=31 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:30.894  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:30.898   701  1243 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:30.914   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:30.915   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:30.915   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:30.915   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:30.915   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:30.916   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=2 freq=2447 RxLinkSpeed=2
+08-04 09:06:30.917   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:30.917   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:30.917   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:30.918   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:30.918   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:30.918   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:30.918   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:30.919   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:30.920   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:30.920   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:30.920   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:30.921   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 2Mbps, Tx Link speed: 2Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:30.922   701   996 D WifiScoreCard: txRate: 4 txSpeed: 2
+08-04 09:06:30.922   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 2
+08-04 09:06:30.922   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=2 tx=3.7, 0.0, 0.0 rx=5.4 bcn=0 [on:0 tx:0 rx:0 period:3009] from screen [on:0 period:-872004214] score=60
+08-04 09:06:30.924   479  2740 I resolv  : res_nsend: used send_dg 107 terrno: 0
+08-04 09:06:30.924   479  2747 I resolv  : res_nsend: used send_dg 404 terrno: 0
+08-04 09:06:30.924   479  2747 I resolv  : doQuery: rcode=0, ancount=4, return value=404
+08-04 09:06:30.928  1197  2738 D NetworkMonitor/100: PROBE_DNS connectivitycheck.gstatic.com 383ms OK 58.63.233.98
+08-04 09:06:30.932   479  2749 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+08-04 09:06:30.933   479  2751 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:30.933   479  2750 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:30.933   479  2751 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9b5adb040
+08-04 09:06:30.933   479  2751 I resolv  : doQuery: rcode=0, ancount=1, return value=321
+08-04 09:06:30.934   479  2750 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9c5ae4610
+08-04 09:06:30.934   479  2750 I resolv  : doQuery: rcode=0, ancount=0, return value=107
+08-04 09:06:31.189   701  1243 W NotificationService: Toast already killed. pkg=com.kuma.motointercom token=android.os.BinderProxy@6085f8c
+08-04 09:06:31.423  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:31.428  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:31.719  1272  1530 D SatelliteController: iisInCarrierRoamingNbIotNtn: satellite is disabled
+08-04 09:06:31.897   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=32 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:31.897   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=32 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:31.897  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:31.964  1197  2738 D NetworkMonitor/100: PROBE_HTTP http://connectivitycheck.gstatic.com/generate_204 time=1033ms ret=204 request={Connection=[close], User-Agent=[Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.32 Safari/537.36]} headers={null=[HTTP/1.1 204 No Content], Connection=[close], Cross-Origin-Resource-Policy=[cross-origin], Date=[Tue, 04 Aug 2026 09:06:34 GMT], X-Android-Received-Millis=[1785834391963], X-Android-Response-Source=[NETWORK 204], X-Android-Selected-Protocol=[http/1.1], X-Android-Sent-Millis=[1785834390942]}
+08-04 09:06:32.426  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:32.431  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:32.901   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=33 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:32.901   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=-1ms what=139298 arg2=33 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:32.907  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:32.910   701  1243 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:33.428  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:33.433   701  1243 V AccessibilityManagerService: onUserStateChangedLocked for userId: 0, forceUpdate: false
+08-04 09:06:33.437   701  1243 W MagnificationConnectionManager: requestConnection duplicated request: connect=false, mConnectionState=DISCONNECTED
+08-04 09:06:33.438   701  1243 D AccessibilityManagerService: restoreCurrentUserForTestAutomationIfNeededLocked(): ignoring because device doesn't support visible background users
+08-04 09:06:33.438   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.439   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.439  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:33.439   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.439   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.439   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.439   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.440   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.440   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.440   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.440   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.441   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.441   701   701 W IPCThreadState: Sending oneway calls to frozen process.
+08-04 09:06:33.441  2720  2720 D AndroidRuntime: Shutting down VM
+08-04 09:06:33.442  2720  2729 W IPCThreadState: call to talkWithDriver in joinThreadPool returned error: -9 (Bad file descriptor), FD: -1
+08-04 09:06:33.442  2720  2728 W IPCThreadState: call to talkWithDriver in joinThreadPool returned error: -9 (Bad file descriptor), FD: -1
+08-04 09:06:33.442   701   701 D BatterySaverPolicy: accessibility changed to false, updating policy.
+08-04 09:06:33.546   479  2753 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+08-04 09:06:33.547   479  2754 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+08-04 09:06:33.547   479  2754 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa955add270
+08-04 09:06:33.547   479  2755 I resolv  : res_nmkquery: (QUERY, IN, A)
+08-04 09:06:33.548   479  2755 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x7fa9d5adba50
+08-04 09:06:33.548   479  2754 I resolv  : doQuery: rcode=0, ancount=8, return value=503
+08-04 09:06:33.548   479  2755 I resolv  : doQuery: rcode=0, ancount=1, return value=53
+08-04 09:06:33.910   701   996 D WifiP2pService: P2pDisabledState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=34 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:33.911   701   996 D WifiP2pService: DefaultState cmd = WifiP2pManager.CLEAR_LOCAL_SERVICES { when=0 what=139298 arg2=34 target=com.android.wifi.x.com.android.internal.util.StateMachine$SmHandler }
+08-04 09:06:33.912  2565  2565 W MotoComP2P: setup BUSY retry setupServiceDiscovery
+08-04 09:06:33.914   701   782 E NotificationService: Package has already queued 5 toasts. Not showing more. Package=com.kuma.motointercom
+08-04 09:06:33.923   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:33.923   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:33.923   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:33.923   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:33.923   701   996 W BestClock: java.time.DateTimeException: No network time available
+08-04 09:06:33.924   701   996 D WifiClientModeImpl[49339:wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-50 TxLinkspeed=1 freq=2447 RxLinkSpeed=2
+08-04 09:06:33.924   701   996 D WifiDataStall: tx tput in kbps: 11000
+08-04 09:06:33.924   701   996 D WifiDataStall: rx tput in kbps: 11000
+08-04 09:06:33.924   701   996 V WifiConfigManager: Updating scan detail cache freq=2447 BSSID=00:13:10:85:fe:01 RSSI=-50 for "AndroidWifi"NONE
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:33.924   701   996 D WifiThroughputPredictor:  utilization (LLS) 80 isBluetoothConnected: false final utilization: 80
+08-04 09:06:33.925   701   996 D WifiThroughputPredictor:  BW: 0 RSSI: -50 Nss: 1 Mode: 1 symDur: 4000 snrDb 30 bitPerTone: 4500 rate: 54 throughput: 11
+08-04 09:06:33.925   701   996 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1361061049 SSID: "AndroidWifi", BSSID: 00:13:10:85:fe:01, MAC: 02:15:b6:00:00:00, IP: /10.0.2.17, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: legacy, RSSI: -50, Link speed: 1Mbps, Tx Link speed: 1Mbps, Max Supported Tx Link speed: 11Mbps, Rx Link speed: 2Mbps, Max Supported Rx Link speed: 11Mbps, Frequency: 2447MHz, Net ID: 0, Metered hint: false, score: 60, isUsable: true, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1, Trusted: true, Restricted: false, Ephemeral: false, OEM paid: false, OEM private: false, OSU AP: false, FQDN: <none>, Provider friendly name: <none>, Requesting package name: <none>"AndroidWifi"openMLO Information: , Is TID-To-Link negotiation supported by the AP: false, AP MLD Address: <none>, AP MLO Link Id: <none>, AP MLO Affiliated links: <none>, Vendor Data: <none>
+08-04 09:06:33.925   701   996 D WifiScoreCard: txRate: 5 txSpeed: 1
+08-04 09:06:33.925   701   996 D WifiScoreCard: network update SIGNAL_POLL "AndroidWifi" ID: 1845611166 RSSI -50 txSpeed 1
+08-04 09:06:33.926   701   996 D WifiClientModeImpl[49339:wlan0]:  ClientModeImpl$L2ConnectedState screen=on 1 0 "AndroidWifi" 00:13:10:85:fe:01 rssi=-50 f=2447 sc=60 link=1 tx=4.5, 0.0, 0.0 rx=6.4 bcn=0 [on:0 tx:0 rx:0 period:3004] from screen [on:0 period:-872001210] score=60
+08-04 09:06:34.430  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友
+08-04 09:06:34.437  2565  2565 D MotoIntercomUi: service status running=true status=已发现车友

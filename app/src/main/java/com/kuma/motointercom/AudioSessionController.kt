@@ -161,13 +161,16 @@ internal class AudioSessionController(
             initialAudioRoute: AudioRouteSelection = AudioRouteSelection.BLUETOOTH,
             onEarpieceActive: () -> Unit = {},
             onExternalAudioActive: (String) -> Unit = {},
-            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {}
+            onAudioInterruptionChanged: (AudioInterruptionState) -> Unit = {},
+            noiseReductionConfig: AudioNoiseReductionConfig =
+                AudioNoiseReductionConfig.baseline()
         ): AudioSessionController {
             val engine = RiderAudioEngine(
                 context = context,
                 onEngineError = onError,
                 isRuntimeCurrent = isRuntimeCurrent,
                 initialAudioControls = initialAudioControls,
+                noiseReductionConfig = noiseReductionConfig,
                 onVoxStateChanged = onVoxStateChanged
             )
             return try {
@@ -181,7 +184,10 @@ internal class AudioSessionController(
                     onEarpieceActive = onEarpieceActive,
                     onExternalAudioActive = onExternalAudioActive,
                     onError = onError,
-                    onRouteReady = { coordinator?.onRouteReady() }
+                    onRouteReady = {
+                        engine.onAudioRouteChanged()
+                        coordinator?.onRouteReady()
+                    }
                 )
                 coordinator = CommunicationAudioCoordinator(
                     engine = engine,

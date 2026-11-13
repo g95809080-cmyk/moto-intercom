@@ -1,0 +1,297 @@
+TASK 10075:com.android.fakesystemapp id=19 userId=0 displayId=0(type=INTERNAL)
+  ACTIVITY com.android.fakesystemapp/.launcher.EmptyHomeActivity 804fd04 pid=1048 userId=0 uid=10075 displayId=0(type=INTERNAL)
+    Local Activity 23ed9d4 State:
+      mResumed=false mStopped=true mFinished=false
+      mIsInMultiWindowMode=false mIsInPictureInPictureMode=false
+      mChangingConfigurations=false
+      mCurrentConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.4 fontWeightAdjustment=0}
+      mLoadersStarted=true
+      FragmentManager misc state:
+        mHost=android.app.Activity$HostCallbacks@1b66004
+        mContainer=android.app.Activity$HostCallbacks@1b66004
+        mCurState=3 mStateSaved=true mDestroyed=false
+    ViewRoot:
+      mAdded=true
+      mRemoved=false
+      mStopped=true
+      mPausedForTransition=false
+      mConsumeBatchedInputScheduled=false
+      mConsumeBatchedInputImmediatelyScheduled=false
+      mPendingInputEventCount=0
+      mProcessInputEventsScheduled=false
+      mTraversalScheduled=false
+      mReportNextDraw=false
+      mLastPerformTraversalsFailedReason=view_not_visible
+      mLastReportedMergedConfiguration={mGlobalConfig={1.0 ?mcc0mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.8 fontWeightAdjustment=0} mOverrideConfig={1.0 ?mcc0mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.3 fontWeightAdjustment=0}}
+      mLastConfigurationFromResources={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.4 fontWeightAdjustment=0}
+      mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 1080, 2400), taskFragmentBounds=Rect(0, 0 - 1080, 2400)}
+      mIsAmbientMode=false
+      mUnbufferedInputSource=0
+      mAttachInfo=       AttachInfo:
+        mHasWindowFocus=false
+        mWindowVisibility=8
+        mInTouchMode=true
+        mUnbufferedDispatchRequested=false
+      android.view.ViewRootImpl$NativePreImeInputStage: mQueueLength=0
+      android.view.ViewRootImpl$ImeInputStage: mQueueLength=0
+      android.view.ViewRootImpl$NativePostImeInputStage: mQueueLength=0
+      android.view.ViewRootImpl$WindowInputEventReceiver
+       mInputChannel: 52b4d64 com.android.fakesystemapp/com.android.fakesystemapp.launcher.EmptyHomeActivity
+       mSeqMap: {}
+       mReceiverPtr:
+        mInputConsumer:
+          mResampleTouch = true
+          mChannel = 52b4d64 com.android.fakesystemapp/com.android.fakesystemapp.launcher.EmptyHomeActivity
+          mMsgDeferred: false
+          Batches:
+              <empty>
+          mSeqChains:
+              <empty>
+          mConsumeTimes:
+              <empty>
+          
+        mBatchedInputEventPending: false
+        mOutboundQueue:
+          <empty>
+        
+    Choreographer:
+      mFrameScheduled=false
+      mLastFrameTime=23883 (250375 ms ago)
+    InsetsController:
+        InsetsState
+          mDisplayFrame=Rect(0, 0 - 1080, 2400)
+          mDisplayCutout=DisplayCutout{insets=Rect(0, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=0 displayHeight=0 physicalDisplayWidth=0 physicalDisplayHeight=0 density={0.0} cutoutSpec={} rotation={0} scale={0.0} physicalPixelDisplaySizeRatio={0.0}}} sideOverrides=null}
+          mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=0, center=Point(0, 0)}, RoundedCorner{position=TopRight, radius=0, center=Point(0, 0)}, RoundedCorner{position=BottomRight, radius=0, center=Point(0, 0)}, RoundedCorner{position=BottomLeft, radius=0, center=Point(0, 0)}]}
+          mRoundedCornerFrame=Rect(0, 0 - 1080, 2400)
+          mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=null rotation=0}
+          mDisplayShape=DisplayShape{ spec=-1893857183 displayWidth=1080 displayHeight=2400 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}
+            InsetsSource id=3 type=ime frame=[0,0][0,0] visible=false flags= sideHint=NONE boundingRects=null
+        mIsPredictiveBackImeHideAnimInProgress=false
+    WindowOnBackDispatcher:
+        Top Callback: android.view.ViewRootImpl$$ExternalSyntheticLambda13@36d3327
+        Callbacks: 
+          Callback: android.view.ViewRootImpl$$ExternalSyntheticLambda13@36d3327 Priority=0
+    ImeBackAnimationController:
+        mLastProgress=0.0
+        mTriggerBack=false
+        mIsPreCommitAnimationInProgress=false
+        mStartRootScrollY=0
+        isBackAnimationAllowed=true
+        isAdjustPan=true
+        isHideAnimationInProgress=false
+    View Hierarchy:
+      com.android.internal.policy.DecorView{30049ed I.E...... R.....ID 0,0-1080,2400 aid=1}[EmptyHomeActivity]
+        com.android.internal.widget.ActionBarOverlayLayout{7f3e022 V.E...... .......D 0,0-1080,2400 #10202cc android:id/decor_content_parent}
+          android.widget.FrameLayout{d6cfab3 V.E...... ........ 0,147-1080,2400 #1020002 android:id/content}
+          com.android.internal.widget.ActionBarContainer{53b7870 V.ED..... ......ID 0,0-1080,147 #10201e4 android:id/action_bar_container}
+            android.widget.Toolbar{fa497e9 V.E...... ........ 0,0-1080,147 #10201e3 android:id/action_bar}
+              android.widget.ActionMenuView{693dc6e V.E...... ......ID 1080,0-1080,147}
+            com.android.internal.widget.ActionBarContextView{5328f0f G.E...... ......I. 0,0-0,0 #10201e8 android:id/action_context_bar}
+    Looper (main, tid 2) {2b7ab9c}
+      (MessageQueue is using Legacy implementation)
+      (Total messages: 0, polling=false, quitting=false)
+    ResourcesManager:
+      total apks: 3
+      resources: 3
+      resource impls: 3
+    1 dumpables:
+    #0: AutofillManager
+        AutofillManager:
+          sessionId: 2147483647
+          state: UNKNOWN
+          context: com.android.fakesystemapp.launcher.EmptyHomeActivity@23ed9d4
+          service client: null
+          client: android.view.autofill.AutofillClientController@525c9a5 (android.os.BinderProxy@96db210)
+          enabled: false
+          enabledAugmentedOnly: false
+          hasService: true
+          hasCallback: false
+          onInvisibleCalled false
+          last autofilled data: null
+          id of last fill UI shown: null
+          tracked views: null
+          fillable ids: null
+          entered ids: null
+          save trigger id: null
+          save on finish(): false
+          options: logLvl=2, compatMode=false, augmented=false, appDisabledExpiration=0
+          fill dialog enabled: false
+          fill dialog enabled hints: []
+          compat mode enabled: false
+          debug: true verbose: false
+        Autofill Compat Mode: false
+
+TASK 10100:com.kuma.motointercom id=20 userId=0 displayId=0(type=INTERNAL)
+  ACTIVITY com.kuma.motointercom/.MainActivity fb12de1 pid=1804 userId=0 uid=10100 displayId=0(type=INTERNAL)
+    Local Activity b84e028 State:
+      mResumed=true mStopped=false mFinished=false
+      mIsInMultiWindowMode=false mIsInPictureInPictureMode=false
+      mChangingConfigurations=false
+      mCurrentConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2 fontWeightAdjustment=0}
+      mLoadersStarted=true
+      FragmentManager misc state:
+        mHost=android.app.Activity$HostCallbacks@46de81d
+        mContainer=android.app.Activity$HostCallbacks@46de81d
+        mCurState=5 mStateSaved=false mDestroyed=false
+    ViewRoot:
+      mAdded=true
+      mRemoved=false
+      mStopped=false
+      mPausedForTransition=false
+      mConsumeBatchedInputScheduled=false
+      mConsumeBatchedInputImmediatelyScheduled=false
+      mPendingInputEventCount=0
+      mProcessInputEventsScheduled=false
+      mTraversalScheduled=false
+      mReportNextDraw=false
+      mLastReportedMergedConfiguration={mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.11 fontWeightAdjustment=0} mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2 fontWeightAdjustment=0}}
+      mLastConfigurationFromResources={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2 fontWeightAdjustment=0}
+      mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 1080, 2400), taskFragmentBounds=Rect(0, 0 - 1080, 2400)}
+      mIsAmbientMode=false
+      mUnbufferedInputSource=0
+      mAttachInfo=       AttachInfo:
+        mHasWindowFocus=true
+        mWindowVisibility=0
+        mInTouchMode=true
+        mUnbufferedDispatchRequested=false
+      android.view.ViewRootImpl$NativePreImeInputStage: mQueueLength=0
+      android.view.ViewRootImpl$ImeInputStage: mQueueLength=0
+      android.view.ViewRootImpl$NativePostImeInputStage: mQueueLength=0
+      android.view.ViewRootImpl$WindowInputEventReceiver
+       mInputChannel: c683363 com.kuma.motointercom/com.kuma.motointercom.MainActivity
+       mSeqMap: {}
+       mReceiverPtr:
+        mInputConsumer:
+          mResampleTouch = true
+          mChannel = c683363 com.kuma.motointercom/com.kuma.motointercom.MainActivity
+          mMsgDeferred: false
+          Batches:
+              <empty>
+          mSeqChains:
+              <empty>
+          mConsumeTimes:
+              <empty>
+          
+        mBatchedInputEventPending: false
+        mOutboundQueue:
+          <empty>
+        
+    Choreographer:
+      mFrameScheduled=false
+      mLastFrameTime=261933 (12329 ms ago)
+    InsetsController:
+        InsetsState
+          mDisplayFrame=Rect(0, 0 - 1080, 2400)
+          mDisplayCutout=DisplayCutout{insets=Rect(0, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=0 displayHeight=0 physicalDisplayWidth=0 physicalDisplayHeight=0 density={0.0} cutoutSpec={} rotation={0} scale={0.0} physicalPixelDisplaySizeRatio={0.0}}} sideOverrides=null}
+          mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=0, center=Point(0, 0)}, RoundedCorner{position=TopRight, radius=0, center=Point(0, 0)}, RoundedCorner{position=BottomRight, radius=0, center=Point(0, 0)}, RoundedCorner{position=BottomLeft, radius=0, center=Point(0, 0)}]}
+          mRoundedCornerFrame=Rect(0, 0 - 1080, 2400)
+          mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=null rotation=0}
+          mDisplayShape=DisplayShape{ spec=-1893857183 displayWidth=1080 displayHeight=2400 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}
+            InsetsSource id=3 type=ime frame=[0,0][0,0] visible=false flags= sideHint=NONE boundingRects=null
+        mIsPredictiveBackImeHideAnimInProgress=false
+    WindowOnBackDispatcher:
+        Top Callback: com.kuma.motointercom.MainActivity$$ExternalSyntheticLambda12@c87407d
+        Callbacks: 
+          Callback: com.kuma.motointercom.MainActivity$$ExternalSyntheticLambda12@c87407d Priority=0
+          Callback: android.app.Activity$$ExternalSyntheticLambda0@65bd6d4 Priority=-1
+    ImeBackAnimationController:
+        mLastProgress=0.0
+        mTriggerBack=false
+        mIsPreCommitAnimationInProgress=false
+        mStartRootScrollY=0
+        isBackAnimationAllowed=true
+        isAdjustPan=false
+        isHideAnimationInProgress=false
+    View Hierarchy:
+      com.android.internal.policy.DecorView{2f2da92 V.E...... R....... 0,0-1080,2400 aid=1}[MainActivity]
+        android.widget.LinearLayout{bd920e9 V.E...... ........ 0,0-1080,2400}
+          android.view.ViewStub{eebbc63 G.E...... ......I. 0,0-0,0 #10201ed android:id/action_mode_bar_stub}
+          android.widget.FrameLayout{b0316e V.E...... ........ 0,0-1080,2400 #1020002 android:id/content}
+            android.widget.FrameLayout{328c00f V.E...... ........ 0,0-1080,2400 #7f04003d app:id/main_root}
+              android.widget.FrameLayout{d78889c V.E...... ........ 0,0-1080,2400 #7f040043 app:id/page_container}
+                android.widget.ScrollView{47d60f3 VFED.V... ........ 0,0-1080,2400 #7f040026 app:id/home_scroll}
+                  android.widget.LinearLayout{bde81b0 V.E...... ........ 0,0-1080,2965 #7f04001a app:id/home_content}
+                    android.widget.LinearLayout{7610829 V.E...... ........ 53,47-1027,224}
+                      android.widget.ImageButton{ede10ba VFED..C.. ........ 0,25-126,151 #7f04001f app:id/home_menu_button}
+                      android.widget.LinearLayout{781fb6b V.E...... ........ 158,0-816,177}
+                        android.widget.TextView{9209361 V.ED..... ........ 135,0-523,85}
+                        android.widget.TextView{dcc7e86 V.ED..... ........ 131,101-526,177 #7f040028 app:id/home_status_capsule}
+                      android.widget.ImageButton{cb4d6c8 VFED..C.. ........ 848,25-974,151 #7f040027 app:id/home_settings_button}
+                    android.widget.LinearLayout{d8327ae V.E...... ........ 53,271-1027,1479}
+                      android.widget.TextView{42e347 V.ED..... ........ 47,79-927,157 #7f04002b app:id/home_status_title}
+                      android.widget.TextView{da49774 V.ED..... ........ 47,173-927,227 #7f040029 app:id/home_status_detail}
+                      android.widget.TextView{cf2049d V.ED..... ........ 47,243-927,293 #7f04002a app:id/home_status_supplemental}
+                      android.widget.FrameLayout{ee1fd12 V.E...... ........ 324,325-650,651}
+                        com.kuma.motointercom.RippleView{d20daeb I.ED..... ........ 0,0-326,326 #7f040025 app:id/home_ripple}
+                        android.widget.ImageView{46f4d99 V.ED..... ........ 68,68-257,257}
+                      android.widget.TextView{f406ce3 V.ED..... ........ 47,651-927,744 #7f040021 app:id/home_peer_name}
+                      android.widget.LinearLayout{a2db6e0 V.E...... ........ 47,791-927,1161 #7f040019 app:id/home_connection_facts}
+                        android.widget.LinearLayout{a5ed85e V.E...... ........ 0,0-880,106}
+                          android.widget.TextView{8de2a55 V.ED..... ........ 0,0-432,106 #7f04002c app:id/home_transport_pill}
+                          android.widget.TextView{a3c1c6a V.ED..... ........ 448,0-880,106 #7f040018 app:id/home_connected_transport}
+                        android.widget.LinearLayout{702f43f V.E...... ........ 0,122-880,228}
+                          android.widget.TextView{3c955b V.ED..... ........ 0,0-432,106 #7f040034 app:id/home_webrtc_pill}
+                          android.widget.TextView{eaf81f8 V.ED..... ........ 448,0-880,106 #7f040017 app:id/home_bluetooth_pill}
+                        android.widget.TextView{a67610c VFED..C.. ........ 0,244-880,370 #7f04002f app:id/home_vox_pill}
+                    android.widget.LinearLayout{583194f V.E...... ........ 53,1511-1027,1982 #7f040014 app:id/home_audio_card}
+                      android.widget.TextView{82416d1 V.ED..... ........ 47,47-927,113}
+                      android.widget.TextView{cf79536 V.ED..... ........ 47,145-927,203 #7f040016 app:id/home_audio_source}
+                      com.kuma.motointercom.VisualizerView{2a52c37 V.ED..... ........ 47,235-927,424 #7f04002d app:id/home_visualizer}
+                    android.widget.LinearLayout{ca208dc V.E...... ........ 53,2014-1027,2416 #7f04001e app:id/home_main_control_section}
+                      android.widget.LinearLayout{d56c5a4 V.E...... ........ 172,0-802,336 #7f04001d app:id/home_main_control_row}
+                        android.widget.ImageButton{91fcec2 VFED..C.. ........ 0,105-126,231 #7f040020 app:id/home_mute_button}
+                        android.widget.Button{f9654d3 VFED..C.. ........ 147,0-483,336 #7f040024 app:id/home_primary_button}
+                        android.widget.ImageButton{f0c9810 VFED..C.. ........ 504,105-630,231 #7f040015 app:id/home_audio_settings_button}
+                      android.widget.TextView{f024f0d V.ED..... ........ 0,352-974,402 #7f04001b app:id/home_disabled_reason}
+                      android.widget.Button{5579060 GFED..C.. ......I. 0,0-0,0 #7f040022 app:id/home_permission_grant_cta}
+                      android.widget.Button{e85e919 GFED..C.. ......I. 0,0-0,0 #7f040023 app:id/home_permission_settings_cta}
+                      android.widget.Button{e600dde GFED..C.. ......I. 0,0-0,0 #7f040035 app:id/home_wifi_settings_cta}
+                    android.widget.LinearLayout{5d8fde5 VFE...C.. ........ 53,2448-1027,2881 #7f04002e app:id/home_vox_card}
+                      android.widget.TextView{b11cf09 V.ED..... ........ 47,47-927,113 #7f040033 app:id/home_vox_title}
+                      android.widget.TextView{da0150e V.ED..... ........ 47,129-927,183 #7f040032 app:id/home_vox_status}
+                      android.widget.LinearLayout{a676b2f V.E...... ........ 47,215-927,320 #7f040031 app:id/home_vox_state_row}
+                        android.widget.TextView{7f52c5 V.ED..... ........ 0,0-282,105}
+                        android.widget.TextView{acc741a V.ED..... ........ 298,0-581,105}
+                        android.widget.TextView{a898b4b V.ED..... ........ 597,0-880,105}
+                      android.widget.TextView{60b253c V.ED..... ........ 47,336-927,386 #7f040030 app:id/home_vox_placeholder_note}
+                    android.widget.Button{136be3a GFED..C.. ......ID 53,2847-1027,2973 #7f04001c app:id/home_discover_cta}
+              android.view.View{2f2b539 GFED..C.. ......I. 0,0-1080,2400 #7f040042 app:id/navigation_scrim}
+              android.widget.LinearLayout{7a4b77e G.E...... ......ID 0,0-767,2400 #7f040041 app:id/navigation_panel}
+                android.widget.TextView{a7eb4df V.ED..... ........ 53,53-714,146}
+                android.widget.TextView{689252c V.ED..... ........ 53,157-714,211}
+                android.widget.Button{dc06bf5 VFED..C.. ..S...ID 53,285-714,411 #7f04003f app:id/nav_home_button}
+                android.widget.Button{ad3bbbf VFED..C.. ......ID 53,443-714,569 #7f04003e app:id/nav_discover_button}
+                android.widget.Button{415528c VFED..C.. ......ID 53,601-714,727 #7f040040 app:id/nav_settings_button}
+    Looper (main, tid 2) {82fdd5}
+      (MessageQueue is using Legacy implementation)
+      (Total messages: 0, polling=false, quitting=false)
+    ResourcesManager:
+      total apks: 1
+      resources: 3
+      resource impls: 2
+    1 dumpables:
+    #0: AutofillManager
+        AutofillManager:
+          sessionId: 2147483647
+          state: UNKNOWN
+          context: com.kuma.motointercom.MainActivity@b84e028
+          service client: null
+          client: android.view.autofill.AutofillClientController@8db29ea (android.os.BinderProxy@6b25166)
+          enabled: false
+          enabledAugmentedOnly: false
+          hasService: true
+          hasCallback: false
+          onInvisibleCalled false
+          last autofilled data: null
+          id of last fill UI shown: null
+          tracked views: null
+          fillable ids: null
+          entered ids: null
+          save trigger id: null
+          save on finish(): false
+          options: logLvl=2, compatMode=false, augmented=false, appDisabledExpiration=0
+          fill dialog enabled: false
+          fill dialog enabled hints: []
+          compat mode enabled: false
+          debug: true verbose: false
+        Autofill Compat Mode: false

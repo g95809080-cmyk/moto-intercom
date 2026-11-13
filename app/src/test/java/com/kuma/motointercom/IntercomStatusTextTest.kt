@@ -77,6 +77,10 @@ class IntercomStatusTextTest {
             "语音通道已连接",
             foregroundNotificationText(connected, "媒体初始化中")
         )
+        assertEquals(
+            "媒体初始化中",
+            foregroundNotificationText(connected, "媒体初始化中", audioReady = false)
+        )
     }
 
     @Test

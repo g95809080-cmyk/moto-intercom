@@ -20,7 +20,8 @@ internal fun intercomStatusDetail(state: IntercomState): String = when (state) {
 internal fun foregroundNotificationText(
     state: IntercomState,
     fallback: String,
-    audioInterruption: AudioInterruptionState = AudioInterruptionState.NORMAL
+    audioInterruption: AudioInterruptionState = AudioInterruptionState.NORMAL,
+    audioReady: Boolean = true
 ): String {
     when (audioInterruption) {
         AudioInterruptionState.PHONE_RINGING,
@@ -31,7 +32,7 @@ internal fun foregroundNotificationText(
         AudioInterruptionState.NORMAL -> Unit
     }
     return when (state) {
-        is IntercomState.Connected -> "语音通道已连接"
+        is IntercomState.Connected -> if (audioReady) "语音通道已连接" else fallback
         is IntercomState.Recovering,
         is IntercomState.Resetting -> intercomStatusDetail(state)
         else -> fallback

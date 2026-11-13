@@ -1,0 +1,10 @@
+﻿wm size:
+Physical size: 1080x2400
+wm density:
+Physical density: 420
+font_scale:
+1.0
+navigation_mode:
+null
+sdk:
+36

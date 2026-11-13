@@ -320,8 +320,65 @@ class SessionOrchestratorTest {
                 )
             )
 
+            assertTrue(repository.saved.isEmpty())
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.AudioReady(runtime, attempt.id, 200L)
+                )
+            )
             assertEquals(listOf("peer-p2p"), repository.saved.map(PairingRecord::remoteDeviceId))
             assertEquals("WIFI_DIRECT", repository.saved.single().lastTransport)
+        } finally {
+            orchestrator.close()
+        }
+    }
+
+    @Test
+    fun staleAudioReadyEpochCannotPersistAfterPhoneInterruption() = runBlocking {
+        val repository = RecordingPairingRepository()
+        var readinessEpoch = 1L
+        val orchestrator = orchestrator(
+            repository = repository,
+            audioReadyEpoch = { readinessEpoch }
+        )
+        val attempt = attempt(
+            "attempt-stale-audio",
+            "peer-stale-audio",
+            Transport.LAN,
+            RuntimeSessionId("remote-stale-audio")
+        )
+        val peer = PeerIdentity(
+            deviceId = "peer-stale-audio",
+            nickname = "Stale Audio Rider",
+            deviceName = "Phone",
+            runtimeSessionId = RuntimeSessionId("remote-stale-audio"),
+            isDeviceIdVerified = true
+        )
+        try {
+            orchestrator.dispatchAndAwait(SessionEvent.RuntimeStarted(runtime))
+            orchestrator.dispatchAndAwait(SessionEvent.ConnectRequested(attempt))
+            orchestrator.dispatchAndAwait(SessionEvent.TunnelReady(attempt, peer, Transport.LAN))
+            orchestrator.dispatchAndAwait(
+                SessionEvent.WebRtcStateChanged(
+                    runtime,
+                    attempt.id,
+                    WebRtcConnectionState.CONNECTED,
+                    100L
+                )
+            )
+
+            readinessEpoch = 2L
+            assertFalse(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.AudioReady(
+                        runtimeSessionId = runtime,
+                        attemptId = attempt.id,
+                        occurredAt = 200L,
+                        readinessEpoch = 1L
+                    )
+                )
+            )
+            assertTrue(repository.saved.isEmpty())
         } finally {
             orchestrator.close()
         }
@@ -489,6 +546,12 @@ class SessionOrchestratorTest {
                 )
             )
 
+            assertTrue(repository.saved.isEmpty())
+            assertTrue(
+                orchestrator.dispatchAndAwait(
+                    SessionEvent.AudioReady(runtime, lanAttempt.id, 200L)
+                )
+            )
             assertEquals(listOf("peer-lan"), repository.saved.map(PairingRecord::remoteDeviceId))
             assertEquals("LAN", repository.saved.single().lastTransport)
 
@@ -527,12 +590,14 @@ class SessionOrchestratorTest {
     private fun orchestrator(
         repository: RecordingPairingRepository = RecordingPairingRepository(),
         onLog: (String) -> Unit = {},
-        elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L }
+        elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000L },
+        audioReadyEpoch: () -> Long = { 0L }
     ) = SessionOrchestrator(
         repository,
         Dispatchers.Unconfined,
         onLog = onLog,
-        elapsedRealtime = elapsedRealtime
+        elapsedRealtime = elapsedRealtime,
+        audioReadyEpoch = audioReadyEpoch
     )
 
     private fun attempt(

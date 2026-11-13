@@ -3,7 +3,6 @@ package com.kuma.motointercom
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.net.wifi.WifiManager
 import org.json.JSONObject
 import java.io.Closeable
 import java.io.IOException
@@ -34,6 +33,9 @@ internal class LanDiscoveryCoordinator(
     private val onLog: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
     initialTargetAttempt: ConnectionAttempt? = null,
+    private val localPlatform: PeerPlatform = PeerPlatform.ANDROID,
+    private val localCapabilities: Set<String> = emptySet(),
+    private val localNetworkRole: BootstrapNetworkRole = BootstrapNetworkRole.EITHER,
     private val monotonicClock: MonotonicClock = MonotonicClock {
         MonotonicTimestamp(System.nanoTime() / 1_000_000L)
     }
@@ -58,6 +60,43 @@ internal class LanDiscoveryCoordinator(
 
     fun start(): Boolean {
         if (!isActive()) return false
+        val localIp = localWifiIp() ?: return false
+        startLanDiscovery(localIp)
+        startNsdDiscovery()
+        return true
+    }
+
+    /** Adds a BLE-delivered endpoint to the same registry used by Bonjour/UDP. */
+    fun rememberExternalEndpoint(
+        device: LanRiderDevice,
+        expiresAtElapsedRealtimeMs: Long = monotonicClock.now().elapsedRealtimeMs + BLE_ENDPOINT_RETENTION_MS
+    ): Boolean {
+        if (!isActive() || device.deviceId.isNullOrBlank() || device.sessionId == null) return false
+        val validIdentity = runCatching {
+            DeviceId.parse(device.deviceId)
+            requireCanonicalUuid(device.sessionId.value, "sessionId")
+            require(device.ip.isNotBlank())
+            require(device.port in 1..65535)
+        }.isSuccess
+        if (!validIdentity) return false
+        rememberLanDevice(
+            serviceName = device.discoveryEndpointId,
+            device = device,
+            expiresAtElapsedRealtimeMs = expiresAtElapsedRealtimeMs
+        )
+        return true
+    }
+
+    fun restartOnCurrentNetwork(): Boolean {
+        if (!isActive()) return false
+        synchronized(lifecycleLock) {
+            closeQuietly(udpSocket.getAndSet(null))
+            closeQuietly(serverSocket.getAndSet(null))
+            closeQuietly(targetedClientSocket.getAndSet(null))
+        }
+        stopNsdDiscovery()
+        deviceRegistry.clear()
+        publishLanDevices(emptyList())
         val localIp = localWifiIp() ?: return false
         startLanDiscovery(localIp)
         startNsdDiscovery()
@@ -202,6 +241,9 @@ internal class LanDiscoveryCoordinator(
             setAttribute("name", riderName)
             setAttribute("deviceName", deviceName)
             setAttribute("protocolVersion", protocolVersion.toString())
+            setAttribute("platform", localPlatform.name)
+            setAttribute("capabilities", localCapabilities.sorted().joinToString(","))
+            setAttribute("networkRole", localNetworkRole.name)
         }
 
         try {
@@ -244,7 +286,14 @@ internal class LanDiscoveryCoordinator(
                                 .toIntOrNull()
                                 ?: 0,
                             ip = ip,
-                            port = serviceInfo.port.takeIf { it > 0 } ?: LAN_TCP_PORT
+                            port = serviceInfo.port.takeIf { it > 0 } ?: LAN_TCP_PORT,
+                            platform = PeerPlatform.parse(serviceInfo.attributeString("platform")),
+                            capabilities = parseCapabilityList(
+                                serviceInfo.attributeString("capabilities")
+                            ),
+                            networkRole = BootstrapNetworkRole.parse(
+                                serviceInfo.attributeString("networkRole")
+                            )
                         )
                     )
                 }
@@ -276,7 +325,8 @@ internal class LanDiscoveryCoordinator(
                         localNickname = riderName,
                         localDeviceName = deviceName,
                         originatingAttempt = attempt,
-                        monotonicClock = monotonicClock
+                        monotonicClock = monotonicClock,
+                        localCapabilities = localCapabilities
                     )
                 } catch (t: Throwable) {
                     log("Rejected LAN v2 HELLO: ${t.message}")
@@ -342,6 +392,9 @@ internal class LanDiscoveryCoordinator(
                         .put("name", riderName)
                         .put("deviceName", deviceName)
                         .put("protocolVersion", protocolVersion)
+                        .put("platform", localPlatform.name)
+                        .put("capabilities", localCapabilities.sorted().joinToString(","))
+                        .put("networkRole", localNetworkRole.name)
                         .put("ip", localIp)
                         .put("tcpPort", LAN_TCP_PORT)
                         .toString()
@@ -368,7 +421,10 @@ internal class LanDiscoveryCoordinator(
                 name = json.optString("name"),
                 deviceName = json.optString("deviceName"),
                 protocolVersion = json.optInt("protocolVersion", 0),
-                tcpPort = json.optInt("tcpPort", 0)
+                tcpPort = json.optInt("tcpPort", 0),
+                platform = PeerPlatform.parse(json.optString("platform")),
+                capabilities = parseCapabilityList(json.optString("capabilities")),
+                networkRole = BootstrapNetworkRole.parse(json.optString("networkRole"))
             ),
             sourceAddress = packet.address.hostAddress.orEmpty(),
             localIp = localIp,
@@ -421,7 +477,8 @@ internal class LanDiscoveryCoordinator(
                 localNickname = riderName,
                 localDeviceName = deviceName,
                 originatingAttempt = attempt,
-                monotonicClock = monotonicClock
+                monotonicClock = monotonicClock,
+                localCapabilities = localCapabilities
             )
             if (!isAttemptCurrent(attempt)) {
                 clientConnectAttempt.release(attempt)
@@ -496,11 +553,7 @@ internal class LanDiscoveryCoordinator(
 
     @Suppress("DEPRECATION")
     private fun localWifiIp(): String? {
-        val wifiManager = context.applicationContext
-            .getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val ip = wifiManager.connectionInfo?.ipAddress ?: return null
-        if (ip == 0) return null
-        return "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"
+        return localPrivateWifiAddress(context)
     }
 
     private fun isActive(): Boolean = !closed.get() && isSessionCurrent(token)
@@ -627,6 +680,7 @@ internal class LanDiscoveryCoordinator(
         private const val LAN_RECEIVE_TIMEOUT_MS = 1_000
         private const val LAN_BROADCAST_INTERVAL_MS = 1_000L
         private const val LAN_BROADCAST_RETENTION_MS = LAN_BROADCAST_INTERVAL_MS * 3
+        private const val BLE_ENDPOINT_RETENTION_MS = 30_000L
         private const val NSD_SERVICE_TYPE = "_motocom._tcp."
 
     }
@@ -639,7 +693,10 @@ internal data class LanBroadcastHello(
     val name: String,
     val deviceName: String,
     val protocolVersion: Int,
-    val tcpPort: Int
+    val tcpPort: Int,
+    val platform: PeerPlatform = PeerPlatform.UNKNOWN,
+    val capabilities: Set<String> = emptySet(),
+    val networkRole: BootstrapNetworkRole = BootstrapNetworkRole.EITHER
 )
 
 internal fun lanBroadcastDeviceOrNull(
@@ -674,9 +731,24 @@ internal fun lanBroadcastDeviceOrNull(
         deviceName = hello.deviceName,
         protocolVersion = hello.protocolVersion.coerceAtLeast(0),
         ip = peerIp,
-        port = hello.tcpPort
+        port = hello.tcpPort,
+        platform = hello.platform,
+        capabilities = hello.capabilities,
+        networkRole = hello.networkRole
     )
 }
+
+private fun parseCapabilityList(raw: String): Set<String> = raw
+    .split(',')
+    .asSequence()
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .filter { capability ->
+        capability.length <= 64 && capability.all {
+            it in 'A'..'Z' || it in '0'..'9' || it == '_'
+        }
+    }
+    .toSet()
 
 internal class LanAttemptLease(initialAttempt: ConnectionAttempt? = null) {
     private val attempt = AtomicReference(initialAttempt)

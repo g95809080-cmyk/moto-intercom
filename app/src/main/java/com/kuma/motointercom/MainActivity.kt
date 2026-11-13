@@ -283,7 +283,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
 
             REQUEST_OPTIONAL_PERMISSIONS -> {
                 if (permissions.indices.any { grantResults.getOrNull(it) != PackageManager.PERMISSION_GRANTED }) {
-                    screen.appendLog("通知或蓝牙权限未授予；不影响对讲启动")
+                    screen.appendLog("通知权限未授予；不影响对讲启动")
                 }
                 intercomService?.refreshConfirmationAvailability()
                 screen.setIntercomState(intercomState, hasCorePermissions())
@@ -304,6 +304,12 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     override fun onIntercomStateChanged(state: IntercomState) {
         runOnUiThread {
             if (serviceConnected) setIntercomState(state)
+        }
+    }
+
+    override fun onAudioReadyChanged(ready: Boolean) {
+        runOnUiThread {
+            if (serviceConnected) screen.setAudioReady(ready)
         }
     }
 
@@ -491,7 +497,10 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
     private fun refreshOptionalPermissionPresentation() {
         val missing = PermissionPolicy.optionalPermissions(Build.VERSION.SDK_INT).filterNot(::hasPermission)
         screen.setOptionalPermissionState(
-            bluetoothPermissionMissing = missing.contains(Manifest.permission.BLUETOOTH_CONNECT),
+            bluetoothPermissionMissing = !PermissionPolicy.canBootstrap(
+                Build.VERSION.SDK_INT,
+                ::hasPermission
+            ),
             notificationPermissionMissing = missing.contains(Manifest.permission.POST_NOTIFICATIONS)
         )
     }
@@ -517,7 +526,7 @@ internal class MainActivity : ComponentActivity(), IntercomService.Listener {
         }
         when (startPrecondition(canStart, wifiAvailable)) {
             StartPrecondition.MISSING_CORE_PERMISSION -> {
-                screen.setPermissionStatus("启动对讲需要录音和电话状态权限")
+                screen.setPermissionStatus("启动对讲需要录音、电话状态和蓝牙权限")
                 requestCorePermissions()
                 return false
             }

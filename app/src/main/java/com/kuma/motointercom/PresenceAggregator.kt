@@ -7,7 +7,10 @@ internal data class DiscoveryIdentityClaim(
     val sourceSessionId: RuntimeSessionId?,
     val nickname: String,
     val deviceName: String,
-    val protocolVersion: Int
+    val protocolVersion: Int,
+    val platform: PeerPlatform = PeerPlatform.UNKNOWN,
+    val capabilities: Set<String> = emptySet(),
+    val networkRole: BootstrapNetworkRole = BootstrapNetworkRole.EITHER
 ) {
     init {
         require(protocolVersion >= 0) { "Protocol version must not be negative" }
@@ -48,7 +51,10 @@ internal data class RiderPresence(
     val protocolVersion: Int,
     val lastSeenElapsedRealtimeMs: Long,
     val candidates: List<PresenceTransportCandidate>,
-    val pairing: PairingRecord?
+    val pairing: PairingRecord?,
+    val platform: PeerPlatform = PeerPlatform.UNKNOWN,
+    val capabilities: Set<String> = emptySet(),
+    val networkRole: BootstrapNetworkRole = BootstrapNetworkRole.EITHER
 ) {
     val isPaired: Boolean
         get() = pairing != null
@@ -277,7 +283,18 @@ internal class PresenceAggregator(
                 }.sortedWith(
                     compareBy<PresenceTransportCandidate>({ it.transport.ordinal }, { it.endpointId })
                 ),
-                pairing = pairing
+                pairing = pairing,
+                platform = group.asSequence()
+                    .map { it.candidate.identity.platform }
+                    .firstOrNull { it != PeerPlatform.UNKNOWN }
+                    ?: PeerPlatform.UNKNOWN,
+                capabilities = group.asSequence()
+                    .flatMap { it.candidate.identity.capabilities.asSequence() }
+                    .toSet(),
+                networkRole = group.asSequence()
+                    .map { it.candidate.identity.networkRole }
+                    .firstOrNull { it != BootstrapNetworkRole.EITHER }
+                    ?: BootstrapNetworkRole.EITHER
             )
         }.sortedWith(
             compareByDescending<RiderPresence>(RiderPresence::isPreferred)

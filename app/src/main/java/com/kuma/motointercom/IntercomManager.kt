@@ -18,6 +18,8 @@ internal class IntercomManager(
     private val webRtcRole: WebRtcRole,
     private val onIntercomDisconnected: (IOException) -> Unit,
     private val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
+    private val onRemoteAudioTrack: () -> Unit = {},
+    private val onRemoteAudioFrameReceived: () -> Unit = {},
     private val onAudioLevelChanged: (Float) -> Unit = {},
     private val onError: (Throwable) -> Unit = {},
     private val isSessionCurrent: () -> Boolean
@@ -40,6 +42,8 @@ internal class IntercomManager(
                     onLocalSdpGenerated = ::sendLocalSdp,
                     onLocalIceCandidateGenerated = ::sendLocalIceCandidate,
                     onConnectionStateChanged = onConnectionStateChanged,
+                    onRemoteAudioTrack = { onRemoteAudioTrack() },
+                    onRemoteAudioFrameReceived = { onRemoteAudioFrameReceived() },
                     onAudioLevelChanged = onAudioLevelChanged,
                     onError = ::onMediaFailure,
                     isSessionCurrent = { !closed.get() && isSessionCurrent() }

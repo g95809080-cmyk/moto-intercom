@@ -107,7 +107,11 @@ internal fun homePresentation(
     val waitingForAudio = state is IntercomState.Connected && !audioReady
     return HomePresentation(
         primaryText = if (waitingForAudio) "正在等待音频就绪" else state.primaryText(),
-        detailText = if (waitingForAudio) "等待远端首帧与本地音频路由确认" else state.detailText(),
+        detailText = if (waitingForAudio) {
+            "等待远端首帧与本地音频路由确认"
+        } else {
+            state.detailText()
+        },
         primaryAction = primaryAction,
         primaryActionLabel = state.primaryActionLabel(),
         primaryActionEnabled = primaryEnabled,
@@ -486,7 +490,7 @@ internal const val BLUETOOTH_DISCONNECTED_TEXT = "未连接"
 internal const val TOGGLE_DEBOUNCE_MS = 2_000L
 internal const val BLUETOOTH_PERMISSION_UNAVAILABLE = "蓝牙状态不可用"
 internal const val OPTIONAL_PERMISSION_BLUETOOTH_NOTICE =
-    "蓝牙权限未授予；蓝牙状态不可用，对讲仍可启动"
+    "蓝牙权限未授予；无法自动发现跨平台设备，请先允许蓝牙权限"
 internal const val OPTIONAL_PERMISSION_NOTIFICATION_NOTICE =
     "通知权限未授予；不影响对讲启动"
 

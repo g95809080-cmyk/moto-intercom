@@ -4,7 +4,9 @@ import android.Manifest
 import android.os.SystemClock
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -12,7 +14,9 @@ import android.util.Log
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
+import org.webrtc.AudioTrackSink
 import org.webrtc.DataChannel
+import org.webrtc.ExternalAudioProcessingFactory
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
@@ -39,6 +43,7 @@ internal data class RiderMediaSessionCallbacks(
     val onLocalIceCandidateGenerated: (candidateJson: String) -> Unit,
     val onConnectionStateChanged: (PeerConnection.PeerConnectionState) -> Unit = {},
     val onRemoteAudioTrack: (AudioTrack) -> Unit = {},
+    val onRemoteAudioFrameReceived: () -> Unit = {},
     val onAudioLevelChanged: (Float) -> Unit = {},
     val onError: (Throwable) -> Unit = {},
     val isSessionCurrent: () -> Boolean
@@ -54,6 +59,7 @@ internal interface RiderMediaSession : Closeable {
 internal interface RiderMediaEngine : Closeable {
     fun updateAudioControls(controls: VersionedAudioControls)
     fun openSession(callbacks: RiderMediaSessionCallbacks): RiderMediaSession
+    fun onAudioRouteChanged() = Unit
     fun suspendAudio() = Unit
     fun resumeAudio() = Unit
 }
@@ -66,6 +72,26 @@ internal fun runAllCleanupSteps(vararg steps: () -> Unit) {
         }
     }
     failure?.let { throw it }
+}
+
+internal fun runAudioPlatformCleanup(
+    stopAudio: () -> Unit,
+    closeExternalProcessor: () -> Unit,
+    disposeTrack: () -> Unit,
+    disposeSource: () -> Unit,
+    disposeFactory: () -> Unit,
+    destroyExternalProcessorFactory: () -> Unit,
+    releaseAudioDevice: () -> Unit
+) {
+    runAllCleanupSteps(
+        stopAudio,
+        closeExternalProcessor,
+        disposeTrack,
+        disposeSource,
+        disposeFactory,
+        destroyExternalProcessorFactory,
+        releaseAudioDevice
+    )
 }
 
 /**
@@ -83,6 +109,8 @@ internal class RiderAudioEngine(
         revision = 0,
         settings = AudioControlSettings()
     ),
+    private val noiseReductionConfig: AudioNoiseReductionConfig =
+        AudioNoiseReductionConfig.baseline(),
     private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
 ) : RiderMediaEngine {
 
@@ -92,6 +120,10 @@ internal class RiderAudioEngine(
 
     private var audioDeviceModule: JavaAudioDeviceModule? = null
     private var factory: PeerConnectionFactory? = null
+    private var externalAudioProcessingFactory: ExternalAudioProcessingFactory? = null
+    private var externalCaptureProcessor: ExternalAudioProcessingFactory.AudioProcessing? = null
+    private var externalProcessorGuard: AudioNoiseExternalProcessorGuard? = null
+    private var noiseDiagnostics: AudioNoiseDiagnostics? = null
     private var peerConnection: PeerConnection? = null
     private var audioSource: AudioSource? = null
     private var localAudioTrack: AudioTrack? = null
@@ -99,6 +131,17 @@ internal class RiderAudioEngine(
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val closed = AtomicBoolean(false)
+    private val noiseDiagnosticsLogRunnable = object : Runnable {
+        override fun run() {
+            if (closed.get() || engineState == EngineState.FAILED || engineState == EngineState.CLOSED) {
+                return
+            }
+            noiseDiagnostics?.snapshot()?.let { snapshot ->
+                Log.i(TAG, snapshot.toLogLine())
+            }
+            mainHandler.postDelayed(this, AUDIO_DIAGNOSTIC_LOG_INTERVAL_MS)
+        }
+    }
     private val audioControlLock = Any()
     private var versionedAudioControls = initialAudioControls.normalized()
     private var audioControls = versionedAudioControls.settings
@@ -108,7 +151,7 @@ internal class RiderAudioEngine(
     )
     private var gateState = voxGate.currentState()
     private var lastPublishedVoxSnapshot: Pair<VersionedAudioControls, VoxRuntimeState>? = null
-    private var engineState = EngineState.INITIALIZING
+    @Volatile private var engineState = EngineState.INITIALIZING
     @Volatile private var audioSuspended = false
     private var lastAudioLevelAt = 0L
     private var lastVoxLogAt = 0L
@@ -173,6 +216,25 @@ internal class RiderAudioEngine(
             createLocalAudioTrack()
             engineState = EngineState.READY
         } catch (t: Throwable) {
+            val experimentalModeActive = noiseDiagnostics?.snapshot()?.activeMode
+                ?.takeUnless { it == AudioNoiseReductionMode.BASELINE }
+            if (experimentalModeActive != null) {
+                runCatching(::disposePlatformResources).exceptionOrNull()?.let(t::addSuppressed)
+                noiseDiagnostics?.recordFallback(
+                    "experimental_init_failed:${t::class.java.simpleName}"
+                )
+                try {
+                    createAudioPlatform(AudioNoiseReductionMode.BASELINE)
+                    createLocalAudioTrack()
+                    engineState = EngineState.READY
+                    Log.w(TAG, "实验音频初始化失败，已重建 BASELINE", t)
+                    return
+                } catch (baselineFailure: Throwable) {
+                    t.addSuppressed(baselineFailure)
+                    runCatching(::disposePlatformResources).exceptionOrNull()
+                        ?.let(t::addSuppressed)
+                }
+            }
             engineState = EngineState.FAILED
             runCatching(::disposePlatformResources).exceptionOrNull()?.let(t::addSuppressed)
             postEngineError(t)
@@ -201,7 +263,9 @@ internal class RiderAudioEngine(
             session.state = MediaSessionState.READY
         } catch (t: Throwable) {
             session.state = MediaSessionState.FAILED
-            runCatching(::disposeMediaSessionResources).exceptionOrNull()?.let(t::addSuppressed)
+            runCatching { disposeMediaSessionResources(session) }
+                .exceptionOrNull()
+                ?.let(t::addSuppressed)
             session.postError(t)
         }
     }
@@ -260,11 +324,12 @@ internal class RiderAudioEngine(
             activeSession.also { activeSession = null }
         }
         session?.markClosed()
+        mainHandler.removeCallbacks(noiseDiagnosticsLogRunnable)
         runRtc(allowClosed = true, onFailure = ::postEngineError) {
             try {
                 engineState = EngineState.CLOSED
                 runAllCleanupSteps(
-                    ::disposeMediaSessionResources,
+                    { disposeMediaSessionResources(session) },
                     ::disposePlatformResources
                 )
             } catch (t: Throwable) {
@@ -275,13 +340,24 @@ internal class RiderAudioEngine(
         }
     }
 
-    private fun disposeMediaSessionResources() {
+    private fun disposeMediaSessionResources(session: MediaSession? = synchronized(sessionLock) {
+        activeSession
+    }) {
+        session?.let(::removeRemoteAudioSink)
         val peer = peerConnection
         peerConnection = null
         localAudioSender = null
         remoteDescriptionSet = false
         pendingRemoteCandidates.clear()
-        peer?.dispose()
+        peer?.let { connection ->
+            runAllCleanupSteps(
+                {
+                    connection.setAudioRecording(false)
+                    connection.setAudioPlayout(false)
+                },
+                connection::dispose
+            )
+        }
     }
 
     private fun disposePlatformResources() {
@@ -289,22 +365,28 @@ internal class RiderAudioEngine(
         val source = audioSource
         val connectionFactory = factory
         val deviceModule = audioDeviceModule
+        val externalFactory = externalAudioProcessingFactory
+        val externalGuard = externalProcessorGuard
         localAudioTrack = null
         audioSource = null
         factory = null
         audioDeviceModule = null
+        externalAudioProcessingFactory = null
+        externalCaptureProcessor = null
+        externalProcessorGuard = null
 
-        var failure: Throwable? = null
-        fun dispose(action: () -> Unit) {
-            runCatching(action).exceptionOrNull()?.let {
-                if (failure == null) failure = it else failure?.addSuppressed(it)
-            }
-        }
-        track?.let { dispose(it::dispose) }
-        source?.let { dispose(it::dispose) }
-        connectionFactory?.let { dispose(it::dispose) }
-        deviceModule?.let { dispose(it::release) }
-        failure?.let { throw it }
+        runAudioPlatformCleanup(
+            stopAudio = {
+                deviceModule?.setMicrophoneMute(true)
+                deviceModule?.setSpeakerMute(true)
+            },
+            closeExternalProcessor = { externalGuard?.close() },
+            disposeTrack = { track?.dispose() },
+            disposeSource = { source?.dispose() },
+            disposeFactory = { connectionFactory?.dispose() },
+            destroyExternalProcessorFactory = { externalFactory?.destroy() },
+            releaseAudioDevice = { deviceModule?.release() }
+        )
     }
 
     private fun requireEngineReady() {
@@ -349,6 +431,44 @@ internal class RiderAudioEngine(
         NetworkMonitorAutoDetect.setIncludeWifiDirect(true)
         initWebRtcOnce(appContext)
 
+        val audioManager = appContext.getSystemService(AudioManager::class.java)
+            ?: error("AudioManager 不可用")
+        val isDebuggableApp =
+            (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val requestedActiveMode = noiseReductionConfig.effectiveMode(isDebuggableApp)
+        val initialRouteProbe = AudioBluetoothProfileDetector.probe(audioManager)
+        val hardwareAecAvailable = runCatching {
+            JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported()
+        }.getOrDefault(false)
+        val hardwareNsAvailable = runCatching {
+            JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported()
+        }.getOrDefault(false)
+        noiseDiagnostics = AudioNoiseDiagnostics(
+            deviceModel = Build.MODEL,
+            requestedMode = noiseReductionConfig.requestedMode,
+            initialActiveMode = requestedActiveMode,
+            initialBluetoothProfile = initialRouteProbe.availableProfile,
+            initialActiveBluetoothProfile = initialRouteProbe.activeProfile,
+            initialActiveRouteDeviceType = initialRouteProbe.activeDeviceType,
+            initialActiveRouteDeviceName = initialRouteProbe.activeDeviceName,
+            hardwareAecAvailable = hardwareAecAvailable,
+            hardwareNsAvailable = hardwareNsAvailable,
+            initialHardwareAecRequested = true,
+            initialHardwareNsRequested = requestedActiveMode !=
+                AudioNoiseReductionMode.WEBRTC_SOFTWARE_NS
+        )
+        Log.i(TAG, "audio_noise_init ${noiseDiagnostics?.snapshot()?.toLogLine()}")
+        mainHandler.removeCallbacks(noiseDiagnosticsLogRunnable)
+        mainHandler.postDelayed(noiseDiagnosticsLogRunnable, AUDIO_DIAGNOSTIC_LOG_INTERVAL_MS)
+
+        createAudioPlatform(requestedActiveMode)
+    }
+
+    private fun createAudioPlatform(activeMode: AudioNoiseReductionMode) {
+        noiseDiagnostics?.updateHardwareRequests(
+            aecRequested = true,
+            nsRequested = activeMode != AudioNoiseReductionMode.WEBRTC_SOFTWARE_NS
+        )
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
             .setAudioAttributes(
                 android.media.AudioAttributes.Builder()
@@ -358,21 +478,43 @@ internal class RiderAudioEngine(
             )
             // 低延迟优先；耳机/头盔链路里这比高保真更重要。
             .setUseLowLatency(true)
-            // 采集端 PCM 钩子：在 WebRTC 编码前做 VOX 门限判断。
-            // 注意这里只做 RMS 计算和状态翻转，避免在音频线程里执行重活。
+            // SamplesReadyCallback 只做诊断和 VOX 观测；它不是发送前的 PCM 修改入口。
             .setSamplesReadyCallback(JavaAudioDeviceModule.SamplesReadyCallback { samples ->
                 handleAudioSamplesForVox(samples)
             })
-            // 优先启用设备硬件 AEC/NS；不支持时 WebRTC 会回退到软件处理。
+            // 软件 NS A/B 时关闭硬件 NS；其他模式保持当前硬件优先基线。
             .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
+            .setUseHardwareNoiseSuppressor(activeMode != AudioNoiseReductionMode.WEBRTC_SOFTWARE_NS)
             .setUseStereoInput(false)
             .setUseStereoOutput(false)
             .createAudioDeviceModule()
 
-        factory = PeerConnectionFactory.builder()
-            .setAudioDeviceModule(audioDeviceModule)
-            .createPeerConnectionFactory()
+        val createBaseFactory = {
+            PeerConnectionFactory.builder()
+                .setAudioDeviceModule(audioDeviceModule ?: error("AudioDeviceModule 尚未初始化"))
+        }
+        if (activeMode == AudioNoiseReductionMode.EXTERNAL_CAPTURE_POST_PROCESSING) {
+            var candidateFactory: ExternalAudioProcessingFactory? = null
+            try {
+                val createdFactory = ExternalAudioProcessingFactory()
+                candidateFactory = createdFactory
+                val candidateProcessor = PassThroughCaptureProcessor()
+                createdFactory.setCapturePostProcessing(candidateProcessor)
+                val createdPeerConnectionFactory = createBaseFactory()
+                    .setAudioProcessingFactory(createdFactory)
+                    .createPeerConnectionFactory()
+                factory = createdPeerConnectionFactory
+                externalAudioProcessingFactory = createdFactory
+                externalCaptureProcessor = candidateProcessor
+                Log.i(TAG, "audio_noise_external_capture_post_processing=enabled")
+            } catch (t: Throwable) {
+                runCatching { candidateFactory?.destroy() }
+                externalProcessorGuard = null
+                throw t
+            }
+        } else {
+            factory = createBaseFactory().createPeerConnectionFactory()
+        }
     }
 
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
@@ -438,21 +580,82 @@ internal class RiderAudioEngine(
     }
 
     private fun handleAudioSamplesForVox(samples: JavaAudioDeviceModule.AudioSamples) {
-        val energy = calculateApproxDb(samples) ?: return
-        val now = SystemClock.elapsedRealtime()
-        val result = synchronized(audioControlLock) {
-            val decision = voxGate.update(energy, now)
-            gateState = decision.state
-            VoxSampleResult(
-                decision = decision,
-                controls = versionedAudioControls,
-                state = effectiveVoxRuntimeState(audioControls, decision.state),
-                trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
+        val startedAtNanos = System.nanoTime()
+        try {
+            val energy = calculateApproxDb(samples) ?: return
+            val now = SystemClock.elapsedRealtime()
+            val result = synchronized(audioControlLock) {
+                val decision = voxGate.update(energy, now)
+                gateState = decision.state
+                VoxSampleResult(
+                    decision = decision,
+                    controls = versionedAudioControls,
+                    state = effectiveVoxRuntimeState(audioControls, decision.state),
+                    trackVolume = effectiveTrackVolume(audioControls, decision.trackVolume)
+                )
+            }
+            val decision = result.decision
+            if (decision.stateChanged) {
+                applyCurrentTrackVolume()
+                logVoxStateChange(decision, energy, result.trackVolume)
+            }
+            publishCurrentVoxState()
+            postAudioLevel(energy)
+            logVoxSnapshot(now, energy, result)
+        } finally {
+            recordAudioNoiseDiagnostics(samples, System.nanoTime() - startedAtNanos)
+        }
+    }
+
+    private fun recordAudioNoiseDiagnostics(
+        samples: JavaAudioDeviceModule.AudioSamples,
+        processingNanos: Long
+    ) {
+        val diagnostics = noiseDiagnostics ?: return
+        diagnostics.recordAudioFrame(
+            sampleRate = samples.sampleRate,
+            channelCount = samples.channelCount,
+            audioFormat = samples.audioFormat,
+            frameBytes = samples.data.size,
+            processingNanos = processingNanos
+        )
+    }
+
+    override fun onAudioRouteChanged() {
+        val diagnostics = noiseDiagnostics ?: return
+        appContext.getSystemService(AudioManager::class.java)?.let { audioManager ->
+            diagnostics.updateActiveRoute(AudioBluetoothProfileDetector.probe(audioManager))
+        }
+    }
+
+    private fun logVoxSnapshot(now: Long, energy: Double, result: VoxSampleResult) {
+        if (now - lastVoxLogAt < VOX_LOG_INTERVAL_MS) return
+        lastVoxLogAt = now
+        val decision = result.decision
+        runRtc {
+            Log.d(
+                TAG,
+                String.format(
+                    Locale.US,
+                    "VOX enabled=%s state=%s energy=%.1f noise=%.1f open=%.1f close=%.1f volume=%.1f",
+                    result.controls.settings.voxEnabled,
+                    result.state,
+                    energy,
+                    decision.noiseFloor,
+                    decision.openThreshold,
+                    decision.closeThreshold,
+                    result.trackVolume
+                )
             )
         }
-        val decision = result.decision
-        if (decision.stateChanged) {
-            applyCurrentTrackVolume()
+    }
+
+    private fun logVoxStateChange(
+        decision: VoxGate.Decision,
+        energy: Double,
+        trackVolume: Double
+    ) {
+        runRtc {
             Log.i(
                 TAG,
                 String.format(
@@ -463,33 +666,10 @@ internal class RiderAudioEngine(
                     decision.noiseFloor,
                     decision.openThreshold,
                     decision.closeThreshold,
-                    result.trackVolume
+                    trackVolume
                 )
             )
         }
-        publishCurrentVoxState()
-        postAudioLevel(energy)
-        logVoxSnapshot(now, energy, result)
-    }
-
-    private fun logVoxSnapshot(now: Long, energy: Double, result: VoxSampleResult) {
-        if (now - lastVoxLogAt < VOX_LOG_INTERVAL_MS) return
-        lastVoxLogAt = now
-        val decision = result.decision
-        Log.d(
-            TAG,
-            String.format(
-                Locale.US,
-                "VOX enabled=%s state=%s energy=%.1f noise=%.1f open=%.1f close=%.1f volume=%.1f",
-                result.controls.settings.voxEnabled,
-                result.state,
-                energy,
-                decision.noiseFloor,
-                decision.openThreshold,
-                decision.closeThreshold,
-                result.trackVolume
-            )
-        )
     }
 
     private fun currentAudioControlApplicationLocked(): AudioControlApplication =
@@ -723,8 +903,44 @@ internal class RiderAudioEngine(
     private fun enableRemoteTrack(session: MediaSession, track: MediaStreamTrack?) {
         if (track is AudioTrack) {
             track.setEnabled(true)
-            postSessionMain(session) { session.callbacks.onRemoteAudioTrack(track) }
+            if (session.remoteAudioTrackAttached.compareAndSet(false, true)) {
+                val sink = remoteAudioSink(session)
+                runCatching { track.addSink(sink) }.getOrElse {
+                    session.remoteAudioTrackAttached.set(false)
+                    throw it
+                }
+                session.remoteAudioTrack = track
+                session.remoteAudioSink = sink
+                postSessionMain(session) { session.callbacks.onRemoteAudioTrack(track) }
+            }
         }
+    }
+
+    private fun remoteAudioSink(session: MediaSession): AudioTrackSink =
+        object : AudioTrackSink {
+            override fun onData(
+                audioData: java.nio.ByteBuffer,
+                bitsPerSample: Int,
+                sampleRate: Int,
+                numberOfChannels: Int,
+                numberOfFrames: Int,
+                absoluteCaptureTimestampMs: Long
+            ) {
+                if (
+                    numberOfFrames <= 0 ||
+                    session.closed.get() ||
+                    !session.remoteAudioFrameReceived.compareAndSet(false, true)
+                ) return
+                postSessionMain(session) { session.callbacks.onRemoteAudioFrameReceived() }
+            }
+        }
+
+    private fun removeRemoteAudioSink(session: MediaSession) {
+        val track = session.remoteAudioTrack ?: return
+        val sink = session.remoteAudioSink ?: return
+        runCatching { track.removeSink(sink) }
+        session.remoteAudioTrack = null
+        session.remoteAudioSink = null
     }
 
     private fun reportSdpFailure(session: MediaSession, message: String) {
@@ -873,10 +1089,62 @@ internal class RiderAudioEngine(
         )
     }
 
+    /**
+     * Debug-only pass-through processor used to prove the AAR capture post-processing hook.
+     * It intentionally does not mutate the buffer or perform any DSP.
+     */
+    private inner class PassThroughCaptureProcessor :
+        ExternalAudioProcessingFactory.AudioProcessing {
+        private val guard = AudioNoiseExternalProcessorGuard(
+            onFrameFinished = { processingNanos ->
+                val keepEnabled = noiseDiagnostics?.recordExternalProcessorFrame(processingNanos)
+                    ?: true
+                if (!keepEnabled) {
+                    Log.w(TAG, "audio_noise_external_processor_overrun; bypassing experimental processor")
+                }
+                keepEnabled
+            },
+            onProcessingFailure = { failure ->
+                noiseDiagnostics?.recordFallback(
+                    "external_processor_failed:${failure::class.java.simpleName}"
+                )
+                Log.w(TAG, "audio_noise_external_processor_failed; bypassing experimental processor", failure)
+            }
+        )
+
+        init {
+            externalProcessorGuard = guard
+        }
+
+        override fun initialize(sampleRateHz: Int, numChannels: Int) {
+            Log.i(
+                TAG,
+                "audio_noise_external_processor_init sampleRate=$sampleRateHz " +
+                    "channels=$numChannels"
+            )
+        }
+
+        override fun reset(newRate: Int) {
+            Log.i(TAG, "audio_noise_external_processor_reset sampleRate=$newRate")
+        }
+
+        override fun process(
+            numBands: Int,
+            numFrames: Int,
+            buffer: java.nio.ByteBuffer
+        ) {
+            guard.process(numBands, numFrames, buffer)
+        }
+    }
+
     private inner class MediaSession(
         val callbacks: RiderMediaSessionCallbacks
     ) : RiderMediaSession {
         val closed = AtomicBoolean(false)
+        val remoteAudioTrackAttached = AtomicBoolean(false)
+        val remoteAudioFrameReceived = AtomicBoolean(false)
+        var remoteAudioTrack: AudioTrack? = null
+        var remoteAudioSink: AudioTrackSink? = null
         @Volatile var state = MediaSessionState.INITIALIZING
 
         override fun createOffer() = this@RiderAudioEngine.createOffer(this)
@@ -903,7 +1171,7 @@ internal class RiderAudioEngine(
             }
             if (shouldDispose) {
                 runRtc(allowClosed = true, onFailure = ::postEngineError) {
-                    disposeMediaSessionResources()
+                    disposeMediaSessionResources(this)
                 }
             }
         }
@@ -969,6 +1237,7 @@ internal class RiderAudioEngine(
         private const val AUDIO_TRACK_ID = "rider_audio_track"
         private const val OPUS_BITRATE_BPS = 32_000
         private const val VOX_LOG_INTERVAL_MS = 1_000L
+        private const val AUDIO_DIAGNOSTIC_LOG_INTERVAL_MS = 5_000L
         private const val PCM_DBFS_TO_APPROX_SPL_OFFSET = 90.0
         private const val AUDIO_LEVEL_INTERVAL_MS = 80L
         private const val OPUS_FMTP =

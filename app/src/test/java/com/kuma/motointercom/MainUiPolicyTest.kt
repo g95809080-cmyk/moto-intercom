@@ -498,6 +498,31 @@ class MainUiPolicyTest {
     }
 
     @Test
+    fun connectedUiWaitsForAudioReadyBeforeShowingSuccess() {
+        val presentation = homePresentation(
+            state = IntercomState.Connected(
+                attempt(),
+                PeerIdentity(
+                    deviceId = "peer-a",
+                    nickname = "Road Captain",
+                    runtimeSessionId = RuntimeSessionId("peer-runtime"),
+                    isDeviceIdVerified = true
+                ),
+                connectedAt = 1L,
+                transport = Transport.LAN
+            ),
+            canStart = true,
+            audioSourceText = "扬声器",
+            bluetoothActive = false,
+            audioReady = false
+        )
+
+        assertEquals("正在等待音频就绪", presentation.primaryText)
+        assertEquals("等待远端首帧与本地音频路由确认", presentation.detailText)
+        assertEquals("媒体已连接，待音频", presentation.webRtcText)
+    }
+
+    @Test
     fun homeDoesNotPromoteDeviceNameToRiderIdentity() {
         val peer = PeerIdentity(
             deviceId = "peer-a",

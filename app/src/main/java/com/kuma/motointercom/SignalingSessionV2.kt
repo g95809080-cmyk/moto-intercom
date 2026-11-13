@@ -143,7 +143,8 @@ internal class SignalingSessionV2 private constructor(
             localDeviceName: String,
             originatingAttempt: ConnectionAttempt?,
             expectedRemoteTargetLock: TargetLock? = originatingAttempt?.targetLock,
-            monotonicClock: MonotonicClock
+            monotonicClock: MonotonicClock,
+            localCapabilities: Set<String> = emptySet()
         ): SignalingSessionV2 {
             val previousTimeout = socket.soTimeout
             try {
@@ -209,6 +210,7 @@ internal class SignalingSessionV2 private constructor(
                         localSession = localRuntimeSessionId,
                         localNickname = localNickname,
                         localDeviceName = localDeviceName,
+                        localCapabilities = localCapabilities,
                         expectedRemoteTargetLock = expectedRemoteTargetLock,
                         beforeHelloRead = beforeHelloRead
                     )
@@ -222,6 +224,7 @@ internal class SignalingSessionV2 private constructor(
                         localSession = localRuntimeSessionId,
                         localNickname = localNickname,
                         localDeviceName = localDeviceName,
+                        localCapabilities = localCapabilities,
                         attempt = originatingAttempt,
                         beforeHelloRead = beforeHelloRead
                     )
@@ -265,6 +268,7 @@ internal class SignalingSessionV2 private constructor(
             localSession: RuntimeSessionId,
             localNickname: String,
             localDeviceName: String,
+            localCapabilities: Set<String>,
             attempt: ConnectionAttempt,
             beforeHelloRead: () -> Unit
         ): HelloExchangeResult {
@@ -289,7 +293,8 @@ internal class SignalingSessionV2 private constructor(
                 targetDevice = expectedRemoteDevice,
                 localSession = localSession,
                 nickname = localNickname,
-                deviceName = localDeviceName
+                deviceName = localDeviceName,
+                capabilities = localCapabilities
             )
             localPinned.requireOutgoing(requesterHello)
             writeHello(codec, output, phaseMachine, requesterHello)
@@ -315,6 +320,7 @@ internal class SignalingSessionV2 private constructor(
                     localSession = localSession,
                     localNickname = localNickname,
                     localDeviceName = localDeviceName,
+                    localCapabilities = localCapabilities,
                     localKey = localKey,
                     localPinned = localPinned,
                     remoteRequester = firstRemote,
@@ -332,6 +338,7 @@ internal class SignalingSessionV2 private constructor(
             localSession: RuntimeSessionId,
             localNickname: String,
             localDeviceName: String,
+            localCapabilities: Set<String>,
             localKey: WireRequestKey,
             localPinned: PinnedChannelIdentity,
             remoteRequester: DecodedHello,
@@ -367,7 +374,8 @@ internal class SignalingSessionV2 private constructor(
                 targetDevice = remoteKey.requesterDeviceId,
                 localSession = localSession,
                 nickname = localNickname,
-                deviceName = localDeviceName
+                deviceName = localDeviceName,
+                capabilities = localCapabilities
             )
             remotePinned.requireOutgoing(responderHello)
             writeHello(codec, output, phaseMachine, responderHello)
@@ -387,6 +395,7 @@ internal class SignalingSessionV2 private constructor(
             localSession: RuntimeSessionId,
             localNickname: String,
             localDeviceName: String,
+            localCapabilities: Set<String>,
             expectedRemoteTargetLock: TargetLock?,
             beforeHelloRead: () -> Unit
         ): HelloExchangeResult {
@@ -412,7 +421,8 @@ internal class SignalingSessionV2 private constructor(
                 targetDevice = requestKey.requesterDeviceId,
                 localSession = localSession,
                 nickname = localNickname,
-                deviceName = localDeviceName
+                deviceName = localDeviceName,
+                capabilities = localCapabilities
             )
             pinned.requireOutgoing(responderHello)
             writeHello(codec, output, phaseMachine, responderHello)
@@ -465,7 +475,8 @@ internal class SignalingSessionV2 private constructor(
             targetDevice: DeviceId,
             localSession: RuntimeSessionId,
             nickname: String,
-            deviceName: String
+            deviceName: String,
+            capabilities: Set<String>
         ) = SignalingEnvelopeV2(
             attemptId = attemptId,
             sourceDeviceId = localDevice,
@@ -475,7 +486,7 @@ internal class SignalingSessionV2 private constructor(
                 requestRole = requestRole,
                 nickname = nickname,
                 deviceName = deviceName,
-                capabilities = emptySet()
+                capabilities = capabilities
             )
         )
 

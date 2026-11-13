@@ -8,12 +8,48 @@ internal data class LanRiderDevice(
     val deviceName: String,
     val protocolVersion: Int,
     val ip: String,
-    val port: Int
+    val port: Int,
+    val platform: PeerPlatform = PeerPlatform.UNKNOWN,
+    val capabilities: Set<String> = emptySet(),
+    val networkRole: BootstrapNetworkRole = BootstrapNetworkRole.EITHER
 ) {
     fun matches(targetLock: TargetLock): Boolean =
         deviceId == targetLock.targetDeviceId &&
             sessionId == targetLock.expectedRemoteSessionId
 }
+
+internal fun lanDeviceFromBleEndpointOrNull(
+    message: BleBootstrapMessage
+): LanRiderDevice? = runCatching {
+    require(message.fields["app"].orEmpty().ifBlank { CrossPlatformCapabilityAdvertisement.APP_ID } ==
+        CrossPlatformCapabilityAdvertisement.APP_ID)
+    val deviceId = message.fields.getValue("deviceId")
+    val sessionId = RuntimeSessionId(message.fields.getValue("sessionId"))
+    DeviceId.parse(deviceId)
+    requireCanonicalUuid(sessionId.value, "sessionId")
+    val hostAddress = message.fields.getValue("hostAddress").trim()
+    require(hostAddress.isNotBlank())
+    require(java.net.InetAddress.getByName(hostAddress).isSiteLocalAddress)
+    val protocolVersion = message.fields["protocolVersion"]?.toIntOrNull()
+        ?: message.protocolVersion
+    require(protocolVersion == message.protocolVersion)
+    val port = message.fields["tcpPort"]?.toIntOrNull()
+        ?: CrossPlatformCapabilityAdvertisement.DEFAULT_TCP_PORT
+    require(port in 1..65535)
+    LanRiderDevice(
+        discoveryEndpointId = "ble:${deviceId}:${sessionId.value}",
+        deviceId = deviceId,
+        sessionId = sessionId,
+        name = message.fields["nickname"].orEmpty(),
+        deviceName = message.fields["deviceName"].orEmpty(),
+        protocolVersion = protocolVersion,
+        ip = hostAddress,
+        port = port,
+        platform = PeerPlatform.parse(message.fields["platform"].orEmpty()),
+        capabilities = message.capabilities,
+        networkRole = BootstrapNetworkRole.parse(message.fields["networkRole"].orEmpty())
+    )
+}.getOrNull()
 
 internal fun ConnectionAttempt?.acceptsLanPreflightDevice(remoteDeviceId: String?): Boolean =
     this != null && Transport.LAN in channelPlan && targetDeviceId == remoteDeviceId

@@ -83,6 +83,27 @@ class LanDiscoveryDeviceRegistryTest {
     }
 
     @Test
+    fun udpHelloCarriesCrossPlatformCapabilitiesOutsideStrictHello() {
+        val device = lanBroadcastDeviceOrNull(
+            hello = hello().copy(
+                platform = PeerPlatform.IOS,
+                capabilities = setOf(MotoComCapability.LAN, MotoComCapability.WIFI_JOIN),
+                networkRole = BootstrapNetworkRole.JOINER
+            ),
+            sourceAddress = "192.168.1.45",
+            localIp = "192.168.1.44",
+            localDeviceId = LOCAL_ID
+        )
+
+        assertEquals(PeerPlatform.IOS, device?.platform)
+        assertEquals(
+            setOf(MotoComCapability.LAN, MotoComCapability.WIFI_JOIN),
+            device?.capabilities
+        )
+        assertEquals(BootstrapNetworkRole.JOINER, device?.networkRole)
+    }
+
+    @Test
     fun udpHelloRejectsLocalIncompleteOrInvalidEndpointClaims() {
         assertNull(
             lanBroadcastDeviceOrNull(

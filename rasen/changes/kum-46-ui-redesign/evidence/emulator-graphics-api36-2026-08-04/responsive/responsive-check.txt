@@ -1,0 +1,6 @@
+320dp-home.xml viewport=320x914dp scrollable=1 overflow=0 max-node-width=320dp
+360dp-font13-home.xml viewport=360x914dp scrollable=1 overflow=0 max-node-width=360dp
+360dp-home.xml viewport=360x914dp scrollable=1 overflow=0 max-node-width=360dp
+411dp-home.xml viewport=411x914dp scrollable=1 overflow=0 max-node-width=411dp
+600dp-home.xml viewport=600x914dp scrollable=1 overflow=0 max-node-width=600dp
+landscape-home.xml viewport=800x411dp scrollable=1 overflow=0 max-node-width=800dp

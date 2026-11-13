@@ -19,3 +19,5 @@ schema: spec-driven
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
 projectId: 0cbcde57-2968-49c0-a0d9-57cb6e72d654
+tools:
+  - codex
