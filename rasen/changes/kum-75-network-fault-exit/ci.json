@@ -1,0 +1,275 @@
+{
+  "reviewed_source_sha": "65c23200d81efb44258737ed1c22f9e4258e6151",
+  "actual_ci_head_sha": "2e6a9ff1e040431185c2202aed58d0fba6148e77",
+  "source_relation": "only_rasen_review_metadata_differs",
+  "changed_paths": [
+    "rasen/changes/kum-75-network-fault-exit/coverage.json",
+    "rasen/changes/kum-75-network-fault-exit/review.md",
+    "rasen/changes/kum-75-network-fault-exit/tasks.md"
+  ],
+  "ci": {
+    "conclusion": "success",
+    "headSha": "2e6a9ff1e040431185c2202aed58d0fba6148e77",
+    "jobs": [
+      {
+        "completedAt": "2026-10-09T12:22:03Z",
+        "conclusion": "success",
+        "databaseId": 113816359524,
+        "name": "Windows emulator fault-script regressions",
+        "startedAt": "2026-10-09T12:21:22Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-09T12:21:24Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-09T12:21:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:31Z",
+            "conclusion": "success",
+            "name": "Checkout source",
+            "number": 2,
+            "startedAt": "2026-10-09T12:21:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:59Z",
+            "conclusion": "success",
+            "name": "Check native ADB exit handling with mock commands",
+            "number": 3,
+            "startedAt": "2026-10-09T12:21:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:22:01Z",
+            "conclusion": "success",
+            "name": "Post Checkout source",
+            "number": 6,
+            "startedAt": "2026-10-09T12:21:59Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:22:01Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 7,
+            "startedAt": "2026-10-09T12:22:01Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37929472718/job/113816359524"
+      },
+      {
+        "completedAt": "2026-10-09T12:29:08Z",
+        "conclusion": "success",
+        "databaseId": 113816359722,
+        "name": "Test, lint, assemble, and test APK",
+        "startedAt": "2026-10-09T12:21:22Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-09T12:21:24Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-09T12:21:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:25Z",
+            "conclusion": "success",
+            "name": "Checkout source",
+            "number": 2,
+            "startedAt": "2026-10-09T12:21:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:25Z",
+            "conclusion": "success",
+            "name": "Set up JDK 17",
+            "number": 3,
+            "startedAt": "2026-10-09T12:21:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:27Z",
+            "conclusion": "success",
+            "name": "Set up Gradle",
+            "number": 4,
+            "startedAt": "2026-10-09T12:21:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:27Z",
+            "conclusion": "success",
+            "name": "Make Gradle wrapper executable",
+            "number": 5,
+            "startedAt": "2026-10-09T12:21:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:29:03Z",
+            "conclusion": "success",
+            "name": "Verify Android project",
+            "number": 6,
+            "startedAt": "2026-10-09T12:21:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:29:06Z",
+            "conclusion": "success",
+            "name": "Upload verification reports",
+            "number": 7,
+            "startedAt": "2026-10-09T12:29:03Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:29:06Z",
+            "conclusion": "success",
+            "name": "Post Set up Gradle",
+            "number": 12,
+            "startedAt": "2026-10-09T12:29:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:29:06Z",
+            "conclusion": "success",
+            "name": "Post Set up JDK 17",
+            "number": 13,
+            "startedAt": "2026-10-09T12:29:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:29:07Z",
+            "conclusion": "success",
+            "name": "Post Checkout source",
+            "number": 14,
+            "startedAt": "2026-10-09T12:29:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:29:07Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 15,
+            "startedAt": "2026-10-09T12:29:07Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37929472718/job/113816359722"
+      },
+      {
+        "completedAt": "2026-10-09T12:27:02Z",
+        "conclusion": "success",
+        "databaseId": 113816359943,
+        "name": "Android API 36 instrumentation tests",
+        "startedAt": "2026-10-09T12:21:22Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-09T12:21:26Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-09T12:21:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:27Z",
+            "conclusion": "success",
+            "name": "Checkout source",
+            "number": 2,
+            "startedAt": "2026-10-09T12:21:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:27Z",
+            "conclusion": "success",
+            "name": "Set up JDK 17",
+            "number": 3,
+            "startedAt": "2026-10-09T12:21:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:29Z",
+            "conclusion": "success",
+            "name": "Set up Gradle",
+            "number": 4,
+            "startedAt": "2026-10-09T12:21:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:29Z",
+            "conclusion": "success",
+            "name": "Make Gradle wrapper executable",
+            "number": 5,
+            "startedAt": "2026-10-09T12:21:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:21:29Z",
+            "conclusion": "success",
+            "name": "Enable KVM",
+            "number": 6,
+            "startedAt": "2026-10-09T12:21:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:26:56Z",
+            "conclusion": "success",
+            "name": "Run connected debug tests on API 36",
+            "number": 7,
+            "startedAt": "2026-10-09T12:21:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:26:58Z",
+            "conclusion": "success",
+            "name": "Upload instrumentation reports",
+            "number": 8,
+            "startedAt": "2026-10-09T12:26:56Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:26:58Z",
+            "conclusion": "success",
+            "name": "Post Set up Gradle",
+            "number": 14,
+            "startedAt": "2026-10-09T12:26:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:26:59Z",
+            "conclusion": "success",
+            "name": "Post Set up JDK 17",
+            "number": 15,
+            "startedAt": "2026-10-09T12:26:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:26:59Z",
+            "conclusion": "success",
+            "name": "Post Checkout source",
+            "number": 16,
+            "startedAt": "2026-10-09T12:26:59Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-09T12:26:59Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-10-09T12:26:59Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37929472718/job/113816359943"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/g95809080-cmyk/moto-intercom/actions/runs/37929472718"
+  }
+}

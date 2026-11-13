@@ -1,0 +1,4 @@
+- [x] 1. 原生命令逐条检查、Mode及既有设备保护
+- [x] 2. 原实现红回归与34种native mock进程绿回归
+- [x] 3. Windows CI接线、固定SHA架构/OCR审查和证据
+- [x] 4. 独立 Draft PR #48 与远端CI全部job成功；实机听音按用户要求deferred，非实机验收通过
