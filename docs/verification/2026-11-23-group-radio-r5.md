@@ -143,6 +143,18 @@ Next gate allowed
 
 公网测试房验证了同一席位续签、恢复时保留 RTC 用户 ID，撤销准入后旧会话续签返回 401。同一设备重新获批后取得新 RTC 用户 ID，旧会话仍返回 401，重放旧撤销回执也未影响新席位。测试房已解散，服务日志无错误事件。双机断网回切与实际通话听感仍待真机验证。
 
+## 11 月 25 日 preview.6 审查加固、版本归口与上线（versionCode 12）
+
+- **分支与固定来源**：独立分支 `codex/group-radio-r5`（Base `7041d3c461fe6e4530d94e3cc7d30c72f48c85c6`），功能 Source `0df6c1fa80b42a96cdfa7d2e2a7ea27732fc8fce`，预览版本身份升级为 `2.3.0-r5.preview.6+0df6c1f`（`groupPreviewVersionCode = 12`，高于 `betaVersionCode = 11` 及已装机历史 `code 10`）。
+- **修复与回归覆盖**：
+  - 控制面 `volc-openapi.mjs` 为请求头与响应体统一接入默认 `5000ms` 超时中断与 `64 KiB` 响应上限，防止上游挂起阻塞房间串行锁及全局 `sweep()`；`server.test.mjs` **37/37** 通过。
+  - 客户端 `GroupRuntime` 与 `GroupHybridRuntime` 补齐底层音频异步释放失败（`onDisposeFailed`）下的 `keepAlive` 与前台服务收尾，同时保持进程级 `GroupRuntimeOwnership` 安全锁定防止双路音频；`HttpGroupCloudClient` 兼容 API 23 校验 `Content-Length` 并限制响应体大小（成功 `8 MiB`、错误 `64 KiB`）。
+  - 主线单测 **105 套件 / 881 项**、群组预览单测 **40 套件 / 264 项** 全部通过（0 失败、0 跳过）；`lintDebug`（0 错误 / 89 警告）与 `lintGroupPreview`（0 错误 / 100 警告）通过；`app-debug.apk` 中火山 / bytenn / ContextCompat 条目数为 **0**。
+- **交付产物**：`C:/Users/Administrator/Documents/摩托对讲机/output/motocom-group-2.3.0-r5.preview.6-e9fc919a.apk`（`124,428,433` bytes，SHA-256 `e9fc919acdfb37e2411d6b4ac1ffe43fa68165295d69c7407e9295db8fed00ce`，同目录含 `.sha256`；`zipalign -c -P 16 4` 与 `apksigner verify` v2 通过）。
+- **云服务器与小米 13 真机升级**：
+  - 服务器 `110.41.77.64` 在零活跃连接窗口备份至 `/var/backups/moto-group-cloud/before-preview6-0df6c1f` 后同步 `/srv/group-cloud` 全部 6 个运行文件，SHA-256 与本地逐一吻合，`moto-group-cloud.service` 重启后处于 `active`；同时为 `/etc/nginx/sites-available/moto.conf` 显式补齐 `default_server`（备份 `moto.conf.bak`），修复无 SNI 纯 IP TLS 请求落入新增域名站点的证书不匹配问题，回归验证 `api.toneride.top`、`admin.toneride.top`、`toneride.top` 与 `https://110.41.77.64/group-cloud/healthz`（`200`）全部正常，公网双模建房、切云与真实火山 OpenAPI `BanRoomUser` 解散冒烟通过，服务已重置为空房间干净状态且日志零密钥泄露。
+  - 小米 13（`2211133C`，`100.84.141.14:5555`）已覆盖安装 `2.3.0-r5.preview.6+0df6c1f`（`versionCode = 12`），机内 `base.apk` SHA-256 与交付件一致，正式主包 `com.kuma.motointercom`（`1.2.3+f587472` / `versionCode = 7`）未受影响，`GroupActivity` 冷启动正常（`772ms`），机内严格 TLS 请求 `https://110.41.77.64/group-cloud/healthz` 返回 `200`。
+
 ## 仍待完成的物理设备门禁（NOT RUN）
 
 0. **R5 路线 A（Fast Connection API）双机/多机真机 0 弹窗矩阵**。小米 13 的单机 2.4 GHz 预设 GO 建组与释放在 `preview.3` 和 `preview.4` 均已通过。仍需第二台 Android 10+ 真机验证客户端 `GroupWifiP2pClient` 在亮屏、后台及息屏时静默加入和重连，以及多端并发加入、50 米邻近探测和后台预连后的语音回切。
