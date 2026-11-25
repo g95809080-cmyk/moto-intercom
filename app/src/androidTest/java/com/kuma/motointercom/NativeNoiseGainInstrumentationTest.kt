@@ -60,7 +60,8 @@ class NativeNoiseGainInstrumentationTest {
             try {
                 val rtc = field(sender, "rtc") as ExecutorService
                 rtc.submit {
-                    assertNull("Only replace test source before native media exists", field(sender, "peerConnection"))
+                    assertTrue("Only replace test source before native media exists",
+                        (field(sender, "activeSessions") as List<*>).isEmpty())
                     val factory = field(sender, "factory") as PeerConnectionFactory
                     val previousTrack = field(sender, "localAudioTrack") as AudioTrack
                     val previousSource = field(sender, "audioSource") as AudioSource

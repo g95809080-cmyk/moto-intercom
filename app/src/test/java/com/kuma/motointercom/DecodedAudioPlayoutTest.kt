@@ -24,6 +24,55 @@ class DecodedAudioPlayoutTest {
         ByteBuffer.wrap(ByteArray(960) { marker.toByte() }), 16, 48_000, 1, 480, 0
     )
 
+    @Test fun mutingOneMemberSilencesOnlyItsOutputAndUnmuteKeepsBothOutputsAlive() {
+        val firstDevice = Device(1)
+        val secondDevice = Device(2)
+        val failures = LinkedBlockingQueue<Throwable>()
+        val first = DecodedAudioPlayout({ true }, {}, {}, { failures.offer(it) }) { _, _ -> firstDevice }
+        val second = DecodedAudioPlayout({ true }, {}, {}, { failures.offer(it) }) { _, _ -> secondDevice }
+        try {
+            first.resume(1)
+            second.resume(1)
+            first.setMuted(true)
+            send(first, 7)
+            send(second, 9)
+            assertTrue(firstDevice.writes.poll(2, TimeUnit.SECONDS)!!.all { it == 0.toByte() })
+            assertTrue(secondDevice.writes.poll(2, TimeUnit.SECONDS)!!.all { it == 9.toByte() })
+            first.setMuted(false)
+            send(first, 8)
+            assertTrue(firstDevice.writes.poll(2, TimeUnit.SECONDS)!!.all { it == 8.toByte() })
+            first.close()
+            send(second, 5)
+            assertTrue(secondDevice.writes.poll(2, TimeUnit.SECONDS)!!.all { it == 5.toByte() })
+            assertNull(failures.poll())
+        } finally {
+            first.close()
+            second.close()
+        }
+    }
+
+    @Test fun acknowledgedMuteSilencesAFrameWhoseOutputConstructionWasDelayed() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val device = Device(1)
+        val output = DecodedAudioPlayout({ true }, {}, {}, { throw it }) { _, _ ->
+            entered.countDown()
+            release.await(2, TimeUnit.SECONDS)
+            device
+        }
+        try {
+            output.resume(1)
+            send(output, 9)
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            output.setMuted(true)
+            release.countDown()
+            assertTrue(device.writes.poll(2, TimeUnit.SECONDS)!!.all { it == 0.toByte() })
+        } finally {
+            release.countDown()
+            output.close()
+        }
+    }
+
     @Test fun delayedOldConstructorCanOnlyReleaseItsOwnDeviceAfterResume() {
         val revision = AtomicLong(1)
         val entered = CountDownLatch(1)

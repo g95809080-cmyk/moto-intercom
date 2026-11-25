@@ -42,7 +42,8 @@ internal data class RiderMediaSessionCallbacks(
     val isSessionCurrent: () -> Boolean,
     val freezeConnectionLoss: (() -> ConnectionLossObservation?)? = null,
     val onConnectionStateObserved: ((NativeConnectionObservation) -> Unit)? = null,
-    val controlIsOpen: () -> Boolean = { true }
+    val controlIsOpen: () -> Boolean = { true },
+    val initialPlaybackMuted: Boolean = false
 )
 
 internal interface RiderMediaSession : Closeable {
@@ -52,6 +53,11 @@ internal interface RiderMediaSession : Closeable {
     fun addRemoteIceCandidate(candidateJson: String)
     fun queryEvidence(callback: (RiderMediaEvidence?) -> Unit) = callback(null)
     fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) = callback(null)
+    fun setPlaybackMuted(muted: Boolean) = Unit
+}
+
+internal enum class RiderMediaMode(val maxSessions: Int) {
+    SINGLE(1), GROUP(3)
 }
 
 internal data class RiderAudioIoRouteSnapshot(
@@ -98,21 +104,22 @@ internal class RiderAudioEngine(
         revision = 0,
         settings = AudioControlSettings()
     ),
-    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> }
+    private val onVoxStateChanged: (VersionedAudioControls, VoxRuntimeState) -> Unit = { _, _ -> },
+    private val mediaMode: RiderMediaMode = RiderMediaMode.SINGLE,
+    private val onDisposed: () -> Unit = {},
+    private val onDisposeFailed: (Throwable) -> Unit = {},
+    private val rtc: ExecutorService = Executors.newSingleThreadExecutor(),
+    private val disposePeerConnection: (PeerConnection?) -> Unit = { it?.dispose() }
 ) : RiderMediaEngine {
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val rtc: ExecutorService = Executors.newSingleThreadExecutor()
-
     private var audioDeviceModule: JavaAudioDeviceModule? = null
     private var factory: PeerConnectionFactory? = null
-    private var peerConnection: PeerConnection? = null
     private var audioSource: AudioSource? = null
     private var localAudioTrack: AudioTrack? = null
-    private var localAudioSender: RtpSender? = null
-    private var remoteDescriptionSet = false
-    private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
+    private val rtcSessions = mutableSetOf<MediaSession>()
+    private var deferredSessionDisposeFailure: Throwable? = null
     private val closed = AtomicBoolean(false)
     private val captureFailed = AtomicBoolean(false)
     private val ioEvidence = RiderAudioIoEvidence()
@@ -145,8 +152,8 @@ internal class RiderAudioEngine(
     // Device operations may synchronously join the native PCM thread. Neither native producer
     // takes this mutex; session registration/removal uses a separate lock.
     private val audioIoLock = Any()
-    @Volatile private var activeSession: MediaSession? = null
-    private val audioIoGate = AudioIoGate(audioIoLock, true,
+    @Volatile private var activeSessions: List<MediaSession> = emptyList()
+    private val audioIoGate = AudioIoGate(audioIoLock, mediaMode == RiderMediaMode.SINGLE,
         { work -> runRtc(allowClosed = true, block = work) }, ::applyNativeAudioIo)
     private val audioSuspended get() = !audioIoGate.allows(audioIoGate.revision())
 
@@ -192,7 +199,7 @@ internal class RiderAudioEngine(
 
     private fun revokeNativeProducers() {
         recordingOwner.authorize(false) { NativeCaptureDiagnostics.currentProducer(audioDeviceModule, true) }
-        activeSession?.playout?.pause()
+        activeSessions.forEach { it.playout.pause() }
         ioEvidence.recording(false)
         ioEvidence.playing(false)
     }
@@ -208,15 +215,17 @@ internal class RiderAudioEngine(
         else {
             recordingOwner.authorize(true)
         }
-        peerConnection?.setAudioRecording(enabled)
+        rtcSessions.filter { !it.closed.get() || !enabled }.forEach {
+            it.peerConnection?.setAudioRecording(enabled)
+            it.peerConnection?.setAudioPlayout(false)
+        }
         // Pinned m125.4 cannot restart Android ADM playout after stopping it.
         // Its NullAudioPoller keeps decoding/reverse AEC processing; the public sink owns output.
-        peerConnection?.setAudioPlayout(false)
         // m125.4 SetRecording(true) does not reinitialize Android ADM after StopRecording.
         // A real interruption toggles the sending track, whose OnMuteStreamChanged reinitializes it.
         // VOX/manual mute still act only on PCM and never disable this track.
         localAudioTrack?.setEnabled(enabled)
-        if (enabled) activeSession?.playout?.resume(audioIoGate.revision())
+        if (enabled) activeSessions.forEach { it.playout.resume(audioIoGate.revision()) }
         audioDeviceModule?.setMicrophoneMute(!enabled)
         audioDeviceModule?.setSpeakerMute(!enabled)
         Log.i(TAG, "ADM I/O applied enabled=$enabled; ${NativeCaptureDiagnostics.describe(audioDeviceModule)}")
@@ -231,7 +240,10 @@ internal class RiderAudioEngine(
             engineState = EngineState.READY
         } catch (t: Throwable) {
             engineState = EngineState.FAILED
-            runCatching(::disposePlatformResources).exceptionOrNull()?.let(t::addSuppressed)
+            runCatching(::disposePlatformResources).exceptionOrNull()?.let { cleanupError ->
+                recordDeferredSessionDisposeFailure(cleanupError)
+                t.addSuppressed(cleanupError)
+            }
             postEngineError(t)
         }
     }
@@ -240,8 +252,9 @@ internal class RiderAudioEngine(
         check(!closed.get()) { "WebRTC engine is closed" }
         val session = MediaSession(callbacks)
         synchronized(sessionLock) {
-            check(activeSession == null) { "a WebRTC media session is already active" }
-            activeSession = session
+            check(!closed.get() && isRuntimeCurrent() && callbacks.isSessionCurrent()) { "media authorization is stale" }
+            check(activeSessions.size < mediaMode.maxSessions) { "WebRTC media session capacity reached" }
+            activeSessions = activeSessions + session
         }
         runRtc(onFailure = session::postError) {
             initializeMediaSession(session)
@@ -258,15 +271,18 @@ internal class RiderAudioEngine(
                     recordingOwner.authorize(true)
                 }
                 createPeerConnection(session)
+                check(ownsSession(session)) { "media authorization revoked during creation" }
                 if (enabled) session.playout.resume(audioIoGate.revision())
             }
-            attachLocalAudioTrack()
+            attachLocalAudioTrack(session)
+            check(isActiveSession(session)) { "media authorization revoked during attachment" }
             session.state = MediaSessionState.READY
         } catch (t: Throwable) {
             session.state = MediaSessionState.FAILED
-            session.playout.close()
-            session.detachRemoteSink()
-            runCatching(::disposeMediaSessionResources).exceptionOrNull()?.let(t::addSuppressed)
+            runCatching { disposeMediaSession(session) }.exceptionOrNull()?.let { cleanupError ->
+                recordDeferredSessionDisposeFailure(cleanupError)
+                t.addSuppressed(cleanupError)
+            }
             session.postError(t)
         }
     }
@@ -275,7 +291,7 @@ internal class RiderAudioEngine(
         runSession(session) {
             requireSessionReady(session)
             Log.i(TAG, "createOffer 开始")
-            peerConnectionOrThrow().createOffer(localSdpObserver(session), sdpConstraints())
+            peerConnectionOrThrow(session).createOffer(localSdpObserver(session), sdpConstraints())
         }
     }
 
@@ -285,7 +301,7 @@ internal class RiderAudioEngine(
             Log.i(TAG, "createAnswer 收到远端 Offer")
             setRemoteDescription(session, remoteSdpJson) {
                 Log.i(TAG, "createAnswer 开始")
-                peerConnectionOrThrow().createAnswer(localSdpObserver(session), sdpConstraints())
+                peerConnectionOrThrow(session).createAnswer(localSdpObserver(session), sdpConstraints())
             }
         }
     }
@@ -303,13 +319,13 @@ internal class RiderAudioEngine(
             try {
                 val candidate = candidateFromJson(candidateJson)
                 Log.i(TAG, "收到远端 ICE candidate: ${candidateSummary(candidate)}")
-                if (remoteDescriptionSet) {
-                    check(peerConnectionOrThrow().addIceCandidate(candidate)) {
+                if (session.remoteDescriptionSet) {
+                    check(peerConnectionOrThrow(session).addIceCandidate(candidate)) {
                         "addIceCandidate 返回 false"
                     }
                     Log.i(TAG, "addIceCandidate 成功")
                 } else {
-                    pendingRemoteCandidates += candidate
+                    session.pendingRemoteCandidates += candidate
                     Log.i(TAG, "addIceCandidate 等待远端描述")
                 }
             } catch (t: Throwable) {
@@ -323,33 +339,64 @@ internal class RiderAudioEngine(
         if (!closed.compareAndSet(false, true)) return
         audioIoGate.close()
         revokeNativeProducers()
-        val session = synchronized(sessionLock) {
-            activeSession.also { activeSession = null }
+        val sessions = synchronized(sessionLock) {
+            activeSessions.also { activeSessions = emptyList() }
         }
-        session?.markClosed()
-        runRtc(allowClosed = true, onFailure = ::postEngineError) {
+        sessions.forEach { it.markClosed() }
+        runRtc(
+            allowClosed = true,
+            onFailure = { error ->
+                postEngineError(error)
+                mainHandler.post { onDisposeFailed(error) }
+            }
+        ) {
+            var disposeFailure: Throwable? = null
             try {
                 engineState = EngineState.CLOSED
                 runAllCleanupSteps(
-                    { session?.detachRemoteSink() },
-                    ::disposeMediaSessionResources,
+                    { deferredSessionDisposeFailure?.let { throw it } },
+                    { runAllCleanupSteps(*rtcSessions.toList().map { session ->
+                        { disposeMediaSession(session) }
+                    }.toTypedArray()) },
                     ::disposePlatformResources
                 )
             } catch (t: Throwable) {
+                disposeFailure = t
                 Log.e(TAG, "WebRTC 资源关闭失败", t)
             } finally {
                 rtc.shutdown()
+                val failure = disposeFailure
+                if (failure == null) {
+                    mainHandler.post { onDisposed() }
+                } else {
+                    mainHandler.post { onDisposeFailed(failure) }
+                }
             }
         }
     }
 
-    private fun disposeMediaSessionResources() {
-        val peer = peerConnection
-        peerConnection = null
-        localAudioSender = null
-        remoteDescriptionSet = false
-        pendingRemoteCandidates.clear()
-        peer?.dispose()
+    private fun disposeMediaSession(session: MediaSession) = runAllCleanupSteps(
+        session.playout::close,
+        session::detachRemoteSink,
+        { disposeMediaSessionResources(session) }
+    )
+
+    private fun disposeMediaSessionResources(session: MediaSession) {
+        val peer = session.peerConnection
+        session.peerConnection = null
+        session.localAudioSender = null
+        session.remoteDescriptionSet = false
+        session.pendingRemoteCandidates.clear()
+        try {
+            disposePeerConnection(peer)
+        } finally {
+            rtcSessions.remove(session)
+        }
+    }
+
+    private fun recordDeferredSessionDisposeFailure(error: Throwable) {
+        val existing = deferredSessionDisposeFailure
+        if (existing == null) deferredSessionDisposeFailure = error else if (existing !== error) existing.addSuppressed(error)
     }
 
     private fun disposePlatformResources() {
@@ -399,7 +446,11 @@ internal class RiderAudioEngine(
     }
 
     private fun isActiveSession(session: MediaSession): Boolean =
-        !session.closed.get() && synchronized(sessionLock) { activeSession === session }
+        ownsSession(session) &&
+            isRuntimeCurrent() && session.callbacks.isSessionCurrent()
+
+    private fun ownsSession(session: MediaSession): Boolean =
+        !closed.get() && !session.closed.get() && session in activeSessions
 
     private fun runRtc(
         allowClosed: Boolean = false,
@@ -504,9 +555,8 @@ internal class RiderAudioEngine(
     }
 
     private fun createPeerConnection(session: MediaSession) = mediaStep("PeerConnection 创建") {
-        check(peerConnection == null) { "previous PeerConnection is still active" }
+        check(session.peerConnection == null) { "previous PeerConnection is still active" }
         val config = PeerConnection.RTCConfiguration(emptyList()).apply {
-            // 无公网、无服务器：只产出 Wi-Fi Direct 局域网 host candidate。
             iceServers = emptyList()
             iceTransportsType = PeerConnection.IceTransportsType.ALL
             candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.ALL
@@ -516,10 +566,11 @@ internal class RiderAudioEngine(
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
 
-        peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
+        session.peerConnection = factoryOrThrow().createPeerConnection(config, observer(session))
             ?: error("创建 PeerConnection 失败")
-        peerConnection!!.setAudioRecording(!audioSuspended)
-        peerConnection!!.setAudioPlayout(false)
+        rtcSessions.add(session)
+        session.peerConnection!!.setAudioRecording(!audioSuspended)
+        session.peerConnection!!.setAudioPlayout(false)
         localAudioTrack?.setEnabled(!audioSuspended)
         audioDeviceModule?.setMicrophoneMute(audioSuspended)
         audioDeviceModule?.setSpeakerMute(audioSuspended)
@@ -556,12 +607,12 @@ internal class RiderAudioEngine(
 
     }
 
-    private fun attachLocalAudioTrack() = mediaStep("local audio track attach") {
-        localAudioSender = peerConnectionOrThrow().addTrack(
+    private fun attachLocalAudioTrack(session: MediaSession) = mediaStep("local audio track attach") {
+        session.localAudioSender = peerConnectionOrThrow(session).addTrack(
             localAudioTrack ?: error("local audio track 尚未初始化"),
             listOf(STREAM_ID)
         )
-        setOpusBitrate(localAudioSender)
+        setOpusBitrate(session.localAudioSender)
     }
 
     private fun handleCapturedPcm(format: Int, channels: Int, rate: Int, buffer: java.nio.ByteBuffer, gateRevision: Long) {
@@ -695,8 +746,9 @@ internal class RiderAudioEngine(
         val level = (db / PCM_DBFS_TO_APPROX_SPL_OFFSET).toFloat().coerceIn(0f, 1f)
         // Native stop joins this PCM thread while holding sessionLock.
         // Snapshot without that lock; delivery still validates the exact session on main.
-        val session = activeSession ?: return
-        postSessionMain(session) { session.callbacks.onAudioLevelChanged(level) }
+        activeSessions.forEach { session ->
+            postSessionMain(session) { session.callbacks.onAudioLevelChanged(level) }
+        }
     }
 
     private fun localSdpObserver(session: MediaSession): SdpObserver = object : SdpObserver {
@@ -705,7 +757,7 @@ internal class RiderAudioEngine(
                 requireSessionReady(session)
                 Log.i(TAG, "${sdp.type} 创建成功: ${sdpSummary(sdp.description)}")
                 val local = SessionDescription(sdp.type, forceOpus32k(sdp.description))
-                peerConnectionOrThrow().setLocalDescription(object : SimpleSdpObserver() {
+                peerConnectionOrThrow(session).setLocalDescription(object : SimpleSdpObserver() {
                     override fun onSetSuccess() {
                         runSession(session) {
                             if (session.state != MediaSessionState.READY) return@runSession
@@ -746,20 +798,20 @@ internal class RiderAudioEngine(
         try {
             val remote = sessionDescriptionFromJson(remoteSdpJson)
             Log.i(TAG, "setRemoteDescription ${remote.type} 开始: ${sdpSummary(remote.description)}")
-            peerConnectionOrThrow().setRemoteDescription(object : SimpleSdpObserver() {
+            peerConnectionOrThrow(session).setRemoteDescription(object : SimpleSdpObserver() {
                 override fun onSetSuccess() {
                     runSession(session) {
                         if (session.state != MediaSessionState.READY) return@runSession
                         Log.i(TAG, "setRemoteDescription 成功")
-                        remoteDescriptionSet = true
-                        pendingRemoteCandidates.forEach {
-                            if (!peerConnectionOrThrow().addIceCandidate(it)) {
+                        session.remoteDescriptionSet = true
+                        session.pendingRemoteCandidates.forEach {
+                            if (!peerConnectionOrThrow(session).addIceCandidate(it)) {
                                 Log.e(TAG, "补交 ICE candidate 失败")
                             } else {
                                 Log.i(TAG, "补交 ICE candidate 成功: ${candidateSummary(it)}")
                             }
                         }
-                        pendingRemoteCandidates.clear()
+                        session.pendingRemoteCandidates.clear()
                         onSet()
                     }
                 }
@@ -790,7 +842,7 @@ internal class RiderAudioEngine(
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             val elapsedMs = SystemClock.elapsedRealtime()
             val wallMs = System.currentTimeMillis()
-            if (closed.get() || !isActiveSession(session)) return
+            if (!ownsSession(session)) return
             val observation = session.connectionObservations.capture(newState, elapsedMs, wallMs) {
                 session.callbacks.freezeConnectionLoss?.invoke()
             } ?: return
@@ -801,7 +853,7 @@ internal class RiderAudioEngine(
                 if (session.state != MediaSessionState.READY) return@runSession
                 Log.i(TAG, "PeerConnection state=$newState")
                 if (observation.sequence == observation.firstLossSequence && newState != PeerConnection.PeerConnectionState.CLOSED) {
-                    peerConnection?.getStats { report ->
+                    session.peerConnection?.getStats { report ->
                         runSession(session) {
                             val pairId = report.statsMap.values.firstOrNull { it.type == "transport" }
                                 ?.members?.get("selectedCandidatePairId") as? String
@@ -966,8 +1018,8 @@ internal class RiderAudioEngine(
     private fun factoryOrThrow(): PeerConnectionFactory =
         factory ?: error("PeerConnectionFactory 尚未初始化")
 
-    private fun peerConnectionOrThrow(): PeerConnection =
-        peerConnection ?: error("PeerConnection 尚未初始化")
+    private fun peerConnectionOrThrow(session: MediaSession): PeerConnection =
+        session.peerConnection ?: error("PeerConnection 尚未初始化")
 
     private fun postEngineError(t: Throwable) {
         Log.e(TAG, "WebRTC audio platform error", t)
@@ -1053,20 +1105,32 @@ internal class RiderAudioEngine(
         val closed = AtomicBoolean(false)
         val connectionObservations = NativeConnectionObservationSource(callbacks.controlIsOpen)
         @Volatile var state = MediaSessionState.INITIALIZING
+        var peerConnection: PeerConnection? = null
+        var localAudioSender: RtpSender? = null
+        var remoteDescriptionSet = false
+        val pendingRemoteCandidates = mutableListOf<IceCandidate>()
+        @Volatile var rendering = false
         var connected = false
         var remoteTrackObserved = false
         var remoteAudioTrack: AudioTrack? = null // RTC queue owns attachment/removal.
         val playout = DecodedAudioPlayout(
-            permits = { revision -> !closed.get() && activeSession === this && !this@RiderAudioEngine.closed.get() && audioIoGate.allows(revision) },
+            permits = { revision -> !closed.get() && this in activeSessions && !this@RiderAudioEngine.closed.get() && audioIoGate.allows(revision) },
             onPlaying = { value ->
-                if (activeSession === this && !closed.get() && (!value || !audioSuspended)) ioEvidence.playing(value)
+                rendering = value && !closed.get()
+                ioEvidence.playing(!audioSuspended && activeSessions.any { it.rendering && !it.closed.get() })
             },
             onWritten = { ioEvidence.rendered(SystemClock.elapsedRealtime()) },
             onError = { error ->
                 // Renderer invokes this only for its current lease; teardown errors cannot fail a replacement.
-                if (activeSession === this && !closed.get()) audioDeviceFailure("playout", error.message ?: error.javaClass.simpleName)
+                if (this in activeSessions && !closed.get()) {
+                    if (mediaMode == RiderMediaMode.SINGLE) {
+                        audioDeviceFailure("playout", error.message ?: error.javaClass.simpleName)
+                    } else {
+                        postError(error)
+                    }
+                }
             }
-        )
+        ).also { it.setMuted(callbacks.initialPlaybackMuted) }
         private val statsPending = AtomicBoolean(false)
 
         override fun queryAudioIoRoute(callback: (RiderAudioIoRouteSnapshot?) -> Unit) {
@@ -1131,6 +1195,8 @@ internal class RiderAudioEngine(
         override fun addRemoteIceCandidate(candidateJson: String) =
             this@RiderAudioEngine.addRemoteIceCandidate(this, candidateJson)
 
+        override fun setPlaybackMuted(muted: Boolean) = playout.setMuted(muted)
+
         override fun close() {
             if (!closed.compareAndSet(false, true)) return
             connectionObservations.retire()
@@ -1138,15 +1204,19 @@ internal class RiderAudioEngine(
             // Release our renderer before removing the registry owner; this never holds sessionLock.
             playout.close()
             val shouldDispose = synchronized(sessionLock) {
-                if (activeSession === this) {
+                if (this in activeSessions) {
                     // Revoke native producers before dispose can stop their I/O threads.
                     // Keep this enqueue ordered before any replacement session initialization.
-                    revokeNativeProducers()
-                    audioIoGate.invalidate()
-                    activeSession = null
-                    runRtc(allowClosed = true, onFailure = ::postEngineError) {
-                        detachRemoteSink()
-                        disposeMediaSessionResources()
+                    activeSessions = activeSessions - this
+                    if (activeSessions.isEmpty()) {
+                        revokeNativeProducers()
+                        audioIoGate.invalidate()
+                    }
+                    runRtc(allowClosed = true, onFailure = { error ->
+                        recordDeferredSessionDisposeFailure(error)
+                        postEngineError(error)
+                    }) {
+                        disposeMediaSession(this)
                     }
                     true
                 } else {

@@ -155,7 +155,7 @@ iOS 当前使用 NavigationStack 中的一个 List，集中展示状态、设备
 
 方案确定后，读取并应用 frontend-design 与 frontend-design-premium，以已确定的原生交互为基础记录 DESIGN.md：品牌与色彩、字号、间距、卡片与按钮、状态文案、页面职责、设置作用范围及需要复用的组件。将 Web 特定组件规则转换为 Android / iOS 适用的原生行为，不改变现有平台技术栈。
 
-首轮建议仅覆盖 Android 首页、群组准备与房间、设置诊断层次和相关说明文案。按项目规则绑定真实 Linear issue / Rasen change；涉及源代码行为变更时完成既有 motointercom-product-architect 审查。该项目审查角色与新安装的 Product & App Architect 插件不是同一个授权主体。
+首轮建议仅覆盖 Android 首页、群组准备与房间、设置诊断层次和相关说明文案。按项目规则绑定真实 Linear issue；涉及源代码行为变更时完成既有 motointercom-product-architect 审查。该项目审查角色与新安装的 Product & App Architect 插件不是同一个授权主体。
 
 实现前需要基于当前应用采集正常、空态、权限拒绝、连接中、音频等待、重连、群组成员/房主以及窄屏大字状态，才能确定画面细节与验证设计。当前静态梳理不代替这些证据。
 
@@ -174,4 +174,4 @@ iOS 当前使用 NavigationStack 中的一个 List，集中展示状态、设备
 - [首次引导](../../app/src/main/java/com/kuma/motointercom/OnboardingGuide.kt)
 - [群组运行时入口](../../app/src/main/java/com/kuma/motointercom/IntercomService.kt)
 - [iOS 根页面](../../ios/Sources/MotoComIOS/UI/MotoComApp.swift)
-- [群组实施决策](../../rasen/changes/kum-56-group-app/design.md)
+- [群组产品需求](2026-11-17-motocom-group-radio-prd.md)
