@@ -155,6 +155,14 @@ Next gate allowed
   - 服务器 `110.41.77.64` 在零活跃连接窗口备份至 `/var/backups/moto-group-cloud/before-preview6-0df6c1f` 后同步 `/srv/group-cloud` 全部 6 个运行文件，SHA-256 与本地逐一吻合，`moto-group-cloud.service` 重启后处于 `active`；同时为 `/etc/nginx/sites-available/moto.conf` 显式补齐 `default_server`（备份 `moto.conf.bak`），修复无 SNI 纯 IP TLS 请求落入新增域名站点的证书不匹配问题，回归验证 `api.toneride.top`、`admin.toneride.top`、`toneride.top` 与 `https://110.41.77.64/group-cloud/healthz`（`200`）全部正常，公网双模建房、切云与真实火山 OpenAPI `BanRoomUser` 解散冒烟通过，服务已重置为空房间干净状态且日志零密钥泄露。
   - 小米 13（`2211133C`，`100.84.141.14:5555`）已覆盖安装 `2.3.0-r5.preview.6+0df6c1f`（`versionCode = 12`），机内 `base.apk` SHA-256 与交付件一致，正式主包 `com.kuma.motointercom`（`1.2.3+f587472` / `versionCode = 7`）未受影响，`GroupActivity` 冷启动正常（`772ms`），机内严格 TLS 请求 `https://110.41.77.64/group-cloud/healthz` 返回 `200`。
 
+## 11 月 26 日独立群组域名上线
+
+- **入口**：用户确认主域名备案通过后，为群组控制面新增独立子域名 `https://group.toneride.top`。华为云 DNS 记录 `group.toneride.top A 110.41.77.64`（TTL `300`）状态为 `ACTIVE`；未修改小程序使用的 `api.toneride.top`，也未修改 `admin.toneride.top`、`toneride.top`、`www.toneride.top` 及其已有记录。
+- **证书**：使用现有 `acme.sh 3.1.7` 通过 HTTP-01 签发 Let's Encrypt EC-256 独立证书（`2026-11-26` 至 `2027-02-24`），安装至 `/etc/ssl/certs/toneride-group.fullchain.pem` 与 `/etc/ssl/private/toneride-group.key`（私钥 `0600 root:root`）；续期由 ARI 窗口驱动，下一次计划续期为 `2027-01-24`，续期后自动 `reload nginx`。
+- **反向代理**：新建独立站点 `/etc/nginx/sites-available/group.toneride.top.conf`，仅将 `group.toneride.top` 的 `80/443` 转发至 `127.0.0.1:8443`；未改动 `moto.conf`、`moto-domain.conf` 及其他站点。`nginx -t` 通过，`nginx` 与 `moto-group-cloud.service` 均为 `active`。
+- **验收**：`223.5.5.5` 与 `8.8.8.8` 均解析到 `110.41.77.64`；HTTP 请求返回 `301` 至 HTTPS；严格 TLS `GET https://group.toneride.top/healthz` 返回 `200`（`maxMembers: 50`、`openApiRevocationEnforced: true`）；`POST /v1/rooms`（空 body）正确返回 `400 INVALID_INPUT`，证明写请求已到达控制面而非 Nginx 默认 404。回归 `api.toneride.top`、`admin.toneride.top`、`www.toneride.top` 与 IP 入口 `/group-cloud/healthz` 均返回 `200`。
+- **客户端配置**：群组预览版“云端服务地址”使用 `https://group.toneride.top`；本次仅变更 DNS、TLS 与 Nginx，不需要重新打包 APK，正式主包与 preview.6 版本身份均未改变。
+
 ## 仍待完成的物理设备门禁（NOT RUN）
 
 0. **R5 路线 A（Fast Connection API）双机/多机真机 0 弹窗矩阵**。小米 13 的单机 2.4 GHz 预设 GO 建组与释放在 `preview.3` 和 `preview.4` 均已通过。仍需第二台 Android 10+ 真机验证客户端 `GroupWifiP2pClient` 在亮屏、后台及息屏时静默加入和重连，以及多端并发加入、50 米邻近探测和后台预连后的语音回切。
