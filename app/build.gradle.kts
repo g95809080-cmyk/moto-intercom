@@ -93,9 +93,31 @@ android {
             initWith(getByName("debug"))
             applicationIdSuffix = ".group.preview"
             matchingFallbacks += "debug"
+            buildConfigField("String", "GROUP_CLOUD_BASE_URL", "\"https://group.toneride.top\"")
+            buildConfigField("String", "GROUP_CLOUD_ALLOWED_HOSTS", "\"group.toneride.top\"")
+        }
+        create("groupPreviewRelease") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".group.preview"
+            isDebuggable = false
+            isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+            buildConfigField("String", "GROUP_CLOUD_BASE_URL", "\"https://group.toneride.top\"")
+            buildConfigField("String", "GROUP_CLOUD_ALLOWED_HOSTS", "\"group.toneride.top\"")
         }
         getByName("release") {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    sourceSets {
+        getByName("groupPreviewRelease") {
+            java.srcDirs("src/groupPreview/java")
+            kotlin.srcDirs("src/groupPreview/java")
+            manifest.srcFile("src/groupPreview/AndroidManifest.xml")
+            jniLibs.srcDirs("src/groupPreview/jniLibs")
         }
     }
 }
@@ -114,7 +136,18 @@ androidComponents.beforeVariants(androidComponents.selector().withBuildType("gro
     (it as com.android.build.api.variant.HasHostTestsBuilder)
         .hostTests.getValue(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE).enable = true
 }
+androidComponents.beforeVariants(androidComponents.selector().withBuildType("groupPreviewRelease")) {
+    (it as com.android.build.api.variant.HasHostTestsBuilder)
+        .hostTests.getValue(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE).enable = true
+}
 androidComponents.onVariants(androidComponents.selector().withBuildType("groupPreview")) { variant ->
+    variant.androidTest?.applicationId?.set("com.kuma.motointercom.group.preview.instrumentation")
+    variant.outputs.forEach {
+        it.versionName.set("$groupPreviewVersion+${groupPreviewCommit.take(7)}")
+        it.versionCode.set(groupPreviewVersionCode)
+    }
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("groupPreviewRelease")) { variant ->
     variant.androidTest?.applicationId?.set("com.kuma.motointercom.group.preview.instrumentation")
     variant.outputs.forEach {
         it.versionName.set("$groupPreviewVersion+${groupPreviewCommit.take(7)}")
@@ -144,6 +177,9 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
             "**/DecodedAudioPlayoutTest.class", "**/PcmTransmitGateTest.class",
             "**/NativeAudioProducerOwnerTest.class")
     }
+    if (name == "testGroupPreviewReleaseUnitTest") {
+        include("**/GroupReleaseCloudPolicyTest.class")
+    }
 }
 
 dependencies {
@@ -163,6 +199,12 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     add("groupPreviewImplementation", "org.bouncycastle:bcprov-jdk18on:1.86")
     add("groupPreviewImplementation", "com.volcengine:VolcEngineRTC:3.60.108.100") {
+        exclude(group = "com.android.support")
+        exclude(group = "android.arch.core")
+        exclude(group = "android.arch.lifecycle")
+    }
+    add("groupPreviewReleaseImplementation", "org.bouncycastle:bcprov-jdk18on:1.86")
+    add("groupPreviewReleaseImplementation", "com.volcengine:VolcEngineRTC:3.60.108.100") {
         exclude(group = "com.android.support")
         exclude(group = "android.arch.core")
         exclude(group = "android.arch.lifecycle")

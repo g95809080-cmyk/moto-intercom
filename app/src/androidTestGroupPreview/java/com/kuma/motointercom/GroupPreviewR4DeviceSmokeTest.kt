@@ -48,8 +48,13 @@ class GroupPreviewR4DeviceSmokeTest {
             waitForCondition(5_000) { exists(hasTag("network_create")) }
             compose.onNodeWithText("网络群组 · R5 预览").assertIsDisplayed()
             compose.onNodeWithTag("network_join").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithTag("network_server_input").assertDoesNotExist()
+            compose.onNodeWithTag("developer_settings").performScrollTo().performClick()
+            waitForCondition(5_000) { exists(hasTag("network_server_input")) }
             compose.onNodeWithTag("network_server_input").performScrollTo().performTextClearance()
             compose.onNodeWithTag("network_server_input").performScrollTo().performTextInput(LOOPBACK_CLOUD_URL)
+            compose.onNodeWithTag("developer_server_save").performClick()
+            waitForCondition(5_000) { !exists(hasTag("network_server_input")) }
 
             compose.onNodeWithTag("network_create").performScrollTo().performClick()
             waitForCondition(20_000) { exists(hasTag("network_invite_code")) }

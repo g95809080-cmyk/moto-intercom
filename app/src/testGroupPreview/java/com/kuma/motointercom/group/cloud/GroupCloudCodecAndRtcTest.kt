@@ -30,6 +30,33 @@ class GroupCloudCodecAndRtcTest {
     }
 
     @Test
+    fun urlPolicyEnforcesProductionHostAllowlistWithoutLoopback() {
+        val allowedHosts = setOf("group.toneride.top")
+        assertEquals(
+            "https://group.toneride.top",
+            GroupCloudUrlPolicy.normalizeAndValidate(
+                "https://group.toneride.top/",
+                allowedHosts = allowedHosts,
+                allowLoopback = false
+            )
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            GroupCloudUrlPolicy.normalizeAndValidate(
+                "https://evil.example",
+                allowedHosts = allowedHosts,
+                allowLoopback = false
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GroupCloudUrlPolicy.normalizeAndValidate(
+                "http://127.0.0.1:8443",
+                allowedHosts = allowedHosts,
+                allowLoopback = false
+            )
+        }
+    }
+
+    @Test
     fun inviteCodeNormalizesAndRedactsToString() {
         val code = GroupCloudInviteCode("012-345")
         assertEquals("012345", code.value)

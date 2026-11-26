@@ -1,5 +1,6 @@
 package com.kuma.motointercom.group.cloud
 
+import com.kuma.motointercom.BuildConfig
 import com.kuma.motointercom.group.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -47,8 +48,29 @@ internal class GroupCloudInviteCode(raw: String) {
 
 internal object GroupCloudUrlPolicy {
     private val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]", "10.0.2.2")
+    private val CONFIGURED_ALLOWED_HOSTS = BuildConfig.GROUP_CLOUD_ALLOWED_HOSTS
+        .split(',')
+        .map { it.trim().lowercase(Locale.ROOT) }
+        .filter { it.isNotEmpty() }
+        .toSet()
 
-    fun normalizeAndValidate(rawUrl: String): String {
+    fun normalizeConfiguredUrl(rawUrl: String): String = normalizeAndValidate(
+        rawUrl = rawUrl,
+        allowedHosts = if (BuildConfig.DEBUG) emptySet() else CONFIGURED_ALLOWED_HOSTS,
+        allowLoopback = BuildConfig.DEBUG
+    )
+
+    fun normalizeAndValidate(rawUrl: String): String = normalizeAndValidate(
+        rawUrl = rawUrl,
+        allowedHosts = emptySet(),
+        allowLoopback = true
+    )
+
+    internal fun normalizeAndValidate(
+        rawUrl: String,
+        allowedHosts: Set<String>,
+        allowLoopback: Boolean
+    ): String {
         val trimmed = rawUrl.trim().trimEnd('/')
         require(trimmed.isNotEmpty()) { "请输入云端服务地址" }
         val uri = try {
@@ -64,8 +86,15 @@ internal object GroupCloudUrlPolicy {
         require(uri.query == null && uri.fragment == null) { "云端服务地址不能包含查询参数或锚点" }
         when (scheme) {
             "https" -> Unit
-            "http" -> require(host in LOOPBACK_HOSTS) { "非本机调试地址必须使用 HTTPS" }
+            "http" -> require(allowLoopback && host in LOOPBACK_HOSTS) { "非本机调试地址必须使用 HTTPS" }
             else -> throw IllegalArgumentException("仅支持 https://（或本机调试 http://127.0.0.1）")
+        }
+        val normalizedAllowedHosts = allowedHosts
+            .map { it.trim().lowercase(Locale.ROOT) }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        require(normalizedAllowedHosts.isEmpty() || host in normalizedAllowedHosts) {
+            "云端服务地址不在受信任域名列表"
         }
         return trimmed
     }

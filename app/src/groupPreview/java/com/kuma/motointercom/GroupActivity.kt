@@ -58,7 +58,9 @@ internal class GroupActivity : ComponentActivity() {
                 onCopy = { code -> (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("房间码", code)) },
                 onStartNetwork = ::requestNetworkStart,
                 initialServerUrl = cloudPrefs.loadServerUrl(),
-                onSaveCloudSettings = cloudPrefs::saveServerUrl
+                allowCustomServer = BuildConfig.DEBUG,
+                onSaveCloudSettings = cloudPrefs::saveServerUrl,
+                onResetCloudSettings = cloudPrefs::resetServerUrl
             )
         } }
     }
@@ -85,12 +87,11 @@ internal class GroupActivity : ComponentActivity() {
     internal fun requestNetworkStart(request: GroupCloudStartRequest) {
         if (!resumed || pending || state.value.busy) return
         val normalizedUrl = try {
-            GroupCloudUrlPolicy.normalizeAndValidate(request.serverUrl)
+            GroupCloudUrlPolicy.normalizeConfiguredUrl(request.serverUrl)
         } catch (error: IllegalArgumentException) {
             state.value = state.value.copy(message = error.message ?: "云端服务地址无效")
             return
         }
-        cloudPrefs.saveServerUrl(normalizedUrl)
         val normalizedRequest = when (request) {
             is GroupCloudStartRequest.Create -> request.copy(serverUrl = normalizedUrl)
             is GroupCloudStartRequest.Join -> request.copy(serverUrl = normalizedUrl)
@@ -148,6 +149,9 @@ internal class GroupActivity : ComponentActivity() {
     }
 }
 
+internal fun showDeveloperCloudSettings(allowCustomServer: Boolean, selectedMode: GroupMode): Boolean =
+    allowCustomServer && selectedMode != GroupMode.LOCAL
+
 @Composable
 internal fun GroupScreen(
     state: GroupServiceState,
@@ -159,12 +163,17 @@ internal fun GroupScreen(
     onSettings: () -> Unit,
     onCopy: (String) -> Unit,
     onStartNetwork: (GroupCloudStartRequest) -> Unit = {},
-    initialServerUrl: String = GroupCloudPreferences.DEFAULT_DEV_SERVER_URL,
-    onSaveCloudSettings: (String) -> Unit = {}
+    initialServerUrl: String = GroupCloudPreferences.DEFAULT_SERVER_URL,
+    allowCustomServer: Boolean = BuildConfig.DEBUG,
+    onSaveCloudSettings: (String) -> Unit = {},
+    onResetCloudSettings: () -> Unit = {}
 ) {
     var selectedMode by remember { mutableStateOf(GroupMode.LOCAL) }
     var code by remember { mutableStateOf("") }
     var serverUrl by remember { mutableStateOf(initialServerUrl) }
+    var showDeveloperSettings by remember { mutableStateOf(false) }
+    var developerServerDraft by remember { mutableStateOf(initialServerUrl) }
+    var developerServerError by remember { mutableStateOf<String?>(null) }
     var inviteInput by remember { mutableStateOf("") }
     var requireApproval by remember { mutableStateOf(true) }
     var confirmEnd by remember { mutableStateOf(false) }
@@ -238,13 +247,6 @@ internal fun GroupScreen(
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("group_join")) { Text("加入房间") }
                     } else {
                         val creatingHybrid = selectedMode == GroupMode.HYBRID
-                        OutlinedTextField(
-                            value = serverUrl,
-                            onValueChange = { serverUrl = it },
-                            label = { Text("云端服务地址（HTTPS 或本机回环）") },
-                            modifier = Modifier.fillMaxWidth().testTag("network_server_input"),
-                            singleLine = true
-                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -270,7 +272,6 @@ internal fun GroupScreen(
                         }
                         Button(
                             onClick = {
-                                onSaveCloudSettings(serverUrl)
                                 onStartNetwork(GroupCloudStartRequest.Create(serverUrl, requireApproval, selectedMode))
                             },
                             enabled = serverUrl.isNotBlank(),
@@ -291,7 +292,6 @@ internal fun GroupScreen(
                             onClick = {
                                 val codeObj = GroupCloudInviteCode(inviteInput)
                                 inviteInput = ""
-                                onSaveCloudSettings(serverUrl)
                                 onStartNetwork(GroupCloudStartRequest.Join(serverUrl, codeObj, selectedMode))
                             },
                             enabled = serverUrl.isNotBlank() && GroupCloudInviteCode.isValid(inviteInput),
@@ -300,6 +300,16 @@ internal fun GroupScreen(
                                 .heightIn(min = 48.dp)
                                 .testTag(if (creatingHybrid) "hybrid_join" else "network_join")
                         ) { Text(if (creatingHybrid) "申请加入双模房间" else "申请加入网络房间") }
+                    }
+                    if (showDeveloperCloudSettings(allowCustomServer, selectedMode)) {
+                        TextButton(
+                            onClick = {
+                                developerServerDraft = serverUrl
+                                developerServerError = null
+                                showDeveloperSettings = true
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("developer_settings")
+                        ) { Text("开发者设置") }
                     }
                     TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text("权限设置") }
                 } else {
@@ -738,6 +748,68 @@ internal fun GroupScreen(
                 }
             }
         }
+    }
+    if (showDeveloperSettings) {
+        AlertDialog(
+            onDismissRequest = {
+                showDeveloperSettings = false
+                developerServerError = null
+            },
+            title = { Text("开发者设置") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("仅调试构建可用。生产构建固定使用内置云端地址。")
+                    OutlinedTextField(
+                        value = developerServerDraft,
+                        onValueChange = {
+                            developerServerDraft = it
+                            developerServerError = null
+                        },
+                        label = { Text("调试云端服务地址") },
+                        modifier = Modifier.fillMaxWidth().testTag("network_server_input"),
+                        singleLine = true
+                    )
+                    developerServerError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(
+                        onClick = {
+                            developerServerDraft = GroupCloudPreferences.DEFAULT_SERVER_URL
+                            developerServerError = null
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("developer_server_reset")
+                    ) { Text("恢复生产地址") }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val normalized = try {
+                            GroupCloudUrlPolicy.normalizeConfiguredUrl(developerServerDraft)
+                        } catch (error: IllegalArgumentException) {
+                            developerServerError = error.message ?: "云端服务地址无效"
+                            null
+                        }
+                        if (normalized != null) {
+                            serverUrl = normalized
+                            if (normalized == GroupCloudPreferences.DEFAULT_SERVER_URL) onResetCloudSettings()
+                            else onSaveCloudSettings(normalized)
+                            showDeveloperSettings = false
+                        }
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("developer_server_save")
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showDeveloperSettings = false
+                        developerServerError = null
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) { Text("取消") }
+            }
+        )
     }
     val roleTarget = if (snapshot?.mode != GroupMode.NETWORK && snapshot?.isOwner == true && room != null && roleTargetId != null) {
         room.members.singleOrNull { it.lease.deviceId == roleTargetId && it.status != GroupMemberStatus.WAITING }

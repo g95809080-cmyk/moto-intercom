@@ -112,7 +112,7 @@ internal class GroupHybridRuntime(
 
     override fun start(code: GroupJoinCode?) {
         try {
-            val normalizedUrl = GroupCloudUrlPolicy.normalizeAndValidate(request.serverUrl)
+            val normalizedUrl = GroupCloudUrlPolicy.normalizeConfiguredUrl(request.serverUrl)
             ownership = checkNotNull(GroupRuntimeOwnership.acquire())
             keepAlive = acquireKeepAlive()
             pollApi = pollApiFactory(normalizedUrl)

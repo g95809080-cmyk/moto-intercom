@@ -28,7 +28,7 @@ internal class HttpGroupCloudClient(
     init {
         require(maxResponseBytes > 0) { "maxResponseBytes must be positive" }
     }
-    private val baseUrl = GroupCloudUrlPolicy.normalizeAndValidate(rawBaseUrl)
+    private val baseUrl = GroupCloudUrlPolicy.normalizeConfiguredUrl(rawBaseUrl)
     private val closed = AtomicBoolean(false)
     private val activeConnections = Collections.synchronizedSet(mutableSetOf<HttpURLConnection>())
 

@@ -134,7 +134,7 @@ internal open class GroupIntercomService : Service() {
                 val targetMode = if (intent.action == ACTION_START_HYBRID_GROUP) GroupMode.HYBRID else GroupMode.NETWORK
                 val rawUrl = intent.getStringExtra(EXTRA_CLOUD_SERVER_URL).orEmpty()
                 val normalizedUrl = try {
-                    GroupCloudUrlPolicy.normalizeAndValidate(rawUrl)
+                    GroupCloudUrlPolicy.normalizeConfiguredUrl(rawUrl)
                 } catch (error: IllegalArgumentException) {
                     publish(state.copy(message = error.message ?: "云端服务地址无效"))
                     if (runtime == null && starting == null) stopSelf(startId)

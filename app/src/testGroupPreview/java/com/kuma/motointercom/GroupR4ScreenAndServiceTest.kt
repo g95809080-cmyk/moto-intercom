@@ -56,6 +56,72 @@ class GroupR4ScreenAndServiceTest {
     }
 
     @Test
+    fun preparationPageUsesBuiltInServerAndKeepsDebugOverrideInDeveloperSettings() {
+        var started: GroupCloudStartRequest? = null
+        var savedUrl: String? = null
+        compose.setContent {
+            MotoComTheme {
+                GroupScreen(
+                    state = GroupServiceState(),
+                    onStart = {},
+                    onAction = {},
+                    onRoute = {},
+                    onVox = {},
+                    onBack = {},
+                    onSettings = {},
+                    onCopy = {},
+                    onStartNetwork = { started = it },
+                    initialServerUrl = GroupCloudPreferences.DEFAULT_SERVER_URL,
+                    allowCustomServer = true,
+                    onSaveCloudSettings = { savedUrl = it }
+                )
+            }
+        }
+        compose.onNodeWithTag("mode_network").performClick()
+        compose.onNodeWithTag("network_server_input").assertDoesNotExist()
+        compose.onNodeWithTag("developer_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("network_server_input").performTextClearance()
+        compose.onNodeWithTag("network_server_input").performTextInput("http://127.0.0.1:8443")
+        compose.onNodeWithTag("developer_server_save").performClick()
+        compose.onNodeWithTag("network_server_input").assertDoesNotExist()
+
+        compose.onNodeWithTag("network_create").performScrollTo().performClick()
+        val created = started as GroupCloudStartRequest.Create
+        assertEquals("http://127.0.0.1:8443", created.serverUrl)
+        assertEquals("http://127.0.0.1:8443", savedUrl)
+    }
+
+    @Test
+    fun productionScreenHidesDeveloperSettingsAndAlwaysUsesBuiltInServer() {
+        var started: GroupCloudStartRequest? = null
+        compose.setContent {
+            MotoComTheme {
+                GroupScreen(
+                    state = GroupServiceState(),
+                    onStart = {},
+                    onAction = {},
+                    onRoute = {},
+                    onVox = {},
+                    onBack = {},
+                    onSettings = {},
+                    onCopy = {},
+                    onStartNetwork = { started = it },
+                    initialServerUrl = GroupCloudPreferences.DEFAULT_SERVER_URL,
+                    allowCustomServer = false
+                )
+            }
+        }
+        compose.onNodeWithTag("mode_network").performClick()
+        compose.onNodeWithTag("developer_settings").assertDoesNotExist()
+        compose.onNodeWithTag("network_server_input").assertDoesNotExist()
+        compose.onNodeWithTag("network_create").performScrollTo().performClick()
+        assertEquals(
+            GroupCloudPreferences.DEFAULT_SERVER_URL,
+            (started as GroupCloudStartRequest.Create).serverUrl
+        )
+    }
+
+    @Test
     fun networkRoomShowsPendingApprovalAndOwnerTransferOrDisbandDialogWithoutRiderControls() {
         val actions = mutableListOf<GroupSessionEvent>()
         val owner = GroupMember(GroupMemberLease("dev-1", "run-1", 1, 1), role = GroupRole.OWNER)
