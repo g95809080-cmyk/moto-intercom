@@ -161,7 +161,17 @@ Next gate allowed
 - **证书**：使用现有 `acme.sh 3.1.7` 通过 HTTP-01 签发 Let's Encrypt EC-256 独立证书（`2026-11-26` 至 `2027-02-24`），安装至 `/etc/ssl/certs/toneride-group.fullchain.pem` 与 `/etc/ssl/private/toneride-group.key`（私钥 `0600 root:root`）；续期由 ARI 窗口驱动，下一次计划续期为 `2027-01-24`，续期后自动 `reload nginx`。
 - **反向代理**：新建独立站点 `/etc/nginx/sites-available/group.toneride.top.conf`，仅将 `group.toneride.top` 的 `80/443` 转发至 `127.0.0.1:8443`；未改动 `moto.conf`、`moto-domain.conf` 及其他站点。`nginx -t` 通过，`nginx` 与 `moto-group-cloud.service` 均为 `active`。
 - **验收**：`223.5.5.5` 与 `8.8.8.8` 均解析到 `110.41.77.64`；HTTP 请求返回 `301` 至 HTTPS；严格 TLS `GET https://group.toneride.top/healthz` 返回 `200`（`maxMembers: 50`、`openApiRevocationEnforced: true`）；`POST /v1/rooms`（空 body）正确返回 `400 INVALID_INPUT`，证明写请求已到达控制面而非 Nginx 默认 404。回归 `api.toneride.top`、`admin.toneride.top`、`www.toneride.top` 与 IP 入口 `/group-cloud/healthz` 均返回 `200`。
-- **客户端配置**：群组预览版“云端服务地址”使用 `https://group.toneride.top`；本次仅变更 DNS、TLS 与 Nginx，不需要重新打包 APK，正式主包与 preview.6 版本身份均未改变。
+- **客户端配置（preview.6 时点）**：当时群组预览版仍需手动填写 `https://group.toneride.top`，本次只变更 DNS、TLS 与 Nginx；preview.7 起改为内置地址，见下节。
+
+## 11 月 26 日 preview.7 内置云端地址与发布变体
+
+- **目标与构建拓扑**：普通用户不再看到或修改云端地址。保留 `groupPreview` 调试变体（BuildConfig.DEBUG=true）用于 `adb reverse`/临时环境联调；新增 `groupPreviewRelease` 非调试变体，`initWith(release)`、`isDebuggable=false`，复用 `src/groupPreview` 的 Java/Kotlin/Manifest/jniLibs，但使用独立 `src/groupPreviewRelease/res` 的严格网络安全配置。两个变体包名均为 `com.kuma.motointercom.group.preview`，版本同由 `version.properties` 管理。
+- **连接策略**：`groupPreviewRelease` 的 BuildConfig 内置 `https://group.toneride.top` 与精确 host allowlist；真实 release 单测断言 BuildConfig.DEBUG=false、恶意 HTTPS 域名和回环 HTTP 均被拒绝。开发者输入仅在 BuildConfig.DEBUG=true 时显示在独立“开发者设置”对话框；普通准备页已移除“云端服务地址”。发布构建初始化时会清除旧 `server_url` 与 `developer_server_url`，旧自定义地址不会继续生效。Service、Runtime 与 HTTP Client 仍会再次执行 `normalizeConfiguredUrl`，不能仅靠绕过 UI 改地址。
+- **网络安全**：调试变体仍允许回环明文用于 `adb reverse`；release 变体 APK 内 `group_preview_network_security_config` 仅有 `base-config cleartextTrafficPermitted=false`，禁止全部明文流量。
+- **架构门禁**：只读架构复审结论 **APPROVED**（P0 无、P1 无），Base `9436d7e4b6bda9695730f25e8670bd63986b700a`，Head `f9bc538fcf08ea647728d708d3f2c50db2092b34`。
+- **自动验证**：主线单测 **105 套件 / 881 项**、调试群组单测 **41 套件 / 270 项**、release 策略单测 **1/1** 全部通过；`lintDebug`（0 错误 / 89 警告）、`lintGroupPreview`（0 错误 / 101 警告）、`lintGroupPreviewRelease`（0 错误 / 100 警告）通过；`assembleGroupPreview`、`assembleGroupPreviewRelease` 与 `assembleGroupPreviewAndroidTest -PtestBuildType=groupPreview` 通过。
+- **交付产物**：`C:/Users/Administrator/Documents/摩托对讲机/output/motocom-group-2.3.0-r5.preview.7-10d494ee.apk`（`119,627,901` bytes，SHA-256 `10d494ee6a51b8f8fe673c1764a25345f0a950bb3e7c9b44a1d5cbe0834c4648`，同目录含 `.sha256`）。身份为 `2.3.0-r5.preview.7+f9bc538` / `versionCode = 13`，`apkanalyzer manifest debuggable` 为 `false`；`apksigner verify` v1/v2 通过，`zipalign -c -P 16 4` 通过。
+- **小米 13 验证**：已覆盖安装 preview.7 release 包，机内 `base.apk` SHA-256 与交付件一致，包 flags 不含 `DEBUGGABLE`，`GroupActivity` 冷启动 **363ms**；双模准备页无“开发者设置”与“云端服务地址”入口，`AndroidRuntime` 无异常。正式主包 `com.kuma.motointercom`（`1.2.3+f587472` / `versionCode = 7`）未受影响。
 
 ## 仍待完成的物理设备门禁（NOT RUN）
 
