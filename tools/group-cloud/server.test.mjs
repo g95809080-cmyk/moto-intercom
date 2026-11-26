@@ -62,7 +62,10 @@ async function startTestServer(options = {}) {
       bannedUserUntil.set(`${roomId}\0${userId}`, nowMs + sec * 1000);
     },
     onRtcBanRoom: async (roomId, details) => {
-      if (faults.banRoom) {
+      if (typeof faults.banRoom === 'function') {
+        const err = await faults.banRoom(roomId, details);
+        if (err) throw err;
+      } else if (faults.banRoom) {
         const err = faults.banRoom;
         faults.banRoom = null;
         throw err;
@@ -1585,6 +1588,8 @@ async function startFakeVolcRtcServer(getNow) {
   const bannedUserUntil = new Map();
   let failStatus = 0;
   let failOnceStatus = 0;
+  let delayAfterBanOnceMs = 0;
+  let delayAfterBanMs = 0;
   let nextGate = null;
   let onBanApplied = null;
 
@@ -1621,23 +1626,41 @@ async function startFakeVolcRtcServer(getNow) {
     }
 
     const nowMs = getNow();
+    let resultMessage = 'success';
     if (action === 'BanRoomUser') {
       const untilMs = nowMs + call.forbiddenInterval * 1000;
       if (call.userId) {
-        bannedUserUntil.set(`${call.roomId}\0${call.userId}`, untilMs);
+        const pairKey = `${call.roomId}\0${call.userId}`;
+        if ((bannedUserUntil.get(pairKey) ?? 0) > nowMs) {
+          resultMessage = 'User has been banned.';
+        }
+        bannedUserUntil.set(pairKey, Math.max(bannedUserUntil.get(pairKey) ?? 0, untilMs));
       } else {
-        bannedRoomUntil.set(call.roomId, untilMs);
+        if ((bannedRoomUntil.get(call.roomId) ?? 0) > nowMs) {
+          resultMessage = 'Room has been banned.';
+        }
+        bannedRoomUntil.set(call.roomId, Math.max(bannedRoomUntil.get(call.roomId) ?? 0, untilMs));
       }
       onBanApplied?.(call);
+      const postBanDelay = delayAfterBanOnceMs || delayAfterBanMs;
+      if (delayAfterBanOnceMs) delayAfterBanOnceMs = 0;
+      if (postBanDelay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, postBanDelay));
+        if (res.destroyed || req.destroyed) return;
+      }
     } else if (action === 'UpdateBanRoomUserRule') {
       if (call.userId && call.forbiddenInterval === 0) {
-        bannedUserUntil.delete(`${call.roomId}\0${call.userId}`);
+        const pairKey = `${call.roomId}\0${call.userId}`;
+        if ((bannedUserUntil.get(pairKey) ?? 0) <= nowMs) {
+          resultMessage = 'User is not banned.';
+        }
+        bannedUserUntil.delete(pairKey);
       } else if (call.userId) {
         bannedUserUntil.set(`${call.roomId}\0${call.userId}`, nowMs + call.forbiddenInterval * 1000);
       }
     }
 
-    const payload = JSON.stringify({ ResponseMetadata: {}, Result: { Message: 'success' } });
+    const payload = JSON.stringify({ ResponseMetadata: {}, Result: { Message: resultMessage } });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(payload);
   });
@@ -1654,6 +1677,12 @@ async function startFakeVolcRtcServer(getNow) {
     },
     failNextWith: (status) => {
       failOnceStatus = status;
+    },
+    delayNextBanResponseMs: (ms) => {
+      delayAfterBanOnceMs = ms;
+    },
+    setBanResponseDelayMs: (ms) => {
+      delayAfterBanMs = ms;
     },
     setOnBanApplied: (fn) => {
       onBanApplied = fn;
@@ -1689,6 +1718,7 @@ async function startFakeVolcEnv(options = {}) {
     accessKeyId: 'test-ak-fake-volc',
     secretKey: 'test-sk-fake-volc',
     endpointUrl: fakeVolc.url,
+    timeoutMs: options.rtcTimeoutMs,
     now: () => new Date(nowMs)
   });
   const store = new GroupCloudStore({
@@ -1697,6 +1727,9 @@ async function startFakeVolcEnv(options = {}) {
     appKey: APP_KEY,
     disconnectTimeoutMs: options.disconnectTimeoutMs ?? 15_000,
     reservationMs: options.reservationMs ?? 60_000,
+    localSignalStableMs: options.localSignalStableMs,
+    localPreconnectTimeoutMs: options.localPreconnectTimeoutMs,
+    revocationRetryCooldownMs: options.revocationRetryCooldownMs,
     rtcAdmin
   });
   const { server } = createGroupCloudServer({ store, sweepIntervalMs: 0 });
@@ -1778,8 +1811,16 @@ test('sweep() ADMITTED -> RESERVED awaits OpenAPI BanRoomUser fail-closed (delay
     assert.equal(room.revision, revBefore);
     assert.equal(env.fakeVolc.canJoin(peerOldRtc), true);
 
+    // Immediate retry within cooldown is throttled without hammering OpenAPI.
+    const callsAfterFailure = env.fakeVolc.calls.length;
+    const throttledSweep = await env.store.sweep();
+    assert.equal(throttledSweep.changed, false);
+    assert.equal(throttledSweep.errors.length, 0);
+    assert.equal(env.fakeVolc.calls.length, callsAfterFailure);
+
     // 2) OpenAPI delayed (hanging Promise) MUST hold state uncommitted until BanRoomUser completes,
     //    and old token MUST already be rejected by FakeVolcRtcServer BEFORE RESERVED commits.
+    env.advance(3_000);
     let stateAtBanMoment = null;
     env.fakeVolc.setOnBanApplied(() => {
       stateAtBanMoment = {
@@ -1890,6 +1931,7 @@ test('sweep() non-owner RESERVED recovery expiry awaits OpenAPI BanRoomUser fail
 
     // 2) Delayed OpenAPI (hanging Promise) MUST hold peer deletion until BanRoomUser completes.
     env.fakeVolc.setFailStatus(0);
+    env.advance(3_000);
     let stateAtBanMoment = null;
     env.fakeVolc.setOnBanApplied(() => {
       stateAtBanMoment = {
@@ -1991,6 +2033,7 @@ test('sweep() owner RESERVED recovery expiry awaits room-level BanRoomUser fail-
     // 2) Delayed OpenAPI (hanging Promise) MUST keep room.ended === false until room-level BanRoomUser completes,
     //    and peer's token MUST be rejected by FakeVolcRtcServer BEFORE room ends.
     env.fakeVolc.setFailStatus(0);
+    env.advance(3_000);
     let stateAtBanMoment = null;
     env.fakeVolc.setOnBanApplied(() => {
       stateAtBanMoment = {
@@ -2497,4 +2540,1729 @@ test('RTC admin enforces request/body timeout and releases per-room lock on stal
     () => streamedOversizeAdmin.banUser('room-oversize-2', 'user-oversize-2', 300),
     /exceeded 65536 bytes/
   );
+});
+
+test('HYBRID CLOUD -> LOCAL partial channel revocation failure blocks re-issuance on banned channel and re-enters cleanly', async () => {
+  const env = await startTestServer({ disconnectTimeoutMs: 60_000 });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    assert.equal(peer.status, 200);
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+
+    const peerPubRes = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(peerPubRes.status, 200);
+    const peerPubRtc = peerPubRes.json.rtc;
+    assert.equal(env.canJoinRtc(peerPubRtc), true);
+
+    const toRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(toRider.status, 200);
+    const ownerRiderRtc = toRider.json.rtc;
+    assert.notEqual(ownerRiderRtc.rtcRoomId, peerPubRtc.rtcRoomId);
+    assert.equal(env.canJoinRtc(ownerRiderRtc), true);
+    rev = toRider.json.snapshot.revision;
+
+    let banRoomAttempts = 0;
+    let failedSecondChannel = false;
+    env.faults.banRoom = () => {
+      banRoomAttempts += 1;
+      if (banRoomAttempts === 2 && !failedSecondChannel) {
+        failedSecondChannel = true;
+        return new Error('Volc OpenAPI 500 on second channel');
+      }
+      return null;
+    };
+
+    const failedSwitch = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(failedSwitch.status, 502);
+    assert.equal(failedSwitch.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.bannedRooms.length, 1);
+    assert.equal(env.bannedRooms[0].roomId, peerPubRtc.rtcRoomId);
+    assert.equal(env.canJoinRtc(peerPubRtc), false);
+    assert.equal(env.canJoinRtc(ownerRiderRtc), true);
+
+    const roomRecord = env.store.rooms.get(roomId);
+    assert.equal(roomRecord.transport.active, 'CLOUD');
+    assert.equal(roomRecord.transport.epoch, 2);
+    assert.equal(roomRecord.revision, rev);
+    assert.equal(roomRecord.issuedRtcRoomIds.has(peerPubRtc.rtcRoomId), false);
+    assert.equal(roomRecord.issuedRtcRoomIds.has(ownerRiderRtc.rtcRoomId), true);
+    assert.equal(roomRecord.rtcRoomRevocations.get(peerPubRtc.rtcRoomId)?.status, 'REVOKED');
+    assert.equal(roomRecord.rtcRoomRevocations.get(ownerRiderRtc.rtcRoomId)?.status, 'FAILED');
+
+    const blockedPeerRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(blockedPeerRefresh.status, 502);
+    assert.equal(blockedPeerRefresh.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(blockedPeerRefresh.json.rtc, undefined);
+    assert.equal(roomRecord.issuedRtcRoomIds.has(peerPubRtc.rtcRoomId), false);
+
+    const blockedPeerResume = await env.api('POST', `/v1/rooms/${roomId}/resume`, { token: peerToken });
+    assert.equal(blockedPeerResume.status, 502);
+    assert.equal(blockedPeerResume.json.code, 'RTC_REVOCATION_FAILED');
+
+    const blockedOwnerRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken });
+    assert.equal(blockedOwnerRefresh.status, 502);
+    assert.equal(blockedOwnerRefresh.json.code, 'RTC_REVOCATION_FAILED');
+
+    const blockedChannelSwitch = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'PUBLIC', expectedRevision: rev }
+    });
+    assert.equal(blockedChannelSwitch.status, 502);
+    assert.equal(blockedChannelSwitch.json.code, 'RTC_REVOCATION_FAILED');
+
+    const blockedJoin = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-late', runtimeId: 'run-l', nickname: '后入队员' }
+    });
+    assert.equal(blockedJoin.status, 502);
+    assert.equal(blockedJoin.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(roomRecord.members.has('dev-late'), false);
+
+    env.faults.banRoom = null;
+    const retrySwitch = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(retrySwitch.status, 200);
+    assert.equal(retrySwitch.json.switched, true);
+    assert.equal(retrySwitch.json.rtc, null);
+    assert.equal(retrySwitch.json.snapshot.transport.active, 'LOCAL');
+    assert.equal(retrySwitch.json.snapshot.transport.epoch, 3);
+    assert.equal(env.bannedRooms.length, 2);
+    assert.equal(env.bannedRooms[1].roomId, ownerRiderRtc.rtcRoomId);
+    assert.equal(env.canJoinRtc(peerPubRtc), false);
+    assert.equal(env.canJoinRtc(ownerRiderRtc), false);
+    assert.equal(roomRecord.rtcRoomRevocations.get(ownerRiderRtc.rtcRoomId)?.status, 'REVOKED');
+    rev = retrySwitch.json.snapshot.revision;
+
+    const backToCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 3 }
+    });
+    assert.equal(backToCloud.status, 200);
+    assert.equal(backToCloud.json.snapshot.transport.epoch, 4);
+    assert.equal(env.canJoinRtc(backToCloud.json.rtc), true);
+    const peerNewCloudRtc = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(peerNewCloudRtc.status, 200);
+    assert.equal(env.canJoinRtc(peerNewCloudRtc.json.rtc), true);
+    assert.notEqual(peerNewCloudRtc.json.rtc.rtcRoomId, peerPubRtc.rtcRoomId);
+  } finally {
+    await env.close();
+  }
+});
+
+test('HYBRID auto-recovery PRECONNECTING partial revocation failure completes on retry and rotates cleanly on preconnect abort', async () => {
+  const env = await startTestServer({
+    disconnectTimeoutMs: 120_000,
+    localSignalStableMs: 5_000,
+    localPreconnectTimeoutMs: 10_000
+  });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode: owner.json.snapshot.invite.code, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const fallbackCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(fallbackCloud.status, 200);
+    rev = fallbackCloud.json.snapshot.revision;
+
+    const peerPub = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(peerPub.status, 200);
+    const ownerRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(ownerRider.status, 200);
+    rev = ownerRider.json.snapshot.revision;
+
+    env.advance(16_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -62 }
+    });
+    env.advance(5_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    const preconnect = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+    });
+    assert.equal(preconnect.json.snapshot.transport.recoveryStage, 'PRECONNECTING');
+
+    env.advance(8_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true, localControlReady: true }
+    });
+
+    let attempts = 0;
+    env.faults.banRoom = () => {
+      attempts += 1;
+      return attempts === 2 ? new Error('OpenAPI timeout on 2nd channel') : null;
+    };
+    const failedHandover = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+    });
+    assert.equal(failedHandover.status, 502);
+    assert.equal(failedHandover.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.bannedRooms.length, 1);
+
+    const deniedRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(deniedRefresh.status, 502);
+    assert.equal(deniedRefresh.json.code, 'RTC_REVOCATION_FAILED');
+
+    // Even after the 10s preconnect window elapses during OpenAPI recovery, retry finishes LOCAL_RECOVERED.
+    env.advance(4_000);
+    env.faults.banRoom = null;
+    const completedHandover = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+    });
+    assert.equal(completedHandover.status, 200);
+    assert.equal(completedHandover.json.switched, true);
+    assert.equal(completedHandover.json.snapshot.transport.active, 'LOCAL');
+    assert.equal(completedHandover.json.snapshot.transport.epoch, 3);
+    assert.equal(completedHandover.json.snapshot.transport.reason, 'LOCAL_RECOVERED');
+    assert.equal(completedHandover.json.snapshot.transport.handoverFromEpoch, 2);
+    assert.equal(env.bannedRooms.length, 2);
+    assert.equal(env.canJoinRtc(peerPub.json.rtc), false);
+    assert.equal(env.canJoinRtc(ownerRider.json.rtc), false);
+    rev = completedHandover.json.snapshot.revision;
+
+    // Second cycle: partial revocation during PRECONNECTING followed by preconnectFailed rotates to fresh CLOUD epoch.
+    const secondFallback = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 3 }
+    });
+    assert.equal(secondFallback.status, 200);
+    const epoch4OwnerRtc = secondFallback.json.rtc;
+    const epoch4PeerRtc = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).json.rtc;
+    assert.notEqual(epoch4OwnerRtc.rtcRoomId, epoch4PeerRtc.rtcRoomId);
+
+    env.advance(31_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 4, localProbeActive: true }
+    });
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 4, localReachable: true, localRssiDbm: -62 }
+    });
+    env.advance(5_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 4, localProbeActive: true }
+    });
+    const preconnect2 = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 4, localReachable: true, localRssiDbm: -60 }
+    });
+    assert.equal(preconnect2.json.snapshot.transport.recoveryStage, 'PRECONNECTING');
+
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 4, localProbeActive: true, localControlReady: true }
+    });
+    let attempts2 = 0;
+    env.faults.banRoom = () => {
+      attempts2 += 1;
+      return attempts2 === 2 ? new Error('OpenAPI 502 on 2nd channel') : null;
+    };
+    const failedHandover2 = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 4, localReachable: true, localRssiDbm: -60, localControlReady: true }
+    });
+    assert.equal(failedHandover2.status, 502);
+    assert.equal(env.bannedRooms.length, 3);
+
+    // Reporting preconnectFailed inside cooldown records CLOUD_ROTATE preserving nextRetryAtMs without calling OpenAPI.
+    const roomBeforeAbort = env.store.rooms.get(roomId);
+    const preservedRetryAt = roomBeforeAbort.pendingEpochRevocation.nextRetryAtMs;
+    env.faults.banRoom = null;
+    const abortDuringCooldown = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 4, localReachable: true, preconnectFailed: true }
+    });
+    assert.equal(abortDuringCooldown.status, 200);
+    assert.equal(abortDuringCooldown.json.switched, false);
+    assert.equal(abortDuringCooldown.json.snapshot.transport.epoch, 4);
+    assert.equal(env.bannedRooms.length, 3);
+    assert.equal(roomBeforeAbort.pendingEpochRevocation.intent, 'CLOUD_ROTATE');
+    assert.equal(roomBeforeAbort.pendingEpochRevocation.nextRetryAtMs, preservedRetryAt);
+
+    // Once retry cooldown elapses, background sweep finishes CLOUD_ROTATE into fresh CLOUD epoch 5.
+    env.advance(3_000);
+    const sweptRotate = await env.store.sweep();
+    assert.equal(sweptRotate.changed, true);
+    assert.equal(sweptRotate.errors.length, 0);
+    assert.equal(roomBeforeAbort.transport.active, 'CLOUD');
+    assert.equal(roomBeforeAbort.transport.epoch, 5);
+    assert.equal(roomBeforeAbort.transport.recoveryStage, 'IDLE');
+    assert.equal(env.bannedRooms.length, 4);
+    assert.equal(env.canJoinRtc(epoch4OwnerRtc), false);
+    assert.equal(env.canJoinRtc(epoch4PeerRtc), false);
+
+    const epoch5Peer = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    const epoch5Owner = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken });
+    assert.equal(epoch5Peer.status, 200);
+    assert.equal(epoch5Owner.status, 200);
+    assert.equal(env.canJoinRtc(epoch5Peer.json.rtc), true);
+    assert.equal(env.canJoinRtc(epoch5Owner.json.rtc), true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('HYBRID closePrivate partial failure blocks banned private room re-issue without blocking PUBLIC members', async () => {
+  const env = await startTestServer({ disconnectTimeoutMs: 60_000 });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    const peerA = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-a', runtimeId: 'run-a', nickname: 'A' }
+    });
+    const peerB = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-b', runtimeId: 'run-b', nickname: 'B' }
+    });
+    let rev = peerB.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerA.json.sessionToken })).status, 200);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerB.json.sessionToken })).status, 200);
+
+    const invite = await env.api('POST', `/v1/rooms/${roomId}/private-invites`, {
+      token: ownerToken,
+      body: { targetDeviceId: 'dev-a', expectedRevision: rev }
+    });
+    assert.equal(invite.status, 201);
+    rev = invite.json.snapshot.revision;
+
+    const accepted = await env.api('POST', `/v1/rooms/${roomId}/private-invites/${invite.json.inviteId}/accept`, {
+      token: peerA.json.sessionToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(accepted.status, 200);
+    const privateRtc = accepted.json.rtc;
+    rev = accepted.json.snapshot.revision;
+
+    env.faults.unbanUser = new Error('Volc OpenAPI unban failed');
+    const failedClose = await env.api('POST', `/v1/rooms/${roomId}/private/close`, {
+      token: peerA.json.sessionToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(failedClose.status, 502);
+    assert.equal(failedClose.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.bannedRooms.length, 1);
+    assert.equal(env.bannedRooms[0].roomId, privateRtc.rtcRoomId);
+    assert.equal(env.canJoinRtc(privateRtc), false);
+
+    const blockedPrivateRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, {
+      token: peerA.json.sessionToken
+    });
+    assert.equal(blockedPrivateRefresh.status, 502);
+    assert.equal(blockedPrivateRefresh.json.code, 'RTC_REVOCATION_FAILED');
+    const roomRecord = env.store.rooms.get(roomId);
+    assert.equal(roomRecord.rtcRoomRevocations.get(privateRtc.rtcRoomId)?.status, 'REVOKED');
+    // Sweeping while private close is still uncommitted keeps the PRIVATE/REVOKED guard active.
+    await env.store.sweep();
+    assert.equal(roomRecord.rtcRoomRevocations.get(privateRtc.rtcRoomId)?.status, 'REVOKED');
+
+    // Peer B in PUBLIC is unaffected by PRIVATE channel revocation.
+    const healthyPublicRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, {
+      token: peerB.json.sessionToken
+    });
+    assert.equal(healthyPublicRefresh.status, 200);
+    assert.equal(env.canJoinRtc(healthyPublicRefresh.json.rtc), true);
+
+    // Retrying closePrivate skips re-banning privateRtc and returns peerA cleanly to PUBLIC.
+    const okClose = await env.api('POST', `/v1/rooms/${roomId}/private/close`, {
+      token: peerA.json.sessionToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(okClose.status, 200);
+    assert.equal(env.bannedRooms.length, 1);
+    assert.equal(env.canJoinRtc(okClose.json.rtc), true);
+    assert.equal(roomRecord.rtcRoomRevocations.size, 0);
+    rev = okClose.json.snapshot.revision;
+
+    // Repeated private sessions in the same long-lived CLOUD epoch must not accumulate PRIVATE/REVOKED entries.
+    for (let round = 0; round < 5; round += 1) {
+      const loopInvite = await env.api('POST', `/v1/rooms/${roomId}/private-invites`, {
+        token: ownerToken,
+        body: { targetDeviceId: 'dev-a', expectedRevision: rev }
+      });
+      assert.equal(loopInvite.status, 201);
+      rev = loopInvite.json.snapshot.revision;
+      const loopAccept = await env.api('POST', `/v1/rooms/${roomId}/private-invites/${loopInvite.json.inviteId}/accept`, {
+        token: peerA.json.sessionToken,
+        body: { expectedRevision: rev }
+      });
+      assert.equal(loopAccept.status, 200);
+      rev = loopAccept.json.snapshot.revision;
+      const loopClose = await env.api('POST', `/v1/rooms/${roomId}/private/close`, {
+        token: peerA.json.sessionToken,
+        body: { expectedRevision: rev }
+      });
+      assert.equal(loopClose.status, 200);
+      rev = loopClose.json.snapshot.revision;
+    }
+    await env.store.sweep();
+    assert.equal(roomRecord.rtcRoomRevocations.size, 0);
+    const bannedBeforeEnd = env.bannedRooms.length;
+
+    // Also verify endRoom partial multi-channel revocation failure blocks re-issuance and completes on retry.
+    const ownerRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(ownerRider.status, 200);
+    rev = ownerRider.json.snapshot.revision;
+    let endAttempts = 0;
+    env.faults.banRoom = () => {
+      endAttempts += 1;
+      return endAttempts === 2 ? new Error('OpenAPI 502 during endRoom') : null;
+    };
+    const failedEnd = await env.api('POST', `/v1/rooms/${roomId}/end`, {
+      token: ownerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(failedEnd.status, 502);
+    assert.equal(failedEnd.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.bannedRooms.length, bannedBeforeEnd + 1);
+
+    const blockedDuringEnd = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, {
+      token: peerB.json.sessionToken
+    });
+    assert.equal(blockedDuringEnd.status, 502);
+    assert.equal(blockedDuringEnd.json.code, 'RTC_REVOCATION_FAILED');
+
+    env.faults.banRoom = null;
+    const okEnd = await env.api('POST', `/v1/rooms/${roomId}/end`, {
+      token: ownerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(okEnd.status, 200);
+    assert.equal(okEnd.json.ended, true);
+    assert.equal(env.bannedRooms.length, bannedBeforeEnd + 2);
+  } finally {
+    await env.close();
+  }
+});
+
+test('sweep completes timed-out PRECONNECTING handover when partial revocation already started and allControlReady is true', async () => {
+  const env = await startTestServer({
+    disconnectTimeoutMs: 120_000,
+    localSignalStableMs: 5_000,
+    localPreconnectTimeoutMs: 10_000
+  });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode: owner.json.snapshot.invite.code, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const fallbackCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(fallbackCloud.status, 200);
+    rev = fallbackCloud.json.snapshot.revision;
+
+    const peerPub = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).json.rtc;
+    const ownerRiderRes = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    const ownerRider = ownerRiderRes.json.rtc;
+    rev = ownerRiderRes.json.snapshot.revision;
+
+    env.advance(16_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -62 }
+    });
+    env.advance(5_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    const preconnect = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+    });
+    assert.equal(preconnect.json.snapshot.transport.recoveryStage, 'PRECONNECTING');
+
+    env.advance(8_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true, localControlReady: true }
+    });
+    let attempts = 0;
+    env.faults.banRoom = () => {
+      attempts += 1;
+      return attempts === 2 ? new Error('OpenAPI timeout on 2nd channel') : null;
+    };
+    const failedHandover = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+    });
+    assert.equal(failedHandover.status, 502);
+    assert.equal(env.bannedRooms.length, 1);
+
+    // Advance past preconnect timeout with NO further client reports; background sweep must complete LOCAL_RECOVERED.
+    env.advance(4_000);
+    env.faults.banRoom = new Error('OpenAPI still failing during sweep');
+    const failedSweep = await env.store.sweep();
+    assert.equal(failedSweep.changed, false);
+    assert.equal(failedSweep.errors.length, 1);
+    assert.equal(env.store.rooms.get(roomId).transport.active, 'CLOUD');
+
+    // Within retry backoff window, another sweep does not re-attempt OpenAPI.
+    const throttledSweep = await env.store.sweep();
+    assert.equal(throttledSweep.changed, false);
+    assert.equal(throttledSweep.errors.length, 0);
+
+    env.advance(6_000);
+    const recoveredSweep = await env.store.sweep();
+    assert.equal(recoveredSweep.changed, true);
+    assert.equal(recoveredSweep.errors.length, 0);
+    const roomRecord = env.store.rooms.get(roomId);
+    assert.equal(roomRecord.transport.active, 'LOCAL');
+    assert.equal(roomRecord.transport.epoch, 3);
+    assert.equal(roomRecord.transport.reason, 'LOCAL_RECOVERED');
+    assert.equal(roomRecord.transport.handoverFromEpoch, 2);
+    assert.equal(env.bannedRooms.length, 2);
+    assert.equal(env.canJoinRtc(peerPub), false);
+    assert.equal(env.canJoinRtc(ownerRider), false);
+  } finally {
+    await env.close();
+  }
+});
+
+test('interleaved remove, ownership transfer, leave, and host reassignment recover cleanly after partial EPOCH revocation', async () => {
+  const env = await startTestServer({ disconnectTimeoutMs: 20_000 });
+  try {
+    const triggerPartialEpochRevocation = async ({ roomId, ownerToken, peerToken, epoch, rev }) => {
+      const peerRtc = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).json.rtc;
+      assert.equal(env.canJoinRtc(peerRtc), true);
+      const ownerRtc = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken })).json.rtc;
+      assert.equal(env.canJoinRtc(ownerRtc), true);
+      assert.notEqual(peerRtc.rtcRoomId, ownerRtc.rtcRoomId);
+
+      let calls = 0;
+      env.faults.banRoom = () => {
+        calls += 1;
+        return calls === 2 ? new Error('OpenAPI 502 on 2nd channel') : null;
+      };
+      const failedSwitch = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+        token: ownerToken,
+        body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: epoch }
+      });
+      assert.equal(failedSwitch.status, 502);
+      assert.equal(failedSwitch.json.code, 'RTC_REVOCATION_FAILED');
+      env.faults.banRoom = null;
+      return { peerRtc, ownerRtc };
+    };
+
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    const peerA = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-a', runtimeId: 'run-a', nickname: 'A' }
+    });
+    const peerB = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-b', runtimeId: 'run-b', nickname: 'B' }
+    });
+    const peerC = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-c', runtimeId: 'run-c', nickname: 'C' }
+    });
+    let rev = peerC.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+
+    const ownerToRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(ownerToRider.status, 200);
+    rev = ownerToRider.json.snapshot.revision;
+
+    // 1. Interleaved removeMember after partial EPOCH revocation: fails closed if OpenAPI down, rotates CLOUD epoch on recovery.
+    const firstPartial = await triggerPartialEpochRevocation({
+      roomId, ownerToken, peerToken: peerA.json.sessionToken, epoch: 2, rev
+    });
+    env.faults.banRoom = new Error('OpenAPI still failing during removeMember');
+    const failedRemove = await env.api('POST', `/v1/rooms/${roomId}/members/dev-c/remove`, {
+      token: ownerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(failedRemove.status, 502);
+    assert.equal(env.store.rooms.get(roomId).members.has('dev-c'), true);
+
+    const okRemove = await env.api('POST', `/v1/rooms/${roomId}/members/dev-c/remove`, {
+      token: ownerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(okRemove.status, 200);
+    assert.equal(okRemove.json.snapshot.transport.active, 'CLOUD');
+    assert.equal(okRemove.json.snapshot.transport.epoch, 3);
+    assert.equal(env.canJoinRtc(firstPartial.peerRtc), false);
+    assert.equal(env.canJoinRtc(firstPartial.ownerRtc), false);
+    rev = okRemove.json.snapshot.revision;
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerA.json.sessionToken })).status, 200);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken })).status, 200);
+
+    // 2. Interleaved transferOwnership (local host departs) after partial EPOCH revocation rotates CLOUD epoch cleanly.
+    const secondPartial = await triggerPartialEpochRevocation({
+      roomId, ownerToken, peerToken: peerA.json.sessionToken, epoch: 3, rev
+    });
+    const transferred = await env.api('POST', `/v1/rooms/${roomId}/owner-transfer`, {
+      token: ownerToken,
+      body: { targetDeviceId: 'dev-a', alsoLeave: false, expectedRevision: rev }
+    });
+    assert.equal(transferred.status, 200);
+    assert.equal(transferred.json.snapshot.ownerId, 'dev-a');
+    assert.equal(transferred.json.snapshot.transport.active, 'CLOUD');
+    assert.equal(transferred.json.snapshot.transport.epoch, 4);
+    assert.equal(transferred.json.snapshot.transport.localHostDeviceId, 'dev-a');
+    assert.equal(env.canJoinRtc(secondPartial.peerRtc), false);
+    assert.equal(env.canJoinRtc(secondPartial.ownerRtc), false);
+    rev = transferred.json.snapshot.revision;
+
+    // New owner dev-a enters RIDER; old owner dev-owner stays in PUBLIC.
+    const newOwnerRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: peerA.json.sessionToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(newOwnerRider.status, 200);
+    rev = newOwnerRider.json.snapshot.revision;
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken })).status, 200);
+
+    // 3. Interleaved host reassignment in reportLocalStatus after partial EPOCH revocation rotates CLOUD epoch.
+    const thirdHostPartial = await triggerPartialEpochRevocation({
+      roomId, ownerToken: peerA.json.sessionToken, peerToken: ownerToken, epoch: 4, rev
+    });
+    const roomBeforeReassign = env.store.rooms.get(roomId);
+    roomBeforeReassign.transport.localHostDeviceId = 'dev-b';
+    roomBeforeReassign.members.get('dev-b').status = 'RESERVED';
+    roomBeforeReassign.members.get('dev-b').reservedUntilMs = env.getNow() + 60_000;
+    env.advance(16_000);
+    const reassigned = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerA.json.sessionToken,
+      body: { transportEpoch: 4, localProbeActive: true }
+    });
+    assert.equal(reassigned.status, 200);
+    assert.equal(reassigned.json.switched, false);
+    assert.equal(reassigned.json.snapshot.transport.active, 'CLOUD');
+    assert.equal(reassigned.json.snapshot.transport.epoch, 5);
+    assert.equal(reassigned.json.snapshot.transport.localHostDeviceId, 'dev-a');
+    assert.equal(env.canJoinRtc(thirdHostPartial.peerRtc), false);
+    assert.equal(env.canJoinRtc(thirdHostPartial.ownerRtc), false);
+    rev = reassigned.json.snapshot.revision;
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken })).status, 200);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerA.json.sessionToken })).status, 200);
+
+    // 4. Interleaved leaveRoom reducing admitted count below 2 after partial EPOCH revocation rotates CLOUD epoch.
+    const resumedB = await env.api('POST', `/v1/rooms/${roomId}/resume`, { token: peerB.json.sessionToken });
+    assert.equal(resumedB.status, 200);
+    rev = resumedB.json.snapshot.revision;
+    const transferToB = await env.api('POST', `/v1/rooms/${roomId}/owner-transfer`, {
+      token: peerA.json.sessionToken,
+      body: { targetDeviceId: 'dev-b', alsoLeave: false, expectedRevision: rev }
+    });
+    assert.equal(transferToB.status, 200);
+    rev = transferToB.json.snapshot.revision;
+    const bToRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: peerB.json.sessionToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(bToRider.status, 200);
+    rev = bToRider.json.snapshot.revision;
+    const rmOldOwner = await env.api('POST', `/v1/rooms/${roomId}/members/dev-owner/remove`, {
+      token: peerB.json.sessionToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(rmOldOwner.status, 200);
+    rev = rmOldOwner.json.snapshot.revision;
+
+    const thirdPartial = await triggerPartialEpochRevocation({
+      roomId, ownerToken: peerB.json.sessionToken, peerToken: peerA.json.sessionToken, epoch: 5, rev
+    });
+    const peerLeft = await env.api('POST', `/v1/rooms/${roomId}/leave`, {
+      token: peerA.json.sessionToken
+    });
+    assert.equal(peerLeft.status, 200);
+    const roomAfterLeave = env.store.rooms.get(roomId);
+    assert.equal(roomAfterLeave.transport.active, 'CLOUD');
+    assert.equal(roomAfterLeave.transport.epoch, 6);
+    assert.equal(env.canJoinRtc(thirdPartial.peerRtc), false);
+    assert.equal(env.canJoinRtc(thirdPartial.ownerRtc), false);
+    const soleOwnerRtc = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, {
+      token: peerB.json.sessionToken
+    });
+    assert.equal(soleOwnerRtc.status, 200);
+    assert.equal(env.canJoinRtc(soleOwnerRtc.json.rtc), true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('timed-out BanRoomUser after RTC applied ban blocks re-issuance on single/first channel and recovers idempotently', async () => {
+  const env = await startFakeVolcEnv({
+    disconnectTimeoutMs: 120_000,
+    rtcTimeoutMs: 80,
+    revocationRetryCooldownMs: 3_000
+  });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    const ownerPubRtc = toCloud.json.rtc;
+    rev = toCloud.json.snapshot.revision;
+    const peerPubRtc = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).json.rtc;
+    assert.equal(peerPubRtc.rtcRoomId, ownerPubRtc.rtcRoomId);
+    assert.equal(env.fakeVolc.canJoin(peerPubRtc), true);
+
+    // 1) Single-channel CLOUD -> LOCAL: FakeVolc applies room ban first, then stalls response past rtcTimeoutMs.
+    env.fakeVolc.delayNextBanResponseMs(220);
+    const timedOutSwitch = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(timedOutSwitch.status, 502);
+    assert.equal(timedOutSwitch.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.fakeVolc.canJoin(peerPubRtc), false);
+
+    const room = env.store.rooms.get(roomId);
+    assert.equal(room.transport.active, 'CLOUD');
+    assert.equal(room.transport.epoch, 2);
+    assert.equal(room.rtcRoomRevocations.get(peerPubRtc.rtcRoomId)?.status, 'FAILED');
+    assert.equal(room.pendingEpochRevocation?.intent, 'MANUAL_LOCAL');
+
+    // Re-issuance on that uncertain/banned single channel MUST fail closed (never clear FAILED or return broken token).
+    const blockedRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(blockedRefresh.status, 502);
+    assert.equal(blockedRefresh.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(room.rtcRoomRevocations.get(peerPubRtc.rtcRoomId)?.status, 'FAILED');
+
+    const blockedResume = await env.api('POST', `/v1/rooms/${roomId}/resume`, { token: peerToken });
+    assert.equal(blockedResume.status, 502);
+    assert.equal(blockedResume.json.code, 'RTC_REVOCATION_FAILED');
+
+    const blockedJoin = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-c', runtimeId: 'run-c', nickname: 'C' }
+    });
+    assert.equal(blockedJoin.status, 502);
+    assert.equal(blockedJoin.json.code, 'RTC_REVOCATION_FAILED');
+
+    // Background sweep after cooldown re-confirms ban ("Room has been banned.") and finishes LOCAL switch.
+    env.advance(3_000);
+    const recovered = await env.store.sweep();
+    assert.equal(recovered.changed, true);
+    assert.equal(recovered.errors.length, 0);
+    assert.equal(room.transport.active, 'LOCAL');
+    assert.equal(room.transport.epoch, 3);
+    assert.equal(room.transport.reason, 'MANUAL_LOCAL');
+    assert.equal(room.pendingEpochRevocation, null);
+    assert.equal(room.rtcRoomRevocations.get(peerPubRtc.rtcRoomId)?.status, 'REVOKED');
+    rev = room.revision;
+
+    // 2) Switch back to fresh CLOUD epoch 4; verify timed-out user BanRoomUser in switchChannel unbans on /rtc-token.
+    const backCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 3 }
+    });
+    assert.equal(backCloud.status, 200);
+    rev = backCloud.json.snapshot.revision;
+    const ownerEpoch4Pub = backCloud.json.rtc;
+    assert.equal(env.fakeVolc.canJoin(ownerEpoch4Pub), true);
+
+    env.fakeVolc.delayNextBanResponseMs(220);
+    const timedOutChannelSwitch = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    assert.equal(timedOutChannelSwitch.status, 502);
+    assert.equal(timedOutChannelSwitch.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.fakeVolc.canJoin(ownerEpoch4Pub), false);
+
+    // Refreshing token on PUBLIC detects uncertain user ban and invokes UpdateBanRoomUserRule to restore access.
+    const unbannedRefresh = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken });
+    assert.equal(unbannedRefresh.status, 200);
+    assert.equal(env.fakeVolc.canJoin(unbannedRefresh.json.rtc), true);
+
+    // 3) Private channel close timeout after RTC ban blocks private refresh without affecting PUBLIC peer,
+    //    and background sweep closes private cleanly.
+    const peerC = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-c', runtimeId: 'run-c', nickname: 'C' }
+    });
+    assert.equal(peerC.status, 200);
+    rev = peerC.json.snapshot.revision;
+    const privInvite = await env.api('POST', `/v1/rooms/${roomId}/private-invites`, {
+      token: ownerToken,
+      body: { targetDeviceId: 'dev-peer', expectedRevision: rev }
+    });
+    assert.equal(privInvite.status, 201);
+    rev = privInvite.json.snapshot.revision;
+    const privAccepted = await env.api('POST', `/v1/rooms/${roomId}/private-invites/${privInvite.json.inviteId}/accept`, {
+      token: peerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(privAccepted.status, 200);
+    const privRtc = privAccepted.json.rtc;
+    rev = privAccepted.json.snapshot.revision;
+
+    env.fakeVolc.delayNextBanResponseMs(220);
+    const timedOutPrivateClose = await env.api('POST', `/v1/rooms/${roomId}/private/close`, {
+      token: peerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(timedOutPrivateClose.status, 502);
+    assert.equal(env.fakeVolc.canJoin(privRtc), false);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).status, 502);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerC.json.sessionToken })).status, 200);
+
+    env.advance(3_000);
+    const privSwept = await env.store.sweep();
+    assert.equal(privSwept.changed, true);
+    assert.equal(privSwept.errors.length, 0);
+    assert.equal(room.members.get('dev-peer').channel.type, 'PUBLIC');
+    assert.equal(room.members.get('dev-owner').channel.type, 'PUBLIC');
+    const peerBackPub = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(peerBackPub.status, 200);
+    assert.equal(env.fakeVolc.canJoin(peerBackPub.json.rtc), true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('MANUAL_CLOUD -> MANUAL_LOCAL partial failure recovers via background sweep without owner retrying switch', async () => {
+  const env = await startTestServer({ disconnectTimeoutMs: 120_000 });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode: owner.json.snapshot.invite.code, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+
+    const peerPub = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).json.rtc;
+    const ownerRiderRes = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    const ownerRider = ownerRiderRes.json.rtc;
+    rev = ownerRiderRes.json.snapshot.revision;
+
+    const peerEventsBefore = await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: peerToken });
+    const peerSeqBefore = peerEventsBefore.json.latestSeq;
+
+    let attempts = 0;
+    env.faults.banRoom = () => {
+      attempts += 1;
+      if (attempts >= 2) return new Error('Volc OpenAPI 503 on second channel');
+      return null;
+    };
+    const failedManualLocal = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(failedManualLocal.status, 502);
+    assert.equal(failedManualLocal.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.bannedRooms.length, 1);
+
+    const room = env.store.rooms.get(roomId);
+    assert.equal(room.transport.active, 'CLOUD');
+    assert.equal(room.transport.reason, 'MANUAL_CLOUD');
+    assert.equal(room.transport.recoveryStage, 'IDLE');
+    assert.equal(room.pendingEpochRevocation?.intent, 'MANUAL_LOCAL');
+
+    // Owner NEVER retries switch; polling & token refresh must NOT trigger OpenAPI retries or issue tokens.
+    const attemptsAfterSwitch = attempts;
+    assert.equal((await env.api('GET', `/v1/rooms/${roomId}/events?after=${peerSeqBefore}&waitMs=0`, { token: peerToken })).status, 200);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).status, 502);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken })).status, 502);
+    assert.equal(attempts, attemptsAfterSwitch);
+
+    // Sweep within initial 3s cooldown does not call OpenAPI.
+    env.advance(1_000);
+    assert.deepEqual(await env.store.sweep(), { changed: false, errors: [] });
+    assert.equal(attempts, attemptsAfterSwitch);
+
+    // Sweep at 3s while OpenAPI still fails records backoff (+6s).
+    env.advance(2_000);
+    const stillFailingSweep = await env.store.sweep();
+    assert.equal(stillFailingSweep.changed, false);
+    assert.equal(stillFailingSweep.errors.length, 1);
+    assert.equal(attempts, attemptsAfterSwitch + 1);
+
+    // OpenAPI recovers; sweep before +6s skips, sweep at +6s finishes MANUAL_LOCAL and broadcasts SNAPSHOT.
+    env.faults.banRoom = null;
+    env.advance(3_000);
+    assert.deepEqual(await env.store.sweep(), { changed: false, errors: [] });
+    env.advance(3_000);
+    const recoveredSweep = await env.store.sweep();
+    assert.equal(recoveredSweep.changed, true);
+    assert.equal(recoveredSweep.errors.length, 0);
+    assert.equal(room.transport.active, 'LOCAL');
+    assert.equal(room.transport.epoch, 3);
+    assert.equal(room.transport.reason, 'MANUAL_LOCAL');
+    assert.equal(room.pendingEpochRevocation, null);
+    assert.equal(env.bannedRooms.length, 2);
+    assert.equal(env.canJoinRtc(peerPub), false);
+    assert.equal(env.canJoinRtc(ownerRider), false);
+
+    const peerEventsAfter = await env.api('GET', `/v1/rooms/${roomId}/events?after=${peerSeqBefore}&waitMs=0`, {
+      token: peerToken
+    });
+    assert.equal(peerEventsAfter.status, 200);
+    assert.equal(peerEventsAfter.json.events.at(-1).snapshot.transport.active, 'LOCAL');
+    assert.equal(peerEventsAfter.json.events.at(-1).snapshot.transport.epoch, 3);
+
+    // Variant: if host disconnects (RESERVED) while MANUAL_LOCAL is pending, sweep rotates to fresh CLOUD instead of dead LOCAL.
+    rev = room.revision;
+    const secondCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 3 }
+    });
+    assert.equal(secondCloud.status, 200);
+    rev = secondCloud.json.snapshot.revision;
+    await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    let secondAttempts = 0;
+    env.faults.banRoom = () => {
+      secondAttempts += 1;
+      return secondAttempts === 2 ? new Error('OpenAPI down on 2nd channel') : null;
+    };
+    const secondFailed = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 4 }
+    });
+    assert.equal(secondFailed.status, 502);
+    env.faults.banRoom = null;
+    room.members.get('dev-owner').status = 'RESERVED';
+    room.members.get('dev-owner').reservedUntilMs = env.getNow() + 60_000;
+    env.advance(3_000);
+    const rotatedSweep = await env.store.sweep();
+    assert.equal(rotatedSweep.changed, true);
+    assert.equal(room.transport.active, 'CLOUD');
+    assert.equal(room.transport.epoch, 5);
+    const freshPeerRtc = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    assert.equal(freshPeerRtc.status, 200);
+    assert.equal(env.canJoinRtc(freshPeerRtc.json.rtc), true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('partial endRoom takes precedence over transport switches, keeps switchTransport atomic, and completes via sweep', async () => {
+  const env = await startTestServer({ disconnectTimeoutMs: 120_000 });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+    const peerPub = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken })).json.rtc;
+    const ownerRiderRes = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    const ownerRider = ownerRiderRes.json.rtc;
+    rev = ownerRiderRes.json.snapshot.revision;
+
+    let endAttempts = 0;
+    env.faults.banRoom = () => {
+      endAttempts += 1;
+      return endAttempts === 2 ? new Error('OpenAPI 502 on 2nd channel during endRoom') : null;
+    };
+    const failedEnd = await env.api('POST', `/v1/rooms/${roomId}/end`, {
+      token: ownerToken,
+      body: { expectedRevision: rev }
+    });
+    assert.equal(failedEnd.status, 502);
+    assert.equal(failedEnd.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(env.bannedRooms.length, 1);
+
+    const room = env.store.rooms.get(roomId);
+    assert.equal(room.ended, false);
+    assert.equal(room.pendingEnd?.reason, 'OWNER_ENDED');
+
+    // Interleaved switchTransport(LOCAL), reportLocalStatus, switchChannel, join, and governance MUST fail closed
+    // without mutating transport, epoch, or revision.
+    const blockedToLocal = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(blockedToLocal.status, 502);
+    assert.equal(blockedToLocal.json.code, 'RTC_REVOCATION_FAILED');
+    assert.equal(room.transport.active, 'CLOUD');
+    assert.equal(room.transport.epoch, 2);
+    assert.equal(room.revision, rev);
+
+    const blockedLocalStatus = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+    });
+    assert.equal(blockedLocalStatus.status, 502);
+
+    const blockedChannel = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'PUBLIC', expectedRevision: rev }
+    });
+    assert.equal(blockedChannel.status, 502);
+
+    const blockedJoin = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-c', runtimeId: 'run-c', nickname: 'C' }
+    });
+    assert.equal(blockedJoin.status, 502);
+
+    // Even if a LOCAL room has a ROOM-level revocation, switchTransport(CLOUD) MUST fail BEFORE mutating transport/epoch.
+    const localOwner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-lo', runtimeId: 'run-lo', nickname: 'L', requireApproval: false, mode: 'HYBRID' }
+    });
+    const localRoom = env.store.rooms.get(localOwner.json.roomId);
+    localRoom.rtcRoomRevocations.set('synthetic-room-ban', {
+      rtcRoomId: 'synthetic-room-ban',
+      epoch: 1,
+      scope: 'ROOM',
+      reason: 'OWNER_ENDED',
+      status: 'REVOKED',
+      bannedUntilMs: env.getNow() + 60_000,
+      maxExpiresAtMs: env.getNow() + 60_000,
+      updatedAtMs: env.getNow()
+    });
+    const revBeforeLocal = localRoom.revision;
+    const blockedLocalToCloud = await env.api('POST', `/v1/rooms/${localRoom.roomId}/transport/switch`, {
+      token: localOwner.json.sessionToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: revBeforeLocal, expectedTransportEpoch: 1 }
+    });
+    assert.equal(blockedLocalToCloud.status, 502);
+    assert.equal(localRoom.transport.active, 'LOCAL');
+    assert.equal(localRoom.transport.epoch, 1);
+    assert.equal(localRoom.revision, revBeforeLocal);
+
+    // Ordinary event polling still works while pending end waits for background sweep recovery.
+    const pollWhilePending = await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: peerToken });
+    assert.equal(pollWhilePending.status, 200);
+
+    // OpenAPI recovers -> background sweep completes OWNER_ENDED without owner retrying endRoom.
+    env.faults.banRoom = null;
+    env.advance(3_000);
+    const sweptEnd = await env.store.sweep();
+    assert.equal(sweptEnd.changed, true);
+    assert.equal(room.ended, true);
+    assert.equal(room.endedReason, 'OWNER_ENDED');
+    assert.equal(env.canJoinRtc(peerPub), false);
+    assert.equal(env.canJoinRtc(ownerRider), false);
+
+    const endedPoll = await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: peerToken });
+    assert.equal(endedPoll.status, 410);
+    assert.equal(endedPoll.json.code, 'ROOM_ENDED');
+    assert.equal(endedPoll.json.endedReason, 'OWNER_ENDED');
+  } finally {
+    await env.close();
+  }
+});
+
+test('polling and token refresh do not amplify room-lock OpenAPI waits and concurrent sweeps coalesce per room', async () => {
+  const env = await startFakeVolcEnv({
+    disconnectTimeoutMs: 120_000,
+    localSignalStableMs: 5_000,
+    localPreconnectTimeoutMs: 10_000,
+    rtcTimeoutMs: 120,
+    revocationRetryCooldownMs: 3_000
+  });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const peer = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode: owner.json.snapshot.invite.code, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    const peerToken = peer.json.sessionToken;
+    let rev = peer.json.snapshot.revision;
+
+    const fallbackCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(fallbackCloud.status, 200);
+    rev = fallbackCloud.json.snapshot.revision;
+    await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken });
+    const ownerRider = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+      token: ownerToken,
+      body: { channel: 'RIDER', expectedRevision: rev }
+    });
+    rev = ownerRider.json.snapshot.revision;
+
+    // Reach PRECONNECTING and fail handover on timeout.
+    env.advance(16_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+    });
+    env.advance(5_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+    });
+    env.advance(8_000);
+    await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true, localControlReady: true }
+    });
+
+    env.fakeVolc.setFailStatus(500);
+    const failedHandover = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: peerToken,
+      body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+    });
+    assert.equal(failedHandover.status, 502);
+
+    // Immediate duplicate local-status reports within cooldown MUST fail fast without re-hitting OpenAPI.
+    const callsAfterFailedHandover = env.fakeVolc.calls.length;
+    const duplicateLocalStatus = await Promise.all([
+      env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: ownerToken,
+        body: { transportEpoch: 2, localProbeActive: true, localControlReady: true }
+      }),
+      env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+      })
+    ]);
+    assert.equal(duplicateLocalStatus[0].status, 502);
+    assert.equal(duplicateLocalStatus[1].status, 502);
+    assert.equal(env.fakeVolc.calls.length, callsAfterFailedHandover);
+
+    // Advance past preconnect timeout AND past initial retry cooldown; ordinary requests must STILL trigger ZERO OpenAPI calls!
+    env.advance(4_000);
+    const callsBeforeBurst = env.fakeVolc.calls.length;
+    const burst = await Promise.all([
+      env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: ownerToken }),
+      env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: peerToken }),
+      env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken }),
+      env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerToken }),
+      env.api('POST', `/v1/rooms/${roomId}/ack`, { token: ownerToken, body: { sequence: 1 } }),
+      env.api('POST', `/v1/rooms/${roomId}/audio`, { token: peerToken, body: { available: false } })
+    ]);
+    assert.equal(burst[0].status, 200);
+    assert.equal(burst[1].status, 200);
+    assert.equal(burst[2].status, 502);
+    assert.equal(burst[3].status, 502);
+    assert.equal(burst[4].status, 200);
+    assert.equal(burst[5].status, 200);
+    assert.equal(env.fakeVolc.calls.length, callsBeforeBurst);
+
+    // Concurrent sweep() calls for the same room must coalesce into ONE in-flight OpenAPI recovery attempt.
+    env.fakeVolc.setFailStatus(0);
+    const gate = env.fakeVolc.armGate();
+    const sweepA = env.store.sweep();
+    const sweepB = env.store.sweep();
+    const sweepC = env.store.sweepRoom(roomId);
+    const hit = await gate.hit;
+    assert.equal(hit.action, 'BanRoomUser');
+    gate.release();
+    const [resA, resB, resC] = await Promise.all([sweepA, sweepB, sweepC]);
+    assert.equal(resA.changed, true);
+    assert.equal(resB.changed, true);
+    assert.equal(resC.changed, true);
+    // Two channels in epoch 2 -> exactly 2 BanRoomUser calls total across all 3 concurrent sweeps.
+    assert.equal(env.fakeVolc.calls.length, callsBeforeBurst + 2);
+    assert.equal(env.store.rooms.get(roomId).transport.active, 'LOCAL');
+    assert.equal(env.store.rooms.get(roomId).transport.epoch, 3);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PRECONNECT_LOCAL recovery never switches to hostless LOCAL when owner/host becomes RESERVED', async () => {
+  for (const mode of ['reportLocalStatus', 'sweep']) {
+    const env = await startTestServer({
+      disconnectTimeoutMs: 120_000,
+      localSignalStableMs: 5_000,
+      localPreconnectTimeoutMs: 20_000
+    });
+    try {
+      const owner = await env.api('POST', '/v1/rooms', {
+        body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+      });
+      const roomId = owner.json.roomId;
+      const ownerToken = owner.json.sessionToken;
+      const inviteCode = owner.json.snapshot.invite.code;
+      const peerA = await env.api('POST', '/v1/rooms/join-requests', {
+        body: { inviteCode, deviceId: 'dev-a', runtimeId: 'run-a', nickname: 'A' }
+      });
+      const peerB = await env.api('POST', '/v1/rooms/join-requests', {
+        body: { inviteCode, deviceId: 'dev-b', runtimeId: 'run-b', nickname: 'B' }
+      });
+      let rev = peerB.json.snapshot.revision;
+
+      const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+        token: ownerToken,
+        body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 1 }
+      });
+      assert.equal(toCloud.status, 200);
+      rev = toCloud.json.snapshot.revision;
+
+      const peerARtc = (await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerA.json.sessionToken })).json.rtc;
+      const ownerRiderRes = await env.api('POST', `/v1/rooms/${roomId}/channel`, {
+        token: ownerToken,
+        body: { channel: 'RIDER', expectedRevision: rev }
+      });
+      const ownerRiderRtc = ownerRiderRes.json.rtc;
+      rev = ownerRiderRes.json.snapshot.revision;
+
+      // Enter PRECONNECTING with all 3 members ready.
+      env.advance(16_000);
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: ownerToken,
+        body: { transportEpoch: 2, localProbeActive: true }
+      });
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerA.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+      });
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerB.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+      });
+      env.advance(5_000);
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: ownerToken,
+        body: { transportEpoch: 2, localProbeActive: true }
+      });
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerA.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+      });
+      const preconnect = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerB.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+      });
+      assert.equal(preconnect.json.snapshot.transport.recoveryStage, 'PRECONNECTING');
+
+      env.advance(2_000);
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: ownerToken,
+        body: { transportEpoch: 2, localProbeActive: true, localControlReady: true }
+      });
+      await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerA.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+      });
+
+      let banCalls = 0;
+      env.faults.banRoom = () => {
+        banCalls += 1;
+        return banCalls === 2 ? new Error('OpenAPI 502 on 2nd channel') : null;
+      };
+      const failedHandover = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerB.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+      });
+      assert.equal(failedHandover.status, 502);
+      env.faults.banRoom = null;
+
+      // Owner (also localHostDeviceId) transitions to RESERVED while peerA and peerB remain ADMITTED & controlReady.
+      const room = env.store.rooms.get(roomId);
+      room.members.get('dev-owner').status = 'RESERVED';
+      room.members.get('dev-owner').reservedUntilMs = env.getNow() + 60_000;
+      env.advance(3_000);
+
+      if (mode === 'reportLocalStatus') {
+        const reported = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+          token: peerA.json.sessionToken,
+          body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60, localControlReady: true }
+        });
+        assert.equal(reported.status, 200);
+        assert.equal(reported.json.switched, false);
+        assert.equal(reported.json.snapshot.transport.active, 'CLOUD');
+        assert.equal(reported.json.snapshot.transport.epoch, 3);
+      } else {
+        const swept = await env.store.sweep();
+        assert.equal(swept.changed, true);
+        assert.equal(swept.errors.length, 0);
+        assert.equal(room.transport.active, 'CLOUD');
+        assert.equal(room.transport.epoch, 3);
+      }
+
+      assert.equal(env.canJoinRtc(peerARtc), false);
+      assert.equal(env.canJoinRtc(ownerRiderRtc), false);
+      const freshA = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerA.json.sessionToken });
+      const freshB = await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerB.json.sessionToken });
+      assert.equal(freshA.status, 200);
+      assert.equal(freshB.status, 200);
+      assert.equal(env.canJoinRtc(freshA.json.rtc), true);
+      assert.equal(env.canJoinRtc(freshB.json.rtc), true);
+    } finally {
+      await env.close();
+    }
+  }
+});
+
+test('approved join receipt replay filters revoked or stale RTC credentials across poll and resubmission', async () => {
+  const env = await startFakeVolcEnv({
+    disconnectTimeoutMs: 120_000,
+    rtcTimeoutMs: 80,
+    revocationRetryCooldownMs: 3_000
+  });
+  try {
+    // 1) Approval queue receipt polled after timed-out BanRoomUser and after LOCAL transition.
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: true, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    let rev = owner.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+
+    const pendingJoin = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-peer', runtimeId: 'run-p', nickname: '队员' }
+    });
+    assert.equal(pendingJoin.status, 202);
+    rev += 1;
+    const approved = await env.api(
+      'POST',
+      `/v1/rooms/${roomId}/join-requests/${pendingJoin.json.requestId}/approve`,
+      { token: ownerToken, body: { expectedRevision: rev } }
+    );
+    assert.equal(approved.status, 200);
+    rev = approved.json.snapshot.revision;
+
+    // Before peer polls its approval receipt, owner switches CLOUD -> LOCAL and RTC applies ban then times out.
+    env.fakeVolc.delayNextBanResponseMs(220);
+    const timedOutLocal = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(timedOutLocal.status, 502);
+
+    const polledDuringRevocation = await env.api('GET', `/v1/join-requests/${pendingJoin.json.requestId}?waitMs=0`, {
+      token: pendingJoin.json.requestSecret
+    });
+    assert.equal(polledDuringRevocation.status, 200);
+    assert.equal(polledDuringRevocation.json.status, 'ADMITTED');
+    assert.equal(polledDuringRevocation.json.rtc, null);
+    assert.equal(polledDuringRevocation.json.snapshot.transport.epoch, 2);
+
+    // Complete switch to LOCAL via sweep; polling receipt again returns live LOCAL snapshot with rtc=null.
+    env.advance(3_000);
+    assert.equal((await env.store.sweep()).changed, true);
+    const polledAfterLocal = await env.api('GET', `/v1/join-requests/${pendingJoin.json.requestId}?waitMs=0`, {
+      token: pendingJoin.json.requestSecret
+    });
+    assert.equal(polledAfterLocal.status, 200);
+    assert.equal(polledAfterLocal.json.rtc, null);
+    assert.equal(polledAfterLocal.json.snapshot.transport.active, 'LOCAL');
+    assert.equal(polledAfterLocal.json.snapshot.transport.epoch, 3);
+
+    // 2) Direct joinSecret replay after partial endRoom filters stale RTC and rejects once ended.
+    const directOwner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-o2', runtimeId: 'run-o2', nickname: 'O2', requireApproval: false, mode: 'HYBRID' }
+    });
+    const room2Id = directOwner.json.roomId;
+    const owner2Token = directOwner.json.sessionToken;
+    const invite2 = directOwner.json.snapshot.invite.code;
+    let rev2 = directOwner.json.snapshot.revision;
+    const toCloud2 = await env.api('POST', `/v1/rooms/${room2Id}/transport/switch`, {
+      token: owner2Token,
+      body: { targetTransport: 'CLOUD', reason: 'MANUAL_CLOUD', expectedRevision: rev2, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud2.status, 200);
+    rev2 = toCloud2.json.snapshot.revision;
+
+    const joinSecret = crypto.randomBytes(32).toString('hex');
+    const directBody = { inviteCode: invite2, deviceId: 'dev-p2', runtimeId: 'run-p2', nickname: 'P2', joinSecret };
+    const firstDirect = await env.api('POST', '/v1/rooms/join-requests', { body: directBody });
+    assert.equal(firstDirect.status, 200);
+    assert.equal(env.fakeVolc.canJoin(firstDirect.json.rtc), true);
+    rev2 = firstDirect.json.snapshot.revision;
+
+    env.fakeVolc.delayNextBanResponseMs(220);
+    const timedOutEnd = await env.api('POST', `/v1/rooms/${room2Id}/end`, {
+      token: owner2Token,
+      body: { expectedRevision: rev2 }
+    });
+    assert.equal(timedOutEnd.status, 502);
+
+    // While room end is pending, receipt replay MUST fail closed with 502 instead of admitting into a dying room.
+    const replayedDirect = await env.api('POST', '/v1/rooms/join-requests', { body: directBody });
+    assert.equal(replayedDirect.status, 502);
+    assert.equal(replayedDirect.json.code, 'RTC_REVOCATION_FAILED');
+
+    env.advance(3_000);
+    assert.equal((await env.store.sweep()).changed, true);
+    const replayedAfterEnd = await env.api('POST', '/v1/rooms/join-requests', { body: directBody });
+    assert.equal(replayedAfterEnd.status, 410);
+    assert.equal(replayedAfterEnd.json.code, 'REQUEST_ENDED');
+
+    // 3) Approval followed by sweep() moving seat to RESERVED before applicant polls MUST auto-resume to ADMITTED
+    //    with a fresh usable RTC token (satisfying Android enterAdmittedSession without ALREADY_IN_ROOM lockout).
+    const netOwner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-net-o', runtimeId: 'run-net-o', nickname: 'NetOwner', requireApproval: true, mode: 'NETWORK' }
+    });
+    const netRoomId = netOwner.json.roomId;
+    const netOwnerToken = netOwner.json.sessionToken;
+    const netInvite = netOwner.json.snapshot.invite.code;
+    const netJoin = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode: netInvite, deviceId: 'dev-net-p', runtimeId: 'run-net-p', nickname: 'NetPeer' }
+    });
+    assert.equal(netJoin.status, 202);
+    const netApproved = await env.api(
+      'POST',
+      `/v1/rooms/${netRoomId}/join-requests/${netJoin.json.requestId}/approve`,
+      { token: netOwnerToken, body: { expectedRevision: netOwner.json.snapshot.revision + 1 } }
+    );
+    assert.equal(netApproved.status, 200);
+    const netRoom = env.store.rooms.get(netRoomId);
+    const originalNetRtc = env.store.pendingIndex.get(netJoin.json.requestId).resolution.rtc;
+
+    // Keep owner alive while approved applicant goes idle past disconnectTimeoutMs (120s) -> RESERVED.
+    for (let step = 0; step < 3; step += 1) {
+      env.advance(50_000);
+      await env.api('GET', `/v1/rooms/${netRoomId}/events?after=0&waitMs=0`, { token: netOwnerToken });
+    }
+    const reserveSweep = await env.store.sweep();
+    assert.equal(reserveSweep.changed, true);
+    assert.equal(netRoom.members.get('dev-net-p').status, 'RESERVED');
+    assert.equal(env.fakeVolc.canJoin(originalNetRtc), false);
+
+    const polledAfterReserved = await env.api('GET', `/v1/join-requests/${netJoin.json.requestId}?waitMs=0`, {
+      token: netJoin.json.requestSecret
+    });
+    assert.equal(polledAfterReserved.status, 200);
+    assert.equal(polledAfterReserved.json.status, 'ADMITTED');
+    const selfView = polledAfterReserved.json.snapshot.members.find((m) => m.deviceId === 'dev-net-p');
+    assert.equal(selfView.status, 'ADMITTED');
+    assert.ok(polledAfterReserved.json.rtc, 'NETWORK ADMITTED receipt MUST include non-null RTC token');
+    assert.equal(env.fakeVolc.canJoin(polledAfterReserved.json.rtc), true);
+
+    // 4) NETWORK mode receipt whose cached RTC expired MUST mint a fresh non-null RTC token (never rtc=null),
+    //    and while endRoom is pending MUST fail closed with 502 then ENDED after sweep.
+    const netRoomRev = polledAfterReserved.json.snapshot.revision;
+    env.store.pendingIndex.get(netJoin.json.requestId).resolution.rtc = {
+      ...polledAfterReserved.json.rtc,
+      expiresAtMs: env.getNow() + 2_000
+    };
+    const polledNearRtcExpiry = await env.api('GET', `/v1/join-requests/${netJoin.json.requestId}?waitMs=0`, {
+      token: netJoin.json.requestSecret
+    });
+    assert.equal(polledNearRtcExpiry.status, 200);
+    assert.equal(polledNearRtcExpiry.json.status, 'ADMITTED');
+    assert.ok(polledNearRtcExpiry.json.rtc);
+    assert.ok(polledNearRtcExpiry.json.rtc.expiresAtMs - env.getNow() >= 30_000);
+    assert.equal(env.fakeVolc.canJoin(polledNearRtcExpiry.json.rtc), true);
+
+    env.store.pendingIndex.get(netJoin.json.requestId).resolution.rtc = {
+      ...polledAfterReserved.json.rtc,
+      expiresAtMs: env.getNow() - 1
+    };
+    const polledAfterRtcExpiry = await env.api('GET', `/v1/join-requests/${netJoin.json.requestId}?waitMs=0`, {
+      token: netJoin.json.requestSecret
+    });
+    assert.equal(polledAfterRtcExpiry.status, 200);
+    assert.equal(polledAfterRtcExpiry.json.status, 'ADMITTED');
+    assert.ok(polledAfterRtcExpiry.json.rtc);
+    assert.ok(polledAfterRtcExpiry.json.rtc.expiresAtMs - env.getNow() >= 30_000);
+    assert.equal(env.fakeVolc.canJoin(polledAfterRtcExpiry.json.rtc), true);
+
+    env.fakeVolc.delayNextBanResponseMs(220);
+    const timedOutNetEnd = await env.api('POST', `/v1/rooms/${netRoomId}/end`, {
+      token: netOwnerToken,
+      body: { expectedRevision: netRoomRev }
+    });
+    assert.equal(timedOutNetEnd.status, 502);
+
+    const polledNetDuringEnd = await env.api('GET', `/v1/join-requests/${netJoin.json.requestId}?waitMs=0`, {
+      token: netJoin.json.requestSecret
+    });
+    assert.equal(polledNetDuringEnd.status, 502);
+    assert.equal(polledNetDuringEnd.json.code, 'RTC_REVOCATION_FAILED');
+
+    env.advance(3_000);
+    assert.equal((await env.store.sweep()).changed, true);
+    const polledNetEnded = await env.api('GET', `/v1/join-requests/${netJoin.json.requestId}?waitMs=0`, {
+      token: netJoin.json.requestSecret
+    });
+    assert.equal(polledNetEnded.status, 200);
+    assert.equal(polledNetEnded.json.status, 'ENDED');
+    assert.equal(polledNetEnded.json.code, 'ROOM_ENDED');
+
+    // 5) HYBRID approval followed by RESERVED also auto-resumes to ADMITTED when polled.
+    const hyOwner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-hy-o', runtimeId: 'run-hy-o', nickname: 'HyOwner', requireApproval: true, mode: 'HYBRID' }
+    });
+    const hyRoomId = hyOwner.json.roomId;
+    const hyOwnerToken = hyOwner.json.sessionToken;
+    const hyJoin = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode: hyOwner.json.snapshot.invite.code, deviceId: 'dev-hy-p', runtimeId: 'run-hy-p', nickname: 'HyPeer' }
+    });
+    assert.equal(hyJoin.status, 202);
+    const hyApproved = await env.api(
+      'POST',
+      `/v1/rooms/${hyRoomId}/join-requests/${hyJoin.json.requestId}/approve`,
+      { token: hyOwnerToken, body: { expectedRevision: hyOwner.json.snapshot.revision + 1 } }
+    );
+    assert.equal(hyApproved.status, 200);
+    for (let step = 0; step < 3; step += 1) {
+      env.advance(50_000);
+      await env.api('GET', `/v1/rooms/${hyRoomId}/events?after=0&waitMs=0`, { token: hyOwnerToken });
+    }
+    assert.equal((await env.store.sweep()).changed, true);
+    assert.equal(env.store.rooms.get(hyRoomId).members.get('dev-hy-p').status, 'RESERVED');
+    const hyPolled = await env.api('GET', `/v1/join-requests/${hyJoin.json.requestId}?waitMs=0`, {
+      token: hyJoin.json.requestSecret
+    });
+    assert.equal(hyPolled.status, 200);
+    assert.equal(hyPolled.json.status, 'ADMITTED');
+    assert.equal(hyPolled.json.snapshot.members.find((m) => m.deviceId === 'dev-hy-p').status, 'ADMITTED');
+    assert.equal(hyPolled.json.rtc, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('host-reassignment local-status reports and pending private disconnect revocations obey unified backoff and scheduling', async () => {
+  const env = await startFakeVolcEnv({
+    disconnectTimeoutMs: 15_000,
+    revocationRetryCooldownMs: 3_000
+  });
+  try {
+    const owner = await env.api('POST', '/v1/rooms', {
+      body: { deviceId: 'dev-owner', runtimeId: 'run-o', nickname: '队长', requireApproval: false, mode: 'HYBRID' }
+    });
+    const roomId = owner.json.roomId;
+    const ownerToken = owner.json.sessionToken;
+    const inviteCode = owner.json.snapshot.invite.code;
+    const peerA = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-a', runtimeId: 'run-a', nickname: 'A' }
+    });
+    const peerB = await env.api('POST', '/v1/rooms/join-requests', {
+      body: { inviteCode, deviceId: 'dev-b', runtimeId: 'run-b', nickname: 'B' }
+    });
+    let rev = peerB.json.snapshot.revision;
+
+    const toCloud = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'CLOUD', reason: 'LOCAL_LINK_LOST', expectedRevision: rev, expectedTransportEpoch: 1 }
+    });
+    assert.equal(toCloud.status, 200);
+    rev = toCloud.json.snapshot.revision;
+    await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerA.json.sessionToken });
+    await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerB.json.sessionToken });
+
+    // 1) Host-reassignment branch in reportLocalStatus enforces retry cooldown during pending epoch revocation.
+    env.fakeVolc.setFailStatus(500);
+    const failedManualLocal = await env.api('POST', `/v1/rooms/${roomId}/transport/switch`, {
+      token: ownerToken,
+      body: { targetTransport: 'LOCAL', reason: 'MANUAL_LOCAL', expectedRevision: rev, expectedTransportEpoch: 2 }
+    });
+    assert.equal(failedManualLocal.status, 502);
+
+    const room = env.store.rooms.get(roomId);
+    room.transport.localHostDeviceId = 'dev-b';
+    room.members.get('dev-b').status = 'RESERVED';
+    room.members.get('dev-b').reservedUntilMs = env.getNow() + 60_000;
+    room.transport.cooldownUntilMs = env.getNow();
+
+    const callsBeforeHostBurst = env.fakeVolc.calls.length;
+    const immediateReassignBurst = await Promise.all([
+      env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: ownerToken,
+        body: { transportEpoch: 2, localProbeActive: true }
+      }),
+      env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+        token: peerA.json.sessionToken,
+        body: { transportEpoch: 2, localReachable: true, localRssiDbm: -60 }
+      })
+    ]);
+    assert.equal(immediateReassignBurst[0].status, 502);
+    assert.equal(immediateReassignBurst[1].status, 502);
+    assert.equal(env.fakeVolc.calls.length, callsBeforeHostBurst);
+
+    // Recover host reassignment into CLOUD epoch 3 cleanly.
+    env.fakeVolc.setFailStatus(0);
+    env.advance(3_000);
+    const reassigned = await env.api('POST', `/v1/rooms/${roomId}/transport/local-status`, {
+      token: ownerToken,
+      body: { transportEpoch: 2, localProbeActive: true }
+    });
+    assert.equal(reassigned.status, 200);
+    assert.equal(reassigned.json.snapshot.transport.active, 'CLOUD');
+    assert.equal(reassigned.json.snapshot.transport.epoch, 3);
+    rev = reassigned.json.snapshot.revision;
+
+    // 2) Pending private disconnect revocation is NOT retried by ordinary requests even AFTER cooldown elapses.
+    const resumedB = await env.api('POST', `/v1/rooms/${roomId}/resume`, { token: peerB.json.sessionToken });
+    assert.equal(resumedB.status, 200);
+    rev = resumedB.json.snapshot.revision;
+    const privInvite = await env.api('POST', `/v1/rooms/${roomId}/private-invites`, {
+      token: ownerToken,
+      body: { targetDeviceId: 'dev-a', expectedRevision: rev }
+    });
+    assert.equal(privInvite.status, 201);
+    rev = privInvite.json.snapshot.revision;
+    const privAccepted = await env.api(
+      'POST',
+      `/v1/rooms/${roomId}/private-invites/${privInvite.json.inviteId}/accept`,
+      { token: peerA.json.sessionToken, body: { expectedRevision: rev } }
+    );
+    assert.equal(privAccepted.status, 200);
+    const privRtc = privAccepted.json.rtc;
+
+    // Let dev-a time out past disconnectTimeoutMs while keeping owner and peerB alive.
+    env.advance(10_000);
+    await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: ownerToken });
+    await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: peerB.json.sessionToken });
+    env.advance(6_000);
+
+    env.fakeVolc.setFailStatus(500);
+    const failedPrivSweep = await env.store.sweep();
+    assert.equal(failedPrivSweep.changed, false);
+    assert.equal(failedPrivSweep.errors.length, 1);
+    assert.equal(room.pendingPrivateRevocations.has(privRtc.rtcRoomId), true);
+
+    // Advance PAST the 3s retry cooldown while OpenAPI is still down; ordinary polling/token refresh MUST trigger ZERO OpenAPI calls.
+    env.advance(4_000);
+    const callsBeforePolls = env.fakeVolc.calls.length;
+    assert.equal((await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: peerB.json.sessionToken })).status, 200);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: peerB.json.sessionToken })).status, 200);
+    assert.equal((await env.api('GET', `/v1/rooms/${roomId}/events?after=0&waitMs=0`, { token: ownerToken })).status, 200);
+    assert.equal((await env.api('POST', `/v1/rooms/${roomId}/rtc-token`, { token: ownerToken })).status, 502);
+    assert.equal(env.fakeVolc.calls.length, callsBeforePolls);
+
+    // Background sweep completes private disconnect revocation once OpenAPI recovers.
+    env.fakeVolc.setFailStatus(0);
+    const recoveredPrivSweep = await env.store.sweep();
+    assert.equal(recoveredPrivSweep.changed, true);
+    assert.equal(recoveredPrivSweep.errors.length, 0);
+    assert.equal(room.members.get('dev-a').status, 'RESERVED');
+    assert.equal(room.members.get('dev-owner').channel.type, 'PUBLIC');
+    assert.equal(env.fakeVolc.canJoin(privRtc), false);
+    assert.equal(room.pendingPrivateRevocations.size, 0);
+  } finally {
+    await env.close();
+  }
 });

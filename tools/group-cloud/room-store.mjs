@@ -21,6 +21,8 @@ export const DEFAULT_LOCAL_CONTROL_PORT = 8899;
 export const DEFAULT_LOCAL_RSSI_THRESHOLD_DBM = -75;
 export const DEFAULT_LOCAL_SIGNAL_STABLE_MS = 12_000;
 export const DEFAULT_LOCAL_PRECONNECT_TIMEOUT_MS = 20_000;
+export const DEFAULT_REVOCATION_RETRY_COOLDOWN_MS = 3_000;
+export const DEFAULT_MAX_REVOCATION_RETRY_COOLDOWN_MS = 30_000;
 export const MAX_NICKNAME_BYTES = 64;
 
 const INVITE_LENGTH = 6;
@@ -203,6 +205,15 @@ export class GroupCloudStore {
     this.localPreconnectTimeoutMs = Number.isInteger(options.localPreconnectTimeoutMs)
       ? options.localPreconnectTimeoutMs
       : DEFAULT_LOCAL_PRECONNECT_TIMEOUT_MS;
+    this.revocationRetryCooldownMs =
+      Number.isInteger(options.revocationRetryCooldownMs) && options.revocationRetryCooldownMs >= 0
+        ? options.revocationRetryCooldownMs
+        : DEFAULT_REVOCATION_RETRY_COOLDOWN_MS;
+    this.maxRevocationRetryCooldownMs =
+      Number.isInteger(options.maxRevocationRetryCooldownMs) &&
+      options.maxRevocationRetryCooldownMs >= this.revocationRetryCooldownMs
+        ? options.maxRevocationRetryCooldownMs
+        : Math.max(DEFAULT_MAX_REVOCATION_RETRY_COOLDOWN_MS, this.revocationRetryCooldownMs);
     this.banRemovedForbiddenSeconds = Number.isInteger(options.banRemovedForbiddenSeconds)
       ? options.banRemovedForbiddenSeconds
       : 300;
@@ -236,6 +247,7 @@ export class GroupCloudStore {
     this.pendingIndex = new Map();
     this.cancelledJoinReceipts = new Map();
     this.roomLocks = new Map();
+    this.inFlightRoomSweeps = new Map();
   }
 
   _withRoomLock(roomId, fn) {
@@ -360,6 +372,201 @@ export class GroupCloudStore {
     );
   }
 
+  _clearRtcRoomGrantRecords(room, rtcRoomId) {
+    for (const [key, grant] of [...room.issuedRtcGrants.entries()]) {
+      if (grant.rtcRoomId === rtcRoomId) room.issuedRtcGrants.delete(key);
+    }
+    for (const key of [...room.bannedRtcPairs.keys()]) {
+      if (key.startsWith(`${rtcRoomId}\0`)) room.bannedRtcPairs.delete(key);
+    }
+  }
+
+  _revocationRetryDelayMs(attempts) {
+    if (this.revocationRetryCooldownMs <= 0) return 0;
+    const exponent = Math.max(0, Math.min(10, Math.max(1, Number(attempts) || 1) - 1));
+    return Math.min(this.maxRevocationRetryCooldownMs, this.revocationRetryCooldownMs * (2 ** exponent));
+  }
+
+  _isPendingRetryDue(pending, nowMs) {
+    if (!pending) return true;
+    return nowMs >= (pending.nextRetryAtMs ?? 0);
+  }
+
+  _isSweepKeyRetryDue(room, key, nowMs) {
+    const record = room.sweepRetryAfterByKey?.get(key);
+    return !record || nowMs >= record.nextRetryAtMs;
+  }
+
+  _recordSweepKeyRetryFailure(room, key, nowMs) {
+    if (!room.sweepRetryAfterByKey) room.sweepRetryAfterByKey = new Map();
+    const prev = room.sweepRetryAfterByKey.get(key);
+    const attempts = (prev?.attempts ?? 0) + 1;
+    const failedAtMs = Math.max(nowMs, this.now());
+    room.sweepRetryAfterByKey.set(key, {
+      attempts,
+      nextRetryAtMs: failedAtMs + this._revocationRetryDelayMs(attempts),
+      updatedAtMs: failedAtMs
+    });
+  }
+
+  _clearSweepKeyRetry(room, key) {
+    room.sweepRetryAfterByKey?.delete(key);
+  }
+
+  _recordPendingEnd(room, reason, message, nowMs, { failed = false } = {}) {
+    const prev = room.pendingEnd;
+    const effectiveReason = prev?.reason ?? reason;
+    const effectiveMessage = prev?.message ?? message;
+    const attempts = failed ? (prev?.attempts ?? 0) + 1 : (prev?.attempts ?? 0);
+    const failedAtMs = Math.max(nowMs, this.now());
+    room.pendingEnd = {
+      reason: effectiveReason,
+      message: effectiveMessage,
+      requestedAtMs: prev?.requestedAtMs ?? nowMs,
+      attempts,
+      nextRetryAtMs: failed ? failedAtMs + this._revocationRetryDelayMs(attempts) : (prev?.nextRetryAtMs ?? 0),
+      updatedAtMs: failedAtMs
+    };
+    return room.pendingEnd;
+  }
+
+  _recordPendingEpochRevocation(room, details, nowMs) {
+    const prev = room.pendingEpochRevocation?.epoch === details.epoch ? room.pendingEpochRevocation : null;
+    const attempts = (prev?.attempts ?? 0) + 1;
+    const failedAtMs = Math.max(nowMs, this.now());
+    room.pendingEpochRevocation = {
+      epoch: details.epoch,
+      intent: details.intent ?? prev?.intent ?? 'MANUAL_LOCAL',
+      revokeReason: details.revokeReason ?? prev?.revokeReason ?? 'SWITCHED_TO_LOCAL',
+      transportReason: details.transportReason ?? prev?.transportReason ?? 'MANUAL_LOCAL',
+      nextLocalHostDeviceId:
+        details.nextLocalHostDeviceId !== undefined
+          ? details.nextLocalHostDeviceId
+          : (prev?.nextLocalHostDeviceId ?? null),
+      preservePreconnect:
+        details.preservePreconnect !== undefined
+          ? Boolean(details.preservePreconnect)
+          : Boolean(prev?.preservePreconnect),
+      advanceBackoff:
+        details.advanceBackoff !== undefined
+          ? Boolean(details.advanceBackoff)
+          : Boolean(prev?.advanceBackoff),
+      requestedAtMs: prev?.requestedAtMs ?? nowMs,
+      attempts,
+      nextRetryAtMs: failedAtMs + this._revocationRetryDelayMs(attempts),
+      updatedAtMs: failedAtMs
+    };
+    return room.pendingEpochRevocation;
+  }
+
+  _updatePendingEpochIntentPreservingBackoff(room, details) {
+    const prev = room.pendingEpochRevocation?.epoch === details.epoch ? room.pendingEpochRevocation : null;
+    if (!prev) return null;
+    room.pendingEpochRevocation = {
+      ...prev,
+      intent: details.intent ?? prev.intent,
+      revokeReason: details.revokeReason ?? prev.revokeReason,
+      transportReason: details.transportReason ?? prev.transportReason,
+      nextLocalHostDeviceId:
+        details.nextLocalHostDeviceId !== undefined
+          ? details.nextLocalHostDeviceId
+          : prev.nextLocalHostDeviceId,
+      preservePreconnect:
+        details.preservePreconnect !== undefined
+          ? Boolean(details.preservePreconnect)
+          : prev.preservePreconnect,
+      advanceBackoff:
+        details.advanceBackoff !== undefined
+          ? Boolean(details.advanceBackoff)
+          : prev.advanceBackoff
+    };
+    return room.pendingEpochRevocation;
+  }
+
+  _bumpPendingEpochRetry(room, epoch, nowMs) {
+    const prev = room.pendingEpochRevocation?.epoch === epoch ? room.pendingEpochRevocation : null;
+    return this._recordPendingEpochRevocation(
+      room,
+      {
+        epoch,
+        intent: prev?.intent ?? (room.transport?.recoveryStage === 'PRECONNECTING' ? 'PRECONNECT_LOCAL' : 'MANUAL_LOCAL'),
+        revokeReason: prev?.revokeReason ?? 'SWITCHED_TO_LOCAL',
+        transportReason: prev?.transportReason ?? 'MANUAL_LOCAL',
+        nextLocalHostDeviceId: prev?.nextLocalHostDeviceId ?? null,
+        preservePreconnect: prev?.preservePreconnect ?? false,
+        advanceBackoff: prev?.advanceBackoff ?? false
+      },
+      nowMs
+    );
+  }
+
+  _recordPendingPrivateRevocation(room, rtcRoomId, deviceId, reason, nowMs) {
+    if (!rtcRoomId || !room.transport) return;
+    if (!room.pendingPrivateRevocations) room.pendingPrivateRevocations = new Map();
+    const prev = room.pendingPrivateRevocations.get(rtcRoomId);
+    const attempts = (prev?.attempts ?? 0) + 1;
+    const failedAtMs = Math.max(nowMs, this.now());
+    room.pendingPrivateRevocations.set(rtcRoomId, {
+      rtcRoomId,
+      epoch: room.transport.epoch,
+      deviceId: prev?.deviceId ?? deviceId,
+      reason: prev?.reason ?? reason,
+      requestedAtMs: prev?.requestedAtMs ?? nowMs,
+      attempts,
+      nextRetryAtMs: failedAtMs + this._revocationRetryDelayMs(attempts),
+      updatedAtMs: failedAtMs
+    });
+  }
+
+  _isBlockingRevocationRecord(record) {
+    return Boolean(record && (record.status === 'REVOKED' || record.status === 'FAILED'));
+  }
+
+  _hasPendingEpochRevocation(room, epoch) {
+    if (!room || room.ended) return false;
+    if (room.pendingEpochRevocation?.epoch === epoch) return true;
+    if (!room?.rtcRoomRevocations) return false;
+    for (const record of room.rtcRoomRevocations.values()) {
+      if (record.epoch === epoch && record.scope === 'EPOCH' && this._isBlockingRevocationRecord(record)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _hasPendingRoomRevocation(room) {
+    if (!room || room.ended) return false;
+    if (room.pendingEnd) return true;
+    if (!room?.rtcRoomRevocations) return false;
+    for (const record of room.rtcRoomRevocations.values()) {
+      if (record.scope === 'ROOM' && this._isBlockingRevocationRecord(record)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _assertRoomNotPendingEnd(room, nowMs = this.now()) {
+    if (this._isOwnerRecoveryExpired(room, nowMs) || this._hasPendingRoomRevocation(room)) {
+      throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '房间正在等待云端语音吊销结束，请稍后重试');
+    }
+  }
+
+  _assertRtcRoomIssuable(room, rtcRoomId, { epoch = undefined } = {}) {
+    if (!rtcRoomId) return;
+    if (this._hasPendingRoomRevocation(room)) {
+      throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '房间正在等待云端语音吊销结束，请稍后重试');
+    }
+    const targetEpoch = epoch ?? (room.mode === 'HYBRID' ? room.transport?.epoch : 1);
+    if (room.mode === 'HYBRID' && Number.isInteger(targetEpoch) && this._hasPendingEpochRevocation(room, targetEpoch)) {
+      throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '当前传输纪元正在切回本地并吊销云端语音，请等待切换完成');
+    }
+    const revocation = room.rtcRoomRevocations?.get(rtcRoomId);
+    if (this._isBlockingRevocationRecord(revocation)) {
+      throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '当前云端语音频道已吊销或吊销状态未确认，禁止继续签发凭证');
+    }
+  }
+
   async _unbanUserFromRtcRoom(room, rtcRoomId, userId, nowMs) {
     const pairKey = `${rtcRoomId}\0${userId}`;
     const record = room.bannedRtcPairs.get(pairKey);
@@ -385,6 +592,7 @@ export class GroupCloudStore {
     if (!this._canIssueRtc(room, member)) return null;
     this._assertRtcRevocationReady();
     const rtcRoomId = this._rtcRoomIdForMember(room, member);
+    this._assertRtcRoomIssuable(room, rtcRoomId);
     const userId = member.rtcUserId;
     await this._unbanUserFromRtcRoom(room, rtcRoomId, userId, nowMs);
     const credentials = mintRtcCredentials({
@@ -427,6 +635,13 @@ export class GroupCloudStore {
     try {
       await this.onRtcBanUser(rtcRoomId, userId, { reason, forbiddenIntervalSec });
     } catch (error) {
+      const prevBan = room.bannedRtcPairs.get(grantKey);
+      room.bannedRtcPairs.set(grantKey, {
+        rtcRoomId,
+        userId,
+        bannedUntilMs: Math.max(prevBan?.bannedUntilMs ?? 0, nowMs + forbiddenIntervalSec * 1000),
+        grantExpiresAtMs: Math.max(prevBan?.grantExpiresAtMs ?? 0, grant.expiresAtMs)
+      });
       this.log({ event: 'rtc_ban_user_failed', roomId: room.roomId.slice(-8), message: error?.message ?? 'unknown' });
       throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '无法立即吊销旧云端语音凭证，操作已中止，请重试');
     }
@@ -450,9 +665,15 @@ export class GroupCloudStore {
 
   async _confirmUserRevokedAllRtcGrants(room, deviceId, reason, nowMs, floorSec = this.banRemovedForbiddenSeconds) {
     const userId = room.members.get(deviceId)?.rtcUserId;
+    const justRevokedKeys = new Set(
+      [...room.issuedRtcGrants.entries()]
+        .filter(([, grant]) => grant.userId === userId && grant.expiresAtMs > nowMs)
+        .map(([grantKey]) => grantKey)
+    );
     await this._revokeUserAllRtcGrants(room, deviceId, reason, nowMs, floorSec);
     const priorBans = [...room.bannedRtcPairs.entries()].filter(
-      ([, record]) =>
+      ([grantKey, record]) =>
+        !justRevokedKeys.has(grantKey) &&
         record.userId === userId &&
         record.grantExpiresAtMs > nowMs &&
         room.issuedRtcRoomIds.has(record.rtcRoomId)
@@ -473,11 +694,25 @@ export class GroupCloudStore {
     }
   }
 
-  async _revokeRtcRoom(room, rtcRoomId, reason, nowMs, floorSec = this.banRoomForbiddenSeconds) {
+  async _revokeRtcRoom(
+    room,
+    rtcRoomId,
+    reason,
+    nowMs,
+    floorSec = this.banRoomForbiddenSeconds,
+    { scope = 'PRIVATE' } = {}
+  ) {
     if (!rtcRoomId) return;
     const meta = room.issuedRtcRoomIds.get(rtcRoomId);
     if (!meta || meta.maxExpiresAtMs <= nowMs) {
-      if (meta) room.issuedRtcRoomIds.delete(rtcRoomId);
+      if (meta) {
+        room.issuedRtcRoomIds.delete(rtcRoomId);
+        this._clearRtcRoomGrantRecords(room, rtcRoomId);
+        const existing = room.rtcRoomRevocations?.get(rtcRoomId);
+        if (existing && existing.status !== 'REVOKED' && (existing.bannedUntilMs ?? 0) <= nowMs) {
+          room.rtcRoomRevocations.delete(rtcRoomId);
+        }
+      }
       return;
     }
     this._assertRtcRevocationReady();
@@ -485,32 +720,52 @@ export class GroupCloudStore {
     try {
       await this.onRtcBanRoom(rtcRoomId, { reason, forbiddenIntervalSec });
     } catch (error) {
+      const existing = room.rtcRoomRevocations?.get(rtcRoomId);
+      if (existing?.status !== 'REVOKED') {
+        room.rtcRoomRevocations.set(rtcRoomId, {
+          rtcRoomId,
+          epoch: meta.epoch,
+          scope,
+          reason,
+          status: 'FAILED',
+          bannedUntilMs: Math.max(existing?.bannedUntilMs ?? 0, nowMs + forbiddenIntervalSec * 1000),
+          maxExpiresAtMs: Math.max(existing?.maxExpiresAtMs ?? 0, meta.maxExpiresAtMs),
+          updatedAtMs: nowMs
+        });
+      }
       this.log({ event: 'rtc_ban_room_failed', roomId: room.roomId.slice(-8), message: error?.message ?? 'unknown' });
       throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '无法吊销云端语音房间，请稍后重试');
     }
+    const bannedUntilMs = nowMs + forbiddenIntervalSec * 1000;
+    const prevRevocation = room.rtcRoomRevocations?.get(rtcRoomId);
+    room.rtcRoomRevocations.set(rtcRoomId, {
+      rtcRoomId,
+      epoch: meta.epoch,
+      scope,
+      reason,
+      status: 'REVOKED',
+      bannedUntilMs: Math.max(prevRevocation?.bannedUntilMs ?? 0, bannedUntilMs),
+      maxExpiresAtMs: Math.max(prevRevocation?.maxExpiresAtMs ?? 0, meta.maxExpiresAtMs),
+      updatedAtMs: nowMs
+    });
     room.issuedRtcRoomIds.delete(rtcRoomId);
-    for (const [key, grant] of [...room.issuedRtcGrants.entries()]) {
-      if (grant.rtcRoomId === rtcRoomId) room.issuedRtcGrants.delete(key);
-    }
-    for (const key of [...room.bannedRtcPairs.keys()]) {
-      if (key.startsWith(`${rtcRoomId}\0`)) room.bannedRtcPairs.delete(key);
-    }
+    this._clearRtcRoomGrantRecords(room, rtcRoomId);
   }
 
   async _revokeRoomRtcForEpoch(room, epoch, reason, nowMs) {
     const minFloorSec = Math.ceil(this.rtcTokenTtlMs / 1000) + 60;
     const targets = [...room.issuedRtcRoomIds.entries()]
-      .filter(([, meta]) => meta.epoch === epoch && meta.maxExpiresAtMs > nowMs)
+      .filter(([, meta]) => meta.epoch === epoch)
       .map(([rtcRoomId]) => rtcRoomId);
     for (const rtcRoomId of targets) {
-      await this._revokeRtcRoom(room, rtcRoomId, reason, nowMs, minFloorSec);
+      await this._revokeRtcRoom(room, rtcRoomId, reason, nowMs, minFloorSec, { scope: 'EPOCH' });
     }
   }
 
   async _revokeAllRoomRtc(room, reason, nowMs) {
     const targets = [...room.issuedRtcRoomIds.keys()];
     for (const rtcRoomId of targets) {
-      await this._revokeRtcRoom(room, rtcRoomId, reason, nowMs, this.banRoomForbiddenSeconds);
+      await this._revokeRtcRoom(room, rtcRoomId, reason, nowMs, this.banRoomForbiddenSeconds, { scope: 'ROOM' });
     }
   }
 
@@ -539,8 +794,45 @@ export class GroupCloudStore {
           changed = true;
         }
       }
+      if (room.transport && room.rtcRoomRevocations) {
+        const privateRtcRoom = this._rtcRoomIdForChannel(room, { type: 'PRIVATE', sessionId }, room.transport.epoch);
+        if (room.rtcRoomRevocations.get(privateRtcRoom)?.scope === 'PRIVATE') {
+          room.rtcRoomRevocations.delete(privateRtcRoom);
+        }
+        room.pendingPrivateRevocations?.delete(privateRtcRoom);
+      }
     }
     return changed;
+  }
+
+  _clearPrivateStateForPrivateRtcRoom(room, privateRtcRoom) {
+    if (!room.transport || !privateRtcRoom) return false;
+    let changed = false;
+    for (const member of room.members.values()) {
+      if (
+        member.channel?.type === 'PRIVATE' &&
+        this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch) === privateRtcRoom
+      ) {
+        if (this._clearPrivateStateForMember(room, member.deviceId)) {
+          changed = true;
+        }
+        break;
+      }
+    }
+    if (room.rtcRoomRevocations?.get(privateRtcRoom)?.scope === 'PRIVATE') {
+      room.rtcRoomRevocations.delete(privateRtcRoom);
+    }
+    room.pendingPrivateRevocations?.delete(privateRtcRoom);
+    return changed;
+  }
+
+  _resolveAdmittedLocalHost(room) {
+    if (!room?.transport) return null;
+    const candidateHost = room.members.get(room.transport.localHostDeviceId);
+    if (candidateHost?.status === 'ADMITTED') return candidateHost;
+    const owner = room.members.get(room.ownerId);
+    if (owner?.status === 'ADMITTED') return owner;
+    return null;
   }
 
   _rotateRouteACredentials(transport) {
@@ -587,6 +879,8 @@ export class GroupCloudStore {
     const transport = room.transport;
     const previous = transport.active;
     const previousEpoch = transport.epoch;
+    room.pendingEpochRevocation = null;
+    room.pendingPrivateRevocations?.clear();
     transport.active = targetActive;
     transport.epoch += 1;
     transport.reason = reason;
@@ -606,7 +900,7 @@ export class GroupCloudStore {
       if (options.nextLocalHostDeviceId) {
         transport.localHostDeviceId = options.nextLocalHostDeviceId;
       }
-      if (FALLBACK_TRANSPORT_REASONS.has(reason)) {
+      if (FALLBACK_TRANSPORT_REASONS.has(reason) && options.advanceBackoff !== false) {
         transport.fallbackStreak += 1;
         const backoff = Math.min(
           this.maxTransportCooldownMs,
@@ -620,7 +914,7 @@ export class GroupCloudStore {
       let hostId = options.nextLocalHostDeviceId ?? transport.localHostDeviceId;
       const hostMember = hostId ? room.members.get(hostId) : null;
       if (!hostMember || hostMember.status !== 'ADMITTED') {
-        hostId = room.ownerId;
+        hostId = this._resolveAdmittedLocalHost(room)?.deviceId ?? room.ownerId;
       }
       transport.localHostDeviceId = hostId;
       if (options.preservePreconnect && transport.localCode && transport.localP2pSsid && transport.localP2pPassphrase) {
@@ -642,6 +936,17 @@ export class GroupCloudStore {
       reason
     });
     return true;
+  }
+
+  _cloudRecoveryReason(room) {
+    return room.transport?.reason === 'MANUAL_CLOUD' ? 'MANUAL_CLOUD' : 'LOCAL_UNAVAILABLE';
+  }
+
+  _rotatePartialEpochToFreshCloud(room, nowMs, { nextLocalHostDeviceId = undefined, advanceBackoff = false } = {}) {
+    this._transitionTransport(room, 'CLOUD', this._cloudRecoveryReason(room), nowMs, {
+      nextLocalHostDeviceId,
+      advanceBackoff
+    });
   }
 
   _handleHybridLocalHostDeparture(room, departingDeviceId, nowMs) {
@@ -882,6 +1187,10 @@ export class GroupCloudStore {
     room.pendingRequests.clear();
     room.members.clear();
     room.privateInvites.clear();
+    room.pendingEnd = null;
+    room.pendingEpochRevocation = null;
+    room.pendingPrivateRevocations?.clear();
+    room.sweepRetryAfterByKey?.clear();
     if (room.transport) {
       room.transport.localCode = null;
       room.transport.localP2pSsid = null;
@@ -914,8 +1223,15 @@ export class GroupCloudStore {
 
   async _endRoom(room, reason, message, nowMs) {
     if (room.ended) return;
-    await this._revokeAllRoomRtc(room, reason, nowMs);
-    this._finalizeEndedRoom(room, reason, message, nowMs);
+    const pending = this._recordPendingEnd(room, reason, message, nowMs, { failed: false });
+    try {
+      await this._revokeAllRoomRtc(room, pending.reason, nowMs);
+    } catch (error) {
+      this._recordPendingEnd(room, pending.reason, pending.message, nowMs, { failed: true });
+      throw error;
+    }
+    room.pendingEnd = null;
+    this._finalizeEndedRoom(room, pending.reason, pending.message, nowMs);
   }
 
   _assertExpectedRevision(room, expectedRevision) {
@@ -960,25 +1276,48 @@ export class GroupCloudStore {
     }
   }
 
-  async _sweepRoomUnlocked(room, nowMs = this.now(), { throwOnError = false } = {}) {
+  async _sweepRoomUnlocked(
+    room,
+    nowMs = this.now(),
+    {
+      throwOnError = false,
+      allowPendingRevocationRecovery = true,
+      respectRetryCooldown = true
+    } = {}
+  ) {
     if (!room || room.ended) return { changed: false, errors: [] };
     const errors = [];
 
-    if (this._isOwnerRecoveryExpired(room, nowMs)) {
-      try {
-        await this._endRoom(room, 'OWNER_RECOVERY_EXPIRED', '群主断线超过 60 秒，网络房间已结束', nowMs);
-        return { changed: true, errors };
-      } catch (error) {
-        this.log({
-          event: 'rtc_sweep_revocation_failed',
-          roomId: room.roomId.slice(-8),
-          action: 'OWNER_RECOVERY_EXPIRED',
-          message: error?.message ?? 'unknown'
-        });
-        if (throwOnError) throw error;
-        errors.push(error);
-        return { changed: false, errors };
+    const ownerRecoveryExpired = this._isOwnerRecoveryExpired(room, nowMs);
+    const hasPendingRoomEnd = this._hasPendingRoomRevocation(room);
+    if (ownerRecoveryExpired || hasPendingRoomEnd) {
+      const isExistingPendingEnd = Boolean(room.pendingEnd) || hasPendingRoomEnd;
+      const shouldAttemptEnd = isExistingPendingEnd
+        ? allowPendingRevocationRecovery && (!respectRetryCooldown || this._isPendingRetryDue(room.pendingEnd, nowMs))
+        : !respectRetryCooldown || this._isSweepKeyRetryDue(room, 'room:end', nowMs);
+      if (shouldAttemptEnd) {
+        const reason = room.pendingEnd?.reason ?? (ownerRecoveryExpired ? 'OWNER_RECOVERY_EXPIRED' : 'OWNER_ENDED');
+        const message =
+          room.pendingEnd?.message ??
+          (ownerRecoveryExpired ? '群主断线超过 60 秒，网络房间已结束' : '群主已解散网络房间');
+        try {
+          await this._endRoom(room, reason, message, nowMs);
+          this._clearSweepKeyRetry(room, 'room:end');
+          return { changed: true, errors };
+        } catch (error) {
+          this._recordSweepKeyRetryFailure(room, 'room:end', nowMs);
+          this.log({
+            event: 'rtc_sweep_revocation_failed',
+            roomId: room.roomId.slice(-8),
+            action: reason,
+            message: error?.message ?? 'unknown'
+          });
+          if (throwOnError) throw error;
+          errors.push(error);
+          return { changed: false, errors };
+        }
       }
+      return { changed: false, errors };
     }
 
     let changed = false;
@@ -993,6 +1332,57 @@ export class GroupCloudStore {
         if (privateInvite.expiresAtMs <= nowMs) {
           room.privateInvites.delete(inviteId);
           changed = true;
+        }
+      }
+      if (room.transport && room.rtcRoomRevocations) {
+        const activePrivateRtcRooms = new Set();
+        for (const item of room.members.values()) {
+          if (item.channel?.type === 'PRIVATE' && item.channel.sessionId) {
+            activePrivateRtcRooms.add(this._rtcRoomIdForChannel(room, item.channel, room.transport.epoch));
+          }
+        }
+        for (const [revokedRoomId, record] of [...room.rtcRoomRevocations.entries()]) {
+          if (
+            record.scope === 'PRIVATE' &&
+            !activePrivateRtcRooms.has(revokedRoomId) &&
+            !room.pendingPrivateRevocations?.has(revokedRoomId)
+          ) {
+            room.rtcRoomRevocations.delete(revokedRoomId);
+          } else if (
+            record.scope === 'EPOCH' &&
+            record.epoch < room.transport.epoch &&
+            record.bannedUntilMs <= nowMs
+          ) {
+            room.rtcRoomRevocations.delete(revokedRoomId);
+          }
+        }
+      }
+    }
+    for (const [pairKey, record] of [...room.bannedRtcPairs.entries()]) {
+      if (record.bannedUntilMs <= nowMs && record.grantExpiresAtMs <= nowMs) {
+        room.bannedRtcPairs.delete(pairKey);
+      }
+    }
+    if (room.sweepRetryAfterByKey) {
+      for (const [retryKey, record] of [...room.sweepRetryAfterByKey.entries()]) {
+        if (retryKey.startsWith('reserve:')) {
+          const deviceId = retryKey.slice('reserve:'.length);
+          const targetMember = room.members.get(deviceId);
+          if (
+            !targetMember ||
+            targetMember.status !== 'ADMITTED' ||
+            nowMs - targetMember.lastSeenMs < this.disconnectTimeoutMs
+          ) {
+            room.sweepRetryAfterByKey.delete(retryKey);
+          }
+        } else if (retryKey.startsWith('expire:')) {
+          const deviceId = retryKey.slice('expire:'.length);
+          const targetMember = room.members.get(deviceId);
+          if (!targetMember || targetMember.status !== 'RESERVED') {
+            room.sweepRetryAfterByKey.delete(retryKey);
+          }
+        } else if ((record.updatedAtMs ?? 0) + this.maxRevocationRetryCooldownMs * 2 <= nowMs) {
+          room.sweepRetryAfterByKey.delete(retryKey);
         }
       }
     }
@@ -1018,6 +1408,31 @@ export class GroupCloudStore {
             room.mode === 'HYBRID' && member.channel?.type === 'PRIVATE' && room.transport?.active === 'CLOUD'
               ? this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch)
               : null;
+          const hasActiveGrants = [...room.issuedRtcGrants.values()].some(
+            (grant) => grant.userId === member.rtcUserId && grant.expiresAtMs > nowMs
+          );
+          const reserveRetryKey = `reserve:${deviceId}`;
+          const pendingPrivate = priorPrivateRtcRoom ? room.pendingPrivateRevocations?.get(priorPrivateRtcRoom) : null;
+          const hasPendingPrivate = Boolean(
+            priorPrivateRtcRoom &&
+              (pendingPrivate || this._isBlockingRevocationRecord(room.rtcRoomRevocations?.get(priorPrivateRtcRoom)))
+          );
+          const hasPendingReserveRetry = Boolean(room.sweepRetryAfterByKey?.has(reserveRetryKey));
+          if (
+            (priorPrivateRtcRoom || hasActiveGrants) &&
+            (hasPendingPrivate || hasPendingReserveRetry) &&
+            !allowPendingRevocationRecovery
+          ) {
+            continue;
+          }
+          if (
+            (priorPrivateRtcRoom || hasActiveGrants) &&
+            respectRetryCooldown &&
+            (!this._isSweepKeyRetryDue(room, reserveRetryKey, nowMs) ||
+              (pendingPrivate && !this._isPendingRetryDue(pendingPrivate, nowMs)))
+          ) {
+            continue;
+          }
           try {
             if (priorPrivateRtcRoom) {
               await this._revokeRtcRoom(room, priorPrivateRtcRoom, 'PRIVATE_DISCONNECTED', nowMs);
@@ -1030,6 +1445,10 @@ export class GroupCloudStore {
               this.banRemovedForbiddenSeconds
             );
           } catch (error) {
+            this._recordSweepKeyRetryFailure(room, reserveRetryKey, nowMs);
+            if (priorPrivateRtcRoom && this._isBlockingRevocationRecord(room.rtcRoomRevocations?.get(priorPrivateRtcRoom))) {
+              this._recordPendingPrivateRevocation(room, priorPrivateRtcRoom, deviceId, 'PRIVATE_DISCONNECTED', nowMs);
+            }
             this.log({
               event: 'rtc_sweep_revocation_failed',
               roomId: room.roomId.slice(-8),
@@ -1040,6 +1459,7 @@ export class GroupCloudStore {
             errors.push(error);
             continue;
           }
+          this._clearSweepKeyRetry(room, reserveRetryKey);
           member.status = 'RESERVED';
           member.audioAvailable = false;
           member.localStatus = null;
@@ -1074,9 +1494,34 @@ export class GroupCloudStore {
           room.transport?.active === 'LOCAL' &&
           room.transport.localHostDeviceId === deviceId &&
           admittedCountAfter >= 2;
+        const rotateCloudAfterExpiry =
+          room.mode === 'HYBRID' &&
+          room.transport?.active === 'CLOUD' &&
+          this._hasPendingEpochRevocation(room, room.transport.epoch) &&
+          (room.transport.localHostDeviceId === deviceId || admittedCountAfter < 2);
+        const expireRetryKey = `expire:${deviceId}`;
+        const pendingPrivate = priorPrivateRtcRoom ? room.pendingPrivateRevocations?.get(priorPrivateRtcRoom) : null;
+        const hasPendingPrivate = Boolean(
+          priorPrivateRtcRoom &&
+            (pendingPrivate || this._isBlockingRevocationRecord(room.rtcRoomRevocations?.get(priorPrivateRtcRoom)))
+        );
+        const hasPendingExpireRetry = Boolean(room.sweepRetryAfterByKey?.has(expireRetryKey));
+        if ((rotateCloudAfterExpiry || hasPendingPrivate || hasPendingExpireRetry) && !allowPendingRevocationRecovery) {
+          continue;
+        }
+        if (
+          respectRetryCooldown &&
+          (!this._isSweepKeyRetryDue(room, expireRetryKey, nowMs) ||
+            (pendingPrivate && !this._isPendingRetryDue(pendingPrivate, nowMs)))
+        ) {
+          continue;
+        }
         try {
           if (willFallbackToCloud) {
             this._assertRtcRevocationReady();
+          }
+          if (rotateCloudAfterExpiry) {
+            await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'RECOVERY_EXPIRED', nowMs);
           }
           if (priorPrivateRtcRoom) {
             await this._revokeRtcRoom(room, priorPrivateRtcRoom, 'RECOVERY_EXPIRED', nowMs);
@@ -1089,6 +1534,13 @@ export class GroupCloudStore {
             this.banRemovedForbiddenSeconds
           );
         } catch (error) {
+          this._recordSweepKeyRetryFailure(room, expireRetryKey, nowMs);
+          if (rotateCloudAfterExpiry) {
+            this._bumpPendingEpochRetry(room, room.transport.epoch, nowMs);
+          }
+          if (priorPrivateRtcRoom && this._isBlockingRevocationRecord(room.rtcRoomRevocations?.get(priorPrivateRtcRoom))) {
+            this._recordPendingPrivateRevocation(room, priorPrivateRtcRoom, deviceId, 'RECOVERY_EXPIRED', nowMs);
+          }
           this.log({
             event: 'rtc_sweep_revocation_failed',
             roomId: room.roomId.slice(-8),
@@ -1099,13 +1551,21 @@ export class GroupCloudStore {
           errors.push(error);
           continue;
         }
+        this._clearSweepKeyRetry(room, expireRetryKey);
         if (room.mode === 'HYBRID') {
           this._clearPrivateStateForMember(room, deviceId);
         }
         room.members.delete(deviceId);
         if (room.mode === 'HYBRID') {
           if (room.transport) room.transport.localStableSinceMs = null;
-          this._handleHybridLocalHostDeparture(room, deviceId, nowMs);
+          if (rotateCloudAfterExpiry) {
+            this._rotatePartialEpochToFreshCloud(room, nowMs, {
+              nextLocalHostDeviceId: room.transport.localHostDeviceId === deviceId ? room.ownerId : undefined,
+              advanceBackoff: false
+            });
+          } else {
+            this._handleHybridLocalHostDeparture(room, deviceId, nowMs);
+          }
         }
         this._revokeDeviceSessions(
           room,
@@ -1124,13 +1584,227 @@ export class GroupCloudStore {
       }
     }
 
+    if (
+      room.mode === 'HYBRID' &&
+      !room.ended &&
+      room.transport?.active === 'CLOUD' &&
+      allowPendingRevocationRecovery &&
+      room.pendingPrivateRevocations?.size > 0
+    ) {
+      const currentEpoch = room.transport.epoch;
+      for (const [privateRtcRoom, pendingPrivate] of [...room.pendingPrivateRevocations.entries()]) {
+        if (pendingPrivate.epoch !== currentEpoch) {
+          room.pendingPrivateRevocations.delete(privateRtcRoom);
+          continue;
+        }
+        const stillActive = [...room.members.values()].some(
+          (item) =>
+            item.channel?.type === 'PRIVATE' &&
+            this._rtcRoomIdForChannel(room, item.channel, currentEpoch) === privateRtcRoom
+        );
+        if (!stillActive) {
+          room.pendingPrivateRevocations.delete(privateRtcRoom);
+          if (room.rtcRoomRevocations?.get(privateRtcRoom)?.scope === 'PRIVATE') {
+            room.rtcRoomRevocations.delete(privateRtcRoom);
+          }
+          continue;
+        }
+        if (respectRetryCooldown && !this._isPendingRetryDue(pendingPrivate, nowMs)) {
+          continue;
+        }
+        try {
+          await this._revokeRtcRoom(room, privateRtcRoom, pendingPrivate.reason, nowMs, this.banRoomForbiddenSeconds, {
+            scope: 'PRIVATE'
+          });
+          if (this._clearPrivateStateForPrivateRtcRoom(room, privateRtcRoom)) {
+            changed = true;
+          }
+        } catch (error) {
+          this._recordPendingPrivateRevocation(room, privateRtcRoom, pendingPrivate.deviceId, pendingPrivate.reason, nowMs);
+          this.log({
+            event: 'rtc_sweep_revocation_failed',
+            roomId: room.roomId.slice(-8),
+            action: pendingPrivate.reason,
+            message: error?.message ?? 'unknown'
+          });
+          errors.push(error);
+        }
+      }
+    }
+
     if (room.mode === 'HYBRID' && !room.ended && room.transport?.active === 'CLOUD') {
-      const admittedCount = [...room.members.values()].filter((item) => item.status === 'ADMITTED').length;
-      if (room.transport.recoveryStage === 'PRECONNECTING') {
+      const admitted = [...room.members.values()].filter((item) => item.status === 'ADMITTED');
+      const admittedCount = admitted.length;
+      const epoch = room.transport.epoch;
+      const hasPendingEpochRevocation = this._hasPendingEpochRevocation(room, epoch);
+      const pendingEpoch = room.pendingEpochRevocation?.epoch === epoch ? room.pendingEpochRevocation : null;
+      const candidateHost = room.members.get(room.transport.localHostDeviceId);
+      const host = this._resolveAdmittedLocalHost(room);
+      const hostAdmitted = Boolean(host);
+
+      if (hasPendingEpochRevocation) {
+        if (allowPendingRevocationRecovery && (!respectRetryCooldown || this._isPendingRetryDue(pendingEpoch, nowMs))) {
+          const intent =
+            pendingEpoch?.intent ??
+            (room.transport.recoveryStage === 'PRECONNECTING' ? 'PRECONNECT_LOCAL' : 'MANUAL_LOCAL');
+          if (intent === 'MANUAL_LOCAL') {
+            const currentHostValid = Boolean(candidateHost && candidateHost.status === 'ADMITTED');
+            const canCompleteManualLocal = currentHostValid || (admittedCount <= 1 && hostAdmitted);
+            const targetHostId = currentHostValid ? candidateHost.deviceId : (host?.deviceId ?? room.ownerId);
+            try {
+              if (canCompleteManualLocal) {
+                await this._revokeRoomRtcForEpoch(room, epoch, pendingEpoch?.revokeReason ?? 'SWITCHED_TO_LOCAL', nowMs);
+                this._transitionTransport(room, 'LOCAL', pendingEpoch?.transportReason ?? 'MANUAL_LOCAL', nowMs, {
+                  nextLocalHostDeviceId: targetHostId,
+                  preservePreconnect: false
+                });
+              } else {
+                await this._revokeRoomRtcForEpoch(room, epoch, 'LOCAL_HOST_LOST', nowMs);
+                this._rotatePartialEpochToFreshCloud(room, nowMs, {
+                  nextLocalHostDeviceId: targetHostId,
+                  advanceBackoff: false
+                });
+              }
+              changed = true;
+            } catch (error) {
+              this._recordPendingEpochRevocation(
+                room,
+                {
+                  epoch,
+                  intent: 'MANUAL_LOCAL',
+                  revokeReason: pendingEpoch?.revokeReason ?? 'SWITCHED_TO_LOCAL',
+                  transportReason: pendingEpoch?.transportReason ?? 'MANUAL_LOCAL',
+                  nextLocalHostDeviceId: targetHostId,
+                  preservePreconnect: false,
+                  advanceBackoff: false
+                },
+                nowMs
+              );
+              this.log({
+                event: 'rtc_sweep_revocation_failed',
+                roomId: room.roomId.slice(-8),
+                action: canCompleteManualLocal ? 'MANUAL_LOCAL' : 'LOCAL_HOST_LOST',
+                message: error?.message ?? 'unknown'
+              });
+              errors.push(error);
+            }
+          } else if (intent === 'CLOUD_ROTATE') {
+            try {
+              await this._revokeRoomRtcForEpoch(room, epoch, pendingEpoch?.revokeReason ?? 'PRECONNECT_ABORTED', nowMs);
+              this._rotatePartialEpochToFreshCloud(room, nowMs, {
+                nextLocalHostDeviceId: pendingEpoch?.nextLocalHostDeviceId ?? undefined,
+                advanceBackoff: Boolean(pendingEpoch?.advanceBackoff)
+              });
+              changed = true;
+            } catch (error) {
+              this._recordPendingEpochRevocation(
+                room,
+                {
+                  epoch,
+                  intent: 'CLOUD_ROTATE',
+                  revokeReason: pendingEpoch?.revokeReason ?? 'PRECONNECT_ABORTED',
+                  transportReason: this._cloudRecoveryReason(room),
+                  nextLocalHostDeviceId: pendingEpoch?.nextLocalHostDeviceId ?? null,
+                  preservePreconnect: false,
+                  advanceBackoff: Boolean(pendingEpoch?.advanceBackoff)
+                },
+                nowMs
+              );
+              this.log({
+                event: 'rtc_sweep_revocation_failed',
+                roomId: room.roomId.slice(-8),
+                action: pendingEpoch?.revokeReason ?? 'PRECONNECT_ABORTED',
+                message: error?.message ?? 'unknown'
+              });
+              errors.push(error);
+            }
+          } else {
+            const startedAt = room.transport.preconnectStartedAtMs ?? room.transport.cooldownUntilMs;
+            const allControlReady =
+              admittedCount >= 2 &&
+              hostAdmitted &&
+              admitted.every(
+                (item) =>
+                  item.localStatus?.epoch === epoch &&
+                  item.localStatus.controlReady === true &&
+                  item.localStatus.reportedAtMs >= startedAt &&
+                  nowMs - item.localStatus.reportedAtMs <= this.localStatusFreshMs
+              );
+            const hostChanged = Boolean(hostAdmitted && room.transport.localHostDeviceId !== host.deviceId);
+            const timedOut =
+              room.transport.preconnectStartedAtMs !== null &&
+              nowMs - room.transport.preconnectStartedAtMs >= this.localPreconnectTimeoutMs;
+            try {
+              if (admittedCount < 2) {
+                await this._revokeRoomRtcForEpoch(room, epoch, 'PRECONNECT_ABORTED', nowMs);
+                this._rotatePartialEpochToFreshCloud(room, nowMs, { advanceBackoff: false });
+                changed = true;
+              } else if (!hostAdmitted) {
+                await this._revokeRoomRtcForEpoch(room, epoch, 'LOCAL_HOST_LOST', nowMs);
+                this._rotatePartialEpochToFreshCloud(room, nowMs, { advanceBackoff: false });
+                changed = true;
+              } else if (hostChanged) {
+                await this._revokeRoomRtcForEpoch(room, epoch, 'LOCAL_HOST_REASSIGNED', nowMs);
+                this._rotatePartialEpochToFreshCloud(room, nowMs, {
+                  nextLocalHostDeviceId: host.deviceId,
+                  advanceBackoff: false
+                });
+                changed = true;
+              } else if (allControlReady) {
+                await this._revokeRoomRtcForEpoch(room, epoch, 'LOCAL_RECOVERED', nowMs);
+                this._transitionTransport(room, 'LOCAL', 'LOCAL_RECOVERED', nowMs, {
+                  nextLocalHostDeviceId: host.deviceId,
+                  preservePreconnect: true
+                });
+                changed = true;
+              } else if (timedOut || room.transport.recoveryStage !== 'PRECONNECTING') {
+                await this._revokeRoomRtcForEpoch(room, epoch, 'PRECONNECT_ABORTED', nowMs);
+                this._rotatePartialEpochToFreshCloud(room, nowMs, { advanceBackoff: true });
+                changed = true;
+              }
+            } catch (error) {
+              this._recordPendingEpochRevocation(
+                room,
+                {
+                  epoch,
+                  intent: hostAdmitted && !hostChanged && admittedCount >= 2 ? 'PRECONNECT_LOCAL' : 'CLOUD_ROTATE',
+                  revokeReason: !hostAdmitted
+                    ? 'LOCAL_HOST_LOST'
+                    : hostChanged
+                      ? 'LOCAL_HOST_REASSIGNED'
+                      : allControlReady
+                        ? 'LOCAL_RECOVERED'
+                        : 'PRECONNECT_ABORTED',
+                  transportReason: allControlReady ? 'LOCAL_RECOVERED' : this._cloudRecoveryReason(room),
+                  nextLocalHostDeviceId: host?.deviceId ?? null,
+                  preservePreconnect: allControlReady,
+                  advanceBackoff: !allControlReady && admittedCount >= 2 && hostAdmitted && !hostChanged
+                },
+                nowMs
+              );
+              this.log({
+                event: 'rtc_sweep_revocation_failed',
+                roomId: room.roomId.slice(-8),
+                action: !hostAdmitted ? 'LOCAL_HOST_LOST' : (allControlReady ? 'LOCAL_RECOVERED' : 'PRECONNECT_ABORTED'),
+                message: error?.message ?? 'unknown'
+              });
+              errors.push(error);
+            }
+          }
+        }
+      } else if (room.transport.recoveryStage === 'PRECONNECTING') {
         if (admittedCount < 2) {
           if (this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'INSUFFICIENT_MEMBERS' })) {
             changed = true;
           }
+        } else if (!hostAdmitted) {
+          if (this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'LOCAL_HOST_LOST' })) {
+            changed = true;
+          }
+        } else if (hostAdmitted && room.transport.localHostDeviceId !== host.deviceId) {
+          room.transport.localHostDeviceId = host.deviceId;
+          this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'LOCAL_HOST_REASSIGNED' });
+          changed = true;
         } else if (
           room.transport.preconnectStartedAtMs !== null &&
           nowMs - room.transport.preconnectStartedAtMs >= this.localPreconnectTimeoutMs
@@ -1139,7 +1813,7 @@ export class GroupCloudStore {
             changed = true;
           }
         }
-      } else if (admittedCount < 2 && room.transport.recoveryStage === 'PROBING') {
+      } else if ((admittedCount < 2 || !hostAdmitted) && room.transport.recoveryStage === 'PROBING') {
         room.transport.recoveryStage = 'IDLE';
         room.transport.recoverySignalStableSinceMs = null;
         changed = true;
@@ -1156,27 +1830,58 @@ export class GroupCloudStore {
     return { changed, errors };
   }
 
-  async sweepRoom(roomId, nowMs = this.now(), options = {}) {
-    this._sweepGlobalExpired(nowMs);
-    return this._sweepLockedRoom(roomId, nowMs, options);
+  async sweepRoom(roomId, nowMs = undefined, options = {}) {
+    const sweepNow = nowMs ?? this.now();
+    this._sweepGlobalExpired(sweepNow);
+    const result = await this._sweepLockedRoom(roomId, nowMs, options);
+    if (options.throwOnError && result.errors.length > 0) {
+      throw result.errors[0];
+    }
+    return result;
   }
 
-  async _sweepLockedRoom(roomId, nowMs, options) {
+  async _sweepLockedRoom(roomId, nowMs, options = {}) {
     if (!roomId || !this.rooms.has(roomId)) return { changed: false, errors: [] };
-    return this._withRoomLock(roomId, async () => {
+    const allowPendingRevocationRecovery = options.allowPendingRevocationRecovery !== false;
+    const respectRetryCooldown = options.respectRetryCooldown !== false;
+    const existing = respectRetryCooldown ? this.inFlightRoomSweeps.get(roomId) : null;
+    if (existing) {
+      return existing;
+    }
+    const sweepPromise = this._withRoomLock(roomId, async () => {
       const room = this.rooms.get(roomId);
       if (!room || room.ended) return { changed: false, errors: [] };
-      return this._sweepRoomUnlocked(room, nowMs, options);
+      const effectiveNow = nowMs ?? this.now();
+      return this._sweepRoomUnlocked(room, effectiveNow, {
+        throwOnError: false,
+        allowPendingRevocationRecovery,
+        respectRetryCooldown
+      });
+    }).finally(() => {
+      if (this.inFlightRoomSweeps.get(roomId) === sweepPromise) {
+        this.inFlightRoomSweeps.delete(roomId);
+      }
     });
+    if (allowPendingRevocationRecovery) {
+      if (respectRetryCooldown) {
+        this.inFlightRoomSweeps.set(roomId, sweepPromise);
+      }
+    }
+    return sweepPromise;
   }
 
-  async sweep(nowMs = this.now(), { throwOnError = false } = {}) {
-    this._sweepGlobalExpired(nowMs);
+  async sweep(nowMs = undefined, { throwOnError = false, respectRetryCooldown = true } = {}) {
+    const sweepNow = nowMs ?? this.now();
+    this._sweepGlobalExpired(sweepNow);
     const roomIds = [...this.rooms.keys()];
     const errors = [];
     let changed = false;
     for (const roomId of roomIds) {
-      const result = await this._sweepLockedRoom(roomId, nowMs, { throwOnError: false });
+      const result = await this._sweepLockedRoom(roomId, nowMs, {
+        throwOnError: false,
+        allowPendingRevocationRecovery: true,
+        respectRetryCooldown
+      });
       if (result.changed) changed = true;
       if (result.errors.length > 0) errors.push(...result.errors);
     }
@@ -1196,7 +1901,11 @@ export class GroupCloudStore {
     if (targetRoomId) {
       const preRoom = this.rooms.get(targetRoomId);
       if (preRoom && !preRoom.ended) {
-        await this._sweepRoomUnlocked(preRoom, nowMs, { throwOnError: false });
+        await this._sweepRoomUnlocked(preRoom, nowMs, {
+          throwOnError: false,
+          allowPendingRevocationRecovery: false,
+          respectRetryCooldown: true
+        });
       }
     }
     const session = this.sessions.get(token);
@@ -1284,6 +1993,11 @@ export class GroupCloudStore {
       issuedRtcRoomIds: new Map(),
       issuedRtcGrants: new Map(),
       bannedRtcPairs: new Map(),
+      rtcRoomRevocations: new Map(),
+      pendingEnd: null,
+      pendingEpochRevocation: null,
+      pendingPrivateRevocations: new Map(),
+      sweepRetryAfterByKey: new Map(),
       mode: normalizedMode,
       maxMembers: roomMaxMembers,
       ownerId: dev,
@@ -1362,11 +2076,157 @@ export class GroupCloudStore {
         if (prior.deviceId !== params.deviceId || prior.runtimeId !== params.runtimeId) {
           throw new CloudStoreError(409, 'REQUEST_CONFLICT', '加入申请与设备会话不匹配');
         }
-        if (prior.status === 'ADMITTED') return prior.resolution;
+        if (prior.status === 'ADMITTED') {
+          return this._resolveJoinReceipt(prior, nowMs, { rejectEnded: true });
+        }
         if (prior.status !== 'PENDING') throw new CloudStoreError(410, 'REQUEST_ENDED', '加入申请已结束');
         return { status: 'PENDING', roomId: prior.roomId, requestId: id, requestSecret: prior.secret, expiresAtMs: prior.expiresAtMs };
       }
       return this._submitJoinRequest(params, { id, secret: params.joinSecret }, nowMs);
+    });
+  }
+
+  async _resolveJoinReceipt(pending, nowMs, { rejectEnded = false } = {}) {
+    return this._withRoomLock(pending.roomId, async () => {
+      const room = this.rooms.get(pending.roomId);
+      if (room && !room.ended) {
+        await this._sweepRoomUnlocked(room, nowMs, {
+          throwOnError: false,
+          allowPendingRevocationRecovery: false,
+          respectRetryCooldown: true
+        });
+      }
+      if (pending.status !== 'ADMITTED') {
+        if (pending.status !== 'PENDING') {
+          this.pendingIndex.delete(pending.requestId);
+        }
+        if (rejectEnded && pending.status !== 'PENDING') {
+          throw new CloudStoreError(410, 'REQUEST_ENDED', '加入申请已结束');
+        }
+        return pending.status === 'PENDING'
+          ? { status: 'PENDING', requestId: pending.requestId, expiresAtMs: pending.expiresAtMs }
+          : pending.resolution;
+      }
+      const liveRoom = this.rooms.get(pending.roomId);
+      const token = pending.resolution?.sessionToken ?? null;
+      const session = token ? this.sessions.get(token) : null;
+      const member = liveRoom?.members.get(pending.deviceId) ?? null;
+      if (
+        !liveRoom ||
+        liveRoom.ended ||
+        !session ||
+        session.revoked ||
+        session.expiresAtMs <= nowMs ||
+        !member ||
+        member.runtimeId !== pending.runtimeId ||
+        liveRoom.activeTokens.get(pending.deviceId) !== token
+      ) {
+        const code = !liveRoom || liveRoom.ended ? 'ROOM_ENDED' : 'SESSION_ENDED';
+        const message = !liveRoom || liveRoom.ended ? '房间已结束' : '原入房会话已结束';
+        pending.status = 'ENDED';
+        pending.resolution = { status: 'ENDED', code, message };
+        this.pendingIndex.delete(pending.requestId);
+        if (rejectEnded) {
+          throw new CloudStoreError(410, 'REQUEST_ENDED', '加入申请已结束');
+        }
+        return pending.resolution;
+      }
+      this._assertRoomNotPendingEnd(liveRoom, nowMs);
+      if (member.status === 'RESERVED') {
+        if (member.reservedUntilMs !== null && member.reservedUntilMs <= nowMs) {
+          throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '成员席位已过期但云端语音凭证吊销未完成，请稍后重试');
+        }
+        const demoteFromRider =
+          liveRoom.mode === 'HYBRID' &&
+          member.channel?.type === 'RIDER' &&
+          !canEnterRider(member.role, liveRoom.riderIncludesFormation);
+        const nextChannel = demoteFromRider ? { type: 'PUBLIC' } : member.channel;
+        const nextMember = { ...member, status: 'ADMITTED', channel: nextChannel };
+        if (this._canIssueRtc(liveRoom, nextMember)) {
+          this._assertRtcRoomIssuable(liveRoom, this._rtcRoomIdForMember(liveRoom, nextMember));
+        }
+        if (demoteFromRider && liveRoom.transport?.active === 'CLOUD') {
+          const riderRtcRoom = this._rtcRoomIdForChannel(liveRoom, member.channel, liveRoom.transport.epoch);
+          await this._revokeUserFromRtcRoom(liveRoom, riderRtcRoom, member.deviceId, 'ROLE_DEMOTED', nowMs);
+        }
+        const freshRtc = await this._issueRtcCredentialsIfAllowed(liveRoom, nextMember, nowMs);
+        member.status = 'ADMITTED';
+        member.reservedUntilMs = null;
+        member.lastSeenMs = nowMs;
+        member.incarnation = liveRoom.nextIncarnation++;
+        member.controlGeneration += 1;
+        member.audioAvailable = false;
+        member.localStatus = null;
+        if (demoteFromRider) {
+          member.channel = { type: 'PUBLIC' };
+          member.channelRevision += 1;
+        }
+        session.incarnation = member.incarnation;
+        session.controlGeneration = member.controlGeneration;
+        session.expiresAtMs = nowMs + this.sessionTtlMs;
+        if (liveRoom.transport) liveRoom.transport.localStableSinceMs = null;
+        liveRoom.revision += 1;
+        this._broadcastSnapshot(liveRoom);
+        const box = this._ensureMailbox(liveRoom, member.deviceId);
+        pending.expiresAtMs = session.expiresAtMs;
+        pending.resolution = {
+          ...pending.resolution,
+          tokenExpiresAtMs: session.expiresAtMs,
+          latestSeq: box.latestSeq,
+          snapshot: this._snapshotFor(liveRoom, member.deviceId),
+          rtc: freshRtc
+        };
+        return pending.resolution;
+      }
+
+      member.lastSeenMs = nowMs;
+      let rtc = null;
+      const cachedRtc = pending.resolution?.rtc ?? null;
+      if (this._canIssueRtc(liveRoom, member)) {
+        const currentRtcRoomId = this._rtcRoomIdForMember(liveRoom, member);
+        const grantKey = `${currentRtcRoomId}\0${member.rtcUserId}`;
+        const grant = liveRoom.issuedRtcGrants.get(grantKey);
+        const ban = liveRoom.bannedRtcPairs.get(grantKey);
+        const epochBlocked =
+          liveRoom.mode === 'HYBRID' &&
+          liveRoom.transport &&
+          this._hasPendingEpochRevocation(liveRoom, liveRoom.transport.epoch);
+        const channelBlocked = this._isBlockingRevocationRecord(liveRoom.rtcRoomRevocations?.get(currentRtcRoomId));
+        const minCachedRtcRemainingMs =
+          this.rtcTokenTtlMs >= 5_000
+            ? Math.min(30_000, Math.max(5_000, Math.floor(this.rtcTokenTtlMs / 2)))
+            : 1;
+        if (epochBlocked || channelBlocked) {
+          if (liveRoom.mode === 'NETWORK') {
+            this._assertRtcRoomIssuable(liveRoom, currentRtcRoomId);
+          }
+          rtc = null;
+        } else if (
+          cachedRtc &&
+          cachedRtc.rtcRoomId === currentRtcRoomId &&
+          cachedRtc.rtcUserId === member.rtcUserId &&
+          cachedRtc.expiresAtMs - nowMs >= minCachedRtcRemainingMs &&
+          Boolean(grant && grant.expiresAtMs - nowMs >= minCachedRtcRemainingMs) &&
+          !(ban && ban.bannedUntilMs > nowMs)
+        ) {
+          rtc = cachedRtc;
+        } else {
+          rtc = await this._issueRtcCredentialsIfAllowed(liveRoom, member, nowMs);
+        }
+      }
+      const box = this._ensureMailbox(liveRoom, member.deviceId);
+      const snapshot = this._snapshotFor(liveRoom, member.deviceId);
+      if (pending.resolution) {
+        pending.resolution.rtc = rtc;
+        pending.resolution.tokenExpiresAtMs = session.expiresAtMs;
+      }
+      return {
+        ...pending.resolution,
+        tokenExpiresAtMs: session.expiresAtMs,
+        latestSeq: box.latestSeq,
+        snapshot,
+        rtc
+      };
     });
   }
 
@@ -1384,15 +2244,17 @@ export class GroupCloudStore {
       const effectiveNow = nowMs;
       const preRoom = this.rooms.get(roomId);
       if (preRoom && !preRoom.ended) {
-        await this._sweepRoomUnlocked(preRoom, effectiveNow, { throwOnError: false });
+        await this._sweepRoomUnlocked(preRoom, effectiveNow, {
+          throwOnError: false,
+          allowPendingRevocationRecovery: false,
+          respectRetryCooldown: true
+        });
       }
       const room = this.rooms.get(roomId);
       if (!room || room.ended || !room.invite || room.invite.expiresAtMs <= effectiveNow || !timingSafeStringEqual(room.invite.code, code)) {
         throw new CloudStoreError(404, 'INVALID_INVITE', '邀请码无效或已过期');
       }
-      if (this._isOwnerRecoveryExpired(room, effectiveNow)) {
-        throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '群主恢复已超时，房间正在等待吊销结束');
-      }
+      this._assertRoomNotPendingEnd(room, effectiveNow);
       if (room.removed.has(dev)) {
         throw new CloudStoreError(403, 'REMOVED', '你已被移出该房间，需群主解除限制后才能重新加入');
       }
@@ -1508,11 +2370,9 @@ export class GroupCloudStore {
     if (typeof requestSecret !== 'string' || !timingSafeStringEqual(pending.secret, requestSecret)) {
       throw new CloudStoreError(401, 'UNAUTHORIZED', '申请凭证无效');
     }
-    await this._sweepLockedRoom(pending.roomId, nowMs, { throwOnError: false });
-    if (pending.status !== 'PENDING') {
-      const resolution = pending.resolution;
-      if (pending.status !== 'ADMITTED') this.pendingIndex.delete(requestId);
-      return resolution;
+    const initial = await this._resolveJoinReceipt(pending, nowMs, { rejectEnded: false });
+    if (initial.status !== 'PENDING') {
+      return initial;
     }
     const clampedWait = Math.max(0, Math.min(20_000, Number(waitMs) || 0));
     if (clampedWait === 0) {
@@ -1521,7 +2381,7 @@ export class GroupCloudStore {
     if (signal?.aborted) {
       return { status: 'PENDING', requestId, expiresAtMs: pending.expiresAtMs };
     }
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let settled = false;
       const cleanupAndResolve = (payload) => {
         if (settled) return;
@@ -1531,22 +2391,26 @@ export class GroupCloudStore {
         signal?.removeEventListener('abort', onAbort);
         resolve(payload);
       };
+      const cleanupAndReject = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        pending.waiters.delete(onWake);
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      };
       const onAbort = () => cleanupAndResolve({ status: 'PENDING', requestId, expiresAtMs: pending.expiresAtMs });
       const onWake = (payload) => {
         if (pending.status !== 'ADMITTED') this.pendingIndex.delete(requestId);
         cleanupAndResolve(payload);
       };
       const timer = setTimeout(() => {
-        void this.sweepRoom(pending.roomId, this.now(), { throwOnError: false })
-          .catch(() => {})
-          .finally(() => {
-            if (pending.status !== 'PENDING') {
-              const res = pending.resolution;
-              if (pending.status !== 'ADMITTED') this.pendingIndex.delete(requestId);
-              cleanupAndResolve(res);
-            } else {
-              cleanupAndResolve({ status: 'PENDING', requestId, expiresAtMs: pending.expiresAtMs });
-            }
+        void this._resolveJoinReceipt(pending, this.now(), { rejectEnded: false })
+          .then((res) => {
+            cleanupAndResolve(res);
+          })
+          .catch((error) => {
+            cleanupAndReject(error);
           });
       }, clampedWait);
       pending.waiters.add(onWake);
@@ -1583,7 +2447,11 @@ export class GroupCloudStore {
       if (!pending) return { status: 'CANCELLED' };
       const room = this.rooms.get(pending.roomId);
       if (room && !room.ended) {
-        await this._sweepRoomUnlocked(room, nowMs, { throwOnError: false });
+        await this._sweepRoomUnlocked(room, nowMs, {
+          throwOnError: false,
+          allowPendingRevocationRecovery: false,
+          respectRetryCooldown: true
+        });
       }
       if (pending.status === 'ADMITTED' && room && !room.ended &&
           room.activeTokens.get(pending.deviceId) === pending.resolution.sessionToken) {
@@ -1608,9 +2476,7 @@ export class GroupCloudStore {
   async approveJoinRequest(token, roomId, requestId, { expectedRevision } = {}, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
-      if (this._isOwnerRecoveryExpired(room, nowMs)) {
-        throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '群主恢复已超时，房间正在等待吊销结束');
-      }
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可审批加入申请');
@@ -1684,6 +2550,7 @@ export class GroupCloudStore {
   async rejectJoinRequest(token, roomId, requestId, { expectedRevision } = {}, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可审批加入申请');
@@ -1707,6 +2574,7 @@ export class GroupCloudStore {
   async rotateInvite(token, roomId, { expectedRevision } = {}, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可刷新邀请码');
@@ -1722,6 +2590,7 @@ export class GroupCloudStore {
   async setRequireApproval(token, roomId, { requireApproval, expectedRevision }, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可修改审批设置');
@@ -1737,6 +2606,7 @@ export class GroupCloudStore {
   async transferOwner(token, roomId, { targetDeviceId, alsoLeave = false, expectedRevision }, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅当前群主可转让群主');
@@ -1766,12 +2636,37 @@ export class GroupCloudStore {
       if (willFallbackToCloud) {
         this._assertRtcRevocationReady();
       }
+      const rotateCloudAfterTransfer =
+        room.mode === 'HYBRID' &&
+        room.transport?.active === 'CLOUD' &&
+        this._hasPendingEpochRevocation(room, room.transport.epoch) &&
+        (room.transport.localHostDeviceId === member.deviceId || (alsoLeave && admittedCountAfter < 2));
+      if (rotateCloudAfterTransfer) {
+        try {
+          await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'OWNER_TRANSFERRED', nowMs);
+        } catch (error) {
+          this._bumpPendingEpochRetry(room, room.transport.epoch, nowMs);
+          throw error;
+        }
+      }
       if (alsoLeave) {
         if (room.mode === 'HYBRID' && member.channel?.type === 'PRIVATE' && room.transport?.active === 'CLOUD') {
           const privateRtcRoom = this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch);
-          await this._revokeRtcRoom(room, privateRtcRoom, 'OWNER_TRANSFER_LEAVE', nowMs);
+          try {
+            await this._revokeRtcRoom(room, privateRtcRoom, 'OWNER_TRANSFER_LEAVE', nowMs);
+          } catch (error) {
+            this._recordPendingPrivateRevocation(room, privateRtcRoom, member.deviceId, 'OWNER_TRANSFER_LEAVE', nowMs);
+            throw error;
+          }
+          try {
+            await this._revokeUserAllRtcGrants(room, member.deviceId, 'OWNER_TRANSFER_LEAVE', nowMs);
+          } catch (error) {
+            this._recordPendingPrivateRevocation(room, privateRtcRoom, member.deviceId, 'OWNER_TRANSFER_LEAVE', nowMs);
+            throw error;
+          }
+        } else {
+          await this._revokeUserAllRtcGrants(room, member.deviceId, 'OWNER_TRANSFER_LEAVE', nowMs);
         }
-        await this._revokeUserAllRtcGrants(room, member.deviceId, 'OWNER_TRANSFER_LEAVE', nowMs);
       } else if (room.mode === 'HYBRID' && member.channel?.type === 'RIDER' && room.transport?.active === 'CLOUD') {
         const riderRtcRoom = this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch);
         await this._revokeUserFromRtcRoom(room, riderRtcRoom, member.deviceId, 'OWNER_DEMOTED', nowMs);
@@ -1792,10 +2687,24 @@ export class GroupCloudStore {
         this._revokeDeviceSessions(room, member.deviceId);
         if (room.mode === 'HYBRID') {
           if (room.transport) room.transport.localStableSinceMs = null;
-          this._handleHybridLocalHostDeparture(room, member.deviceId, nowMs);
+          if (rotateCloudAfterTransfer) {
+            this._rotatePartialEpochToFreshCloud(room, nowMs, {
+              nextLocalHostDeviceId: room.transport.localHostDeviceId === member.deviceId ? room.ownerId : undefined,
+              advanceBackoff: false
+            });
+          } else {
+            this._handleHybridLocalHostDeparture(room, member.deviceId, nowMs);
+          }
         }
       } else if (room.mode === 'HYBRID') {
-        this._handleHybridLocalHostDeparture(room, member.deviceId, nowMs);
+        if (rotateCloudAfterTransfer) {
+          this._rotatePartialEpochToFreshCloud(room, nowMs, {
+            nextLocalHostDeviceId: room.transport.localHostDeviceId === member.deviceId ? room.ownerId : undefined,
+            advanceBackoff: false
+          });
+        } else {
+          this._handleHybridLocalHostDeparture(room, member.deviceId, nowMs);
+        }
       }
       room.revision += 1;
       this._broadcastSnapshot(room);
@@ -1810,6 +2719,7 @@ export class GroupCloudStore {
   async removeMember(token, roomId, targetDeviceId, { expectedRevision } = {}, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可移除成员');
@@ -1834,11 +2744,35 @@ export class GroupCloudStore {
       if (willFallbackToCloud) {
         this._assertRtcRevocationReady();
       }
+      const rotateCloudAfterRemove =
+        room.mode === 'HYBRID' &&
+        room.transport?.active === 'CLOUD' &&
+        this._hasPendingEpochRevocation(room, room.transport.epoch);
+      if (rotateCloudAfterRemove) {
+        try {
+          await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'MEMBER_REMOVED', nowMs);
+        } catch (error) {
+          this._bumpPendingEpochRetry(room, room.transport.epoch, nowMs);
+          throw error;
+        }
+      }
       if (room.mode === 'HYBRID' && target.channel?.type === 'PRIVATE' && room.transport?.active === 'CLOUD') {
         const privateRtcRoom = this._rtcRoomIdForChannel(room, target.channel, room.transport.epoch);
-        await this._revokeRtcRoom(room, privateRtcRoom, 'REMOVED', nowMs);
+        try {
+          await this._revokeRtcRoom(room, privateRtcRoom, 'REMOVED', nowMs);
+        } catch (error) {
+          this._recordPendingPrivateRevocation(room, privateRtcRoom, targetId, 'REMOVED', nowMs);
+          throw error;
+        }
+        try {
+          await this._revokeUserAllRtcGrants(room, targetId, 'REMOVED', nowMs, this.banRemovedForbiddenSeconds);
+        } catch (error) {
+          this._recordPendingPrivateRevocation(room, privateRtcRoom, targetId, 'REMOVED', nowMs);
+          throw error;
+        }
+      } else {
+        await this._revokeUserAllRtcGrants(room, targetId, 'REMOVED', nowMs, this.banRemovedForbiddenSeconds);
       }
-      await this._revokeUserAllRtcGrants(room, targetId, 'REMOVED', nowMs, this.banRemovedForbiddenSeconds);
       if (room.mode === 'HYBRID') {
         this._clearPrivateStateForMember(room, targetId);
       }
@@ -1846,12 +2780,19 @@ export class GroupCloudStore {
       room.removed.set(targetId, target.nickname);
       if (room.mode === 'HYBRID') {
         if (room.transport) room.transport.localStableSinceMs = null;
-        const hostDeparted = this._handleHybridLocalHostDeparture(room, targetId, nowMs);
-        if (!hostDeparted) {
-          if (room.transport?.active === 'CLOUD') {
-            this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'MEMBER_REMOVED' });
-          } else if (room.transport?.active === 'LOCAL') {
-            this._transitionTransport(room, 'LOCAL', 'MEMBER_REMOVED', nowMs, { preservePreconnect: false });
+        if (rotateCloudAfterRemove) {
+          this._rotatePartialEpochToFreshCloud(room, nowMs, {
+            nextLocalHostDeviceId: room.transport.localHostDeviceId === targetId ? room.ownerId : undefined,
+            advanceBackoff: false
+          });
+        } else {
+          const hostDeparted = this._handleHybridLocalHostDeparture(room, targetId, nowMs);
+          if (!hostDeparted) {
+            if (room.transport?.active === 'CLOUD') {
+              this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'MEMBER_REMOVED' });
+            } else if (room.transport?.active === 'LOCAL') {
+              this._transitionTransport(room, 'LOCAL', 'MEMBER_REMOVED', nowMs, { preservePreconnect: false });
+            }
           }
         }
       }
@@ -1885,6 +2826,7 @@ export class GroupCloudStore {
   async unblockMember(token, roomId, targetDeviceId, { expectedRevision } = {}, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可解除移除限制');
@@ -1909,6 +2851,7 @@ export class GroupCloudStore {
   async _leaveMemberUnlocked(room, member, nowMs) {
     if (member.deviceId === room.ownerId) {
       if (room.members.size > 1) {
+        this._assertRoomNotPendingEnd(room, nowMs);
         throw new CloudStoreError(
           409,
           'OWNER_TRANSFER_REQUIRED',
@@ -1918,6 +2861,7 @@ export class GroupCloudStore {
       await this._endRoom(room, 'LAST_MEMBER_LEFT', '已结束并离开网络房间', nowMs);
       return { ended: true };
     }
+    this._assertRoomNotPendingEnd(room, nowMs);
     const admittedCountAfter = [...room.members.values()].filter(
       (m) => m.status === 'ADMITTED' && m.deviceId !== member.deviceId
     ).length;
@@ -1929,11 +2873,36 @@ export class GroupCloudStore {
     if (willFallbackToCloud) {
       this._assertRtcRevocationReady();
     }
+    const rotateCloudAfterLeave =
+      room.mode === 'HYBRID' &&
+      room.transport?.active === 'CLOUD' &&
+      this._hasPendingEpochRevocation(room, room.transport.epoch) &&
+      (room.transport.localHostDeviceId === member.deviceId || admittedCountAfter < 2);
+    if (rotateCloudAfterLeave) {
+      try {
+        await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'MEMBER_LEFT', nowMs);
+      } catch (error) {
+        this._bumpPendingEpochRetry(room, room.transport.epoch, nowMs);
+        throw error;
+      }
+    }
     if (room.mode === 'HYBRID' && member.channel?.type === 'PRIVATE' && room.transport?.active === 'CLOUD') {
       const privateRtcRoom = this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch);
-      await this._revokeRtcRoom(room, privateRtcRoom, 'MEMBER_LEFT', nowMs);
+      try {
+        await this._revokeRtcRoom(room, privateRtcRoom, 'MEMBER_LEFT', nowMs);
+      } catch (error) {
+        this._recordPendingPrivateRevocation(room, privateRtcRoom, member.deviceId, 'MEMBER_LEFT', nowMs);
+        throw error;
+      }
+      try {
+        await this._revokeUserAllRtcGrants(room, member.deviceId, 'MEMBER_LEFT', nowMs, this.banRemovedForbiddenSeconds);
+      } catch (error) {
+        this._recordPendingPrivateRevocation(room, privateRtcRoom, member.deviceId, 'MEMBER_LEFT', nowMs);
+        throw error;
+      }
+    } else {
+      await this._revokeUserAllRtcGrants(room, member.deviceId, 'MEMBER_LEFT', nowMs, this.banRemovedForbiddenSeconds);
     }
-    await this._revokeUserAllRtcGrants(room, member.deviceId, 'MEMBER_LEFT', nowMs, this.banRemovedForbiddenSeconds);
     if (room.mode === 'HYBRID') {
       this._clearPrivateStateForMember(room, member.deviceId);
     }
@@ -1941,9 +2910,16 @@ export class GroupCloudStore {
     this._revokeDeviceSessions(room, member.deviceId);
     if (room.mode === 'HYBRID') {
       if (room.transport) room.transport.localStableSinceMs = null;
-      this._handleHybridLocalHostDeparture(room, member.deviceId, nowMs);
-      if (room.transport?.active === 'CLOUD' && admittedCountAfter < 2) {
-        this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'INSUFFICIENT_MEMBERS' });
+      if (rotateCloudAfterLeave) {
+        this._rotatePartialEpochToFreshCloud(room, nowMs, {
+          nextLocalHostDeviceId: room.transport.localHostDeviceId === member.deviceId ? room.ownerId : undefined,
+          advanceBackoff: false
+        });
+      } else {
+        this._handleHybridLocalHostDeparture(room, member.deviceId, nowMs);
+        if (room.transport?.active === 'CLOUD' && admittedCountAfter < 2) {
+          this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'INSUFFICIENT_MEMBERS' });
+        }
       }
     }
     room.revision += 1;
@@ -1967,9 +2943,7 @@ export class GroupCloudStore {
   async resumeMember(token, roomId, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member, session } = await this._authenticateUnlocked(token, roomId, nowMs);
-      if (this._isOwnerRecoveryExpired(room, nowMs)) {
-        throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '群主恢复已超时，房间正在等待吊销结束');
-      }
+      this._assertRoomNotPendingEnd(room, nowMs);
       if (room.removed.has(member.deviceId)) {
         throw new CloudStoreError(403, 'REMOVED', '你已被移出该房间');
       }
@@ -1979,14 +2953,18 @@ export class GroupCloudStore {
         room.mode === 'HYBRID' &&
         member.channel?.type === 'RIDER' &&
         !canEnterRider(member.role, room.riderIncludesFormation);
+      const nextChannel = demoteFromRider ? { type: 'PUBLIC' } : member.channel;
+      const nextMember = { ...member, status: 'ADMITTED', channel: nextChannel };
+      if (this._canIssueRtc(room, nextMember)) {
+        this._assertRtcRoomIssuable(room, this._rtcRoomIdForMember(room, nextMember));
+      }
       if (demoteFromRider && room.transport?.active === 'CLOUD') {
         const riderRtcRoom = this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch);
         await this._revokeUserFromRtcRoom(room, riderRtcRoom, member.deviceId, 'ROLE_DEMOTED', nowMs);
       }
-      const nextChannel = demoteFromRider ? { type: 'PUBLIC' } : member.channel;
       const rtc = await this._issueRtcCredentialsIfAllowed(
         room,
-        { ...member, status: 'ADMITTED', channel: nextChannel },
+        nextMember,
         nowMs
       );
       member.lastSeenMs = nowMs;
@@ -2022,6 +3000,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可分配成员角色');
@@ -2086,6 +3065,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.deviceId !== room.ownerId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅群主可修改领队频道编队策略');
@@ -2120,6 +3100,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
@@ -2134,16 +3115,33 @@ export class GroupCloudStore {
       }
       const previousChannel = member.channel;
       const changingChannel = previousChannel?.type !== normalized;
+      const nextMember = member.channel?.type !== normalized ? { ...member, channel: { type: normalized } } : member;
+      if (this._canIssueRtc(room, nextMember)) {
+        this._assertRtcRoomIssuable(room, this._rtcRoomIdForMember(room, nextMember));
+      }
       if (changingChannel && room.transport?.active === 'CLOUD') {
         const oldRtcRoom = this._rtcRoomIdForChannel(room, previousChannel, room.transport.epoch);
         if (previousChannel?.type === 'PRIVATE') {
-          await this._revokeRtcRoom(room, oldRtcRoom, 'CHANNEL_SWITCH', nowMs);
+          try {
+            await this._revokeRtcRoom(room, oldRtcRoom, 'CHANNEL_SWITCH', nowMs);
+          } catch (error) {
+            this._recordPendingPrivateRevocation(room, oldRtcRoom, member.deviceId, 'CHANNEL_SWITCH', nowMs);
+            throw error;
+          }
         } else {
           await this._revokeUserFromRtcRoom(room, oldRtcRoom, member.deviceId, 'CHANNEL_SWITCH', nowMs);
         }
       }
-      const nextMember = member.channel?.type !== normalized ? { ...member, channel: { type: normalized } } : member;
-      const rtc = await this._issueRtcCredentialsIfAllowed(room, nextMember, nowMs);
+      let rtc;
+      try {
+        rtc = await this._issueRtcCredentialsIfAllowed(room, nextMember, nowMs);
+      } catch (error) {
+        if (previousChannel?.type === 'PRIVATE' && room.transport?.active === 'CLOUD') {
+          const oldRtcRoom = this._rtcRoomIdForChannel(room, previousChannel, room.transport.epoch);
+          this._recordPendingPrivateRevocation(room, oldRtcRoom, member.deviceId, 'CHANNEL_SWITCH', nowMs);
+        }
+        throw error;
+      }
       if (previousChannel?.type === 'PRIVATE') {
         this._clearPrivateStateForMember(room, member.deviceId);
       }
@@ -2168,6 +3166,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
@@ -2209,6 +3208,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
@@ -2233,14 +3233,18 @@ export class GroupCloudStore {
         room.privateInvites.delete(inviteId);
         throw new CloudStoreError(409, 'PRIVATE_BUSY', '成员已在私聊中');
       }
+      const sessionId = crypto.randomUUID();
+      const nextCalleeMember = { ...member, channel: { type: 'PRIVATE', sessionId } };
       if (room.transport?.active === 'CLOUD') {
+        const nextPrivateRtcRoom = this._rtcRoomIdForChannel(room, nextCalleeMember.channel, room.transport.epoch);
+        this._assertRtcRoomIssuable(room, nextPrivateRtcRoom);
         const callerOldRtcRoom = this._rtcRoomIdForChannel(room, caller.channel, room.transport.epoch);
         const calleeOldRtcRoom = this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch);
         await this._revokeUserFromRtcRoom(room, callerOldRtcRoom, caller.deviceId, 'PRIVATE_ACCEPTED', nowMs);
         await this._revokeUserFromRtcRoom(room, calleeOldRtcRoom, member.deviceId, 'PRIVATE_ACCEPTED', nowMs);
       }
+      const rtc = await this._issueRtcCredentialsIfAllowed(room, nextCalleeMember, nowMs);
       room.privateInvites.delete(inviteId);
-      const sessionId = crypto.randomUUID();
       caller.channel = { type: 'PRIVATE', sessionId };
       caller.channelRevision += 1;
       caller.audioAvailable = false;
@@ -2251,7 +3255,7 @@ export class GroupCloudStore {
       this._broadcastSnapshot(room);
       return {
         snapshot: this._snapshotFor(room, member.deviceId),
-        rtc: await this._issueRtcCredentialsIfAllowed(room, member, nowMs)
+        rtc
       };
     });
   }
@@ -2260,6 +3264,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       this._assertExpectedRevision(room, expectedRevision);
       const invite = room.privateInvites.get(inviteId);
@@ -2280,6 +3285,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       this._assertExpectedRevision(room, expectedRevision);
       const invite = room.privateInvites.get(inviteId);
@@ -2300,14 +3306,35 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       this._assertExpectedRevision(room, expectedRevision);
       if (member.channel?.type === 'PRIVATE') {
-        if (room.transport?.active === 'CLOUD') {
-          const privateRtcRoom = this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch);
-          await this._revokeRtcRoom(room, privateRtcRoom, 'PRIVATE_CLOSED', nowMs);
+        const nextPublicMember = { ...member, channel: { type: 'PUBLIC' } };
+        if (this._canIssueRtc(room, nextPublicMember)) {
+          this._assertRtcRoomIssuable(room, this._rtcRoomIdForMember(room, nextPublicMember));
         }
-        const rtc = await this._issueRtcCredentialsIfAllowed(room, { ...member, channel: { type: 'PUBLIC' } }, nowMs);
+        const privateRtcRoom =
+          room.transport?.active === 'CLOUD'
+            ? this._rtcRoomIdForChannel(room, member.channel, room.transport.epoch)
+            : null;
+        if (room.transport?.active === 'CLOUD') {
+          try {
+            await this._revokeRtcRoom(room, privateRtcRoom, 'PRIVATE_CLOSED', nowMs);
+          } catch (error) {
+            this._recordPendingPrivateRevocation(room, privateRtcRoom, member.deviceId, 'PRIVATE_CLOSED', nowMs);
+            throw error;
+          }
+        }
+        let rtc;
+        try {
+          rtc = await this._issueRtcCredentialsIfAllowed(room, nextPublicMember, nowMs);
+        } catch (error) {
+          if (privateRtcRoom) {
+            this._recordPendingPrivateRevocation(room, privateRtcRoom, member.deviceId, 'PRIVATE_CLOSED', nowMs);
+          }
+          throw error;
+        }
         this._clearPrivateStateForMember(room, member.deviceId);
         room.revision += 1;
         this._broadcastSnapshot(room);
@@ -2332,6 +3359,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
@@ -2368,8 +3396,29 @@ export class GroupCloudStore {
       }
       if (target === 'CLOUD') {
         this._assertRtcRevocationReady();
+        const nextEpoch = room.transport.epoch + 1;
+        const nextRtcRoomId = this._rtcRoomIdForChannel(room, member.channel, nextEpoch);
+        this._assertRtcRoomIssuable(room, nextRtcRoomId, { epoch: nextEpoch });
+        await this._unbanUserFromRtcRoom(room, nextRtcRoomId, member.rtcUserId, nowMs);
       } else if (room.transport.active === 'CLOUD') {
-        await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'SWITCHED_TO_LOCAL', nowMs);
+        try {
+          await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'SWITCHED_TO_LOCAL', nowMs);
+        } catch (error) {
+          this._recordPendingEpochRevocation(
+            room,
+            {
+              epoch: room.transport.epoch,
+              intent: 'MANUAL_LOCAL',
+              revokeReason: 'SWITCHED_TO_LOCAL',
+              transportReason: 'MANUAL_LOCAL',
+              nextLocalHostDeviceId: null,
+              preservePreconnect: false,
+              advanceBackoff: false
+            },
+            nowMs
+          );
+          throw error;
+        }
       }
       const effectiveReason = isAutomaticFallback
         ? normalizedReason
@@ -2405,6 +3454,7 @@ export class GroupCloudStore {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
       this._ensureHybridRoom(room);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
@@ -2471,31 +3521,90 @@ export class GroupCloudStore {
       ) {
         const admitted = [...room.members.values()].filter((item) => item.status === 'ADMITTED');
         if (admitted.length >= 2) {
-          const candidateHost = room.members.get(room.transport.localHostDeviceId);
-          const host = candidateHost?.status === 'ADMITTED' ? candidateHost : room.members.get(room.ownerId);
-          if (host && room.transport.localHostDeviceId !== host.deviceId) {
-            room.transport.localHostDeviceId = host.deviceId;
-            this._abortHybridPreconnect(room, nowMs, { advanceBackoff: false, reason: 'LOCAL_HOST_REASSIGNED' });
-            room.revision += 1;
-            this._broadcastSnapshot(room);
-            return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
-          }
-          if (room.transport.recoveryStage === 'PRECONNECTING') {
-            const timedOut =
-              room.transport.preconnectStartedAtMs !== null &&
-              nowMs - room.transport.preconnectStartedAtMs >= this.localPreconnectTimeoutMs;
-            if (Boolean(preconnectFailed) || timedOut) {
-              this._abortHybridPreconnect(room, nowMs, {
-                advanceBackoff: true,
-                reason: preconnectFailed ? 'PRECONNECT_FAILED' : 'PRECONNECT_TIMEOUT'
+          const host = this._resolveAdmittedLocalHost(room);
+          const hostUnavailable = !host;
+          const hostReassigned = Boolean(host && room.transport.localHostDeviceId !== host.deviceId);
+          const pendingEpoch =
+            room.pendingEpochRevocation?.epoch === room.transport.epoch ? room.pendingEpochRevocation : null;
+          if (hostUnavailable || hostReassigned) {
+            if (this._hasPendingEpochRevocation(room, room.transport.epoch)) {
+              const revokeReason = hostUnavailable ? 'LOCAL_HOST_LOST' : 'LOCAL_HOST_REASSIGNED';
+              if (pendingEpoch && !this._isPendingRetryDue(pendingEpoch, nowMs)) {
+                this._updatePendingEpochIntentPreservingBackoff(room, {
+                  epoch: room.transport.epoch,
+                  intent: 'CLOUD_ROTATE',
+                  revokeReason,
+                  transportReason: this._cloudRecoveryReason(room),
+                  nextLocalHostDeviceId: host?.deviceId ?? null,
+                  preservePreconnect: false,
+                  advanceBackoff: false
+                });
+                throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '云端语音吊销重试冷却中，请稍后重试');
+              }
+              try {
+                await this._revokeRoomRtcForEpoch(room, room.transport.epoch, revokeReason, nowMs);
+              } catch (error) {
+                this._recordPendingEpochRevocation(
+                  room,
+                  {
+                    epoch: room.transport.epoch,
+                    intent: 'CLOUD_ROTATE',
+                    revokeReason,
+                    transportReason: this._cloudRecoveryReason(room),
+                    nextLocalHostDeviceId: host?.deviceId ?? null,
+                    preservePreconnect: false,
+                    advanceBackoff: false
+                  },
+                  nowMs
+                );
+                throw error;
+              }
+              this._rotatePartialEpochToFreshCloud(room, nowMs, {
+                nextLocalHostDeviceId: host?.deviceId ?? undefined,
+                advanceBackoff: false
               });
               room.revision += 1;
               this._broadcastSnapshot(room);
               return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
             }
+            let mutated = hostMetadataChanged;
+            if (hostReassigned) {
+              room.transport.localHostDeviceId = host.deviceId;
+              mutated = true;
+            }
+            if (
+              this._abortHybridPreconnect(room, nowMs, {
+                advanceBackoff: false,
+                reason: hostUnavailable ? 'LOCAL_HOST_LOST' : 'LOCAL_HOST_REASSIGNED'
+              })
+            ) {
+              mutated = true;
+            }
+            if (mutated) {
+              room.revision += 1;
+              this._broadcastSnapshot(room);
+            }
+            return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
+          }
+          if (
+            room.pendingEpochRevocation?.epoch === room.transport.epoch &&
+            (room.pendingEpochRevocation.intent === 'MANUAL_LOCAL' ||
+              room.pendingEpochRevocation.intent === 'CLOUD_ROTATE')
+          ) {
+            if (hostMetadataChanged) {
+              room.revision += 1;
+              this._broadcastSnapshot(room);
+            }
+            return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
+          }
+          if (room.transport.recoveryStage === 'PRECONNECTING') {
+            const hasPartialRevocation = this._hasPendingEpochRevocation(room, room.transport.epoch);
+            const timedOut =
+              room.transport.preconnectStartedAtMs !== null &&
+              nowMs - room.transport.preconnectStartedAtMs >= this.localPreconnectTimeoutMs;
             const startedAt = room.transport.preconnectStartedAtMs ?? room.transport.cooldownUntilMs;
             const allControlReady =
-              Boolean(host) &&
+              Boolean(host && host.status === 'ADMITTED') &&
               admitted.every(
                 (item) =>
                   item.localStatus?.epoch === room.transport.epoch &&
@@ -2503,8 +3612,28 @@ export class GroupCloudStore {
                   item.localStatus.reportedAtMs >= startedAt &&
                   nowMs - item.localStatus.reportedAtMs <= this.localStatusFreshMs
               );
-            if (allControlReady) {
-              await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'LOCAL_RECOVERED', nowMs);
+            if (!Boolean(preconnectFailed) && allControlReady && (!timedOut || hasPartialRevocation)) {
+              if (pendingEpoch?.intent === 'PRECONNECT_LOCAL' && !this._isPendingRetryDue(pendingEpoch, nowMs)) {
+                throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '云端语音吊销重试冷却中，请稍后重试');
+              }
+              try {
+                await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'LOCAL_RECOVERED', nowMs);
+              } catch (error) {
+                this._recordPendingEpochRevocation(
+                  room,
+                  {
+                    epoch: room.transport.epoch,
+                    intent: 'PRECONNECT_LOCAL',
+                    revokeReason: 'LOCAL_RECOVERED',
+                    transportReason: 'LOCAL_RECOVERED',
+                    nextLocalHostDeviceId: host.deviceId,
+                    preservePreconnect: true,
+                    advanceBackoff: false
+                  },
+                  nowMs
+                );
+                throw error;
+              }
               this._transitionTransport(room, 'LOCAL', 'LOCAL_RECOVERED', nowMs, {
                 nextLocalHostDeviceId: host.deviceId,
                 preservePreconnect: true
@@ -2512,6 +3641,55 @@ export class GroupCloudStore {
               room.revision += 1;
               this._broadcastSnapshot(room);
               return { switched: true, snapshot: this._snapshotFor(room, member.deviceId) };
+            }
+            if (Boolean(preconnectFailed) || timedOut) {
+              if (hasPartialRevocation) {
+                if (pendingEpoch && !this._isPendingRetryDue(pendingEpoch, nowMs)) {
+                  this._updatePendingEpochIntentPreservingBackoff(room, {
+                    epoch: room.transport.epoch,
+                    intent: 'CLOUD_ROTATE',
+                    revokeReason: 'PRECONNECT_ABORTED',
+                    transportReason: this._cloudRecoveryReason(room),
+                    nextLocalHostDeviceId: null,
+                    preservePreconnect: false,
+                    advanceBackoff: true
+                  });
+                  if (hostMetadataChanged) {
+                    room.revision += 1;
+                    this._broadcastSnapshot(room);
+                  }
+                  return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
+                }
+                try {
+                  await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'PRECONNECT_ABORTED', nowMs);
+                } catch (error) {
+                  this._recordPendingEpochRevocation(
+                    room,
+                    {
+                      epoch: room.transport.epoch,
+                      intent: 'CLOUD_ROTATE',
+                      revokeReason: 'PRECONNECT_ABORTED',
+                      transportReason: this._cloudRecoveryReason(room),
+                      nextLocalHostDeviceId: null,
+                      preservePreconnect: false,
+                      advanceBackoff: true
+                    },
+                    nowMs
+                  );
+                  throw error;
+                }
+                this._rotatePartialEpochToFreshCloud(room, nowMs, { advanceBackoff: true });
+                room.revision += 1;
+                this._broadcastSnapshot(room);
+                return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
+              }
+              this._abortHybridPreconnect(room, nowMs, {
+                advanceBackoff: true,
+                reason: preconnectFailed ? 'PRECONNECT_FAILED' : 'PRECONNECT_TIMEOUT'
+              });
+              room.revision += 1;
+              this._broadcastSnapshot(room);
+              return { switched: false, snapshot: this._snapshotFor(room, member.deviceId) };
             }
             if (hostMetadataChanged) {
               room.revision += 1;
@@ -2588,6 +3766,7 @@ export class GroupCloudStore {
   async refreshRtcCredentials(token, roomId, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
       }
@@ -2606,6 +3785,7 @@ export class GroupCloudStore {
   async updateAudioAvailability(token, roomId, { available }, nowMs = this.now()) {
     return this._withRoomLock(roomId, async () => {
       const { room, member } = await this._authenticateUnlocked(token, roomId, nowMs);
+      this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       if (member.status !== 'ADMITTED') {
         throw new CloudStoreError(409, 'NOT_ADMITTED', '成员未处于在房状态');
