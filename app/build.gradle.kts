@@ -24,6 +24,46 @@ val groupPreviewVersionCode = releaseVersion.getProperty("groupPreviewVersionCod
 val groupPreviewCommit = releaseVersion.getProperty("groupPreviewCommit")
 require(groupPreviewCommit.matches(Regex("[0-9a-f]{40}")))
 require(groupPreviewVersionCode > androidVersionCode && groupPreviewVersionCode > betaVersionCode)
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) {
+        file.inputStream().use { load(it) }
+    }
+}
+fun resolveExplicitSigningValue(key: String): String? =
+    providers.gradleProperty(key).orNull?.takeIf { it.isNotBlank() }
+        ?: System.getenv(key)?.takeIf { it.isNotBlank() }
+val explicitReleaseSigning = listOf(
+    resolveExplicitSigningValue("MOTOCOM_RELEASE_STORE_FILE"),
+    resolveExplicitSigningValue("MOTOCOM_RELEASE_STORE_PASSWORD"),
+    resolveExplicitSigningValue("MOTOCOM_RELEASE_KEY_ALIAS"),
+    resolveExplicitSigningValue("MOTOCOM_RELEASE_KEY_PASSWORD")
+)
+val usesExplicitReleaseSigning = explicitReleaseSigning.any { it != null }
+val resolvedReleaseSigning = if (usesExplicitReleaseSigning) {
+    explicitReleaseSigning
+} else {
+    listOf(
+        localProperties.getProperty("motocom.release.storeFile")?.takeIf { it.isNotBlank() },
+        localProperties.getProperty("motocom.release.storePassword")?.takeIf { it.isNotBlank() },
+        localProperties.getProperty("motocom.release.keyAlias")?.takeIf { it.isNotBlank() },
+        localProperties.getProperty("motocom.release.keyPassword")?.takeIf { it.isNotBlank() }
+    )
+}
+val hasAnyReleaseSigningConfig = resolvedReleaseSigning.any { it != null }
+val hasCompleteReleaseSigningConfig = resolvedReleaseSigning.all { it != null }
+val releaseStoreFile = resolvedReleaseSigning[0]?.let { rootProject.file(it) }
+if (hasAnyReleaseSigningConfig) {
+    require(hasCompleteReleaseSigningConfig) {
+        "正式分发签名配置不完整：必须同时提供 storeFile、storePassword、keyAlias 与 keyPassword。"
+    }
+    require(releaseStoreFile != null && releaseStoreFile.isFile) {
+        "正式分发签名 keystore 文件不存在: ${releaseStoreFile?.path ?: resolvedReleaseSigning[0]}"
+    }
+    require(!releaseStoreFile.name.equals("debug.keystore", ignoreCase = true)) {
+        "禁止将 debug.keystore 用作正式分发签名证书: ${releaseStoreFile.path}"
+    }
+}
 val volcOmittedPlugins = listOf(
     "libbytertc_videosr_extension.so",
     "libbytertc_videosharpen_extension.so",
@@ -82,6 +122,20 @@ android {
     }
     testBuildType = providers.gradleProperty("testBuildType").orElse("debug").get()
 
+    signingConfigs {
+        if (hasCompleteReleaseSigningConfig) {
+            create("releaseDistribution") {
+                storeFile = releaseStoreFile
+                storePassword = resolvedReleaseSigning[1]
+                keyAlias = resolvedReleaseSigning[2]
+                keyPassword = resolvedReleaseSigning[3]
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         create("beta") {
             initWith(getByName("debug"))
@@ -102,7 +156,7 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("releaseDistribution")
             matchingFallbacks += "release"
             buildConfigField("String", "GROUP_CLOUD_BASE_URL", "\"https://group.toneride.top\"")
             buildConfigField("String", "GROUP_CLOUD_ALLOWED_HOSTS", "\"group.toneride.top\"")
@@ -152,6 +206,25 @@ androidComponents.onVariants(androidComponents.selector().withBuildType("groupPr
     variant.outputs.forEach {
         it.versionName.set("$groupPreviewVersion+${groupPreviewCommit.take(7)}")
         it.versionCode.set(groupPreviewVersionCode)
+    }
+}
+val releaseSigningReady = hasCompleteReleaseSigningConfig
+val releasePackagingTasks = setOf(
+    "assembleGroupPreviewRelease",
+    "packageGroupPreviewRelease",
+    "bundleGroupPreviewRelease",
+    "signGroupPreviewReleaseBundle",
+    "validateSigningGroupPreviewRelease"
+)
+tasks.configureEach {
+    if (name in releasePackagingTasks) {
+        doFirst {
+            if (!releaseSigningReady) {
+                throw GradleException(
+                    "groupPreviewRelease 打包必须配置正式分发签名（MOTOCOM_RELEASE_STORE_FILE / MOTOCOM_RELEASE_STORE_PASSWORD / MOTOCOM_RELEASE_KEY_ALIAS / MOTOCOM_RELEASE_KEY_PASSWORD 或 local.properties 中的 motocom.release.*），禁止回退到 Android Debug 或输出未签名包。"
+                )
+            }
+        }
     }
 }
 

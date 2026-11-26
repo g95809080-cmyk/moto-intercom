@@ -173,6 +173,13 @@ Next gate allowed
 - **交付产物**：`C:/Users/Administrator/Documents/摩托对讲机/output/motocom-group-2.3.0-r5.preview.7-10d494ee.apk`（`119,627,901` bytes，SHA-256 `10d494ee6a51b8f8fe673c1764a25345f0a950bb3e7c9b44a1d5cbe0834c4648`，同目录含 `.sha256`）。身份为 `2.3.0-r5.preview.7+f9bc538` / `versionCode = 13`，`apkanalyzer manifest debuggable` 为 `false`；`apksigner verify` v1/v2 通过，`zipalign -c -P 16 4` 通过。
 - **小米 13 验证**：已覆盖安装 preview.7 release 包，机内 `base.apk` SHA-256 与交付件一致，包 flags 不含 `DEBUGGABLE`，`GroupActivity` 冷启动 **363ms**；双模准备页无“开发者设置”与“云端服务地址”入口，`AndroidRuntime` 无异常。正式主包 `com.kuma.motointercom`（`1.2.3+f587472` / `versionCode = 7`）未受影响。
 
+## 11 月 26 日 preview.7 正式分发签名切换与重打包
+
+- **签名体系切换**：在 `app/build.gradle.kts` 移除 `groupPreviewRelease` 对 `signingConfigs.getByName("debug")` 的硬编码依赖，改为显式解析 `releaseDistribution` 正式分发签名（优先读取 Gradle 属性/环境变量 `MOTOCOM_RELEASE_STORE_FILE` / `MOTOCOM_RELEASE_STORE_PASSWORD` / `MOTOCOM_RELEASE_KEY_ALIAS` / `MOTOCOM_RELEASE_KEY_PASSWORD`，否则回退 git-ignored `local.properties` 中的 `motocom.release.*`），开启 APK Signature Scheme v1/v2/v3，并对打包任务实施 fail-closed 护栏：禁止使用 `debug.keystore`、禁止配置残缺，无签名配置时 CI 仍可执行 `testGroupPreviewReleaseUnitTest` / `lintGroupPreviewRelease`，但 `assembleGroupPreviewRelease` / `packageGroupPreviewRelease` / `bundleGroupPreviewRelease` 会直接失败阻断。
+- **正式分发证书**：本机仓库外新建独立 PKCS12 证书（RSA 4096-bit，`SHA256withRSA`，有效期 10,000 天，未入库），DN 为 `CN=MotoCom Distribution, OU=Mobile, O=ToneRide, L=Shanghai, ST=Shanghai, C=CN`，证书 SHA-256 指纹 `26833c0bb88a8754b7d7ee0431adb2707a1fb50ef730d8087bbba99eb328caca`（SHA-1 `70f73abcd611349b2fefd7157cfb410331c0b752`）。
+- **正式签名交付产物**：`C:/Users/Administrator/Documents/摩托对讲机/output/motocom-group-2.3.0-r5.preview.7-f3d0183d.apk`（`119,632,896` bytes，SHA-256 `f3d0183d49c75f1cd6f1ba2e0420b14d1d133210523703f9efd4d71a0b4bf47f`，同目录含 `.sha256`）。包身份保持 `com.kuma.motointercom.group.preview` / `2.3.0-r5.preview.7+f9bc538` / `versionCode = 13`（Android 源码功能基线仍为 `f9bc538`）；`apkanalyzer manifest debuggable` 为 `false`，`zipalign -c -P 16 4` 通过，`apksigner verify` v1/v2/v3 通过且签名主体为上述正式证书；`GroupReleaseCloudPolicyTest` **1/1** 与 `lintGroupPreviewRelease`（0 错误 / 100 警告）通过。
+- **覆盖升级与旧包作废口径**：此前使用 `Android Debug` 签名的 `motocom-group-2.3.0-r5.preview.7-10d494ee.apk` 及 `.sha256` 已作废并从 `output/` 清理，不再对外发放。所有曾安装过 `preview.1`–`preview.7`（`Android Debug` 签名）`com.kuma.motointercom.group.preview` 的设备（含小米 13）必须先卸载旧预览包，再安装正式签名包 `motocom-group-2.3.0-r5.preview.7-f3d0183d.apk`；后续同正式证书签发的新版本可直接覆盖升级。本次打包时未连接小米 13 ADB，正式签名包尚未在小米 13 上执行卸载重装实测。
+
 ## 仍待完成的物理设备门禁（NOT RUN）
 
 0. **R5 路线 A（Fast Connection API）双机/多机真机 0 弹窗矩阵**。小米 13 的单机 2.4 GHz 预设 GO 建组与释放在 `preview.3` 和 `preview.4` 均已通过。仍需第二台 Android 10+ 真机验证客户端 `GroupWifiP2pClient` 在亮屏、后台及息屏时静默加入和重连，以及多端并发加入、50 米邻近探测和后台预连后的语音回切。
