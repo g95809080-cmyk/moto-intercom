@@ -14,6 +14,7 @@ internal interface GroupAudioEffects : Closeable {
     fun signal(lease: GroupMediaLease, message: GroupMessage)
     fun mute(value: Boolean)
     fun vox(value: Boolean)
+    fun voxSensitivity(value: Int) = Unit
     fun block(peer: String, value: Boolean)
     fun selectRoute(value: AudioRouteSelection)
     fun poll()
@@ -122,6 +123,10 @@ internal class GroupAudio(
     }
     override fun mute(value: Boolean) { controls = controls.copy(muted = value); updateControls() }
     override fun vox(value: Boolean) { controls = controls.copy(voxEnabled = value); updateControls() }
+    override fun voxSensitivity(value: Int) {
+        controls = controls.copy(voxSensitivity = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY))
+        updateControls()
+    }
     private fun updateControls() { media.updateAudioControls(VersionedAudioControls(++controlsRevision, controls)) }
     override fun block(peer: String, value: Boolean) = media.block(peer, value)
     override fun selectRoute(value: AudioRouteSelection) {

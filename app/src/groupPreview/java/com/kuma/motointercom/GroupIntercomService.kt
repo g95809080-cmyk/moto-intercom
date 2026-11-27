@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Binder
@@ -20,6 +21,168 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+
+internal object GroupAudioControlStore {
+    private val stateLock = Any()
+    private val ioExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "motocom-group-audio-prefs").apply { isDaemon = true }
+    }
+    private var initializedAppContext: Context? = null
+    private var cachedSettings: AudioControlSettings? = null
+    private var pendingAppContext: Context? = null
+    private var pendingVoxEnabled: Boolean? = null
+    private var pendingVoxSensitivity: Int? = null
+
+    @Volatile
+    internal var diskLoader: (Context) -> AudioControlSettings = { context ->
+        AudioControlPreferences(context).load()
+    }
+
+    @Volatile
+    internal var diskWriter: (Context, AudioControlSettings) -> Boolean = { context, settings ->
+        AudioControlPreferences(context).saveVoxSettings(settings)
+    }
+
+    private fun resetPendingIfContextChangedLocked(appContext: Context) {
+        if (pendingAppContext !== appContext) {
+            pendingAppContext = appContext
+            pendingVoxEnabled = null
+            pendingVoxSensitivity = null
+        }
+    }
+
+    private fun loadOrHydrate(appContext: Context): AudioControlSettings {
+        synchronized(stateLock) {
+            val current = cachedSettings
+            if (current != null && initializedAppContext === appContext) {
+                return current
+            }
+        }
+        val loadedFromDisk = diskLoader(appContext)
+        return synchronized(stateLock) {
+            val existing = cachedSettings
+            if (existing != null && initializedAppContext === appContext) {
+                existing
+            } else {
+                val pendingEnabled = if (pendingAppContext === appContext) pendingVoxEnabled else null
+                val pendingSensitivity = if (pendingAppContext === appContext) pendingVoxSensitivity else null
+                val merged = loadedFromDisk.copy(
+                    voxEnabled = pendingEnabled ?: loadedFromDisk.voxEnabled,
+                    voxSensitivity = pendingSensitivity ?: loadedFromDisk.voxSensitivity
+                ).normalized()
+                initializedAppContext = appContext
+                cachedSettings = merged
+                pendingAppContext = appContext
+                pendingVoxEnabled = null
+                pendingVoxSensitivity = null
+                merged
+            }
+        }
+    }
+
+    fun load(context: Context): AudioControlSettings =
+        loadOrHydrate(context.applicationContext)
+
+    fun isHydrated(context: Context): Boolean {
+        val appContext = context.applicationContext
+        return synchronized(stateLock) {
+            cachedSettings != null && initializedAppContext === appContext
+        }
+    }
+
+    fun peek(context: Context): AudioControlSettings {
+        val appContext = context.applicationContext
+        return synchronized(stateLock) {
+            cachedSettings?.takeIf { initializedAppContext === appContext } ?: AudioControlSettings(
+                voxEnabled = if (pendingAppContext === appContext) pendingVoxEnabled ?: true else true,
+                voxSensitivity = if (pendingAppContext === appContext) {
+                    pendingVoxSensitivity ?: DEFAULT_VOX_SENSITIVITY
+                } else {
+                    DEFAULT_VOX_SENSITIVITY
+                }
+            ).normalized()
+        }
+    }
+
+    fun hydrateAsync(
+        context: Context,
+        onLoaded: ((AudioControlSettings) -> Unit)? = null
+    ): Future<AudioControlSettings> {
+        val appContext = context.applicationContext
+        return ioExecutor.submit<AudioControlSettings> {
+            val hydrated = loadOrHydrate(appContext)
+            onLoaded?.invoke(hydrated)
+            hydrated
+        }
+    }
+
+    fun updateVoxEnabled(context: Context, enabled: Boolean): AudioControlSettings {
+        val appContext = context.applicationContext
+        val snapshot = synchronized(stateLock) {
+            val existing = cachedSettings?.takeIf { initializedAppContext === appContext }
+            if (existing != null) {
+                val next = existing.copy(voxEnabled = enabled).normalized()
+                cachedSettings = next
+                next
+            } else {
+                resetPendingIfContextChangedLocked(appContext)
+                pendingVoxEnabled = enabled
+                AudioControlSettings(
+                    voxEnabled = enabled,
+                    voxSensitivity = pendingVoxSensitivity ?: DEFAULT_VOX_SENSITIVITY
+                ).normalized()
+            }
+        }
+        enqueueDiskWrite(appContext)
+        return snapshot
+    }
+
+    fun updateVoxSensitivity(context: Context, sensitivity: Int): AudioControlSettings {
+        val appContext = context.applicationContext
+        return updateVoxSensitivityInternal(appContext, sensitivity).first
+    }
+
+    fun updateVoxSensitivityAsync(context: Context, sensitivity: Int): Future<AudioControlSettings> {
+        val appContext = context.applicationContext
+        return updateVoxSensitivityInternal(appContext, sensitivity).second
+    }
+
+    private fun updateVoxSensitivityInternal(
+        appContext: Context,
+        sensitivity: Int
+    ): Pair<AudioControlSettings, Future<AudioControlSettings>> {
+        val clamped = sensitivity.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+        val snapshot = synchronized(stateLock) {
+            val existing = cachedSettings?.takeIf { initializedAppContext === appContext }
+            if (existing != null) {
+                val next = existing.copy(voxSensitivity = clamped).normalized()
+                cachedSettings = next
+                next
+            } else {
+                resetPendingIfContextChangedLocked(appContext)
+                pendingVoxSensitivity = clamped
+                AudioControlSettings(
+                    voxEnabled = pendingVoxEnabled ?: true,
+                    voxSensitivity = clamped
+                ).normalized()
+            }
+        }
+        return snapshot to enqueueDiskWrite(appContext)
+    }
+
+    private fun enqueueDiskWrite(appContext: Context): Future<AudioControlSettings> =
+        ioExecutor.submit<AudioControlSettings> {
+            val latest = loadOrHydrate(appContext)
+            diskWriter(appContext, latest)
+            latest
+        }
+
+    fun awaitPendingWrites() {
+        ioExecutor.submit {}.get()
+    }
+}
 
 internal open class GroupIntercomService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -27,6 +190,9 @@ internal open class GroupIntercomService : Service() {
     private var runtime: GroupRuntimeHandle? = null
     private var starting: UUID? = null
     private var destroyed = false
+    private var audioHydrationInFlight = false
+    private var pendingPreviewVoxSensitivity: Int? = null
+    private var appliedRuntimeControls: AudioControlSettings? = null
     private var state = GroupServiceState()
     private val binder = LocalBinder()
 
@@ -36,7 +202,15 @@ internal open class GroupIntercomService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    override fun onCreate() {
+        super.onCreate()
+        hydrateIdleAudioPreferences()
+    }
+
     internal fun addGroupListener(listener: (GroupServiceState) -> Unit) {
+        if (runtime == null && starting == null) {
+            hydrateIdleAudioPreferences()
+        }
         listeners += listener
         listener(state)
     }
@@ -48,21 +222,90 @@ internal open class GroupIntercomService : Service() {
     internal fun groupAction(event: GroupSessionEvent) {
         if (event == GroupSessionEvent.Leave && starting != null) {
             starting = null
-            publish(GroupServiceState(message = "已取消"))
+            publish(idleState("已取消"))
             stopForegroundCompat()
             stopSelf()
         } else runtime?.dispatch(event)
     }
 
     internal fun groupRoute(selection: AudioRouteSelection) {
+        AudioRoutePreferences(this).save(selection)
         runtime?.route(selection)
         publish(state.copy(route = selection))
     }
 
     internal fun groupVox(value: Boolean) {
+        GroupAudioControlStore.updateVoxEnabled(this, value)
+        appliedRuntimeControls = appliedRuntimeControls?.copy(voxEnabled = value)
         runtime?.vox(value)
         publish(state.copy(vox = value))
     }
+
+    internal fun previewVoxSensitivity(value: Int) {
+        val clamped = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+        pendingPreviewVoxSensitivity = clamped
+        appliedRuntimeControls = appliedRuntimeControls?.copy(voxSensitivity = clamped)
+        runtime?.voxSensitivity(clamped)
+    }
+
+    internal fun groupVoxSensitivity(value: Int) {
+        val clamped = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+        pendingPreviewVoxSensitivity = null
+        GroupAudioControlStore.updateVoxSensitivity(this, clamped)
+        appliedRuntimeControls = appliedRuntimeControls?.copy(voxSensitivity = clamped)
+        runtime?.voxSensitivity(clamped)
+    }
+
+    private fun ensureAudioPreferencesHydrated() {
+        if (destroyed || audioHydrationInFlight || GroupAudioControlStore.isHydrated(this)) return
+        audioHydrationInFlight = true
+        GroupAudioControlStore.hydrateAsync(this) {
+            scope.launch {
+                audioHydrationInFlight = false
+                if (destroyed) return@launch
+                val latest = GroupAudioControlStore.peek(this@GroupIntercomService)
+                val activeRuntime = runtime
+                if (activeRuntime != null) {
+                    val applied = appliedRuntimeControls
+                    val targetSensitivity = pendingPreviewVoxSensitivity ?: latest.voxSensitivity
+                    if (applied == null || applied.voxEnabled != latest.voxEnabled) {
+                        activeRuntime.vox(latest.voxEnabled)
+                    }
+                    if (applied == null || applied.voxSensitivity != targetSensitivity) {
+                        activeRuntime.voxSensitivity(targetSensitivity)
+                    }
+                    appliedRuntimeControls = AudioControlSettings(
+                        voxEnabled = latest.voxEnabled,
+                        voxSensitivity = targetSensitivity,
+                        rnnoiseEnabled = latest.rnnoiseEnabled
+                    ).normalized()
+                }
+                if (state.vox != latest.voxEnabled) {
+                    publish(state.copy(vox = latest.voxEnabled))
+                }
+            }
+        }
+    }
+
+    private fun effectiveRuntimeAudioControls(): AudioControlSettings {
+        val base = GroupAudioControlStore.peek(this)
+        val preview = pendingPreviewVoxSensitivity ?: return base
+        return base.copy(voxSensitivity = preview).normalized()
+    }
+
+    private fun hydrateIdleAudioPreferences() {
+        state = state.copy(
+            route = AudioRoutePreferences(this).load(),
+            vox = GroupAudioControlStore.peek(this).voxEnabled
+        )
+        ensureAudioPreferencesHydrated()
+    }
+
+    private fun idleState(message: String): GroupServiceState = GroupServiceState(
+        message = message,
+        route = AudioRoutePreferences(this).load(),
+        vox = GroupAudioControlStore.peek(this).voxEnabled
+    )
 
     internal open fun identityStore(): LocalIdentityStore = DataStoreLocalIdentityStore(this)
 
@@ -72,8 +315,27 @@ internal open class GroupIntercomService : Service() {
         onSnapshot: (GroupSessionSnapshot) -> Unit,
         onLabel: (String) -> Unit,
         onReleased: () -> Unit
-    ): GroupRuntimeHandle = GroupRuntime(this, endpoint, nickname, state.route,
-        AudioControlPreferences(this).load(), onSnapshot, onLabel, onReleased)
+    ): GroupRuntimeHandle = createLocalRuntimeInstance(
+        endpoint = endpoint,
+        nickname = nickname,
+        initialRoute = state.route,
+        initialControls = effectiveRuntimeAudioControls(),
+        onSnapshot = onSnapshot,
+        onLabel = onLabel,
+        onReleased = onReleased
+    )
+
+    internal open fun createLocalRuntimeInstance(
+        endpoint: GroupAuthEndpoint,
+        nickname: String,
+        initialRoute: AudioRouteSelection,
+        initialControls: AudioControlSettings,
+        onSnapshot: (GroupSessionSnapshot) -> Unit,
+        onLabel: (String) -> Unit,
+        onReleased: () -> Unit
+    ): GroupRuntimeHandle = GroupRuntime(
+        this, endpoint, nickname, initialRoute, initialControls, onSnapshot, onLabel, onReleased
+    )
 
     internal open fun createCloudRuntime(
         endpoint: GroupAuthEndpoint,
@@ -100,13 +362,33 @@ internal open class GroupIntercomService : Service() {
         onSnapshot: (GroupSessionSnapshot) -> Unit,
         onLabel: (String) -> Unit,
         onReleased: () -> Unit
+    ): GroupRuntimeHandle = createHybridRuntimeInstance(
+        endpoint = endpoint,
+        nickname = nickname,
+        request = request,
+        initialRoute = state.route,
+        initialControls = effectiveRuntimeAudioControls(),
+        onSnapshot = onSnapshot,
+        onLabel = onLabel,
+        onReleased = onReleased
+    )
+
+    internal open fun createHybridRuntimeInstance(
+        endpoint: GroupAuthEndpoint,
+        nickname: String,
+        request: GroupCloudStartRequest,
+        initialRoute: AudioRouteSelection,
+        initialControls: AudioControlSettings,
+        onSnapshot: (GroupSessionSnapshot) -> Unit,
+        onLabel: (String) -> Unit,
+        onReleased: () -> Unit
     ): GroupRuntimeHandle = GroupHybridRuntime(
         context = this,
         endpoint = endpoint,
         nickname = nickname,
         request = request,
-        initialRoute = state.route,
-        initialControls = AudioControlPreferences(this).load(),
+        initialRoute = initialRoute,
+        initialControls = initialControls,
         onSnapshot = onSnapshot,
         onAudioLabel = onLabel,
         onReleased = onReleased
@@ -173,7 +455,7 @@ internal open class GroupIntercomService : Service() {
             return
         }
         if (!networkAvailable()) {
-            publish(GroupServiceState(message = "请授予麦克风权限后再使用网络群组"))
+            publish(idleState("请授予麦克风权限后再使用网络群组"))
             return
         }
         val token = UUID.randomUUID()
@@ -182,17 +464,18 @@ internal open class GroupIntercomService : Service() {
             message = "正在连接云端网络群组",
             busy = true,
             route = AudioRoutePreferences(this).load(),
-            vox = AudioControlPreferences(this).load().voxEnabled
+            vox = GroupAudioControlStore.peek(this).voxEnabled
         )
         try {
             getSystemService(NotificationManager::class.java).cancel(TERMINAL_NOTIFICATION_ID)
             startForeground(NOTIFICATION_ID, notification())
         } catch (_: Exception) {
             starting = null
-            publish(GroupServiceState(message = "无法启动前台对讲，请返回页面重试"))
+            publish(idleState("无法启动前台对讲，请返回页面重试"))
             return
         }
         publish(state)
+        ensureAudioPreferencesHydrated()
         scope.launch {
             try {
                 val identity = identityStore()
@@ -201,6 +484,7 @@ internal open class GroupIntercomService : Service() {
                     "骑士 ${device.replace("-", "").takeLast(6).uppercase(java.util.Locale.ROOT)}"
                 }
                 if (starting != token || destroyed) return@launch
+                val initialControls = effectiveRuntimeAudioControls()
                 lateinit var created: GroupRuntimeHandle
                 created = createCloudRuntime(
                     endpoint = GroupAuthEndpoint(device, UUID.randomUUID().toString()),
@@ -217,6 +501,8 @@ internal open class GroupIntercomService : Service() {
                     onReleased = {
                         if (runtime === created) {
                             runtime = null
+                            appliedRuntimeControls = null
+                            pendingPreviewVoxSensitivity = null
                             if (!destroyed) {
                                 publish(state.copy(snapshot = created.snapshot,
                                     message = created.snapshot.message, busy = false))
@@ -228,6 +514,7 @@ internal open class GroupIntercomService : Service() {
                     }
                 )
                 runtime = created
+                appliedRuntimeControls = initialControls
                 starting = null
                 try {
                     created.start(null)
@@ -235,12 +522,12 @@ internal open class GroupIntercomService : Service() {
                     created.close()
                     val msg = error.message?.takeIf { it.isNotBlank() } ?: "网络群组启动失败，请检查网络或服务地址"
                     if (runtime === created) publish(state.copy(message = msg))
-                    else if (runtime == null && !destroyed) publish(GroupServiceState(message = msg))
+                    else if (runtime == null && !destroyed) publish(idleState(msg))
                 }
             } catch (_: Exception) {
                 if (starting == token && !destroyed) {
                     starting = null
-                    publish(GroupServiceState(message = "无法准备设备身份，请重试"))
+                    publish(idleState("无法准备设备身份，请重试"))
                     stopForegroundCompat()
                     stopSelf()
                 }
@@ -256,7 +543,7 @@ internal open class GroupIntercomService : Service() {
             return
         }
         if (!available()) {
-            publish(GroupServiceState(message = "请检查麦克风和附近设备权限；双模群组需要 Wi-Fi Direct 与 BLE"))
+            publish(idleState("请检查麦克风和附近设备权限；双模群组需要 Wi-Fi Direct 与 BLE"))
             return
         }
         val token = UUID.randomUUID()
@@ -265,17 +552,18 @@ internal open class GroupIntercomService : Service() {
             message = "正在连接双模群组（本地优先）",
             busy = true,
             route = AudioRoutePreferences(this).load(),
-            vox = AudioControlPreferences(this).load().voxEnabled
+            vox = GroupAudioControlStore.peek(this).voxEnabled
         )
         try {
             getSystemService(NotificationManager::class.java).cancel(TERMINAL_NOTIFICATION_ID)
             startForeground(NOTIFICATION_ID, notification())
         } catch (_: Exception) {
             starting = null
-            publish(GroupServiceState(message = "无法启动前台对讲，请返回页面重试"))
+            publish(idleState("无法启动前台对讲，请返回页面重试"))
             return
         }
         publish(state)
+        ensureAudioPreferencesHydrated()
         scope.launch {
             try {
                 val identity = identityStore()
@@ -284,6 +572,7 @@ internal open class GroupIntercomService : Service() {
                     "骑士 ${device.replace("-", "").takeLast(6).uppercase(java.util.Locale.ROOT)}"
                 }
                 if (starting != token || destroyed) return@launch
+                val initialControls = effectiveRuntimeAudioControls()
                 lateinit var created: GroupRuntimeHandle
                 created = createHybridRuntime(
                     endpoint = GroupAuthEndpoint(device, UUID.randomUUID().toString()),
@@ -300,6 +589,8 @@ internal open class GroupIntercomService : Service() {
                     onReleased = {
                         if (runtime === created) {
                             runtime = null
+                            appliedRuntimeControls = null
+                            pendingPreviewVoxSensitivity = null
                             if (!destroyed) {
                                 publish(state.copy(snapshot = created.snapshot,
                                     message = created.snapshot.message, busy = false))
@@ -311,6 +602,7 @@ internal open class GroupIntercomService : Service() {
                     }
                 )
                 runtime = created
+                appliedRuntimeControls = initialControls
                 starting = null
                 try {
                     created.start(null)
@@ -318,12 +610,12 @@ internal open class GroupIntercomService : Service() {
                     created.close()
                     val msg = error.message?.takeIf { it.isNotBlank() } ?: "双模群组启动失败，请检查网络或服务地址"
                     if (runtime === created) publish(state.copy(message = msg))
-                    else if (runtime == null && !destroyed) publish(GroupServiceState(message = msg))
+                    else if (runtime == null && !destroyed) publish(idleState(msg))
                 }
             } catch (_: Exception) {
                 if (starting == token && !destroyed) {
                     starting = null
-                    publish(GroupServiceState(message = "无法准备设备身份，请重试"))
+                    publish(idleState("无法准备设备身份，请重试"))
                     stopForegroundCompat()
                     stopSelf()
                 }
@@ -339,22 +631,23 @@ internal open class GroupIntercomService : Service() {
             return
         }
         if (!available()) {
-            publish(GroupServiceState(message = "请检查麦克风和附近设备权限；本地群组需要 Wi-Fi Direct 与 BLE"))
+            publish(idleState("请检查麦克风和附近设备权限；本地群组需要 Wi-Fi Direct 与 BLE"))
             return
         }
         val token = UUID.randomUUID()
         starting = token
         state = GroupServiceState(message = "正在准备本地群组", busy = true,
-            route = AudioRoutePreferences(this).load(), vox = AudioControlPreferences(this).load().voxEnabled)
+            route = AudioRoutePreferences(this).load(), vox = GroupAudioControlStore.peek(this).voxEnabled)
         try {
             getSystemService(NotificationManager::class.java).cancel(TERMINAL_NOTIFICATION_ID)
             startForeground(NOTIFICATION_ID, notification())
         } catch (_: Exception) {
             starting = null
-            publish(GroupServiceState(message = "无法启动前台对讲，请返回页面重试"))
+            publish(idleState("无法启动前台对讲，请返回页面重试"))
             return
         }
         publish(state)
+        ensureAudioPreferencesHydrated()
         scope.launch {
             try {
                 val identity = identityStore()
@@ -363,6 +656,7 @@ internal open class GroupIntercomService : Service() {
                     "骑士 ${device.replace("-", "").takeLast(6).uppercase(java.util.Locale.ROOT)}"
                 }
                 if (starting != token || destroyed) return@launch
+                val initialControls = effectiveRuntimeAudioControls()
                 lateinit var created: GroupRuntimeHandle
                 created = createRuntime(GroupAuthEndpoint(device, UUID.randomUUID().toString()), nickname,
                     { snapshot -> if (runtime === created && !destroyed) {
@@ -371,6 +665,8 @@ internal open class GroupIntercomService : Service() {
                     { label -> if (runtime === created && !destroyed) publish(state.copy(audioLabel = label)) },
                     { if (runtime === created) {
                         runtime = null
+                        appliedRuntimeControls = null
+                        pendingPreviewVoxSensitivity = null
                         if (!destroyed) {
                             publish(state.copy(snapshot = created.snapshot,
                                 message = created.snapshot.message, busy = false))
@@ -380,18 +676,19 @@ internal open class GroupIntercomService : Service() {
                         stopSelf()
                     } })
                 runtime = created
+                appliedRuntimeControls = initialControls
                 starting = null
                 try {
                     created.start(code)
                 } catch (_: Exception) {
                     created.close()
                     if (runtime === created) publish(state.copy(message = "群组启动失败，正在释放网络"))
-                    else if (runtime == null && !destroyed) publish(GroupServiceState(message = "群组启动失败，请检查无线网络后重试"))
+                    else if (runtime == null && !destroyed) publish(idleState("群组启动失败，请检查无线网络后重试"))
                 }
             } catch (_: Exception) {
                 if (starting == token && !destroyed) {
                     starting = null
-                    publish(GroupServiceState(message = "无法准备设备身份，请重试"))
+                    publish(idleState("无法准备设备身份，请重试"))
                     stopForegroundCompat()
                     stopSelf()
                 }

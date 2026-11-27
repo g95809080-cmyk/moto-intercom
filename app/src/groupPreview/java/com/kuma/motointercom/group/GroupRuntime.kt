@@ -12,6 +12,7 @@ internal interface GroupRuntimeHandle : Closeable {
     fun dispatch(event: GroupSessionEvent)
     fun route(value: AudioRouteSelection)
     fun vox(value: Boolean)
+    fun voxSensitivity(value: Int) = Unit
 }
 
 internal class GroupAudioLifetime(
@@ -89,6 +90,11 @@ internal class GroupRuntime(
     override fun dispatch(event: GroupSessionEvent) = writer.dispatch(event)
     override fun route(value: AudioRouteSelection) { initialRoute = value; audio?.selectRoute(value) }
     override fun vox(value: Boolean) { initialControls = initialControls.copy(voxEnabled = value); audio?.vox(value) }
+    override fun voxSensitivity(value: Int) {
+        val clamped = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+        initialControls = initialControls.copy(voxSensitivity = clamped)
+        audio?.voxSensitivity(clamped)
+    }
     private fun runOnMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else main.post(action)
     }

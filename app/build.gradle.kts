@@ -167,11 +167,15 @@ android {
     }
 
     sourceSets {
+        getByName("groupPreview") {
+            res.directories.add("src/groupPreviewCommon/res")
+        }
         getByName("groupPreviewRelease") {
             java.srcDirs("src/groupPreview/java")
             kotlin.srcDirs("src/groupPreview/java")
             manifest.srcFile("src/groupPreview/AndroidManifest.xml")
             jniLibs.srcDirs("src/groupPreview/jniLibs")
+            res.directories.add("src/groupPreviewCommon/res")
         }
     }
 }

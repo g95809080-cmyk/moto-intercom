@@ -6,6 +6,8 @@ import android.os.Looper
 import com.kuma.motointercom.AudioControlSettings
 import com.kuma.motointercom.AudioRouteSelection
 import com.kuma.motointercom.IntercomRuntimeKeepAlive
+import com.kuma.motointercom.MAX_VOX_SENSITIVITY
+import com.kuma.motointercom.MIN_VOX_SENSITIVITY
 import com.kuma.motointercom.group.*
 import com.kuma.motointercom.group.cloud.*
 import java.io.Closeable
@@ -137,6 +139,12 @@ internal class GroupHybridRuntime(
     override fun vox(value: Boolean) {
         initialControls = initialControls.copy(voxEnabled = value)
         localAudio?.vox(value)
+    }
+
+    override fun voxSensitivity(value: Int) {
+        val clamped = value.coerceIn(MIN_VOX_SENSITIVITY, MAX_VOX_SENSITIVITY)
+        initialControls = initialControls.copy(voxSensitivity = clamped)
+        localAudio?.voxSensitivity(clamped)
     }
 
     private fun postInternal(event: GroupHybridInternalEvent) {
