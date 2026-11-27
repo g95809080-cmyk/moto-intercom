@@ -20,6 +20,7 @@ async function startEntitlementServer({
   requireCodeForJoin = false,
   rtcTokenTtlMs = 10 * 60_000,
   lowQuotaWarnSeconds = 900,
+  adminToken = TEST_ADMIN_TOKEN,
   trustLoopbackProxy = false,
   onBeforeUnbanUser = null
 } = {}) {
@@ -58,7 +59,7 @@ async function startEntitlementServer({
     host: '127.0.0.1',
     store,
     entitlementStore,
-    adminToken: TEST_ADMIN_TOKEN,
+    adminToken,
     trustLoopbackProxy,
     sweepIntervalMs: 0,
     now: () => clock.now
@@ -506,9 +507,87 @@ test('admin HTTP API auth, idempotency, topup, revoke with BanRoomUser, global q
     assert.equal(overview.status, 200);
     assert.equal(overview.json.codeStats.REDEEMED, 1);
     assert.equal(overview.json.codeStats.UNUSED, 1);
+    assert.equal(Array.isArray(overview.json.dailyUsage), true);
+    assert.equal(overview.json.dailyUsage.length, 14);
   } finally {
     await env.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('visual admin panel static routes enforce strict CSP, allowlist isolation, fail-closed when disabled, and overview dailyUsage split', async () => {
+  const clock = { now: Date.UTC(2026, 10, 27, 4, 0, 0) };
+  const env = await startEntitlementServer({ clock });
+  try {
+    // 1. /admin, /admin/, CSS, JS serve 200 with strict CSP and zero secrets
+    for (const [route, expectedType] of [
+      ['/admin', 'text/html'],
+      ['/admin/', 'text/html'],
+      ['/admin/assets/admin.css', 'text/css'],
+      ['/admin/assets/admin.js', 'application/javascript']
+    ]) {
+      const res = await fetch(`${env.baseUrl}${route}`);
+      assert.equal(res.status, 200, `expected 200 for ${route}`);
+      assert.ok((res.headers.get('content-type') || '').includes(expectedType));
+      assert.equal(res.headers.get('x-frame-options'), 'DENY');
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(res.headers.get('cache-control'), 'no-store');
+      const csp = res.headers.get('content-security-policy') || '';
+      assert.ok(csp.includes("script-src 'self'"));
+      assert.ok(!csp.includes('unsafe-inline'));
+      const text = await res.text();
+      assert.ok(!text.includes(TEST_ADMIN_TOKEN));
+      assert.ok(!text.includes(TEST_HMAC_SECRET));
+      if (route.endsWith('.js')) {
+        assert.ok(!text.includes('.style.'), 'admin.js must not mutate inline styles under strict style-src self');
+        assert.ok(!text.includes('innerHTML'), 'admin.js must not use innerHTML');
+      }
+    }
+
+    // 2. Path traversal and unknown admin paths are rejected 404
+    for (const badRoute of ['/admin/assets/../server.mjs', '/admin/assets/%2e%2e/server.mjs', '/admin/config.json']) {
+      const bad = await fetch(`${env.baseUrl}${badRoute}`);
+      assert.equal(bad.status, 404, `expected 404 for ${badRoute}`);
+    }
+
+    // 3. Record usage across NETWORK and HYBRID and verify dailyUsage & ownerDeviceId ranking
+    const minted = await api(env.baseUrl, 'POST', '/admin/v1/codes/batch', {
+      bearer: TEST_ADMIN_TOKEN,
+      body: { count: 1, quotaMinutes: 300, validDays: 14, maxMembers: 6 }
+    });
+    const redeemed = await api(env.baseUrl, 'POST', '/v1/entitlements/redeem', {
+      body: { code: minted.json.codes[0].code, deviceId: 'dev-chart-1' }
+    });
+    const entId = redeemed.json.entitlement.entitlementId;
+    env.entitlementStore.deductUsage(
+      { entitlementId: entId, roomId: 'room-n', mode: 'NETWORK', deltaSeconds: 180, peakRtcMembers: 3, reason: 'TICK' },
+      clock.now
+    );
+    env.entitlementStore.deductUsage(
+      { entitlementId: entId, roomId: 'room-h', mode: 'HYBRID', deltaSeconds: 120, peakRtcMembers: 2, reason: 'TICK' },
+      clock.now
+    );
+    const ov = await api(env.baseUrl, 'GET', '/admin/v1/overview', { bearer: TEST_ADMIN_TOKEN });
+    assert.equal(ov.status, 200);
+    assert.equal(ov.json.dailyUsage.length, 14);
+    const todayBucket = ov.json.dailyUsage[13];
+    assert.equal(todayBucket.dateKey, '2026-11-27');
+    assert.equal(todayBucket.networkSeconds, 180);
+    assert.equal(todayBucket.hybridSeconds, 120);
+    assert.equal(todayBucket.totalMinutes, 5);
+    assert.equal(ov.json.topConsumersToday[0].ownerDeviceId, 'dev-chart-1');
+    assert.equal(ov.json.topConsumersMonth[0].ownerDeviceId, 'dev-chart-1');
+  } finally {
+    await env.close();
+  }
+
+  // 4. Fail-closed 404 when adminToken is not configured
+  const disabledEnv = await startEntitlementServer({ clock, adminToken: '' });
+  try {
+    const res = await fetch(`${disabledEnv.baseUrl}/admin`);
+    assert.equal(res.status, 404);
+  } finally {
+    await disabledEnv.close();
   }
 });
 

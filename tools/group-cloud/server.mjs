@@ -12,6 +12,37 @@ const MAX_BODY_BYTES = 128 * 1024;
 const ADMIN_RATE_WINDOW_MS = 10 * 60 * 1000;
 const ADMIN_MAX_FAILURES = 10;
 const ADMIN_GLOBAL_MAX_FAILURES = 20;
+const ADMIN_UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'admin-ui');
+const ADMIN_UI_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "connect-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'none'"
+].join('; ');
+const ADMIN_STATIC_ROUTES = new Map([
+  ['/admin', { file: 'index.html', contentType: 'text/html; charset=utf-8' }],
+  ['/admin/', { file: 'index.html', contentType: 'text/html; charset=utf-8' }],
+  ['/admin/assets/admin.css', { file: 'admin.css', contentType: 'text/css; charset=utf-8' }],
+  ['/admin/assets/admin.js', { file: 'admin.js', contentType: 'application/javascript; charset=utf-8' }]
+]);
+
+function loadAdminUiAssets() {
+  const cache = new Map();
+  for (const [route, meta] of ADMIN_STATIC_ROUTES) {
+    const filePath = path.join(ADMIN_UI_DIR, meta.file);
+    if (!fs.existsSync(filePath)) continue;
+    cache.set(route, {
+      body: fs.readFileSync(filePath),
+      contentType: meta.contentType
+    });
+  }
+  return cache;
+}
 
 export function isLoopbackHost(host) {
   if (typeof host !== 'string') return false;
@@ -102,6 +133,25 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+function sendStaticAdminAsset(res, method, asset) {
+  if (res.writableEnded) return;
+  res.writeHead(200, {
+    'Content-Type': asset.contentType,
+    'Content-Length': asset.body.length,
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': ADMIN_UI_CSP,
+    'X-Frame-Options': 'DENY',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'Cross-Origin-Opener-Policy': 'same-origin'
+  });
+  if (method === 'HEAD') {
+    res.end();
+    return;
+  }
+  res.end(asset.body);
+}
+
 export function createGroupCloudServer(options = {}) {
   const configuredHost = options.host ?? '127.0.0.1';
   const hasTls = Boolean(options.tls);
@@ -116,6 +166,7 @@ export function createGroupCloudServer(options = {}) {
   const entitlementStore = options.entitlementStore ?? options.store?.entitlementStore ?? null;
   const store = options.store ?? new GroupCloudStore({ ...options, entitlementStore });
   const adminToken = typeof options.adminToken === 'string' ? options.adminToken.trim() : '';
+  const adminUiAssets = adminToken && entitlementStore ? loadAdminUiAssets() : new Map();
   const trustLoopbackProxy = Boolean(options.trustLoopbackProxy ?? false);
   const adminAuthFailures = new Map();
   let adminGlobalAuthFailures = [];
@@ -230,6 +281,18 @@ export function createGroupCloudServer(options = {}) {
           { expectedDeviceId: deviceId }
         );
         sendJson(res, 200, { entitlement: summary });
+        return;
+      }
+
+      if ((method === 'GET' || method === 'HEAD') && ADMIN_STATIC_ROUTES.has(pathname)) {
+        if (!entitlementStore || !adminToken) {
+          throw new CloudStoreError(404, 'ADMIN_DISABLED', '后台管理面板未启用');
+        }
+        const asset = adminUiAssets.get(pathname);
+        if (!asset) {
+          throw new CloudStoreError(404, 'ADMIN_UI_MISSING', '后台管理面板静态资源未部署');
+        }
+        sendStaticAdminAsset(res, method, asset);
         return;
       }
 

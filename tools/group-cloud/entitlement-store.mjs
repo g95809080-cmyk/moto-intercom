@@ -29,6 +29,10 @@ export function shanghaiMonthKey(nowMs) {
   return new Date(nowMs + 8 * 3_600_000).toISOString().slice(0, 7);
 }
 
+export function shanghaiDateKey(nowMs) {
+  return new Date(nowMs + 8 * 3_600_000).toISOString().slice(0, 10);
+}
+
 function computeCheckChars(dataPart) {
   const digest = crypto.createHash('sha256').update(`${CODE_PREFIX}:${dataPart}`, 'ascii').digest();
   const value = ((digest[0] << 8) | digest[1]) & 0x3ff;
@@ -233,6 +237,7 @@ export class EntitlementStore {
       );
       CREATE INDEX IF NOT EXISTS idx_ledger_month ON usage_ledger(month_key, recorded_at_ms);
       CREATE INDEX IF NOT EXISTS idx_ledger_entitlement ON usage_ledger(entitlement_id, month_key);
+      CREATE INDEX IF NOT EXISTS idx_ledger_recorded ON usage_ledger(recorded_at_ms);
 
       CREATE TABLE IF NOT EXISTS global_monthly_usage (
         month_key TEXT PRIMARY KEY,
@@ -1532,34 +1537,75 @@ export class EntitlementStore {
     const dayStartMs = nowMs - 24 * 60 * 60 * 1000;
     const topConsumersToday = this.db
       .prepare(
-        `SELECT entitlement_id, SUM(delta_seconds) AS used_seconds
-         FROM usage_ledger
-         WHERE recorded_at_ms >= ?
-         GROUP BY entitlement_id
+        `SELECT u.entitlement_id, e.owner_device_id, SUM(u.delta_seconds) AS used_seconds
+         FROM usage_ledger u
+         LEFT JOIN entitlements e ON e.entitlement_id = u.entitlement_id
+         WHERE u.recorded_at_ms >= ?
+         GROUP BY u.entitlement_id
          ORDER BY used_seconds DESC
          LIMIT 10`
       )
       .all(dayStartMs)
       .map((item) => ({
         entitlementId: item.entitlement_id,
+        ownerDeviceId: item.owner_device_id ?? '',
         usedSeconds: item.used_seconds,
         usedMinutes: Math.floor(item.used_seconds / 60)
       }));
     const topConsumersMonth = this.db
       .prepare(
-        `SELECT entitlement_id, SUM(delta_seconds) AS used_seconds
-         FROM usage_ledger
-         WHERE month_key = ?
-         GROUP BY entitlement_id
+        `SELECT u.entitlement_id, e.owner_device_id, SUM(u.delta_seconds) AS used_seconds
+         FROM usage_ledger u
+         LEFT JOIN entitlements e ON e.entitlement_id = u.entitlement_id
+         WHERE u.month_key = ?
+         GROUP BY u.entitlement_id
          ORDER BY used_seconds DESC
          LIMIT 10`
       )
       .all(monthKey)
       .map((item) => ({
         entitlementId: item.entitlement_id,
+        ownerDeviceId: item.owner_device_id ?? '',
         usedSeconds: item.used_seconds,
         usedMinutes: Math.floor(item.used_seconds / 60)
       }));
+
+    const dailyWindowDays = 14;
+    const shanghaiNowMs = nowMs + 8 * 3_600_000;
+    const shanghaiTodayStartUtcMs =
+      Math.floor(shanghaiNowMs / 86_400_000) * 86_400_000 - 8 * 3_600_000;
+    const dailyStartMs = shanghaiTodayStartUtcMs - (dailyWindowDays - 1) * 86_400_000;
+    const dailyBuckets = new Map();
+    for (let idx = 0; idx < dailyWindowDays; idx += 1) {
+      const key = shanghaiDateKey(dailyStartMs + idx * 86_400_000);
+      dailyBuckets.set(key, {
+        dateKey: key,
+        networkSeconds: 0,
+        hybridSeconds: 0,
+        totalSeconds: 0
+      });
+    }
+    const dailyRows = this.db
+      .prepare(
+        `SELECT mode, delta_seconds, recorded_at_ms
+         FROM usage_ledger
+         WHERE recorded_at_ms >= ?`
+      )
+      .all(dailyStartMs);
+    for (const row of dailyRows) {
+      const key = shanghaiDateKey(row.recorded_at_ms);
+      const bucket = dailyBuckets.get(key);
+      if (!bucket) continue;
+      if (row.mode === 'HYBRID') bucket.hybridSeconds += row.delta_seconds;
+      else bucket.networkSeconds += row.delta_seconds;
+      bucket.totalSeconds += row.delta_seconds;
+    }
+    const dailyUsage = [...dailyBuckets.values()].map((bucket) => ({
+      ...bucket,
+      networkMinutes: Math.round((bucket.networkSeconds / 60) * 10) / 10,
+      hybridMinutes: Math.round((bucket.hybridSeconds / 60) * 10) / 10,
+      totalMinutes: Math.round((bucket.totalSeconds / 60) * 10) / 10
+    }));
 
     const codeStats = { UNUSED: 0, REDEEMED: 0, REVOKED: 0 };
     for (const row of codeCounts) {
@@ -1576,6 +1622,7 @@ export class EntitlementStore {
       codeStats,
       topConsumersToday,
       topConsumersMonth,
+      dailyUsage,
       serverNowMs: nowMs
     };
   }

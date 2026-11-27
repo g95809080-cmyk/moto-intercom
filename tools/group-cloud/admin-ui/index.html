@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>MotoCom 云端额度与激活码控制台</title>
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+</head>
+<body>
+  <!-- Login Gate -->
+  <main id="login-view" class="login-shell">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">MC</div>
+        <div>
+          <h1 id="login-title" class="login-title">MotoCom 云端控制台</h1>
+          <p class="login-sub">group.toneride.top · 激活码与人·分钟配额管理</p>
+        </div>
+      </div>
+
+      <form id="login-form" class="stack-md" autocomplete="off">
+        <div class="field">
+          <label for="token-input">管理员 Token（Bearer）</label>
+          <div class="input-with-btn">
+            <input
+              id="token-input"
+              name="adminToken"
+              type="password"
+              required
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="粘贴服务端 .local/config.json 中的 adminToken"
+            >
+            <button id="toggle-token-btn" type="button" class="btn btn-ghost btn-sm">显示</button>
+          </div>
+        </div>
+
+        <label class="checkbox-row">
+          <input id="remember-session-checkbox" type="checkbox">
+          <span>在当前标签页会话内保持登录（关闭标签页自动清除）</span>
+        </label>
+
+        <div id="login-error" class="alert alert-danger hidden" role="alert"></div>
+
+        <button id="login-submit-btn" type="submit" class="btn btn-primary btn-block">验证并进入控制台</button>
+      </form>
+
+      <div class="login-footer">
+        <span id="login-security-hint">所有数据经 /admin/v1/* 实时鉴权获取</span>
+        <button id="login-theme-btn" type="button" class="btn btn-ghost btn-sm">切换夜航暗色</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Authenticated Console Shell -->
+  <div id="app-view" class="app-shell hidden">
+    <aside class="sidebar" aria-label="控制台导航">
+      <div class="sidebar-top">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">MC</div>
+          <div>
+            <div class="brand-name">MotoCom Admin</div>
+            <div id="sidebar-month" class="brand-meta">--</div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-list" id="nav-list">
+        <button type="button" class="nav-item active" data-view="overview">
+          <span>总览监控</span>
+        </button>
+        <button type="button" class="nav-item" data-view="codes">
+          <span>激活码管理</span>
+          <span id="nav-badge-codes" class="nav-badge hidden">0</span>
+        </button>
+        <button type="button" class="nav-item" data-view="entitlements">
+          <span>权益与设备</span>
+        </button>
+        <button type="button" class="nav-item" data-view="rooms">
+          <span>实时房间</span>
+          <span id="nav-badge-rooms" class="nav-badge badge-live hidden">0</span>
+        </button>
+        <button type="button" class="nav-item" data-view="policy">
+          <span>熔断与策略</span>
+        </button>
+        <button type="button" class="nav-item" data-view="audit">
+          <span>操作审计</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <label class="toggle-row" for="auto-refresh-toggle">
+          <span>15 秒自动刷新</span>
+          <input id="auto-refresh-toggle" type="checkbox" checked>
+        </label>
+        <div class="sidebar-actions">
+          <button id="theme-toggle-btn" type="button" class="btn btn-secondary btn-sm">夜航暗色</button>
+          <button id="logout-btn" type="button" class="btn btn-danger-outline btn-sm">锁定退出</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h2 id="view-title" class="view-title">总览监控</h2>
+          <span id="sync-status" class="sync-status">等待同步</span>
+        </div>
+        <div class="topbar-right">
+          <button id="refresh-btn" type="button" class="btn btn-secondary">刷新</button>
+          <button id="open-mint-btn" type="button" class="btn btn-primary">+ 批量发码</button>
+        </div>
+      </header>
+
+      <div id="global-alert" class="global-alert hidden" role="status"></div>
+
+      <div class="content-scroll">
+        <!-- View 1: Overview -->
+        <section id="panel-overview" class="view-panel">
+          <div class="kpi-grid">
+            <article class="kpi-card">
+              <div class="kpi-label">本月云端消耗</div>
+              <div class="kpi-value-row">
+                <span id="kpi-used-min" class="kpi-value tabular">0</span>
+                <span id="kpi-limit-min" class="kpi-unit tabular">/ 8,500 人·分</span>
+              </div>
+              <div class="kpi-foot">
+                <span id="kpi-remaining-min" class="tabular">剩余 8,500 人·分</span>
+                <span id="kpi-used-pct" class="pill pill-ok tabular">0%</span>
+              </div>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-label">实时云端态势</div>
+              <div class="kpi-value-row">
+                <span id="kpi-active-rooms" class="kpi-value tabular">0</span>
+                <span class="kpi-unit">活跃房</span>
+              </div>
+              <div class="kpi-foot">
+                <span id="kpi-rtc-members" class="tabular">计费中 0 房 · RTC 0 人</span>
+                <span id="kpi-burn-rate" class="pill pill-neutral tabular">0 人·分/分钟</span>
+              </div>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-label">有效绑定设备</div>
+              <div class="kpi-value-row">
+                <span id="kpi-entitlements" class="kpi-value tabular">0</span>
+                <span class="kpi-unit">台房主设备</span>
+              </div>
+              <div class="kpi-foot">
+                <span id="kpi-join-policy">入群门槛 仅房主需码</span>
+                <button type="button" class="link-btn" data-jump="policy">调整策略</button>
+              </div>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-label">激活码池分布</div>
+              <div class="kpi-value-row">
+                <span id="kpi-codes-unused" class="kpi-value tabular">0</span>
+                <span class="kpi-unit">张可用</span>
+              </div>
+              <div class="code-pool-bar" aria-label="激活码状态占比">
+                <svg class="svg-pool-bar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
+                  <rect id="pool-seg-unused" class="seg-unused" x="0" y="0" width="0" height="8"></rect>
+                  <rect id="pool-seg-redeemed" class="seg-redeemed" x="0" y="0" width="0" height="8"></rect>
+                  <rect id="pool-seg-revoked" class="seg-revoked" x="0" y="0" width="0" height="8"></rect>
+                </svg>
+              </div>
+              <div class="kpi-foot tabular">
+                <span id="kpi-codes-breakdown">已兑 0 · 已吊销 0</span>
+                <button type="button" class="link-btn" data-jump="codes">管理码池</button>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel-card">
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">自然月配额水位与火山免费额度对比</h3>
+                <p id="quota-gauge-sub" class="panel-sub">按 Asia/Shanghai 自然月累计人·分钟</p>
+              </div>
+              <div class="header-pills">
+                <span id="quota-state-pill" class="pill pill-ok">正常放行</span>
+              </div>
+            </div>
+            <div class="gauge-wrap">
+              <div class="gauge-track" aria-label="本月配额使用进度">
+                <svg class="svg-gauge" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true">
+                  <rect id="gauge-fill" class="gauge-fill" x="0" y="0" width="0" height="16" rx="8"></rect>
+                  <rect id="gauge-warn-tick" class="gauge-tick-warn" x="680" y="0" width="3" height="16"></rect>
+                  <rect id="gauge-hard-tick" class="gauge-tick-hard" x="850" y="0" width="3" height="16"></rect>
+                </svg>
+              </div>
+              <div class="gauge-scale tabular">
+                <span>0</span>
+                <span id="gauge-warn-label" class="scale-warn">预警线 6,800</span>
+                <span id="gauge-hard-label" class="scale-hard">硬熔断线 8,500</span>
+                <span>火山免费上限 10,000 人·分</span>
+              </div>
+            </div>
+          </article>
+
+          <div class="two-col-grid">
+            <article class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h3 class="panel-title">近 14 天云端消耗趋势</h3>
+                  <p class="panel-sub">单位 人·分钟（按模式堆叠）</p>
+                </div>
+                <div class="chart-legend">
+                  <span class="legend-item"><i class="dot dot-network"></i>NETWORK</span>
+                  <span class="legend-item"><i class="dot dot-hybrid"></i>HYBRID 云端</span>
+                </div>
+              </div>
+              <div id="daily-chart" class="bar-chart" aria-label="近 14 天每日用量柱状图"></div>
+              <div id="daily-chart-detail" class="chart-detail tabular">悬停或点击柱条查看当日明细</div>
+            </article>
+
+            <article class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h3 class="panel-title">高消耗权益排行</h3>
+                  <p class="panel-sub">按累计云端人·分钟降序</p>
+                </div>
+                <div class="segmented" role="tablist" aria-label="排行周期">
+                  <button id="rank-tab-today" type="button" class="seg-btn active" data-rank="today">近 24 小时</button>
+                  <button id="rank-tab-month" type="button" class="seg-btn" data-rank="month">本月累计</button>
+                </div>
+              </div>
+              <div id="consumers-list" class="rank-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- View 2: Activation Codes -->
+        <section id="panel-codes" class="view-panel hidden">
+          <article class="panel-card">
+            <form id="codes-filter-form" class="filter-bar">
+              <input id="filter-batch" type="text" placeholder="批次 ID（如 wechat-beta-1）">
+              <select id="filter-code-status" aria-label="激活码状态">
+                <option value="">全部状态</option>
+                <option value="UNUSED">可用（UNUSED）</option>
+                <option value="REDEEMED">已兑换（REDEEMED）</option>
+                <option value="REVOKED">已吊销（REVOKED）</option>
+              </select>
+              <input id="filter-mask" type="text" placeholder="尾号掩码（如 1VDG）">
+              <button type="submit" class="btn btn-secondary">筛选</button>
+              <button id="filter-codes-reset" type="button" class="btn btn-ghost">重置</button>
+            </form>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>掩码</th>
+                    <th>批次与类型</th>
+                    <th>额度（剩/总）</th>
+                    <th>规格</th>
+                    <th>状态</th>
+                    <th>绑定权益</th>
+                    <th>创建时间</th>
+                    <th>备注</th>
+                    <th class="col-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="codes-tbody"></tbody>
+              </table>
+            </div>
+
+            <div class="pagination-bar">
+              <span id="codes-page-info" class="tabular">共 0 条</span>
+              <div class="pagination-actions">
+                <button id="codes-prev-btn" type="button" class="btn btn-secondary btn-sm">上一页</button>
+                <button id="codes-next-btn" type="button" class="btn btn-secondary btn-sm">下一页</button>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <!-- View 3: Entitlements -->
+        <section id="panel-entitlements" class="view-panel hidden">
+          <article class="panel-card">
+            <form id="entitlements-filter-form" class="filter-bar">
+              <select id="filter-ent-status" aria-label="权益状态">
+                <option value="">全部状态</option>
+                <option value="ACTIVE">正常（ACTIVE）</option>
+                <option value="REVOKED">已停用（REVOKED）</option>
+              </select>
+              <button type="submit" class="btn btn-secondary">筛选</button>
+            </form>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>权益与设备</th>
+                    <th>状态</th>
+                    <th>人·分钟额度</th>
+                    <th>有效期至</th>
+                    <th>上限规格</th>
+                    <th>换绑 / 赞助房</th>
+                    <th class="col-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="entitlements-tbody"></tbody>
+              </table>
+            </div>
+
+            <div class="pagination-bar">
+              <span id="entitlements-page-info" class="tabular">共 0 条</span>
+              <div class="pagination-actions">
+                <button id="entitlements-prev-btn" type="button" class="btn btn-secondary btn-sm">上一页</button>
+                <button id="entitlements-next-btn" type="button" class="btn btn-secondary btn-sm">下一页</button>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <!-- View 4: Live Rooms -->
+        <section id="panel-rooms" class="view-panel hidden">
+          <article class="panel-card">
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">当前活跃云端与双模房间</h3>
+                <p id="rooms-summary-text" class="panel-sub">实时读取内存房间状态，可立即强制解散并吊销 RTC</p>
+              </div>
+              <button id="rooms-refresh-btn" type="button" class="btn btn-secondary btn-sm">刷新房间</button>
+            </div>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>房间 ID</th>
+                    <th>模式 / 通道</th>
+                    <th>成员 / 上限</th>
+                    <th>计费 RTC 人数</th>
+                    <th>累计计费</th>
+                    <th>持续时长</th>
+                    <th>赞助权益 ID</th>
+                    <th class="col-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="rooms-tbody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <!-- View 5: Policy & Circuit Breaker -->
+        <section id="panel-policy" class="view-panel hidden">
+          <div class="two-col-grid">
+            <article class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h3 class="panel-title">月度配额与入群准入策略</h3>
+                  <p class="panel-sub">立即生效并持久化至 SQLite，所有变更记录审计日志</p>
+                </div>
+              </div>
+
+              <form id="policy-form" class="stack-md">
+                <div class="field">
+                  <label for="policy-hard-limit">当月全局硬熔断上限（人·分钟）</label>
+                  <input id="policy-hard-limit" type="number" min="1" max="10000000" required>
+                  <span class="field-hint">火山单应用免费额度为 10,000 人·分钟，建议保持 8,500 预留缓冲</span>
+                </div>
+
+                <div class="field">
+                  <label for="policy-warn-pct">预警阈值百分比（%）</label>
+                  <input id="policy-warn-pct" type="number" min="10" max="100" step="1" required>
+                </div>
+
+                <div class="field">
+                  <label for="policy-require-join">队员入群门槛</label>
+                  <select id="policy-require-join">
+                    <option value="false">仅房主需激活码，队员凭 6 位邀请码免码加入（默认）</option>
+                    <option value="true">全员必须持有有效激活码才能建房或入群（严格收紧）</option>
+                  </select>
+                </div>
+
+                <button type="submit" class="btn btn-primary">保存配额策略</button>
+              </form>
+            </article>
+
+            <article class="panel-card danger-card">
+              <div class="panel-header">
+                <div>
+                  <h3 class="panel-title danger-title">紧急全局熔断开关</h3>
+                  <p class="panel-sub">将当月硬上限设为 0 人·分钟，立即拒绝全部新建房并通过 BanRoomUser 断流所有在线云端房</p>
+                </div>
+              </div>
+
+              <form id="emergency-stop-form" class="stack-md">
+                <div class="field">
+                  <label for="emergency-confirm-input">输入 STOP 确认执行紧急熔断</label>
+                  <input id="emergency-confirm-input" type="text" placeholder="STOP" autocomplete="off">
+                </div>
+                <div class="btn-row">
+                  <button id="emergency-stop-btn" type="submit" class="btn btn-danger">立即全局熔断（清零放行）</button>
+                  <button id="emergency-restore-btn" type="button" class="btn btn-secondary">恢复默认 8,500 人·分</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- View 6: Audit Logs -->
+        <section id="panel-audit" class="view-panel hidden">
+          <article class="panel-card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>时间（北京时间）</th>
+                    <th>操作</th>
+                    <th>目标</th>
+                    <th>来源 IP</th>
+                    <th>详情摘要</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-tbody"></tbody>
+              </table>
+            </div>
+
+            <div class="pagination-bar">
+              <span id="audit-page-info" class="tabular">共 0 条</span>
+              <div class="pagination-actions">
+                <button id="audit-prev-btn" type="button" class="btn btn-secondary btn-sm">上一页</button>
+                <button id="audit-next-btn" type="button" class="btn btn-secondary btn-sm">下一页</button>
+              </div>
+            </div>
+          </article>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Batch Mint & One-Time Plaintext Copy Center -->
+  <div id="mint-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="mint-modal-title">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <h3 id="mint-modal-title">批量签发激活码</h3>
+        <button type="button" class="icon-close" data-close-modal="mint-modal" aria-label="关闭">×</button>
+      </div>
+
+      <div id="mint-form-stage" class="modal-body">
+        <div class="preset-row">
+          <button type="button" class="preset-chip" data-preset="beta">微信小队 · 10张 · 300分/6人/14天</button>
+          <button type="button" class="preset-chip" data-preset="leader">领队大队 · 2张 · 1000分/20人/30天</button>
+          <button type="button" class="preset-chip" data-preset="topup">加油包 · 5张 · +300分/30天</button>
+        </div>
+
+        <form id="mint-form" class="form-grid">
+          <div class="field">
+            <label for="mint-type">激活码类型</label>
+            <select id="mint-type">
+              <option value="PLAN">基础套餐码（PLAN）</option>
+              <option value="TOPUP">额度加油包（TOPUP）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="mint-count">签发数量（1-200）</label>
+            <input id="mint-count" type="number" min="1" max="200" value="10" required>
+          </div>
+          <div class="field">
+            <label for="mint-minutes">单码额度（人·分钟）</label>
+            <input id="mint-minutes" type="number" min="1" max="1000000" value="300" required>
+          </div>
+          <div class="field">
+            <label for="mint-days">激活后有效天数</label>
+            <input id="mint-days" type="number" min="1" max="3650" value="14" required>
+          </div>
+          <div class="field">
+            <label for="mint-max-members">单房人数上限（2-50）</label>
+            <input id="mint-max-members" type="number" min="2" max="50" value="6" required>
+          </div>
+          <div class="field">
+            <label for="mint-max-rooms">最大并发房数（1-20）</label>
+            <input id="mint-max-rooms" type="number" min="1" max="20" value="1" required>
+          </div>
+          <div class="field">
+            <label for="mint-max-session">单次连续云端上限（分钟）</label>
+            <input id="mint-max-session" type="number" min="5" max="1440" value="120" required>
+          </div>
+          <div class="field">
+            <label for="mint-batch">批次号（可选）</label>
+            <input id="mint-batch" type="text" maxlength="64" placeholder="如 wechat-beta-2">
+          </div>
+          <div class="field field-span-2">
+            <label for="mint-note">备注（可选）</label>
+            <input id="mint-note" type="text" maxlength="160" placeholder="如 微信内测二批">
+          </div>
+
+          <div id="mint-error" class="alert alert-danger field-span-2 hidden"></div>
+
+          <div class="modal-footer field-span-2">
+            <button type="button" class="btn btn-secondary" data-close-modal="mint-modal">取消</button>
+            <button id="mint-submit-btn" type="submit" class="btn btn-primary">确认签发</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="mint-result-stage" class="modal-body hidden">
+        <div class="alert alert-warn">
+          服务端仅存哈希，激活码明文仅在本次展示。关闭窗口或刷新页面后无法再次查看明文，请立即复制或导出。
+        </div>
+        <div class="result-toolbar">
+          <button id="copy-all-codes-btn" type="button" class="btn btn-primary btn-sm">复制全部激活码</button>
+          <button id="copy-wechat-tpl-btn" type="button" class="btn btn-secondary btn-sm">复制微信群发放文案</button>
+          <button id="download-codes-btn" type="button" class="btn btn-secondary btn-sm">导出 .txt</button>
+        </div>
+        <div id="mint-result-meta" class="result-meta tabular"></div>
+        <div id="mint-result-list" class="minted-list"></div>
+        <div class="modal-footer">
+          <button id="mint-again-btn" type="button" class="btn btn-secondary">继续发下一批</button>
+          <button type="button" class="btn btn-primary" data-close-modal="mint-modal">已完成保存，关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Entitlement Topup -->
+  <div id="topup-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="topup-modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="topup-modal-title">权益充值与续期</h3>
+        <button type="button" class="icon-close" data-close-modal="topup-modal" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="topup-target-info" class="panel-sub"></p>
+        <form id="topup-form" class="stack-md">
+          <div class="form-grid">
+            <div class="field">
+              <label for="topup-minutes">追加人·分钟</label>
+              <input id="topup-minutes" type="number" min="0" max="1000000" value="300" required>
+            </div>
+            <div class="field">
+              <label for="topup-days">顺延有效天数</label>
+              <input id="topup-days" type="number" min="0" max="3650" value="30" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="topup-max-members">调整房间人数上限（留空保持不变）</label>
+            <input id="topup-max-members" type="number" min="2" max="50" placeholder="2-50">
+          </div>
+          <div class="field">
+            <label for="topup-reason">操作备注</label>
+            <input id="topup-reason" type="text" maxlength="160" placeholder="如 微信群续费补发">
+          </div>
+          <div id="topup-error" class="alert alert-danger hidden"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="topup-modal">取消</button>
+            <button id="topup-submit-btn" type="submit" class="btn btn-primary">确认充值</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Generic Reason / Confirm -->
+  <div id="confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="confirm-modal-title">确认操作</h3>
+        <button type="button" class="icon-close" data-close-modal="confirm-modal" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-modal-desc" class="confirm-desc"></p>
+        <form id="confirm-form" class="stack-md">
+          <div id="confirm-reason-wrap" class="field">
+            <label id="confirm-reason-label" for="confirm-reason-input">原因说明</label>
+            <input id="confirm-reason-input" type="text" maxlength="160" placeholder="选填，将写入审计日志">
+          </div>
+          <div id="confirm-extra-wrap" class="field hidden">
+            <label for="confirm-extra-input">向房间广播的结束提示</label>
+            <input id="confirm-extra-input" type="text" maxlength="120" value="管理员已结束该云端房间">
+          </div>
+          <div id="confirm-error" class="alert alert-danger hidden"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="confirm-modal">取消</button>
+            <button id="confirm-submit-btn" type="submit" class="btn btn-danger">确认执行</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <script src="/admin/assets/admin.js" defer></script>
+</body>
+</html>
