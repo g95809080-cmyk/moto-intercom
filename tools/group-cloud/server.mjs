@@ -1,12 +1,17 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EntitlementStore } from './entitlement-store.mjs';
 import { CloudStoreError, GroupCloudStore } from './room-store.mjs';
 import { createRtcAdmin } from './volc-openapi.mjs';
 
 const MAX_BODY_BYTES = 128 * 1024;
+const ADMIN_RATE_WINDOW_MS = 10 * 60 * 1000;
+const ADMIN_MAX_FAILURES = 10;
+const ADMIN_GLOBAL_MAX_FAILURES = 20;
 
 export function isLoopbackHost(host) {
   if (typeof host !== 'string') return false;
@@ -19,6 +24,49 @@ function extractBearer(req) {
   if (typeof auth !== 'string') return '';
   const match = /^Bearer\s+(\S+)$/i.exec(auth.trim());
   return match ? match[1] : '';
+}
+
+function extractEntitlementToken(req) {
+  const raw = req.headers['x-moto-entitlement'];
+  if (typeof raw !== 'string') return '';
+  return raw.trim();
+}
+
+function extractDeviceIdHeader(req) {
+  const raw = req.headers['x-moto-device-id'];
+  if (typeof raw !== 'string') return '';
+  return raw.trim();
+}
+
+function extractIdempotencyKey(req) {
+  const raw = req.headers['idempotency-key'];
+  if (typeof raw !== 'string') return '';
+  return raw.trim();
+}
+
+function isLoopbackAddress(addr) {
+  if (typeof addr !== 'string') return false;
+  const normalized = addr.trim().toLowerCase();
+  return normalized === '127.0.0.1' || normalized === '::1' || normalized === '::ffff:127.0.0.1';
+}
+
+function extractClientIp(req, trustLoopbackProxy = false) {
+  const remote = req.socket?.remoteAddress ?? 'unknown';
+  if (trustLoopbackProxy && isLoopbackAddress(remote)) {
+    const realIp = req.headers['x-real-ip'];
+    if (typeof realIp === 'string' && realIp.trim()) {
+      return realIp.trim().slice(0, 64);
+    }
+  }
+  return String(remote).slice(0, 64);
+}
+
+function timingSafeTokenMatch(expected, actual) {
+  if (typeof expected !== 'string' || typeof actual !== 'string' || !expected || !actual) return false;
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(actual, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 async function readJsonBody(req) {
@@ -65,7 +113,13 @@ export function createGroupCloudServer(options = {}) {
       `Refusing to start cleartext HTTP group-cloud server on non-loopback host "${configuredHost}". Configure TLS 1.2+ (tls.cert/tls.key) or bind to loopback (127.0.0.1 / ::1).`
     );
   }
-  const store = options.store ?? new GroupCloudStore(options);
+  const entitlementStore = options.entitlementStore ?? options.store?.entitlementStore ?? null;
+  const store = options.store ?? new GroupCloudStore({ ...options, entitlementStore });
+  const adminToken = typeof options.adminToken === 'string' ? options.adminToken.trim() : '';
+  const trustLoopbackProxy = Boolean(options.trustLoopbackProxy ?? false);
+  const adminAuthFailures = new Map();
+  let adminGlobalAuthFailures = [];
+  const nowFn = options.now ?? store.now ?? (() => Date.now());
   if (!store.rtcRevocationConfigured) {
     throw new Error(
       'Refusing to start group-cloud server without authoritative Volc RTC OpenAPI revocation (BanRoomUser / UpdateBanRoomUserRule). Configure volcOpenApiAccessKey and volcOpenApiSecretKey.'
@@ -73,6 +127,31 @@ export function createGroupCloudServer(options = {}) {
   }
   const sweepIntervalMs = options.sweepIntervalMs ?? 5_000;
   const log = options.log ?? (() => {});
+
+  function assertAdminAuthorized(req, clientIp) {
+    if (!entitlementStore || !adminToken) {
+      throw new CloudStoreError(404, 'ADMIN_DISABLED', '后台管理接口未启用');
+    }
+    const nowMs = nowFn();
+    const cutoff = nowMs - ADMIN_RATE_WINDOW_MS;
+    adminGlobalAuthFailures = adminGlobalAuthFailures.filter((ts) => ts > cutoff);
+    if (adminGlobalAuthFailures.length >= ADMIN_GLOBAL_MAX_FAILURES) {
+      throw new CloudStoreError(429, 'RATE_LIMITED', '管理接口认证失败次数过多，请稍后再试');
+    }
+    const failures = (adminAuthFailures.get(clientIp) ?? []).filter((ts) => ts > cutoff);
+    if (failures.length >= ADMIN_MAX_FAILURES) {
+      adminAuthFailures.set(clientIp, failures);
+      throw new CloudStoreError(429, 'RATE_LIMITED', '管理认证失败次数过多，请稍后再试');
+    }
+    const provided = extractBearer(req);
+    if (!timingSafeTokenMatch(adminToken, provided)) {
+      failures.push(nowMs);
+      adminAuthFailures.set(clientIp, failures);
+      adminGlobalAuthFailures.push(nowMs);
+      throw new CloudStoreError(401, 'ADMIN_UNAUTHORIZED', '管理员认证失败');
+    }
+    if (failures.length > 0) adminAuthFailures.delete(clientIp);
+  }
 
   const handler = async (req, res) => {
     const controller = new AbortController();
@@ -84,28 +163,273 @@ export function createGroupCloudServer(options = {}) {
       const url = new URL(req.url ?? '/', 'http://localhost');
       const method = (req.method ?? 'GET').toUpperCase();
       const pathname = url.pathname;
+      const clientIp = extractClientIp(req, trustLoopbackProxy);
 
       if (method === 'GET' && pathname === '/healthz') {
-        sendJson(res, 200, {
+        const payload = {
           ok: true,
           mode: 'NETWORK',
           maxMembers: store.maxMembers,
           audioRoutingRequired: true,
           openApiRevocationEnforced: true
+        };
+        if (entitlementStore) {
+          payload.entitlementEnabled = true;
+          payload.adminApiEnabled = Boolean(adminToken);
+        }
+        sendJson(res, 200, payload);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/v1/entitlements/redeem') {
+        if (!entitlementStore) {
+          throw new CloudStoreError(404, 'ENTITLEMENT_DISABLED', '激活码权益服务未启用');
+        }
+        const body = await readJsonBody(req);
+        const result = entitlementStore.redeemActivationCode({
+          code: body.code,
+          deviceId: body.deviceId,
+          existingToken: extractEntitlementToken(req),
+          clientIp
         });
+        if (result.rebound && result.entitlementId) {
+          try {
+            await store.terminateRoomsForEntitlement(result.entitlementId, {
+              reason: 'ENTITLEMENT_REBOUND',
+              message: '该激活码已在新设备换绑，原云端房间已结束'
+            });
+          } catch (error) {
+            log({ event: 'rebind_terminate_rooms_failed', message: error?.message ?? 'unknown' });
+          }
+        }
+        sendJson(res, 200, {
+          action: result.action,
+          rebound: result.rebound,
+          entitlementToken: result.entitlementToken,
+          codeMask: result.codeMask,
+          entitlement: result.entitlement
+        });
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/v1/entitlements/me') {
+        if (!entitlementStore) {
+          throw new CloudStoreError(404, 'ENTITLEMENT_DISABLED', '激活码权益服务未启用');
+        }
+        const token = extractEntitlementToken(req);
+        if (!token) {
+          throw new CloudStoreError(401, 'ENTITLEMENT_REQUIRED', '请先输入激活码开通网络对讲权益');
+        }
+        const deviceId = extractDeviceIdHeader(req);
+        if (!deviceId) {
+          throw new CloudStoreError(400, 'DEVICE_ID_REQUIRED', '缺少设备标识请求头 X-Moto-Device-Id');
+        }
+        const summary = entitlementStore.getEntitlementStatus(
+          token,
+          nowFn(),
+          { expectedDeviceId: deviceId }
+        );
+        sendJson(res, 200, { entitlement: summary });
+        return;
+      }
+
+      if (pathname.startsWith('/admin/v1/')) {
+        assertAdminAuthorized(req, clientIp);
+
+        if (method === 'GET' && pathname === '/admin/v1/overview') {
+          const activeRooms = store.listActiveRoomsSummary();
+          sendJson(res, 200, entitlementStore.getOverview(activeRooms));
+          return;
+        }
+
+        if (method === 'POST' && pathname === '/admin/v1/codes/batch') {
+          const body = await readJsonBody(req);
+          const result = entitlementStore.mintCodeBatch({
+            ...body,
+            actorIp: clientIp,
+            idempotencyKey: extractIdempotencyKey(req)
+          });
+          sendJson(res, 201, result);
+          return;
+        }
+
+        if (method === 'GET' && pathname === '/admin/v1/codes') {
+          const result = entitlementStore.listCodes({
+            batchId: url.searchParams.get('batchId') ?? '',
+            status: url.searchParams.get('status') ?? '',
+            codeMask: url.searchParams.get('codeMask') ?? '',
+            limit: url.searchParams.get('limit') ?? 50,
+            offset: url.searchParams.get('offset') ?? 0
+          });
+          sendJson(res, 200, result);
+          return;
+        }
+
+        let adminMatch = /^\/admin\/v1\/codes\/([^/]+)\/revoke$/.exec(pathname);
+        if (adminMatch && method === 'POST') {
+          const codeId = decodeURIComponent(adminMatch[1]);
+          const body = await readJsonBody(req);
+          const result = entitlementStore.revokeCode(codeId, {
+            reason: body.reason ?? '',
+            actorIp: clientIp
+          });
+          let termination = { endedRoomIds: [], pendingRoomIds: [] };
+          if (result.shouldTerminateRooms && result.entitlementId) {
+            termination = await store.terminateRoomsForEntitlement(result.entitlementId, {
+              reason: 'ENTITLEMENT_REVOKED',
+              message: '房主激活码已被管理员停用，云端房间已结束'
+            });
+          }
+          sendJson(res, 200, {
+            ...result,
+            terminatedRoomIds: termination.endedRoomIds,
+            pendingTerminationRoomIds: termination.pendingRoomIds
+          });
+          return;
+        }
+
+        if (method === 'GET' && pathname === '/admin/v1/entitlements') {
+          const result = entitlementStore.listEntitlements({
+            status: url.searchParams.get('status') ?? '',
+            limit: url.searchParams.get('limit') ?? 50,
+            offset: url.searchParams.get('offset') ?? 0
+          });
+          const activeRooms = store.listActiveRoomsSummary();
+          const activeByEntitlement = new Map();
+          for (const room of activeRooms) {
+            if (!room.sponsorEntitlementId) continue;
+            activeByEntitlement.set(
+              room.sponsorEntitlementId,
+              (activeByEntitlement.get(room.sponsorEntitlementId) ?? 0) + 1
+            );
+          }
+          sendJson(res, 200, {
+            ...result,
+            items: result.items.map((item) => ({
+              ...item,
+              activeSponsoredRoomsCount: activeByEntitlement.get(item.entitlementId) ?? 0
+            }))
+          });
+          return;
+        }
+
+        adminMatch = /^\/admin\/v1\/entitlements\/([^/]+)\/(topup|reset-rebind|revoke)$/.exec(pathname);
+        if (adminMatch && method === 'POST') {
+          const entitlementId = decodeURIComponent(adminMatch[1]);
+          const action = adminMatch[2];
+          const body = await readJsonBody(req);
+          if (action === 'topup') {
+            const result = entitlementStore.topupEntitlement(entitlementId, {
+              ...body,
+              actorIp: clientIp,
+              idempotencyKey: extractIdempotencyKey(req)
+            });
+            sendJson(res, 200, result);
+            return;
+          }
+          if (action === 'reset-rebind') {
+            const result = entitlementStore.resetRebindCount(entitlementId, {
+              reason: body.reason ?? '',
+              actorIp: clientIp
+            });
+            sendJson(res, 200, result);
+            return;
+          }
+          const result = entitlementStore.revokeEntitlement(entitlementId, {
+            reason: body.reason ?? '',
+            actorIp: clientIp
+          });
+          const termination = await store.terminateRoomsForEntitlement(entitlementId, {
+            reason: 'ENTITLEMENT_REVOKED',
+            message: '房主云端对讲权限已被管理员停用，房间已结束'
+          });
+          sendJson(res, 200, {
+            ...result,
+            terminatedRoomIds: termination.endedRoomIds,
+            pendingTerminationRoomIds: termination.pendingRoomIds
+          });
+          return;
+        }
+
+        if (method === 'GET' && pathname === '/admin/v1/rooms/active') {
+          const rooms = store.listActiveRoomsSummary();
+          sendJson(res, 200, { total: rooms.length, items: rooms, serverNowMs: nowFn() });
+          return;
+        }
+
+        adminMatch = /^\/admin\/v1\/rooms\/([^/]+)\/force-end$/.exec(pathname);
+        if (adminMatch && method === 'POST') {
+          const roomId = decodeURIComponent(adminMatch[1]);
+          const body = await readJsonBody(req);
+          const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim().slice(0, 64) : 'ADMIN_ENDED';
+          const message =
+            typeof body.message === 'string' && body.message.trim()
+              ? body.message.trim().slice(0, 120)
+              : '管理员已结束该云端房间';
+          const result = await store.forceEndRoomByAdmin(roomId, { reason, message });
+          entitlementStore.recordAdminAction({
+            action: 'FORCE_END_ROOM',
+            targetType: 'ROOM',
+            targetId: roomId,
+            actorIp: clientIp,
+            payloadSummary: { reason, message }
+          });
+          sendJson(res, 200, result);
+          return;
+        }
+
+        if (method === 'PUT' && pathname === '/admin/v1/config/global-quota') {
+          const body = await readJsonBody(req);
+          const updated = entitlementStore.updateGlobalQuotaConfig({
+            hardLimitMinutes: body.hardLimitMinutes,
+            requireCodeForJoin: body.requireCodeForJoin,
+            warnThresholdRatio: body.warnThresholdRatio,
+            actorIp: clientIp
+          });
+          let termination = { endedRoomIds: [], pendingRoomIds: [] };
+          if (updated.remainingSeconds <= 0) {
+            termination = await store.terminateAllActiveRooms({
+              reason: 'GLOBAL_QUOTA_EXHAUSTED',
+              message: '本月云端测试总免费额度已用尽，通话已结束，请使用本地直连模式'
+            });
+          }
+          sendJson(res, 200, {
+            globalQuota: updated,
+            terminatedRoomIds: termination.endedRoomIds,
+            pendingTerminationRoomIds: termination.pendingRoomIds
+          });
+          return;
+        }
+
+        if (method === 'GET' && pathname === '/admin/v1/audit-logs') {
+          const result = entitlementStore.listAuditLogs({
+            limit: url.searchParams.get('limit') ?? 50,
+            offset: url.searchParams.get('offset') ?? 0
+          });
+          sendJson(res, 200, result);
+          return;
+        }
+
+        sendJson(res, 404, { code: 'NOT_FOUND', message: '后台管理接口不存在' });
         return;
       }
 
       if (method === 'POST' && pathname === '/v1/rooms') {
         const body = await readJsonBody(req);
-        const result = await store.createRoom(body);
+        const result = await store.createRoom({
+          ...body,
+          entitlementToken: extractEntitlementToken(req)
+        });
         sendJson(res, 201, result);
         return;
       }
 
       if (method === 'POST' && pathname === '/v1/rooms/join-requests') {
         const body = await readJsonBody(req);
-        const result = await store.submitJoinRequest(body);
+        const result = await store.submitJoinRequest({
+          ...body,
+          entitlementToken: extractEntitlementToken(req)
+        });
         sendJson(res, result.status === 'ADMITTED' ? 200 : 202, result);
         return;
       }
@@ -336,10 +660,15 @@ export function createGroupCloudServer(options = {}) {
   const originalClose = server.close.bind(server);
   server.close = (cb) => {
     if (timer) clearInterval(timer);
+    try {
+      store.flushAllPendingBilling();
+    } catch (error) {
+      log({ event: 'shutdown_billing_flush_failed', message: error?.message ?? 'unknown' });
+    }
     return originalClose(cb);
   };
 
-  return { server, store };
+  return { server, store, entitlementStore };
 }
 
 function loadConfigFromDisk(configPath) {
@@ -368,6 +697,14 @@ function loadConfigFromDisk(configPath) {
     volcOpenApiTimeoutMs: raw.volcOpenApiTimeoutMs !== undefined ? Number(raw.volcOpenApiTimeoutMs) : undefined,
     banRemovedForbiddenSeconds: Number(raw.banRemovedForbiddenSeconds ?? 300),
     banRoomForbiddenSeconds: Number(raw.banRoomForbiddenSeconds ?? 3600),
+    entitlementEnforced: raw.entitlementEnforced !== undefined ? Boolean(raw.entitlementEnforced) : undefined,
+    dbPath: raw.dbPath ? path.resolve(dir, raw.dbPath) : '',
+    codeHmacSecret: raw.codeHmacSecret ?? '',
+    adminToken: raw.adminToken ?? '',
+    globalMonthlyLimitMinutes:
+      raw.globalMonthlyLimitMinutes !== undefined ? Number(raw.globalMonthlyLimitMinutes) : undefined,
+    requireCodeForJoin: raw.requireCodeForJoin !== undefined ? Boolean(raw.requireCodeForJoin) : undefined,
+    trustLoopbackProxy: raw.trustLoopbackProxy !== undefined ? Boolean(raw.trustLoopbackProxy) : undefined,
     tls
   };
 }
@@ -408,6 +745,28 @@ if (isMain) {
   const banRoomForbiddenSeconds = Number(
     process.env.GROUP_CLOUD_BAN_ROOM_SECONDS ?? fileConfig.banRoomForbiddenSeconds ?? 3600
   );
+  const entitlementEnforcedEnv = process.env.GROUP_CLOUD_ENTITLEMENT_ENFORCED;
+  const entitlementEnforced =
+    entitlementEnforcedEnv !== undefined
+      ? entitlementEnforcedEnv.toLowerCase() !== 'false'
+      : (fileConfig.entitlementEnforced ?? true);
+  const dbPath =
+    process.env.GROUP_CLOUD_DB_PATH ??
+    fileConfig.dbPath ??
+    path.join(path.dirname(modulePath), '.local', 'entitlements.db');
+  const codeHmacSecret = process.env.GROUP_CLOUD_CODE_HMAC_SECRET ?? fileConfig.codeHmacSecret ?? '';
+  const adminToken = process.env.GROUP_CLOUD_ADMIN_TOKEN ?? fileConfig.adminToken ?? '';
+  const globalMonthlyLimitMinutes = Number(
+    process.env.GROUP_CLOUD_GLOBAL_MONTHLY_LIMIT_MINUTES ?? fileConfig.globalMonthlyLimitMinutes ?? 8500
+  );
+  const requireCodeForJoin =
+    process.env.GROUP_CLOUD_REQUIRE_CODE_FOR_JOIN !== undefined
+      ? process.env.GROUP_CLOUD_REQUIRE_CODE_FOR_JOIN.toLowerCase() === 'true'
+      : Boolean(fileConfig.requireCodeForJoin ?? false);
+  const trustLoopbackProxy =
+    process.env.GROUP_CLOUD_TRUST_LOOPBACK_PROXY !== undefined
+      ? process.env.GROUP_CLOUD_TRUST_LOOPBACK_PROXY.toLowerCase() === 'true'
+      : Boolean(fileConfig.trustLoopbackProxy ?? false);
   const tls = fileConfig.tls ?? null;
   if (!volcAppId || !volcAppKey) {
     throw new Error('Volc RTC AppID/AppKey is required. Set GROUP_CLOUD_VOLC_APP_ID and GROUP_CLOUD_VOLC_APP_KEY or .local/config.json.');
@@ -417,6 +776,22 @@ if (isMain) {
       'Volc RTC OpenAPI AK/SK is required for authoritative RTC revocation (BanRoomUser / UpdateBanRoomUserRule). Set GROUP_CLOUD_VOLC_OPENAPI_AK and GROUP_CLOUD_VOLC_OPENAPI_SK or .local/config.json.'
     );
   }
+  const log = (entry) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...entry }));
+  let entitlementStore = null;
+  if (entitlementEnforced) {
+    if (!codeHmacSecret || codeHmacSecret.length < 16) {
+      throw new Error(
+        'Entitlement enforcement requires codeHmacSecret (>= 16 chars). Set GROUP_CLOUD_CODE_HMAC_SECRET or .local/config.json.'
+      );
+    }
+    entitlementStore = new EntitlementStore({
+      dbPath,
+      codeHmacSecret,
+      globalMonthlyLimitMinutes,
+      requireCodeForJoin,
+      log
+    });
+  }
   const rtcAdmin = createRtcAdmin({
     appId: volcAppId,
     accessKeyId: volcOpenApiAccessKey,
@@ -425,9 +800,8 @@ if (isMain) {
     endpointUrl: volcOpenApiEndpoint || undefined,
     timeoutMs: volcOpenApiTimeoutMs
   });
-  const log = (entry) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...entry }));
 
-  const { server } = createGroupCloudServer({
+  const { server, store } = createGroupCloudServer({
     host,
     appId: volcAppId,
     appKey: volcAppKey,
@@ -435,6 +809,9 @@ if (isMain) {
     banRemovedForbiddenSeconds,
     banRoomForbiddenSeconds,
     rtcAdmin,
+    entitlementStore,
+    adminToken,
+    trustLoopbackProxy,
     tls,
     log
   });
@@ -445,7 +822,24 @@ if (isMain) {
       event: 'group_cloud_listening',
       url: `${scheme}://${host}:${port}`,
       maxMembers,
-      openApiBan: rtcAdmin.enabled
+      openApiBan: rtcAdmin.enabled,
+      entitlementEnforced: Boolean(entitlementStore),
+      adminApiEnabled: Boolean(entitlementStore && adminToken)
     });
   });
+
+  const shutdown = (signal) => {
+    log({ event: 'group_cloud_shutdown', signal });
+    store.flushAllPendingBilling();
+    server.close(() => {
+      entitlementStore?.close();
+      process.exit(0);
+    });
+    setTimeout(() => {
+      entitlementStore?.close();
+      process.exit(0);
+    }, 5000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }

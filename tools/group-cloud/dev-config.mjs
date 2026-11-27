@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,7 +23,14 @@ const config = {
   volcOpenApiSecretKey: '',
   volcOpenApiRegion: 'cn-north-1',
   banRemovedForbiddenSeconds: 300,
-  banRoomForbiddenSeconds: 3600
+  banRoomForbiddenSeconds: 3600,
+  entitlementEnforced: true,
+  dbPath: './entitlements.db',
+  codeHmacSecret: crypto.randomBytes(32).toString('hex'),
+  adminToken: crypto.randomBytes(32).toString('hex'),
+  globalMonthlyLimitMinutes: 8500,
+  requireCodeForJoin: false,
+  trustLoopbackProxy: false
 };
 
 fs.writeFileSync(path.join(localDir, 'config.json'), JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });

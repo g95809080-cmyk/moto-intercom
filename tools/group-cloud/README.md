@@ -52,7 +52,20 @@ GROUP_CLOUD_VOLC_OPENAPI_REGION
 GROUP_CLOUD_VOLC_OPENAPI_TIMEOUT_MS
 GROUP_CLOUD_BAN_REMOVED_SECONDS
 GROUP_CLOUD_BAN_ROOM_SECONDS
+GROUP_CLOUD_ENTITLEMENT_ENFORCED
+GROUP_CLOUD_DB_PATH
+GROUP_CLOUD_CODE_HMAC_SECRET
+GROUP_CLOUD_ADMIN_TOKEN
+GROUP_CLOUD_GLOBAL_MONTHLY_LIMIT_MINUTES
+GROUP_CLOUD_REQUIRE_CODE_FOR_JOIN
 ```
+
+## 激活码权益与后台管理（SQLite WAL + `/admin/v1/*`）
+
+- 服务启动默认开启激活码权益拦截（`entitlementEnforced = true`），强制要求配置 `codeHmacSecret`（至少 16 位）；生产环境由 systemd 通过 `StateDirectory=moto-group-cloud` 将数据库落在 `/var/lib/moto-group-cloud/entitlements.db`。
+- 建房（`POST /v1/rooms`，涵盖 `NETWORK` 与 `HYBRID`）要求房主携带 `X-Moto-Entitlement`，查询权益（`GET /v1/entitlements/me`）强制校验 `X-Moto-Entitlement` 与 `X-Moto-Device-Id` 设备绑定关系；队员输入 6 位邀请码即可免码加入（可通过 `requireCodeForJoin` 动态收紧为全员激活）。
+- `HYBRID` 模式在 `LOCAL` 阶段零扣费；`NETWORK` 与 `HYBRID/CLOUD` 仅在同逻辑频道在线 `>= 2` 人时按整数人·秒扣减，并按剩余额度动态收紧 RTC Token 有效期；当单码余额归零、单次连续云端通话达上限或当月全局红线（默认 8,500 人·分钟，按 `Asia/Shanghai` 自然月重置）触发时，服务端广播终结事件并同步调用火山 OpenAPI `BanRoomUser` 立即断流。
+- 后台 HTTP 管理接口需在配置中设置高熵 `adminToken`（`Authorization: Bearer <adminToken>`）方可启用，提供 `/admin/v1/overview`、`/admin/v1/codes/batch`、`/admin/v1/codes`、`/admin/v1/codes/:codeId/revoke`、`/admin/v1/entitlements`、`/admin/v1/entitlements/:id/(topup|reset-rebind|revoke)`、`/admin/v1/rooms/active`、`/admin/v1/rooms/:roomId/force-end`、`PUT /admin/v1/config/global-quota` 与 `/admin/v1/audit-logs`，并配套命令行客户端 `node codes-cli.mjs`。
 
 ## 火山引擎 RTC 部署要求
 
@@ -77,7 +90,7 @@ GROUP_CLOUD_BAN_ROOM_SECONDS
 ## 测试
 
 ```bash
-node --test server.test.mjs
+npm test
 ```
 
-测试覆盖 AccessToken v001 二进制布局与 HMAC-SHA256、OpenAPI 签名、50 席原子准入、RTC Token 续签、群主移除/解散 Ban 钩子、60 秒恢复、CAS 严格校验、非回环明文 TLS 拦截，以及“无 TURN / 无信令中继”契约。
+测试覆盖 AccessToken v001 二进制布局与 HMAC-SHA256、OpenAPI 签名、50 席原子准入、RTC Token 续签、群主移除/解散 Ban 钩子、60 秒恢复、CAS 严格校验、非回环明文 TLS 拦截、激活码兑换/叠码/限次换绑、人·秒计费与动态 TTL、全局红线熔断以及 `/admin/v1/*` 后台管理契约。

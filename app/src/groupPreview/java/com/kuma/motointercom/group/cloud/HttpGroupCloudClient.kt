@@ -23,7 +23,9 @@ internal class HttpGroupCloudClient(
     private val sslSocketFactory: SSLSocketFactory? = null,
     private val connectTimeoutMs: Int = 8_000,
     private val shortReadTimeoutMs: Int = 10_000,
-    private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES
+    private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES,
+    private val entitlementTokenProvider: () -> String? = { null },
+    private val deviceIdProvider: () -> String? = { null }
 ) : GroupCloudApi {
     init {
         require(maxResponseBytes > 0) { "maxResponseBytes must be positive" }
@@ -227,6 +229,24 @@ internal class HttpGroupCloudClient(
         request("POST", "/v1/rooms/${encode(roomId)}/ack", token, JSONObject().put("sequence", sequence))
     }
 
+    override fun redeemActivationCode(
+        code: String,
+        deviceId: String,
+        appVersion: String
+    ): GroupEntitlementRedeemResult {
+        val body = JSONObject()
+            .put("code", code)
+            .put("deviceId", deviceId)
+            .put("appVersion", appVersion)
+        val res = request("POST", "/v1/entitlements/redeem", null, body)
+        return GroupCloudCodec.parseEntitlementRedeemResult(res)
+    }
+
+    override fun fetchEntitlementStatus(): GroupEntitlementSummary {
+        val res = request("GET", "/v1/entitlements/me", null, null)
+        return GroupCloudCodec.parseEntitlementSummary(res.getJSONObject("entitlement"))
+    }
+
     override fun setRole(
         token: String,
         roomId: String,
@@ -417,6 +437,14 @@ internal class HttpGroupCloudClient(
             if (!bearerToken.isNullOrBlank()) {
                 setRequestProperty("Authorization", "Bearer $bearerToken")
             }
+            val entitlementToken = entitlementTokenProvider()?.trim()
+            if (!entitlementToken.isNullOrBlank()) {
+                setRequestProperty("X-Moto-Entitlement", entitlementToken)
+            }
+            val deviceId = deviceIdProvider()?.trim()
+            if (!deviceId.isNullOrBlank()) {
+                setRequestProperty("X-Moto-Device-Id", deviceId)
+            }
             if (this is HttpsURLConnection && sslSocketFactory != null) {
                 this.sslSocketFactory = sslSocketFactory
             }
@@ -427,7 +455,7 @@ internal class HttpGroupCloudClient(
                 val bytes = body.toString().toByteArray(Charsets.UTF_8)
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.setFixedLengthStreamingMode(bytes.size)
+                connection.setRequestProperty("Content-Length", bytes.size.toString())
                 connection.outputStream.use { it.write(bytes) }
             }
             val status = connection.responseCode
@@ -469,6 +497,11 @@ internal class HttpGroupCloudClient(
         "UNAUTHORIZED" -> "会话已失效，请重新加入"
         "TRANSPORT_CONFLICT" -> "传输状态已更新，请重试"
         "UNSUPPORTED_IN_MODE" -> "当前模式不支持该操作"
+        "ENTITLEMENT_REQUIRED" -> "请先输入激活码开通云端对讲权益"
+        "ENTITLEMENT_INVALID", "ENTITLEMENT_REVOKED" -> "激活凭证已失效，请重新输入激活码"
+        "ENTITLEMENT_DEVICE_MISMATCH" -> "激活凭证与当前设备不匹配，请重新输入激活码"
+        "QUOTA_EXHAUSTED", "ENTITLEMENT_EXPIRED" -> "云端对讲额度已用尽或过期，请续码或改用本地模式"
+        "GLOBAL_QUOTA_EXHAUSTED" -> "本月云端测试总免费额度已用尽，请使用本地直连模式"
         else -> if (status in 500..599) "云端服务暂时不可用，请稍后重试" else "云端请求失败（$status）"
     }
 

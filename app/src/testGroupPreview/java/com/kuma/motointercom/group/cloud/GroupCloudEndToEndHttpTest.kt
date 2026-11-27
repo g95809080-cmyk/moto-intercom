@@ -62,6 +62,7 @@ class GroupCloudEndToEndHttpTest {
                 environment()["GROUP_CLOUD_VOLC_OPENAPI_AK"] = "e2e-openapi-ak"
                 environment()["GROUP_CLOUD_VOLC_OPENAPI_SK"] = "e2e-openapi-sk"
                 environment()["GROUP_CLOUD_VOLC_OPENAPI_ENDPOINT"] = openApiEndpoint
+                environment()["GROUP_CLOUD_ENTITLEMENT_ENFORCED"] = "false"
                 redirectErrorStream(true)
             }
             .start()

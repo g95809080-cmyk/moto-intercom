@@ -256,6 +256,11 @@ internal class GroupCloudSessionOrchestrator(
                             finish(cloudEvent.message, flush = false, terminal = mapTerminalReason(cloudEvent.reason))
                             return
                         }
+                        is GroupCloudEvent.QuotaWarning -> {
+                            if (cloudEvent.message.isNotBlank()) {
+                                message = cloudEvent.message
+                            }
+                        }
                     }
                 }
                 if (phase == GroupPhase.IN_ROOM) {
@@ -678,6 +683,13 @@ internal class GroupCloudSessionOrchestrator(
                     )
                     "RECOVERY_EXPIRED" -> finish(error.userMessage, flush = false, terminal = GroupTerminalReason.RECOVERY_EXPIRED)
                     "UNAUTHORIZED" -> finish(error.userMessage, flush = false, terminal = GroupTerminalReason.FAILED)
+                    "QUOTA_EXHAUSTED",
+                    "ENTITLEMENT_EXPIRED",
+                    "ENTITLEMENT_REVOKED",
+                    "ENTITLEMENT_INVALID",
+                    "ENTITLEMENT_REQUIRED",
+                    "ENTITLEMENT_DEVICE_MISMATCH",
+                    "GLOBAL_QUOTA_EXHAUSTED" -> finish(error.userMessage, flush = false, terminal = GroupTerminalReason.FAILED)
                     "OWNER_TRANSFER_REQUIRED" -> message = error.userMessage
                     "REVISION_CONFLICT" -> {
                         message = "房间状态已更新，正在同步最新名单"

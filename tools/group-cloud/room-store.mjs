@@ -239,6 +239,17 @@ export class GroupCloudStore {
       this.onRtcUnbanUser = hasHandlers ? options.onRtcUnbanUser : null;
     }
     this.log = options.log ?? (() => {});
+    this.entitlementStore = options.entitlementStore ?? null;
+    this.lowQuotaWarnSeconds = Number.isInteger(options.lowQuotaWarnSeconds) ? options.lowQuotaWarnSeconds : 900;
+    this.sessionLimitWarnSeconds = Number.isInteger(options.sessionLimitWarnSeconds)
+      ? options.sessionLimitWarnSeconds
+      : 600;
+    this.billingFlushIntervalMs = Number.isInteger(options.billingFlushIntervalMs)
+      ? options.billingFlushIntervalMs
+      : 30_000;
+    this.billingFlushSecondsThreshold = Number.isInteger(options.billingFlushSecondsThreshold)
+      ? options.billingFlushSecondsThreshold
+      : 30;
 
     this.rooms = new Map();
     this.inviteIndex = new Map();
@@ -248,6 +259,7 @@ export class GroupCloudStore {
     this.cancelledJoinReceipts = new Map();
     this.roomLocks = new Map();
     this.inFlightRoomSweeps = new Map();
+    this.pendingCreateByEntitlement = new Map();
   }
 
   _withRoomLock(roomId, fn) {
@@ -345,6 +357,182 @@ export class GroupCloudStore {
   _rtcRoomIdForMember(room, member) {
     if (!this._canIssueRtc(room, member)) return null;
     return this._rtcRoomIdForChannel(room, member.channel, room.transport?.epoch ?? 1);
+  }
+
+  _countActiveSponsoredRooms(entitlementId) {
+    if (!entitlementId) return 0;
+    let count = this.pendingCreateByEntitlement.get(entitlementId) ?? 0;
+    for (const room of this.rooms.values()) {
+      if (!room.ended && room.sponsorEntitlementId === entitlementId) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  _countChannelAdmittedMembers(room, channel) {
+    const key = formatChannel(channel);
+    let count = 0;
+    for (const item of room.members.values()) {
+      if (item.status === 'ADMITTED' && formatChannel(item.channel) === key) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  _countActiveCloudRtcMembers(room) {
+    if (!room || room.ended) return 0;
+    if (room.mode === 'HYBRID' && room.transport?.active !== 'CLOUD') return 0;
+    const perChannel = new Map();
+    for (const item of room.members.values()) {
+      if (item.status !== 'ADMITTED') continue;
+      const key = formatChannel(item.channel);
+      perChannel.set(key, (perChannel.get(key) ?? 0) + 1);
+    }
+    let total = 0;
+    for (const count of perChannel.values()) {
+      if (count >= 2) total += count;
+    }
+    return total;
+  }
+
+  _assertSponsorQuotaAvailable(room, nowMs) {
+    if (!this.entitlementStore || !room?.sponsorEntitlementId) return null;
+    const quota = this.entitlementStore.checkSponsorQuota(room.sponsorEntitlementId, nowMs);
+    const pendingSec = room.billing?.pendingSeconds ?? 0;
+    const effectiveRemainingSeconds = Math.max(0, quota.effectiveRemainingSeconds - pendingSec);
+    if (!quota.allowed || effectiveRemainingSeconds <= 0) {
+      throw new CloudStoreError(
+        quota.allowed ? 402 : quota.status,
+        quota.allowed ? 'QUOTA_EXHAUSTED' : quota.code,
+        quota.message || '房主云端对讲额度已用尽，请兑换新激活码或改用本地模式'
+      );
+    }
+    return { ...quota, effectiveRemainingSeconds };
+  }
+
+  _settleRoomBilling(room, nowMs, { forceFlush = false, reason = 'SWEEP', emitWarnings = true } = {}) {
+    if (!this.entitlementStore || !room?.sponsorEntitlementId || !room.billing || room.ended) {
+      return { terminate: null, effectiveRemainingSeconds: null };
+    }
+    const billing = room.billing;
+    const elapsedMs = Math.max(0, nowMs - billing.lastSettledAtMs);
+    const wholeSeconds = Math.floor(elapsedMs / 1000);
+    const activeMembers = this._countActiveCloudRtcMembers(room);
+
+    if (wholeSeconds > 0) {
+      billing.lastSettledAtMs += wholeSeconds * 1000;
+      if (activeMembers >= 2) {
+        const delta = activeMembers * wholeSeconds;
+        billing.pendingSeconds += delta;
+        billing.totalBilledSeconds += delta;
+        billing.peakRtcMembers = Math.max(billing.peakRtcMembers, activeMembers);
+        if (billing.cloudSessionStartedAtMs === null) {
+          billing.cloudSessionStartedAtMs = nowMs - wholeSeconds * 1000;
+        }
+      } else {
+        billing.cloudSessionStartedAtMs = null;
+        billing.sessionLimitWarned = false;
+      }
+    }
+
+    const flushPending = (flushReason) => {
+      const toBill = billing.pendingSeconds;
+      billing.pendingSeconds = 0;
+      billing.lastFlushedAtMs = nowMs;
+      const peak = Math.max(2, billing.peakRtcMembers);
+      billing.peakRtcMembers = activeMembers;
+      return this.entitlementStore.deductUsage(
+        {
+          entitlementId: room.sponsorEntitlementId,
+          roomId: room.roomId,
+          mode: room.mode,
+          deltaSeconds: toBill,
+          peakRtcMembers: peak,
+          reason: flushReason
+        },
+        nowMs
+      );
+    };
+
+    const shouldFlush =
+      billing.pendingSeconds > 0 &&
+      (forceFlush ||
+        billing.pendingSeconds >= this.billingFlushSecondsThreshold ||
+        nowMs - billing.lastFlushedAtMs >= this.billingFlushIntervalMs);
+    let quota = shouldFlush
+      ? flushPending(reason)
+      : this.entitlementStore.checkSponsorQuota(room.sponsorEntitlementId, nowMs);
+
+    let effectiveRemainingSeconds = Math.max(0, quota.effectiveRemainingSeconds - billing.pendingSeconds);
+    if (!quota.allowed || effectiveRemainingSeconds <= 0) {
+      if (billing.pendingSeconds > 0) {
+        quota = flushPending(`${reason}_EXHAUSTED`);
+        effectiveRemainingSeconds = Math.max(0, quota.effectiveRemainingSeconds);
+      }
+      return {
+        terminate: {
+          reason: quota.reason || 'QUOTA_EXHAUSTED',
+          message: quota.message || '房主云端对讲额度已用尽，通话已结束'
+        },
+        effectiveRemainingSeconds: 0
+      };
+    }
+
+    const maxSessionSec = Math.max(60, (room.maxSessionMinutes || 120) * 60);
+    if (billing.cloudSessionStartedAtMs !== null && activeMembers >= 2) {
+      const sessionElapsedSec = Math.floor((nowMs - billing.cloudSessionStartedAtMs) / 1000);
+      if (sessionElapsedSec >= maxSessionSec) {
+        if (billing.pendingSeconds > 0) {
+          flushPending(`${reason}_SESSION_LIMIT`);
+        }
+        return {
+          terminate: {
+            reason: 'SESSION_TIME_LIMIT',
+            message: '单次云端通话已达防挂机时长上限，房间已自动结束'
+          },
+          effectiveRemainingSeconds
+        };
+      }
+      if (
+        emitWarnings &&
+        !billing.sessionLimitWarned &&
+        maxSessionSec - sessionElapsedSec <= this.sessionLimitWarnSeconds &&
+        room.ownerId &&
+        room.members.has(room.ownerId)
+      ) {
+        billing.sessionLimitWarned = true;
+        const leftMin = Math.max(1, Math.ceil((maxSessionSec - sessionElapsedSec) / 60));
+        this._pushEvent(room, room.ownerId, {
+          type: 'QUOTA_WARNING',
+          revision: room.revision,
+          warningType: 'SESSION_LIMIT',
+          remainingMinutes: leftMin,
+          message: `本次云端通话将在约 ${leftMin} 分钟后达到防挂机时长上限`
+        });
+      }
+    }
+
+    if (
+      emitWarnings &&
+      !billing.lowQuotaWarned &&
+      effectiveRemainingSeconds <= this.lowQuotaWarnSeconds &&
+      room.ownerId &&
+      room.members.has(room.ownerId)
+    ) {
+      billing.lowQuotaWarned = true;
+      const leftMin = Math.max(1, Math.ceil(effectiveRemainingSeconds / 60));
+      this._pushEvent(room, room.ownerId, {
+        type: 'QUOTA_WARNING',
+        revision: room.revision,
+        warningType: 'QUOTA_LOW',
+        remainingMinutes: leftMin,
+        message: `云端对讲剩余额度约 ${leftMin} 人·分钟，请留意额度消耗`
+      });
+    }
+
+    return { terminate: null, effectiveRemainingSeconds };
   }
 
   _assertRtcRevocationReady() {
@@ -585,23 +773,22 @@ export class GroupCloudStore {
     room.bannedRtcPairs.delete(pairKey);
   }
 
-  async _issueRtcCredentialsIfAllowed(room, member, nowMs) {
-    if (this._isOwnerRecoveryExpired(room, nowMs)) {
-      throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '群主恢复已超时，房间正在等待吊销结束');
-    }
-    if (!this._canIssueRtc(room, member)) return null;
-    this._assertRtcRevocationReady();
-    const rtcRoomId = this._rtcRoomIdForMember(room, member);
-    this._assertRtcRoomIssuable(room, rtcRoomId);
+  _mintAndRecordRtcCredentialsSync(room, member, rtcRoomId, quota, nowMs) {
     const userId = member.rtcUserId;
-    await this._unbanUserFromRtcRoom(room, rtcRoomId, userId, nowMs);
+    let effectiveTtlMs = this.rtcTokenTtlMs;
+    if (quota && Number.isFinite(quota.effectiveRemainingSeconds)) {
+      const estimatedMembers = Math.max(2, this._countChannelAdmittedMembers(room, member.channel));
+      const affordableMs = Math.floor((quota.effectiveRemainingSeconds / estimatedMembers) * 1000);
+      const minSupportedTtl = Math.min(60_000, this.rtcTokenTtlMs);
+      effectiveTtlMs = Math.max(minSupportedTtl, Math.min(this.rtcTokenTtlMs, affordableMs));
+    }
     const credentials = mintRtcCredentials({
       appId: this.appId,
       appKey: this.appKey,
       rtcRoomId,
       rtcUserId: userId,
       nowMs,
-      ttlMs: this.rtcTokenTtlMs
+      ttlMs: effectiveTtlMs
     });
     const grantKey = `${rtcRoomId}\0${userId}`;
     const prevGrant = room.issuedRtcGrants.get(grantKey);
@@ -618,6 +805,25 @@ export class GroupCloudStore {
       maxExpiresAtMs: Math.max(prevRoom?.maxExpiresAtMs ?? 0, credentials.expiresAtMs)
     });
     return credentials;
+  }
+
+  async _issueRtcCredentialsIfAllowed(room, member, nowMs) {
+    if (this._isOwnerRecoveryExpired(room, nowMs)) {
+      throw new CloudStoreError(502, 'RTC_REVOCATION_FAILED', '群主恢复已超时，房间正在等待吊销结束');
+    }
+    if (!this._canIssueRtc(room, member)) return null;
+    this._assertSponsorQuotaAvailable(room, nowMs);
+    this._assertRtcRevocationReady();
+    const rtcRoomId = this._rtcRoomIdForMember(room, member);
+    this._assertRtcRoomIssuable(room, rtcRoomId);
+    const userId = member.rtcUserId;
+    await this._unbanUserFromRtcRoom(room, rtcRoomId, userId, nowMs);
+    const postNowMs = Math.max(nowMs, this.now());
+    this._assertRoomNotPendingEnd(room, postNowMs);
+    if (!this._canIssueRtc(room, member)) return null;
+    const finalQuota = this._assertSponsorQuotaAvailable(room, postNowMs);
+    this._assertRtcRoomIssuable(room, rtcRoomId);
+    return this._mintAndRecordRtcCredentialsSync(room, member, rtcRoomId, finalQuota, postNowMs);
   }
 
   async _revokeUserFromRtcRoom(room, rtcRoomId, deviceId, reason, nowMs, floorSec = 10) {
@@ -876,6 +1082,7 @@ export class GroupCloudStore {
 
   _transitionTransport(room, targetActive, reason, nowMs, options = {}) {
     if (room.mode !== 'HYBRID' || !room.transport) return false;
+    this._settleRoomBilling(room, nowMs, { forceFlush: true, reason: `TRANSPORT_${targetActive}`, emitWarnings: false });
     const transport = room.transport;
     const previous = transport.active;
     const previousEpoch = transport.epoch;
@@ -1223,6 +1430,7 @@ export class GroupCloudStore {
 
   async _endRoom(room, reason, message, nowMs) {
     if (room.ended) return;
+    this._settleRoomBilling(room, nowMs, { forceFlush: true, reason: `END_${reason}`, emitWarnings: false });
     const pending = this._recordPendingEnd(room, reason, message, nowMs, { failed: false });
     try {
       await this._revokeAllRoomRtc(room, pending.reason, nowMs);
@@ -1318,6 +1526,25 @@ export class GroupCloudStore {
         }
       }
       return { changed: false, errors };
+    }
+
+    if (this.entitlementStore && room.sponsorEntitlementId) {
+      const billingResult = this._settleRoomBilling(room, nowMs, { reason: 'SWEEP', emitWarnings: true });
+      if (billingResult.terminate) {
+        if (!respectRetryCooldown || this._isSweepKeyRetryDue(room, 'room:end', nowMs)) {
+          try {
+            await this._endRoom(room, billingResult.terminate.reason, billingResult.terminate.message, nowMs);
+            this._clearSweepKeyRetry(room, 'room:end');
+            return { changed: true, errors };
+          } catch (error) {
+            this._recordSweepKeyRetryFailure(room, 'room:end', nowMs);
+            if (throwOnError) throw error;
+            errors.push(error);
+            return { changed: false, errors };
+          }
+        }
+        return { changed: false, errors };
+      }
     }
 
     let changed = false;
@@ -1951,7 +2178,10 @@ export class GroupCloudStore {
     return this._withRoomLock(lockRoomId, () => this._authenticateUnlocked(token, roomId, nowMs));
   }
 
-  async createRoom({ deviceId, runtimeId, nickname, requireApproval = true, mode = 'NETWORK', supportsFastP2p }, nowMs = this.now()) {
+  async createRoom(
+    { deviceId, runtimeId, nickname, requireApproval = true, mode = 'NETWORK', supportsFastP2p, entitlementToken = '' },
+    nowMs = this.now()
+  ) {
     this._sweepGlobalExpired(nowMs);
     const normalizedMode = typeof mode === 'string' ? mode.trim().toUpperCase() : 'NETWORK';
     if (!VALID_MODES.has(normalizedMode)) {
@@ -1963,11 +2193,31 @@ export class GroupCloudStore {
     const dev = normalizeId(deviceId, 'deviceId');
     const run = normalizeId(runtimeId, 'runtimeId');
     const name = normalizeNickname(nickname, dev);
+    let eligibility = null;
+    if (this.entitlementStore) {
+      eligibility = this.entitlementStore.checkCreateRoomEligibility(
+        entitlementToken,
+        {
+          mode: normalizedMode,
+          deviceId: dev,
+          countActiveRooms: (entitlementId) => this._countActiveSponsoredRooms(entitlementId)
+        },
+        nowMs
+      );
+      this.pendingCreateByEntitlement.set(
+        eligibility.entitlementId,
+        (this.pendingCreateByEntitlement.get(eligibility.entitlementId) ?? 0) + 1
+      );
+    }
+    try {
     const roomId = crypto.randomUUID();
     const roomEpoch = crypto.randomUUID();
     const rtcRoomId = `mcr-${crypto.randomUUID().replaceAll('-', '')}`;
     const isHybrid = normalizedMode === 'HYBRID';
-    const roomMaxMembers = isHybrid ? Math.min(this.maxMembers, HYBRID_MAX_MEMBERS) : this.maxMembers;
+    const entitlementMaxMembers = eligibility ? eligibility.maxMembers : this.maxMembers;
+    const roomMaxMembers = isHybrid
+      ? Math.min(this.maxMembers, HYBRID_MAX_MEMBERS, entitlementMaxMembers)
+      : Math.min(this.maxMembers, entitlementMaxMembers);
     const owner = {
       deviceId: dev,
       rtcUserId: crypto.randomUUID(),
@@ -2001,6 +2251,21 @@ export class GroupCloudStore {
       mode: normalizedMode,
       maxMembers: roomMaxMembers,
       ownerId: dev,
+      sponsorEntitlementId: eligibility?.entitlementId ?? null,
+      maxSessionMinutes: eligibility?.maxSessionMinutes ?? 120,
+      createdAtMs: nowMs,
+      billing: eligibility
+        ? {
+            lastSettledAtMs: nowMs,
+            pendingSeconds: 0,
+            totalBilledSeconds: 0,
+            cloudSessionStartedAtMs: null,
+            lowQuotaWarned: false,
+            sessionLimitWarned: false,
+            lastFlushedAtMs: nowMs,
+            peakRtcMembers: 0
+          }
+        : null,
       revision: 1,
       ended: false,
       endedReason: null,
@@ -2061,6 +2326,13 @@ export class GroupCloudStore {
       snapshot: this._snapshotFor(room, dev),
       rtc
     };
+    } finally {
+      if (eligibility) {
+        const remaining = (this.pendingCreateByEntitlement.get(eligibility.entitlementId) ?? 1) - 1;
+        if (remaining <= 0) this.pendingCreateByEntitlement.delete(eligibility.entitlementId);
+        else this.pendingCreateByEntitlement.set(eligibility.entitlementId, remaining);
+      }
+    }
   }
 
   async submitJoinRequest(params, nowMs = this.now()) {
@@ -2230,12 +2502,19 @@ export class GroupCloudStore {
     });
   }
 
-  async _submitJoinRequest({ inviteCode, deviceId, runtimeId, nickname, supportsFastP2p }, receipt, nowMs) {
+  async _submitJoinRequest(
+    { inviteCode, deviceId, runtimeId, nickname, supportsFastP2p, entitlementToken = '' },
+    receipt,
+    nowMs
+  ) {
     this._sweepGlobalExpired(nowMs);
     const code = normalizeInviteCode(inviteCode);
     const dev = normalizeId(deviceId, 'deviceId');
     const run = normalizeId(runtimeId, 'runtimeId');
     const name = normalizeNickname(nickname, dev);
+    if (this.entitlementStore) {
+      this.entitlementStore.checkJoinEligibilityIfRequired(entitlementToken, { deviceId: dev }, nowMs);
+    }
     const roomId = this.inviteIndex.get(code);
     if (!roomId) {
       throw new CloudStoreError(404, 'INVALID_INVITE', '邀请码无效或已过期');
@@ -2255,6 +2534,9 @@ export class GroupCloudStore {
         throw new CloudStoreError(404, 'INVALID_INVITE', '邀请码无效或已过期');
       }
       this._assertRoomNotPendingEnd(room, effectiveNow);
+      if (this.entitlementStore && room.sponsorEntitlementId) {
+        this._assertSponsorQuotaAvailable(room, effectiveNow);
+      }
       if (room.removed.has(dev)) {
         throw new CloudStoreError(403, 'REMOVED', '你已被移出该房间，需群主解除限制后才能重新加入');
       }
@@ -2273,6 +2555,7 @@ export class GroupCloudStore {
       }
 
       if (!room.requireApproval) {
+        this._settleRoomBilling(room, effectiveNow, { forceFlush: false, reason: 'MEMBER_JOIN' });
         const member = {
           deviceId: dev,
           rtcUserId: crypto.randomUUID(),
@@ -2503,6 +2786,10 @@ export class GroupCloudStore {
         this.pendingIndex.delete(requestId);
         throw new CloudStoreError(409, 'ALREADY_IN_ROOM', '该成员已在房间中');
       }
+      if (this.entitlementStore && room.sponsorEntitlementId) {
+        this._assertSponsorQuotaAvailable(room, nowMs);
+      }
+      this._settleRoomBilling(room, nowMs, { forceFlush: false, reason: 'APPROVE_JOIN' });
       const joined = {
         deviceId: pending.deviceId,
         rtcUserId: crypto.randomUUID(),
@@ -2733,6 +3020,7 @@ export class GroupCloudStore {
       if (!target) {
         throw new CloudStoreError(404, 'MEMBER_NOT_FOUND', '目标成员不在房间内');
       }
+      this._settleRoomBilling(room, nowMs, { forceFlush: false, reason: 'MEMBER_REMOVE' });
       const admittedCountAfter = [...room.members.values()].filter(
         (m) => m.status === 'ADMITTED' && m.deviceId !== targetId
       ).length;
@@ -2862,6 +3150,7 @@ export class GroupCloudStore {
       return { ended: true };
     }
     this._assertRoomNotPendingEnd(room, nowMs);
+    this._settleRoomBilling(room, nowMs, { forceFlush: false, reason: 'MEMBER_LEAVE' });
     const admittedCountAfter = [...room.members.values()].filter(
       (m) => m.status === 'ADMITTED' && m.deviceId !== member.deviceId
     ).length;
@@ -3110,6 +3399,7 @@ export class GroupCloudStore {
       if (normalized !== 'PUBLIC' && normalized !== 'RIDER') {
         throw new CloudStoreError(400, 'INVALID_CHANNEL', '频道仅支持 PUBLIC 或 RIDER');
       }
+      this._settleRoomBilling(room, nowMs, { forceFlush: false, reason: 'SWITCH_CHANNEL' });
       if (normalized === 'RIDER' && !canEnterRider(member.role, room.riderIncludesFormation)) {
         throw new CloudStoreError(403, 'FORBIDDEN', '当前角色无权进入领队频道');
       }
@@ -3222,6 +3512,7 @@ export class GroupCloudStore {
       if (invite.calleeId !== member.deviceId) {
         throw new CloudStoreError(403, 'FORBIDDEN', '仅被呼叫方可以接受该私聊');
       }
+      this._settleRoomBilling(room, nowMs, { forceFlush: false, reason: 'ACCEPT_PRIVATE' });
       const caller = room.members.get(invite.callerId);
       if (!caller || caller.status !== 'ADMITTED') {
         room.privateInvites.delete(inviteId);
@@ -3309,6 +3600,7 @@ export class GroupCloudStore {
       this._assertRoomNotPendingEnd(room, nowMs);
       member.lastSeenMs = nowMs;
       this._assertExpectedRevision(room, expectedRevision);
+      this._settleRoomBilling(room, nowMs, { forceFlush: false, reason: 'CLOSE_PRIVATE' });
       if (member.channel?.type === 'PRIVATE') {
         const nextPublicMember = { ...member, channel: { type: 'PUBLIC' } };
         if (this._canIssueRtc(room, nextPublicMember)) {
@@ -3394,12 +3686,15 @@ export class GroupCloudStore {
           rtc: await this._issueRtcCredentialsIfAllowed(room, member, nowMs)
         };
       }
+      let preUnbannedRtcRoomId = null;
       if (target === 'CLOUD') {
+        this._assertSponsorQuotaAvailable(room, nowMs);
         this._assertRtcRevocationReady();
         const nextEpoch = room.transport.epoch + 1;
         const nextRtcRoomId = this._rtcRoomIdForChannel(room, member.channel, nextEpoch);
         this._assertRtcRoomIssuable(room, nextRtcRoomId, { epoch: nextEpoch });
         await this._unbanUserFromRtcRoom(room, nextRtcRoomId, member.rtcUserId, nowMs);
+        preUnbannedRtcRoomId = nextRtcRoomId;
       } else if (room.transport.active === 'CLOUD') {
         try {
           await this._revokeRoomRtcForEpoch(room, room.transport.epoch, 'SWITCHED_TO_LOCAL', nowMs);
@@ -3423,8 +3718,19 @@ export class GroupCloudStore {
       const effectiveReason = isAutomaticFallback
         ? normalizedReason
         : (target === 'CLOUD' ? 'MANUAL_CLOUD' : 'MANUAL_LOCAL');
-      this._transitionTransport(room, target, effectiveReason, nowMs);
-      const rtc = await this._issueRtcCredentialsIfAllowed(room, member, nowMs);
+      const commitNowMs = Math.max(nowMs, this.now());
+      let rtc = null;
+      if (target === 'CLOUD') {
+        this._assertRoomNotPendingEnd(room, commitNowMs);
+        const finalQuota = this._assertSponsorQuotaAvailable(room, commitNowMs);
+        this._transitionTransport(room, target, effectiveReason, commitNowMs);
+        const activeRtcRoomId = this._rtcRoomIdForMember(room, member);
+        if (activeRtcRoomId && activeRtcRoomId === preUnbannedRtcRoomId) {
+          rtc = this._mintAndRecordRtcCredentialsSync(room, member, activeRtcRoomId, finalQuota, commitNowMs);
+        }
+      } else {
+        this._transitionTransport(room, target, effectiveReason, commitNowMs);
+      }
       room.revision += 1;
       this._broadcastSnapshot(room);
       return {
@@ -3892,5 +4198,113 @@ export class GroupCloudStore {
 
     if (immediate) return immediate;
     return waiterPromise;
+  }
+
+  listActiveRoomsSummary(nowMs = this.now()) {
+    const list = [];
+    for (const room of this.rooms.values()) {
+      if (room.ended) continue;
+      const admittedMembers = [...room.members.values()].filter((m) => m.status === 'ADMITTED').length;
+      const activeCloudMembers = this._countActiveCloudRtcMembers(room);
+      const totalBilledSeconds = room.billing?.totalBilledSeconds ?? 0;
+      list.push({
+        roomId: room.roomId,
+        mode: room.mode,
+        activeTransport: room.mode === 'HYBRID' ? (room.transport?.active ?? 'LOCAL') : 'CLOUD',
+        sponsorEntitlementId: room.sponsorEntitlementId ?? null,
+        ownerId: room.ownerId,
+        maxMembers: room.maxMembers,
+        memberCount: room.members.size,
+        admittedMembers,
+        activeCloudMembers,
+        totalBilledSeconds,
+        totalBilledMinutes: Math.floor(totalBilledSeconds / 60),
+        createdAtMs: room.createdAtMs ?? nowMs,
+        durationMinutes: Math.floor(Math.max(0, nowMs - (room.createdAtMs ?? nowMs)) / 60_000)
+      });
+    }
+    return list;
+  }
+
+  async forceEndRoomByAdmin(roomId, { reason = 'ADMIN_ENDED', message = '管理员已结束该云端房间' } = {}, nowMs = this.now()) {
+    return this._withRoomLock(roomId, async () => {
+      const room = this.rooms.get(roomId);
+      if (!room || room.ended) {
+        throw new CloudStoreError(404, 'ROOM_NOT_FOUND', '目标房间不存在或已结束');
+      }
+      await this._endRoom(room, reason, message, nowMs);
+      return { roomId, ended: true, reason };
+    });
+  }
+
+  async terminateRoomsForEntitlement(
+    entitlementId,
+    { reason = 'ENTITLEMENT_REVOKED', message = '房主云端对讲权限已失效，房间已结束' } = {},
+    nowMs = this.now()
+  ) {
+    const targets = [];
+    for (const room of this.rooms.values()) {
+      if (!room.ended && room.sponsorEntitlementId === entitlementId) {
+        targets.push(room.roomId);
+      }
+    }
+    const endedRoomIds = [];
+    const pendingRoomIds = [];
+    for (const roomId of targets) {
+      await this._withRoomLock(roomId, async () => {
+        const room = this.rooms.get(roomId);
+        if (!room || room.ended || room.sponsorEntitlementId !== entitlementId) return;
+        try {
+          await this._endRoom(room, reason, message, nowMs);
+          endedRoomIds.push(roomId);
+        } catch (error) {
+          pendingRoomIds.push(roomId);
+          this.log({
+            event: 'terminate_entitlement_room_pending',
+            roomId: roomId.slice(-8),
+            reason,
+            message: error?.message ?? 'unknown'
+          });
+        }
+      });
+    }
+    return { endedRoomIds, pendingRoomIds };
+  }
+
+  async terminateAllActiveRooms(
+    { reason = 'GLOBAL_QUOTA_EXHAUSTED', message = '本月云端测试总免费额度已用尽，通话已结束，请使用本地直连模式' } = {},
+    nowMs = this.now()
+  ) {
+    const targets = [...this.rooms.values()].filter((r) => !r.ended).map((r) => r.roomId);
+    const endedRoomIds = [];
+    const pendingRoomIds = [];
+    for (const roomId of targets) {
+      await this._withRoomLock(roomId, async () => {
+        const room = this.rooms.get(roomId);
+        if (!room || room.ended) return;
+        try {
+          await this._endRoom(room, reason, message, nowMs);
+          endedRoomIds.push(roomId);
+        } catch (error) {
+          pendingRoomIds.push(roomId);
+          this.log({
+            event: 'terminate_all_room_pending',
+            roomId: roomId.slice(-8),
+            reason,
+            message: error?.message ?? 'unknown'
+          });
+        }
+      });
+    }
+    return { endedRoomIds, pendingRoomIds };
+  }
+
+  flushAllPendingBilling(nowMs = this.now()) {
+    if (!this.entitlementStore) return;
+    for (const room of this.rooms.values()) {
+      if (!room.ended && room.sponsorEntitlementId && room.billing) {
+        this._settleRoomBilling(room, nowMs, { forceFlush: true, reason: 'SERVER_SHUTDOWN', emitWarnings: false });
+      }
+    }
   }
 }

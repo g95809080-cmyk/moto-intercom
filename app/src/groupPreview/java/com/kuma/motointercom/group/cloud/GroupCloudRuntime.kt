@@ -19,8 +19,20 @@ internal class GroupCloudRuntime(
     private val onSnapshot: (GroupSessionSnapshot) -> Unit,
     private val onAudioLabel: (String) -> Unit,
     private val onReleased: () -> Unit,
-    private val pollApiFactory: (String) -> GroupCloudApi = { HttpGroupCloudClient(it) },
-    private val actionApiFactory: (String) -> GroupCloudApi = { HttpGroupCloudClient(it) },
+    private val pollApiFactory: (String) -> GroupCloudApi = { url ->
+        HttpGroupCloudClient(
+            url,
+            entitlementTokenProvider = { GroupEntitlementStore(context).loadToken() },
+            deviceIdProvider = { endpoint.deviceId }
+        )
+    },
+    private val actionApiFactory: (String) -> GroupCloudApi = { url ->
+        HttpGroupCloudClient(
+            url,
+            entitlementTokenProvider = { GroupEntitlementStore(context).loadToken() },
+            deviceIdProvider = { endpoint.deviceId }
+        )
+    },
     private val rtcMediaFactory: GroupRtcMediaFactory = object : GroupRtcMediaFactory {
         override fun create(
             context: Context,

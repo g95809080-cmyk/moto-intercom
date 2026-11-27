@@ -64,6 +64,11 @@ import com.kuma.motointercom.group.networkGroupPromptPermissions
 import com.kuma.motointercom.group.cloud.GroupCloudPreferences
 import com.kuma.motointercom.group.cloud.GroupCloudStartRequest
 import com.kuma.motointercom.group.cloud.GroupCloudUrlPolicy
+import com.kuma.motointercom.group.cloud.GroupActivationCodeValidator
+import com.kuma.motointercom.group.cloud.GroupCloudException
+import com.kuma.motointercom.group.cloud.GroupEntitlementStore
+import com.kuma.motointercom.group.cloud.GroupEntitlementSummary
+import com.kuma.motointercom.group.cloud.HttpGroupCloudClient
 import com.kuma.motointercom.group.ui.GlassBackdropMood
 import com.kuma.motointercom.group.ui.GroupGlassBackdrop
 import com.kuma.motointercom.group.ui.GroupGlassPalette
@@ -109,11 +114,24 @@ internal class GroupActivity : ComponentActivity() {
     private val rnnoiseEnabled = mutableStateOf(false)
     private val diagnosticLogs = mutableStateOf<List<String>>(emptyList())
     private val diagnosticHint = mutableStateOf<String?>(null)
+    private val entitlementSummary = mutableStateOf<GroupEntitlementSummary?>(null)
+    private val hasEntitlementToken = mutableStateOf(false)
+    private val entitlementBusy = mutableStateOf(false)
+    private val entitlementError = mutableStateOf<String?>(null)
+    private val showActivationDialog = mutableStateOf(false)
+    private var entitlementRefreshInFlight = false
     private lateinit var cloudPrefs: GroupCloudPreferences
+    private lateinit var entitlementStore: GroupEntitlementStore
     private lateinit var appearancePrefs: AppearancePreferences
     private lateinit var routePrefs: AudioRoutePreferences
     private lateinit var identityStore: LocalIdentityStore
-    private val listener: (GroupServiceState) -> Unit = { state.value = it }
+    private val listener: (GroupServiceState) -> Unit = { next ->
+        val wasBusy = state.value.busy
+        state.value = next
+        if (wasBusy && !next.busy && entitlementStore.loadToken() != null) {
+            refreshEntitlementAsync(cloudPrefs.loadServerUrl(), silent = true)
+        }
+    }
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             if (!bound) return
@@ -136,6 +154,9 @@ internal class GroupActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         DiagnosticLog.initialize(this)
         cloudPrefs = GroupCloudPreferences(this)
+        entitlementStore = GroupEntitlementStore(this)
+        hasEntitlementToken.value = entitlementStore.loadToken() != null
+        entitlementSummary.value = entitlementStore.loadSummary()
         appearancePrefs = AppearancePreferences(this)
         routePrefs = AudioRoutePreferences(this)
         identityStore = DataStoreLocalIdentityStore(this)
@@ -236,8 +257,138 @@ internal class GroupActivity : ComponentActivity() {
                         } else {
                             "当前暂无可复制的日志"
                         }
+                    },
+                    entitlementSummary = entitlementSummary.value,
+                    hasEntitlementToken = hasEntitlementToken.value,
+                    entitlementBusy = entitlementBusy.value,
+                    entitlementError = entitlementError.value,
+                    showActivationDialog = showActivationDialog.value,
+                    onOpenActivationDialog = {
+                        entitlementError.value = null
+                        showActivationDialog.value = true
+                    },
+                    onDismissActivationDialog = {
+                        if (!entitlementBusy.value) {
+                            entitlementError.value = null
+                            showActivationDialog.value = false
+                        }
+                    },
+                    onRedeemActivationCode = { codeInput, targetServerUrl ->
+                        redeemActivationCodeAsync(codeInput, targetServerUrl)
+                    },
+                    onRefreshEntitlement = { targetServerUrl ->
+                        refreshEntitlementAsync(targetServerUrl, silent = false)
+                    },
+                    onClearEntitlement = {
+                        entitlementStore.clear()
+                        hasEntitlementToken.value = false
+                        entitlementSummary.value = null
+                        entitlementError.value = null
+                        state.value = state.value.copy(message = "已清除本地激活凭证")
                     }
                 )
+            }
+        }
+    }
+
+    private fun refreshEntitlementAsync(rawServerUrl: String, silent: Boolean) {
+        val token = entitlementStore.loadToken()
+        if (token.isNullOrBlank()) {
+            hasEntitlementToken.value = false
+            entitlementSummary.value = null
+            return
+        }
+        if (entitlementRefreshInFlight) return
+        val normalizedUrl = runCatching { GroupCloudUrlPolicy.normalizeConfiguredUrl(rawServerUrl) }.getOrNull() ?: return
+        entitlementRefreshInFlight = true
+        if (!silent) entitlementBusy.value = true
+        activityScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val deviceId = identityStore.getOrCreateDeviceId()
+                HttpGroupCloudClient(
+                    normalizedUrl,
+                    entitlementTokenProvider = { token },
+                    deviceIdProvider = { deviceId }
+                ).use { client ->
+                    client.fetchEntitlementStatus()
+                }
+            }
+            runOnUiThread {
+                entitlementRefreshInFlight = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                entitlementBusy.value = false
+                result.onSuccess { latest ->
+                    entitlementStore.saveSummary(latest)
+                    hasEntitlementToken.value = true
+                    entitlementSummary.value = entitlementStore.loadSummary()
+                    entitlementError.value = null
+                }.onFailure { error ->
+                    if (error is GroupCloudException && error.code in setOf("ENTITLEMENT_INVALID", "ENTITLEMENT_REVOKED", "ENTITLEMENT_DEVICE_MISMATCH")) {
+                        entitlementStore.clear()
+                        hasEntitlementToken.value = false
+                        entitlementSummary.value = null
+                        if (!silent) state.value = state.value.copy(message = error.userMessage)
+                    } else if (!silent) {
+                        state.value = state.value.copy(
+                            message = (error as? GroupCloudException)?.userMessage ?: "无法刷新云端额度，请检查网络连接"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun redeemActivationCodeAsync(rawCode: String, rawServerUrl: String) {
+        val normalizedCode = GroupActivationCodeValidator.normalizeOrNull(rawCode)
+        if (normalizedCode == null) {
+            entitlementError.value = "激活码格式或校验位无效，请核对后重试"
+            return
+        }
+        val normalizedUrl = try {
+            GroupCloudUrlPolicy.normalizeConfiguredUrl(rawServerUrl)
+        } catch (error: IllegalArgumentException) {
+            entitlementError.value = error.message ?: "云端服务地址无效"
+            return
+        }
+        entitlementBusy.value = true
+        entitlementError.value = null
+        activityScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val deviceId = identityStore.getOrCreateDeviceId()
+                val existingToken = entitlementStore.loadToken()
+                HttpGroupCloudClient(
+                    normalizedUrl,
+                    entitlementTokenProvider = { existingToken },
+                    deviceIdProvider = { deviceId }
+                ).use { client ->
+                    client.redeemActivationCode(normalizedCode, deviceId, BuildConfig.VERSION_NAME)
+                }
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                entitlementBusy.value = false
+                result.onSuccess { redeemed ->
+                    val saved = runCatching { entitlementStore.saveRedeemResult(redeemed) }
+                    if (saved.isFailure) {
+                        entitlementError.value = "本机安全密钥存储不可用，无法加密保存激活凭证"
+                        return@onSuccess
+                    }
+                    hasEntitlementToken.value = true
+                    entitlementSummary.value = entitlementStore.loadSummary()
+                    entitlementError.value = null
+                    showActivationDialog.value = false
+                    val summary = redeemed.summary
+                    val actionLabel = when (redeemed.action) {
+                        "STACKED" -> "已叠加新激活码"
+                        "REBOUND" -> "已换绑并恢复激活码权益"
+                        else -> "已激活云端对讲权益"
+                    }
+                    state.value = state.value.copy(
+                        message = "$actionLabel，剩余 ${summary.remainingMinutes} 人·分钟（限 ${summary.maxMembers} 人）"
+                    )
+                }.onFailure { error ->
+                    entitlementError.value = (error as? GroupCloudException)?.userMessage ?: "激活失败，请检查网络连接后重试"
+                }
             }
         }
     }
@@ -302,6 +453,9 @@ internal class GroupActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        if (entitlementStore.loadToken() != null && !state.value.busy) {
+            refreshEntitlementAsync(cloudPrefs.loadServerUrl(), silent = true)
+        }
         if (pending && permissionsReturned) completeStart()
     }
 
@@ -364,6 +518,13 @@ internal class GroupActivity : ComponentActivity() {
             GroupCloudUrlPolicy.normalizeConfiguredUrl(request.serverUrl)
         } catch (error: IllegalArgumentException) {
             state.value = state.value.copy(message = error.message ?: "云端服务地址无效")
+            return
+        }
+        if (request is GroupCloudStartRequest.Create && entitlementStore.loadToken().isNullOrBlank()) {
+            hasEntitlementToken.value = false
+            entitlementError.value = null
+            showActivationDialog.value = true
+            state.value = state.value.copy(message = "创建云端或双模房间前请先输入激活码，队员凭 6 位邀请码可直接加入")
             return
         }
         val normalizedRequest = when (request) {
@@ -473,7 +634,17 @@ internal fun GroupScreen(
     logStatusHint: String? = null,
     onRefreshLogs: () -> Unit = {},
     onExportLogs: () -> Unit = {},
-    onCopyLogs: () -> Unit = {}
+    onCopyLogs: () -> Unit = {},
+    entitlementSummary: GroupEntitlementSummary? = null,
+    hasEntitlementToken: Boolean = false,
+    entitlementBusy: Boolean = false,
+    entitlementError: String? = null,
+    showActivationDialog: Boolean = false,
+    onOpenActivationDialog: () -> Unit = {},
+    onDismissActivationDialog: () -> Unit = {},
+    onRedeemActivationCode: (String, String) -> Unit = { _, _ -> },
+    onRefreshEntitlement: (String) -> Unit = {},
+    onClearEntitlement: () -> Unit = {}
 ) {
     var selectedMode by remember { mutableStateOf(GroupMode.LOCAL) }
     var activeTheme by remember(themeMode) { mutableStateOf(themeMode) }
@@ -483,6 +654,7 @@ internal fun GroupScreen(
     var showDeveloperSettings by remember { mutableStateOf(false) }
     var developerServerDraft by remember { mutableStateOf(initialServerUrl) }
     var developerServerError by remember { mutableStateOf<String?>(null) }
+    var activationCodeDraft by remember { mutableStateOf("") }
     var inviteInput by remember { mutableStateOf("") }
     var requireApproval by remember { mutableStateOf(true) }
     var confirmEnd by remember { mutableStateOf(false) }
@@ -521,6 +693,12 @@ internal fun GroupScreen(
     LaunchedEffect(isInSession) {
         if (!isInSession) {
             inRoomScrollState.scrollTo(0)
+        }
+    }
+
+    LaunchedEffect(showActivationDialog) {
+        if (!showActivationDialog) {
+            activationCodeDraft = ""
         }
     }
 
@@ -612,6 +790,12 @@ internal fun GroupScreen(
                                 onSaveNickname = onSaveNickname,
                                 inCall = isInSession,
                                 cloudVoiceActive = isCloudVoiceActive,
+                                entitlementSummary = entitlementSummary,
+                                hasEntitlementToken = hasEntitlementToken,
+                                entitlementBusy = entitlementBusy,
+                                onOpenActivationDialog = onOpenActivationDialog,
+                                onRefreshEntitlement = { onRefreshEntitlement(serverUrl) },
+                                onClearEntitlement = onClearEntitlement,
                                 themeMode = activeTheme,
                                 onSelectTheme = selectThemeAction,
                                 route = state.route,
@@ -662,7 +846,10 @@ internal fun GroupScreen(
                                     allowCustomServer = allowCustomServer,
                                     onOpenDeveloperSettings = openDeveloperSettingsAction,
                                     onStartLocal = onStart,
-                                    onStartNetwork = onStartNetwork
+                                    onStartNetwork = onStartNetwork,
+                                    entitlementSummary = entitlementSummary,
+                                    hasEntitlementToken = hasEntitlementToken,
+                                    onOpenActivationDialog = onOpenActivationDialog
                                 )
                             } else {
                                 GroupInRoomContent(
@@ -845,6 +1032,81 @@ internal fun GroupScreen(
                     onAction(GroupSessionEvent.EndRoom)
                 },
                 onDismiss = { confirmNetworkOwnerExit = false }
+            )
+        }
+
+        if (showActivationDialog) {
+            val validDraft = GroupActivationCodeValidator.isValid(activationCodeDraft)
+            AlertDialog(
+                onDismissRequest = {
+                    if (!entitlementBusy) {
+                        activationCodeDraft = ""
+                        onDismissActivationDialog()
+                    }
+                },
+                containerColor = colors.cardElevated,
+                title = {
+                    Text(
+                        text = if (hasEntitlementToken) "叠加或换绑激活码" else "输入云端对讲激活码",
+                        color = colors.textPrimary
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "本地直连永久免费。仅建房房主需要激活码，队员输入 6 位邀请码即可直接加入。",
+                            color = colors.textSecondary
+                        )
+                        OutlinedTextField(
+                            value = activationCodeDraft,
+                            onValueChange = { activationCodeDraft = it.take(24) },
+                            label = { Text("激活码（MOTO-XXXX-XXXX-XXXX）") },
+                            singleLine = true,
+                            enabled = !entitlementBusy,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("activation_code_input")
+                        )
+                        if (activationCodeDraft.isNotBlank() && !validDraft && entitlementError == null) {
+                            Text(
+                                text = "请粘贴完整激活码（自动兼容大小写与连字符）",
+                                color = colors.textMuted,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        entitlementError?.let {
+                            Text(
+                                text = it,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag("activation_code_error")
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { onRedeemActivationCode(activationCodeDraft, serverUrl) },
+                        enabled = !entitlementBusy && activationCodeDraft.isNotBlank(),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("activation_code_submit")
+                    ) {
+                        Text(if (entitlementBusy) "验证中…" else "确认激活")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            activationCodeDraft = ""
+                            onDismissActivationDialog()
+                        },
+                        enabled = !entitlementBusy,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("activation_code_cancel")
+                    ) { Text("取消") }
+                }
             )
         }
     }

@@ -321,6 +321,14 @@ internal sealed interface GroupCloudEvent {
         val reason: String,
         val message: String
     ) : GroupCloudEvent
+
+    data class QuotaWarning(
+        override val seq: Long,
+        override val revision: Long,
+        val warningType: String,
+        val remainingMinutes: Int,
+        val message: String
+    ) : GroupCloudEvent
 }
 
 internal data class CloudEventBatch(
@@ -659,9 +667,56 @@ internal object GroupCloudCodec {
                             message = item.optString("message", "网络房间已结束")
                         )
                     )
+                    "QUOTA_WARNING" -> add(
+                        GroupCloudEvent.QuotaWarning(
+                            seq = seq,
+                            revision = revision,
+                            warningType = item.optString("warningType", "QUOTA_LOW"),
+                            remainingMinutes = item.optInt("remainingMinutes", 0),
+                            message = item.optString("message", "云端对讲额度即将用尽")
+                        )
+                    )
                 }
             }
         }
         return CloudEventBatch(resync = resync, latestSeq = latestSeq, snapshot = snapshot, events = events)
+    }
+
+    fun parseEntitlementSummary(obj: JSONObject, codeMask: String? = null): GroupEntitlementSummary {
+        val nearest = if (obj.has("nearestExpiresAtMs") && !obj.isNull("nearestExpiresAtMs")) {
+            obj.getLong("nearestExpiresAtMs")
+        } else null
+        val furthest = if (obj.has("furthestExpiresAtMs") && !obj.isNull("furthestExpiresAtMs")) {
+            obj.getLong("furthestExpiresAtMs")
+        } else null
+        val remainingSeconds = obj.optLong("remainingSeconds", obj.optInt("remainingMinutes", 0) * 60L)
+        return GroupEntitlementSummary(
+            entitlementId = obj.getString("entitlementId"),
+            status = obj.optString("status", "ACTIVE"),
+            remainingSeconds = remainingSeconds,
+            remainingMinutes = obj.optInt("remainingMinutes", (remainingSeconds / 60L).toInt()),
+            totalMinutes = obj.optInt("totalMinutes", 0),
+            usedMinutes = obj.optInt("usedMinutes", 0),
+            maxMembers = obj.optInt("maxMembers", 0),
+            maxConcurrentRooms = obj.optInt("maxConcurrentRooms", 1),
+            maxSessionMinutes = obj.optInt("maxSessionMinutes", 120),
+            nearestExpiresAtMs = nearest,
+            furthestExpiresAtMs = furthest,
+            activeGrantCount = obj.optInt("activeGrantCount", 0),
+            codeMask = codeMask,
+            serverNowMs = obj.optLong("serverNowMs", System.currentTimeMillis())
+        )
+    }
+
+    fun parseEntitlementRedeemResult(obj: JSONObject): GroupEntitlementRedeemResult {
+        val mask = obj.optString("codeMask", "")
+        val summary = parseEntitlementSummary(obj.getJSONObject("entitlement"), codeMask = mask.takeIf { it.isNotBlank() })
+        return GroupEntitlementRedeemResult(
+            action = obj.optString("action", "ACTIVATED"),
+            rebound = obj.optBoolean("rebound", false),
+            entitlementToken = obj.getString("entitlementToken"),
+            codeMask = mask,
+            summary = summary
+        )
     }
 }

@@ -33,6 +33,10 @@ internal interface GroupCloudApi : Closeable {
     fun updateAudioAvailability(token: String, roomId: String, available: Boolean): GroupCloudSnapshotPayload
     fun pollEvents(token: String, roomId: String, afterSeq: Long, waitMs: Int): CloudEventBatch
     fun ackEvents(token: String, roomId: String, sequence: Long)
+    fun redeemActivationCode(code: String, deviceId: String, appVersion: String): GroupEntitlementRedeemResult =
+        throw UnsupportedOperationException("Entitlements not supported")
+    fun fetchEntitlementStatus(): GroupEntitlementSummary =
+        throw UnsupportedOperationException("Entitlements not supported")
     fun createHybridRoom(deviceId: String, runtimeId: String, nickname: String, requireApproval: Boolean): CloudAdmittedSession =
         throw UnsupportedOperationException("HYBRID not supported")
     fun setRole(token: String, roomId: String, targetDeviceId: String, role: GroupRole, expectedRevision: Long): GroupCloudSnapshotPayload =

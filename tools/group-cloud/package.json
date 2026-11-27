@@ -9,6 +9,6 @@
   "scripts": {
     "start": "node server.mjs",
     "dev-config": "node dev-config.mjs",
-    "test": "node --test server.test.mjs"
+    "test": "node --test server.test.mjs entitlement.test.mjs"
   }
 }

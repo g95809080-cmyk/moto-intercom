@@ -532,6 +532,11 @@ internal class GroupHybridSessionOrchestrator(
                             finish(item.message, flush = false, terminal = mapTerminalReason(item.reason))
                             return
                         }
+                        is GroupCloudEvent.QuotaWarning -> {
+                            if (item.message.isNotBlank()) {
+                                message = item.message
+                            }
+                        }
                     }
                 }
                 if (ackSeq > latestSeq) {
@@ -2599,7 +2604,15 @@ internal class GroupHybridSessionOrchestrator(
             finish(event.error.userMessage, flush = false, terminal = mapErrorToTerminal(event.error))
             return
         }
-        if (event.action == "rtc_token") retryRtcTokenRefresh() else message = event.error.userMessage
+        if (event.action == "rtc_token") {
+            if (event.error.code in QUOTA_TERMINAL_CODES) {
+                finish(event.error.userMessage, flush = false, terminal = GroupTerminalReason.FAILED)
+            } else {
+                retryRtcTokenRefresh()
+            }
+        } else {
+            message = event.error.userMessage
+        }
     }
 
     private fun handleLeave() {
@@ -2966,5 +2979,14 @@ internal class GroupHybridSessionOrchestrator(
         private const val DEFAULT_P2P_GO_ADDRESS = "192.168.49.1"
         private const val LOCAL_STATUS_HEARTBEAT_MS = 10_000L
         private val TERMINAL_CODES = setOf("REMOVED", "ROOM_ENDED", "RECOVERY_EXPIRED", "UNAUTHORIZED")
+        private val QUOTA_TERMINAL_CODES = setOf(
+            "QUOTA_EXHAUSTED",
+            "ENTITLEMENT_EXPIRED",
+            "ENTITLEMENT_REVOKED",
+            "ENTITLEMENT_INVALID",
+            "ENTITLEMENT_REQUIRED",
+            "ENTITLEMENT_DEVICE_MISMATCH",
+            "GLOBAL_QUOTA_EXHAUSTED"
+        )
     }
 }

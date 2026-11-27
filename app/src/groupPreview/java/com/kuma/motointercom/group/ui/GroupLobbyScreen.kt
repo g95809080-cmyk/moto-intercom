@@ -36,6 +36,7 @@ import com.kuma.motointercom.R
 import com.kuma.motointercom.group.GroupMode
 import com.kuma.motointercom.group.cloud.GroupCloudInviteCode
 import com.kuma.motointercom.group.cloud.GroupCloudStartRequest
+import com.kuma.motointercom.group.cloud.GroupEntitlementSummary
 import com.kuma.motointercom.showDeveloperCloudSettings
 
 @Composable
@@ -58,7 +59,10 @@ internal fun GroupLobbyContent(
     allowCustomServer: Boolean,
     onOpenDeveloperSettings: () -> Unit,
     onStartLocal: (String?) -> Unit,
-    onStartNetwork: (GroupCloudStartRequest) -> Unit
+    onStartNetwork: (GroupCloudStartRequest) -> Unit,
+    entitlementSummary: GroupEntitlementSummary? = null,
+    hasEntitlementToken: Boolean = false,
+    onOpenActivationDialog: () -> Unit = {}
 ) {
     val colors = GroupGlassPalette.current
     val isCloudMode = selectedMode != GroupMode.LOCAL
@@ -215,13 +219,47 @@ internal fun GroupLobbyContent(
                 Text(
                     text = "创建新房间",
                     style = GroupGlassTypography.seatTitle,
-                    color = colors.textPrimary
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
-                Text(
-                    text = capacityCaption,
-                    style = GroupGlassTypography.badge,
-                    color = colors.textMuted
-                )
+                Spacer(Modifier.width(8.dp))
+                if (isCloudMode) {
+                    val entitlementLabel = when {
+                        !hasEntitlementToken -> "未激活 · 激活"
+                        entitlementSummary?.isUsable == true ->
+                            "剩 ${entitlementSummary.remainingMinutes}分 · ${entitlementSummary.maxMembers}人"
+                        entitlementSummary != null -> "额度已尽 · 续码"
+                        else -> "已激活 · 管理"
+                    }
+                    GlassPillChip(
+                        label = entitlementLabel,
+                        containerColor = if (hasEntitlementToken && entitlementSummary?.isUsable == true) {
+                            colors.speakingSurface
+                        } else {
+                            colors.glass
+                        },
+                        contentColor = if (hasEntitlementToken && entitlementSummary?.isUsable == true) {
+                            colors.textLimeAccent
+                        } else {
+                            colors.textSecondary
+                        },
+                        borderColor = if (hasEntitlementToken && entitlementSummary?.isUsable == true) {
+                            colors.limeActiveBorder.copy(alpha = 0.7f)
+                        } else {
+                            colors.hairlineBorder
+                        },
+                        onClick = onOpenActivationDialog,
+                        modifier = Modifier.testTag("entitlement_banner")
+                    )
+                } else {
+                    Text(
+                        text = capacityCaption,
+                        style = GroupGlassTypography.badge,
+                        color = colors.textMuted
+                    )
+                }
             }
             if (isCloudMode) {
                 Row(

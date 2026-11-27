@@ -48,21 +48,24 @@ import com.kuma.motointercom.MIN_VOX_SENSITIVITY
 import com.kuma.motointercom.MotoComThemeMode
 import com.kuma.motointercom.group.GroupMode
 import com.kuma.motointercom.group.cloud.GroupCloudPreferences
+import com.kuma.motointercom.group.cloud.GroupEntitlementSummary
 import com.kuma.motointercom.showDeveloperCloudSettings
 import java.io.File
 import kotlin.math.roundToInt
 
 private val AUTH_HEADER_NAME_REGEX = Regex(
-    """(?i)(?:"(?:proxy-)?authorization"|(?<![A-Za-z0-9_-])(?:proxy-)?authorization(?![A-Za-z0-9_-]))"""
+    """(?i)(?:"(?:(?:proxy-)?authorization|x-moto-entitlement)"|(?<![A-Za-z0-9_-])(?:(?:proxy-)?authorization|x-moto-entitlement)(?![A-Za-z0-9_-]))"""
 )
 private val STANDALONE_AUTH_SCHEME_REGEX = Regex(
     """(?i)\b(?:digest|oauth|aws4-hmac-sha256|hmac[A-Za-z0-9_-]*)(?![A-Za-z0-9_-])"""
 )
 private val BEARER_KEYWORD_REGEX = Regex("""(?i)\bbearer\b""")
 private val SENSITIVE_KEY_REGEX = Regex(
-    """(?i)(?:"(?:[A-Za-z0-9_.-]*(?:passphrase|password|passwd|secret|token|credential|signature|cookie|cnonce|nonce|opaque|api_?key|access_?key|private_?key|invite(?:_?code)?|room[_ -]?code|join[_ -]?code|local[_ -]?code|group[_ -]?code|pair[_ -]?code|auth[_ -]?code|ice-pwd|ice-ufrag)|code|pin|psk)"|\b(?:[A-Za-z0-9_.-]*(?:passphrase|password|passwd|secret|token|credential|signature|cookie|cnonce|nonce|opaque|api_?key|access_?key|private_?key|invite(?:_?code)?|room[_ -]?code|join[_ -]?code|local[_ -]?code|group[_ -]?code|pair[_ -]?code|auth[_ -]?code|ice-pwd|ice-ufrag)|code|pin|psk)\b)"""
+    """(?i)(?:"(?:[A-Za-z0-9_.-]*(?:passphrase|password|passwd|secret|token|credential|signature|cookie|cnonce|nonce|opaque|api_?key|access_?key|private_?key|entitlement|activation[_ -]?code|invite(?:_?code)?|room[_ -]?code|join[_ -]?code|local[_ -]?code|group[_ -]?code|pair[_ -]?code|auth[_ -]?code|ice-pwd|ice-ufrag)|code|pin|psk)"|\b(?:[A-Za-z0-9_.-]*(?:passphrase|password|passwd|secret|token|credential|signature|cookie|cnonce|nonce|opaque|api_?key|access_?key|private_?key|entitlement|activation[_ -]?code|invite(?:_?code)?|room[_ -]?code|join[_ -]?code|local[_ -]?code|group[_ -]?code|pair[_ -]?code|auth[_ -]?code|ice-pwd|ice-ufrag)|code|pin|psk)\b)"""
 )
 private val UFRAG_KEYWORD_REGEX = Regex("""(?i)\bufrag\b""")
+private val ACTIVATION_CODE_REGEX = Regex("""(?i)\bMOTO-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b""")
+private val ENTITLEMENT_TOKEN_REGEX = Regex("""\bmte_[A-Za-z0-9_-]{16,}\b""")
 private val SIX_DIGIT_STANDALONE_REGEX = Regex("(?<![0-9])[0-9]{6}(?![0-9])")
 
 private fun isHttpTchar(ch: Char): Boolean =
@@ -516,7 +519,9 @@ internal fun redactDiagnosticLine(raw: String): String {
     val maskedBearer = redactStandaloneBearer(maskedStandaloneAuth)
     val maskedKeys = redactSensitiveKeyValues(maskedBearer)
     val maskedUfrag = redactUfrag(maskedKeys)
-    return SIX_DIGIT_STANDALONE_REGEX.replace(maskedUfrag, "******")
+    val maskedActivation = ACTIVATION_CODE_REGEX.replace(maskedUfrag, "[REDACTED]")
+    val maskedEntToken = ENTITLEMENT_TOKEN_REGEX.replace(maskedActivation, "[REDACTED]")
+    return SIX_DIGIT_STANDALONE_REGEX.replace(maskedEntToken, "******")
 }
 
 internal fun redactDiagnosticLines(lines: List<String>): String =
@@ -566,6 +571,12 @@ internal fun GroupSettingsContent(
     onSaveNickname: (String) -> Unit,
     inCall: Boolean,
     cloudVoiceActive: Boolean = false,
+    entitlementSummary: GroupEntitlementSummary? = null,
+    hasEntitlementToken: Boolean = false,
+    entitlementBusy: Boolean = false,
+    onOpenActivationDialog: () -> Unit = {},
+    onRefreshEntitlement: () -> Unit = {},
+    onClearEntitlement: () -> Unit = {},
     themeMode: MotoComThemeMode,
     onSelectTheme: (MotoComThemeMode) -> Unit,
     route: AudioRouteSelection,
@@ -660,6 +671,90 @@ internal fun GroupSettingsContent(
                 minHeight = 48.dp,
                 modifier = Modifier.testTag("settings_nickname_save")
             )
+        }
+    }
+
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_entitlement_card")
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "云端对讲激活码",
+                style = GroupGlassTypography.seatTitle,
+                color = colors.textPrimary
+            )
+            val statusLabel = when {
+                !hasEntitlementToken -> "未激活"
+                entitlementSummary?.isUsable == true -> "已激活"
+                else -> "额度不可用"
+            }
+            GlassPillChip(
+                label = statusLabel,
+                containerColor = if (hasEntitlementToken && entitlementSummary?.isUsable == true) {
+                    colors.speakingSurface
+                } else {
+                    colors.chipNeutral
+                },
+                contentColor = if (hasEntitlementToken && entitlementSummary?.isUsable == true) {
+                    colors.textLimeAccent
+                } else {
+                    colors.textSecondary
+                }
+            )
+        }
+        val detailText = when {
+            !hasEntitlementToken -> "创建网络或双模房间需要激活码，通过 6 位邀请码入群免激活。"
+            entitlementSummary == null -> "已保存激活凭证，点击刷新查看最新剩余人·分钟。"
+            entitlementSummary.isUsable -> buildString {
+                append("剩余 ${entitlementSummary.remainingMinutes} 人·分钟 · 限 ${entitlementSummary.maxMembers} 人 · 剩 ${entitlementSummary.remainingDays()} 天")
+                entitlementSummary.codeMask?.let { append("\n当前码 $it") }
+            }
+            else -> "当前额度已用尽或过期，可兑换新激活码继续建房。"
+        }
+        Text(
+            text = detailText,
+            style = GroupGlassTypography.compact,
+            color = colors.textSecondary,
+            modifier = Modifier.testTag("settings_entitlement_summary")
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            GlassActionButton(
+                label = if (hasEntitlementToken) "叠加新码" else "输入激活码",
+                onClick = onOpenActivationDialog,
+                enabled = !entitlementBusy,
+                variant = GlassCtaVariant.OBSIDIAN,
+                minHeight = 48.dp,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("settings_entitlement_redeem")
+            )
+            if (hasEntitlementToken) {
+                GlassActionButton(
+                    label = if (entitlementBusy) "同步中…" else "刷新",
+                    onClick = onRefreshEntitlement,
+                    enabled = !entitlementBusy,
+                    variant = GlassCtaVariant.SECONDARY,
+                    minHeight = 48.dp,
+                    modifier = Modifier.testTag("settings_entitlement_refresh")
+                )
+                GlassActionButton(
+                    label = "清除",
+                    onClick = onClearEntitlement,
+                    enabled = !inCall && !entitlementBusy,
+                    variant = GlassCtaVariant.SECONDARY,
+                    minHeight = 48.dp,
+                    modifier = Modifier.testTag("settings_entitlement_clear")
+                )
+            }
         }
     }
 
