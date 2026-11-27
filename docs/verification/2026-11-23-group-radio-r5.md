@@ -183,10 +183,15 @@ Next gate allowed
 ## 11 月 26 日控制面吊销修复线上同步与 R5 Liquid Glass UI 落地
 
 - **云服务器控制面同步（`cc8a375`）**：在零活跃连接与零活跃房间窗口备份旧 `/srv/group-cloud/room-store.mjs` 至 `/var/backups/moto-group-cloud/before-cc8a375/room-store.mjs`，同步新版 `room-store.mjs`（SHA-256 `a2e00095ac931838261a970f97a1a7994b0995074ca519b81f2a03fafd85333c`，`root:groupcloud 0640`，保留 `/srv/group-cloud/.local` 不动），6 个运行文件 SHA-256 与本地仓库逐一一致。重启 `moto-group-cloud.service` 后确认 `active`（`openApiBan: true`），公网严格 TLS `GET https://group.toneride.top/healthz` 返回 `200`（`openApiRevocationEnforced: true`），完整公网 HTTPS 双模冒烟（建房 -> `LOCAL -> CLOUD` -> `CLOUD -> LOCAL` 真实火山 OpenAPI `BanRoomUser` 吊销 -> 解散）通过并重置为空房间干净状态。
-- **R5 Liquid Glass UI 落地（未提交工作区，主线 `app/src/main/` 零改动）**：
+- **R5 Liquid Glass UI 落地（功能提交 `f144b6e`，主线 `app/src/main/` 零改动）**：
   - 严格隔离在 `app/src/groupPreview/`、`app/src/groupPreviewCommon/res/` 与 `app/src/testGroupPreview/`：`app/build.gradle.kts` 为 `groupPreview` 与 `groupPreviewRelease` 同时注册公共资源目录 `src/groupPreviewCommon/res`（保留两变体各自独立的网络安全配置），合入头盔主视觉资源 `drawable-nodpi/group_helmet_hero.png`。
   - 新增 `group/ui/` 模块落地全部 8 套液态玻璃界面与状态（Daylight / NightRide 双主题与 API ≤ 34 系统栏配色同步、大厅三模式切换与含真实 `innerTextField()` 且兼容 LTR/RTL 触摸坐标定位的 6 位分段入房码、本地/双模 2×2 席位玻璃网格、云端兜底与私聊夜航态势、50 人网络语音席与成员列表、根部双层全屏遮罩悬浮玻璃底部面板 `GlassBottomSheetOverlay` 承载音频通路/VOX 与按 `(deviceId, incarnation)` 锁定的防误操作成员治理、系统设置含通话中昵称锁定与音频路由/VOX 灵敏度串行持久化及实时下发、日志诊断绑定 `STARTED` 生命周期的 2 秒刷新与覆盖 RFC 7616 `Digest`/`username*`/`HMAC-SHA256` 的展示/复制/导出三路统一脱敏）。
   - 回归验证全部通过：`:app:testGroupPreviewUnitTest` **42 套件 / 288 项** 0 失败 0 跳过（含 `GroupGlassUiTest` 18 项与全部既有 270 项）；`:app:testGroupPreviewReleaseUnitTest` **1/1** 通过；`lintGroupPreview` 与 `lintGroupPreviewRelease` 均为 **0 错误 / 99 警告**（本次新增与改动的全部 Kotlin 源文件 **0 错误 / 0 警告 / 0 提示**，`app/build.gradle.kts` 仅保留既有 8 条依赖/targetSdk 基线警告）；`assembleGroupPreview` 与 `assembleGroupPreviewRelease` 通过，release APK 确认 `debuggable=false`、V3 正式分发证书指纹 `26833c0bb88a8754b7d7ee0431adb2707a1fb50ef730d8087bbba99eb328caca`，且 `aapt2 dump resources` 确认 `drawable/group_helmet_hero` 与 `xml/group_preview_network_security_config` 均已打入。
+  - **独立只读终审**：经多轮复审收口（脱敏全量线性迭代扫描/4096 截断防泄漏/前缀保留、VOX 冷启动非阻塞水合/建房状态同步/建房前预览即时生效/生产工厂直测）后获得 **`APPROVED`（P0 0 / P1 0 / P2 0）**。
+- **11 月 27 日 `preview.8` 正式签名发布包（Source `f144b6e593d4366027ae030e3e1fadc2273c6fdc`）**：
+  - **交付产物**：`C:/Users/Administrator/Documents/摩托对讲机/output/motocom-group-2.3.0-r5.preview.8-822925b3.apk`（`119,835,738` bytes，SHA-256 `822925b3e7bcff3b7023d8945d53735e1ec4d94cf7f5726322c3b4678e56064a`，同目录含 `.sha256`）。
+  - **包身份与核验**：`com.kuma.motointercom.group.preview` / `2.3.0-r5.preview.8+f144b6e` / `versionCode = 14`；`apkanalyzer manifest debuggable` 为 `false`，`zipalign -c -P 16 4` 通过，`apksigner verify` v1/v2/v3 通过且 V3 证书主体为 `CN=MotoCom Distribution, OU=Mobile, O=ToneRide, L=Shanghai, ST=Shanghai, C=CN`（SHA-256 `26833c0bb88a8754b7d7ee0431adb2707a1fb50ef730d8087bbba99eb328caca`）；`aapt2` 确认 `drawable/group_helmet_hero` 与 `xml/group_preview_network_security_config`（`cleartextTrafficPermitted=false`）均已打入；`GroupReleaseCloudPolicyTest` **1/1** 与 `lintGroupPreviewRelease`（0 错误 / 99 警告）通过。
+  - **升级口径**：沿用正式分发证书，已安装正式签名版 `preview.7`（`f3d0183d`）的设备可直接覆盖升级；仍安装旧调试签名预览包的设备需先卸载后安装。本次打包未连接物理机 ADB，真机实测仍列于下方门禁。
 
 ## 仍待完成的物理设备门禁（NOT RUN）
 
