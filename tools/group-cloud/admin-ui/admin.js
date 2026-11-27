@@ -3,6 +3,8 @@
 
   const SESSION_TOKEN_KEY = 'motocom_admin_session_token';
   const THEME_STORAGE_KEY = 'motocom_admin_theme';
+  const PORTAL_SSO_TOKEN = 'portal-sso';
+  const PORTAL_ORIGIN = 'https://entry.toneride.top';
   const PAGE_SIZE = 25;
   const AUTO_REFRESH_MS = 15_000;
   const VOLC_FREE_LIMIT_MINUTES = 10_000;
@@ -117,6 +119,11 @@
 
   function clearChildren(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function isPortalManagedHost() {
+    const { protocol, hostname } = window.location;
+    return protocol === 'https:' && hostname.endsWith('.toneride.top');
   }
 
   function createIdempotencyKey(prefix) {
@@ -293,6 +300,15 @@
         code: payload?.code || `HTTP_${response.status}`
       });
       if (response.status === 401 && !overrideToken) {
+        if (state.token === PORTAL_SSO_TOKEN) {
+          stopAutoRefresh();
+          state.token = '';
+          clearSensitiveDom();
+          window.location.replace(
+            `${PORTAL_ORIGIN}/login?next=${encodeURIComponent(window.location.href)}`
+          );
+          throw err;
+        }
         lockSession('管理员会话已失效，请重新输入 adminToken');
       }
       throw err;
@@ -1181,7 +1197,16 @@
     });
     $('login-theme-btn').addEventListener('click', toggleTheme);
     $('theme-toggle-btn').addEventListener('click', toggleTheme);
-    $('logout-btn').addEventListener('click', () => lockSession());
+    $('logout-btn').addEventListener('click', () => {
+      if (state.token === PORTAL_SSO_TOKEN) {
+        stopAutoRefresh();
+        state.token = '';
+        clearSensitiveDom();
+        window.location.replace(`${PORTAL_ORIGIN}/logout`);
+        return;
+      }
+      lockSession();
+    });
     $('refresh-btn').addEventListener('click', () => refreshCurrentView());
     $('rooms-refresh-btn').addEventListener('click', () => refreshCurrentView());
     $('open-mint-btn').addEventListener('click', openMintModal);
@@ -1494,6 +1519,25 @@
     }
     applyTheme(savedTheme);
     bindEvents();
+
+    if (isPortalManagedHost()) {
+      // 统一入口由网关注入真实管理令牌，浏览器仅携带占位值。
+      try {
+        const overview = await apiRequest('GET', '/admin/v1/overview', {
+          overrideToken: PORTAL_SSO_TOKEN
+        });
+        state.token = PORTAL_SSO_TOKEN;
+        $('logout-btn').textContent = '退出统一入口';
+        $('login-view').classList.add('hidden');
+        $('app-view').classList.remove('hidden');
+        renderOverview(overview);
+        $('sync-status').textContent = `上次同步 ${formatTimeShanghai(Date.now()).slice(11)}`;
+        startAutoRefresh();
+        return;
+      } catch {
+        // 保留 adminToken 登录，作为未接入统一入口时的兜底。
+      }
+    }
 
     let sessionToken = '';
     try {
