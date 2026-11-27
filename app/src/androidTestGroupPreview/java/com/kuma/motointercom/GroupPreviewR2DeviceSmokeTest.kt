@@ -33,7 +33,7 @@ class GroupPreviewR2DeviceSmokeTest {
 
         launchGroupActivity()
         waitForCondition(15_000) { exists(hasTag("group_create")) }
-        compose.onNodeWithText("摩声群组 · R5 预览").assertIsDisplayed()
+        compose.onNodeWithText("随时组队开聊").assertIsDisplayed()
         compose.onNodeWithTag("group_join").assertIsNotEnabled()
         compose.onNodeWithTag("group_code_input").performScrollTo().performTextInput("12345")
         compose.onNodeWithTag("group_join").assertIsNotEnabled()
@@ -47,7 +47,7 @@ class GroupPreviewR2DeviceSmokeTest {
 
         val firstCode = readRoomCode()
         compose.onNodeWithText("群主 · 我", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("公共频道 · 频道内 1 人 · 全队 1/4 人").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("成员列表（1/4）").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("group_voice_status").performScrollTo().assertTextContains("当前频道仅你 1 人", substring = true)
         compose.onNodeWithTag("channel_public").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("channel_rider").performScrollTo().assertIsEnabled()
@@ -55,19 +55,19 @@ class GroupPreviewR2DeviceSmokeTest {
         assertOngoingNotification("摩声群组 · 公共频道", forbiddenCode = firstCode)
 
         compose.onNodeWithTag("channel_rider").performScrollTo().performClick()
-        waitForCondition(10_000) { exists(hasText("领队频道 · 频道内 1 人 · 全队 1/4 人")) }
-        compose.onNodeWithText("✓ 领队频道（当前）").performScrollTo().assertIsDisplayed()
+        waitForCondition(10_000) { exists(hasTag("channel_rider") and !isEnabled()) }
+        compose.onNodeWithText("频道：领队频道", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("channel_public").performScrollTo().assertIsEnabled()
         assertOngoingNotification("摩声群组 · 领队频道", forbiddenCode = firstCode)
 
         compose.onNodeWithTag("rider_includes_formation").performScrollTo().performClick()
-        waitForCondition(10_000) { exists(hasText("已关闭：仅群主与骑行官可进入领队频道")) }
-        compose.onNodeWithText("领队频道 · 频道内 1 人 · 全队 1/4 人").performScrollTo().assertIsDisplayed()
+        waitForCondition(10_000) { exists(hasTag("rider_includes_formation") and isOff()) }
+        compose.onNodeWithText("频道：领队频道", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("rider_includes_formation").performScrollTo().performClick()
-        waitForCondition(10_000) { exists(hasText("已开启：头车与尾车可进入领队频道")) }
+        waitForCondition(10_000) { exists(hasTag("rider_includes_formation") and isOn()) }
 
         compose.onNodeWithTag("channel_public").performScrollTo().performClick()
-        waitForCondition(10_000) { exists(hasText("公共频道 · 频道内 1 人 · 全队 1/4 人")) }
+        waitForCondition(10_000) { exists(hasTag("channel_public") and !isEnabled()) }
         assertOngoingNotification("摩声群组 · 公共频道", forbiddenCode = firstCode)
 
         compose.onNodeWithText("收起对讲").performScrollTo().performClick()
@@ -76,7 +76,7 @@ class GroupPreviewR2DeviceSmokeTest {
 
         launchGroupActivity()
         waitForCondition(15_000) { exists(hasText("房间码 $firstCode")) }
-        compose.onNodeWithText("公共频道 · 频道内 1 人 · 全队 1/4 人").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("成员列表（1/4）").performScrollTo().assertIsDisplayed()
 
         compose.onNodeWithTag("group_leave").performScrollTo().performClick()
         waitForCondition(5_000) { exists(hasText("结束全队对讲？")) }

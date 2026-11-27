@@ -42,11 +42,11 @@ class GroupPreviewR4DeviceSmokeTest {
         try {
             launchGroupActivity()
             waitForCondition(15_000) { exists(hasTag("mode_network")) }
-            compose.onNodeWithText("摩声群组 · R5 预览").assertIsDisplayed()
+            compose.onNodeWithText("随时组队开聊").assertIsDisplayed()
 
             compose.onNodeWithTag("mode_network").performScrollTo().performClick()
             waitForCondition(5_000) { exists(hasTag("network_create")) }
-            compose.onNodeWithText("网络群组 · R5 预览").assertIsDisplayed()
+            compose.onNodeWithText("云端公共频道 · 最多 50 人").assertIsDisplayed()
             compose.onNodeWithTag("network_join").performScrollTo().assertIsNotEnabled()
             compose.onNodeWithTag("network_server_input").assertDoesNotExist()
             compose.onNodeWithTag("developer_settings").performScrollTo().performClick()

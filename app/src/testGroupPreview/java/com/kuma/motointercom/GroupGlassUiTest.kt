@@ -20,12 +20,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -39,8 +41,10 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -1232,6 +1236,694 @@ class GroupGlassUiTest {
         } finally {
             controller.pause().stop().destroy()
         }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w420dp-h900dp")
+    fun lobbyRemovesCollapseButtonAndPinsBottomAudioBar() {
+        compose.setContent {
+            Box(modifier = Modifier.width(412.dp).height(900.dp)) {
+                GroupScreen(
+                    state = GroupServiceState(
+                        snapshot = null,
+                        busy = false,
+                        route = AudioRouteSelection.BLUETOOTH,
+                        vox = true
+                    ),
+                    onStart = {},
+                    onAction = {},
+                    onRoute = {},
+                    onVox = {},
+                    onBack = {},
+                    onCopy = {},
+                    onSettings = {}
+                )
+            }
+        }
+
+        compose.onNodeWithText("收起对讲").assertDoesNotExist()
+        compose.onNodeWithContentDescription("摩声骑行头盔").assertIsDisplayed()
+        compose.onNodeWithTag("lobby_audio_quick_bar").performScrollTo().assertIsDisplayed()
+        val barTop = compose.onNodeWithTag("lobby_audio_quick_bar").fetchSemanticsNode().boundsInRoot.top
+        val createBottom = compose.onNodeWithTag("group_join").fetchSemanticsNode().boundsInRoot.bottom
+        assertTrue(
+            "Lobby audio bar should anchor below cards near bottom of 900dp viewport (barTop=$barTop, createBottom=$createBottom)",
+            barTop > createBottom
+        )
+        compose.onNodeWithTag("lobby_audio_quick_bar").performClick()
+        compose.onNodeWithTag("settings_screen").assertIsDisplayed()
+    }
+
+    @Test
+    fun roomCodeHeroCardUnifiesAndTogglesAcrossModes() {
+        val ownerId = java.util.UUID(0, 101).toString()
+        val peerId = java.util.UUID(0, 102).toString()
+        val roomKey = GroupRoomKey(java.util.UUID(0, 110).toString(), java.util.UUID(0, 111).toString())
+        val ownerLease = GroupMemberLease(ownerId, java.util.UUID(0, 111).toString(), 1, 1)
+        val peerLease = GroupMemberLease(peerId, java.util.UUID(0, 112).toString(), 2, 1)
+        val roster = com.kuma.motointercom.group.GroupRoster(
+            key = roomKey,
+            hostId = ownerId,
+            publication = 1,
+            ended = false,
+            members = listOf(
+                GroupMember(ownerLease, role = GroupRole.OWNER),
+                GroupMember(peerLease, role = GroupRole.HEAD)
+            ),
+            links = emptyList(),
+            names = mapOf(ownerId to "老K", peerId to "头车阿明")
+        )
+        val participation = GroupParticipation().begin(roomKey)
+        var copied = ""
+        var currentMode by mutableStateOf(GroupMode.LOCAL)
+        compose.setContent {
+            val snap = when (currentMode) {
+                GroupMode.LOCAL -> GroupSessionSnapshot(
+                    phase = GroupPhase.IN_ROOM,
+                    operation = null,
+                    networkAttempt = null,
+                    view = roster,
+                    local = ownerLease,
+                    participation = participation,
+                    code = GroupJoinCode("849216"),
+                    host = true,
+                    message = "",
+                    matches = emptyList(),
+                    names = roster.names,
+                    removed = emptySet(),
+                    mode = GroupMode.LOCAL
+                )
+                GroupMode.HYBRID -> GroupSessionSnapshot(
+                    phase = GroupPhase.IN_ROOM,
+                    operation = null,
+                    networkAttempt = null,
+                    view = roster,
+                    local = ownerLease,
+                    participation = participation,
+                    code = null,
+                    host = true,
+                    message = "",
+                    matches = emptyList(),
+                    names = roster.names,
+                    removed = emptySet(),
+                    mode = GroupMode.HYBRID,
+                    inviteCode = "527904",
+                    activeTransport = GroupTransport.LOCAL
+                )
+                GroupMode.NETWORK -> GroupSessionSnapshot(
+                    phase = GroupPhase.IN_ROOM,
+                    operation = null,
+                    networkAttempt = null,
+                    view = roster,
+                    local = ownerLease,
+                    participation = participation,
+                    code = null,
+                    host = true,
+                    message = "",
+                    matches = emptyList(),
+                    names = roster.names,
+                    removed = emptySet(),
+                    mode = GroupMode.NETWORK,
+                    inviteCode = "618390"
+                )
+            }
+            Box(modifier = Modifier.width(412.dp).height(900.dp)) {
+                GroupScreen(
+                    state = GroupServiceState(snap, busy = true),
+                    onStart = {},
+                    onAction = {},
+                    onRoute = {},
+                    onVox = {},
+                    onBack = {},
+                    onCopy = { copied = it },
+                    onSettings = {}
+                )
+            }
+        }
+
+        // LOCAL mode: unified 3+3 hero code + collapsible + inline private shortcut
+        compose.onNodeWithTag("local_room_code").assertIsDisplayed().assertTextContains("房间码 849216")
+        compose.onNodeWithTag("network_rotate_invite").assertDoesNotExist()
+        compose.onNodeWithTag("private_call_$peerId").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("member_role_$peerId").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("room_code_copy").performScrollTo().performClick()
+        assertEquals("849216", copied)
+        compose.onNodeWithTag("room_code_toggle").performScrollTo().performClick()
+        compose.onNodeWithTag("local_room_code").assertIsDisplayed().assertTextContains("房间码 849216")
+
+        // HYBRID mode: same slot, invite code + rotate + inline private shortcut
+        currentMode = GroupMode.HYBRID
+        compose.waitForIdle()
+        compose.onNodeWithTag("network_invite_code").assertIsDisplayed().assertTextContains("527904")
+        compose.onNodeWithTag("network_rotate_invite").assertIsDisplayed()
+        compose.onNodeWithTag("private_call_$peerId").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("room_code_copy").performScrollTo().performClick()
+        assertEquals("527904", copied)
+
+        // NETWORK mode: same slot, invite code + rotate, NO private shortcut, bottom dock pinned
+        currentMode = GroupMode.NETWORK
+        compose.waitForIdle()
+        compose.onNodeWithTag("network_invite_code").assertIsDisplayed().assertTextContains("618390")
+        compose.onNodeWithTag("network_rotate_invite").assertIsDisplayed()
+        compose.onNodeWithTag("private_call_$peerId").assertDoesNotExist()
+        compose.onNodeWithTag("group_leave").performScrollTo().assertIsDisplayed()
+        val dockBottom = compose.onNodeWithTag("group_leave").fetchSemanticsNode().boundsInRoot.bottom
+        val listBottom = compose.onNodeWithTag("group_member_count").fetchSemanticsNode().boundsInRoot.bottom
+        assertTrue("Bottom riding dock must stay below member list (dockBottom=$dockBottom, listBottom=$listBottom)", dockBottom > listBottom)
+    }
+
+    @Test
+    fun hybridCloudDockHidesLocalVoxAndSurvivesNarrowLargeFont() {
+        val ownerId = java.util.UUID(0, 201).toString()
+        val peerId = java.util.UUID(0, 202).toString()
+        val roomKey = GroupRoomKey(java.util.UUID(0, 210).toString(), java.util.UUID(0, 211).toString())
+        val ownerLease = GroupMemberLease(ownerId, java.util.UUID(0, 211).toString(), 1, 1)
+        val peerLease = GroupMemberLease(peerId, java.util.UUID(0, 212).toString(), 2, 1)
+        val roster = com.kuma.motointercom.group.GroupRoster(
+            key = roomKey,
+            hostId = ownerId,
+            publication = 1,
+            ended = false,
+            members = listOf(
+                GroupMember(ownerLease, role = GroupRole.OWNER),
+                GroupMember(peerLease, role = GroupRole.HEAD)
+            ),
+            links = emptyList(),
+            names = mapOf(ownerId to "老K", peerId to "头车阿明")
+        )
+        val hybridCloudSnap = GroupSessionSnapshot(
+            phase = GroupPhase.IN_ROOM,
+            operation = null,
+            networkAttempt = null,
+            view = roster,
+            local = ownerLease,
+            participation = GroupParticipation().begin(roomKey),
+            code = null,
+            host = true,
+            message = "",
+            matches = emptyList(),
+            names = roster.names,
+            removed = emptySet(),
+            mode = GroupMode.HYBRID,
+            inviteCode = "527904",
+            activeTransport = GroupTransport.CLOUD,
+            activeSpeakerIds = setOf(peerId)
+        )
+
+        compose.setContent {
+            val baseDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1.5f)) {
+                Box(modifier = Modifier.width(320.dp).height(760.dp)) {
+                    GroupScreen(
+                        state = GroupServiceState(
+                            snapshot = hybridCloudSnap,
+                            busy = true,
+                            route = AudioRouteSelection.BLUETOOTH,
+                            vox = true
+                        ),
+                        onStart = {},
+                        onAction = {},
+                        onRoute = {},
+                        onVox = {},
+                        onBack = {},
+                        onCopy = {},
+                        onSettings = {}
+                    )
+                }
+            }
+        }
+
+        // P1-1: Hybrid CLOUD must NOT report VOX active even when local vox preference is true
+        compose.onNodeWithTag("open_audio_sheet").performScrollTo().assertTextContains("云端直通", substring = true)
+        compose.onNodeWithTag("group_mic_toggle").performScrollTo().assertTextContains("麦克风开", substring = true)
+        compose.onNodeWithText("声控已开").assertDoesNotExist()
+        compose.onNodeWithText("VOX 自动开麦").assertDoesNotExist()
+
+        // P1-2: On 320dp + 1.5x fontScale, Dock mic CTA stacks full-width so icon & label stay legible
+        val micBounds = compose.onNodeWithTag("group_mic_toggle").fetchSemanticsNode().boundsInRoot
+        val density = compose.density.density
+        assertTrue(
+            "Primary mic button must retain ample width on 320dp@1.5x (widthDp=${micBounds.width / density})",
+            micBounds.width / density >= 200f
+        )
+
+        // P2-1: Collapsed cloud invite code keeps full row width so all 6 digits remain visible
+        compose.onNodeWithTag("room_code_toggle").performScrollTo().performClick()
+        compose.onNodeWithTag("network_invite_code").performScrollTo().assertIsDisplayed().assertTextContains("527904")
+        val collapsedCodeBounds = compose.onNodeWithTag("network_invite_code").fetchSemanticsNode().boundsInRoot
+        val collapsedToggleBounds = compose.onNodeWithTag("room_code_toggle").fetchSemanticsNode().boundsInRoot
+        val collapsedCopyBounds = compose.onNodeWithTag("room_code_copy").fetchSemanticsNode().boundsInRoot
+        val separatedVertically = collapsedToggleBounds.top >= collapsedCodeBounds.bottom
+        val separatedHorizontally = collapsedToggleBounds.left >= collapsedCodeBounds.right
+        assertTrue(
+            "Collapsed invite code must never overlap actions on 320dp@1.5x (code=$collapsedCodeBounds, toggle=$collapsedToggleBounds)",
+            separatedVertically || separatedHorizontally
+        )
+        assertTrue(
+            "Collapsed copy action must fit inside 320dp viewport (copyRightDp=${collapsedCopyBounds.right / density})",
+            collapsedCopyBounds.right / density <= 320f
+        )
+
+        // P2-2: Local/Hybrid peer member name stays legible and unobstructed above action chips
+        compose.onNodeWithText("头车阿明 · 头车").performScrollTo().assertIsDisplayed()
+        val peerNameTextBounds = compose.onNodeWithText("头车阿明 · 头车", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "Peer display name text itself must stay legible on 320dp@1.5x (widthDp=${peerNameTextBounds.width / density})",
+            peerNameTextBounds.width / density >= 120f
+        )
+        compose.onNodeWithTag("private_call_$peerId").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("member_role_$peerId").performScrollTo().assertIsDisplayed()
+        val muteRightDp = compose.onNodeWithTag("member_mute_$peerId").performScrollTo().assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot.right / density
+        assertTrue("Peer action row must fit inside 320dp viewport (muteRightDp=$muteRightDp)", muteRightDp <= 320f)
+
+        // Verify no duplicate network_active_speakers tag in Hybrid CLOUD mode
+        compose.onNodeWithTag("network_active_speakers").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w480dp-h900dp")
+    fun collapsedCloudInviteCodeAvoidsTruncationAt374dpAnd412dp() {
+        val ownerId = java.util.UUID(0, 301).toString()
+        val roomKey = GroupRoomKey(java.util.UUID(0, 310).toString(), java.util.UUID(0, 311).toString())
+        val ownerLease = GroupMemberLease(ownerId, java.util.UUID(0, 311).toString(), 1, 1)
+        val roster = com.kuma.motointercom.group.GroupRoster(
+            key = roomKey,
+            hostId = ownerId,
+            publication = 1,
+            ended = false,
+            members = listOf(GroupMember(ownerLease, role = GroupRole.OWNER)),
+            links = emptyList(),
+            names = mapOf(ownerId to "老K")
+        )
+        val netSnap = GroupSessionSnapshot(
+            phase = GroupPhase.IN_ROOM,
+            operation = null,
+            networkAttempt = null,
+            view = roster,
+            local = ownerLease,
+            participation = GroupParticipation().begin(roomKey),
+            code = null,
+            host = true,
+            message = "",
+            matches = emptyList(),
+            names = roster.names,
+            removed = emptySet(),
+            mode = GroupMode.NETWORK,
+            inviteCode = "618390"
+        )
+        var viewportWidth by mutableStateOf(374.dp)
+        var testFontScale by mutableStateOf(1.0f)
+        compose.setContent {
+            val baseDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = testFontScale)) {
+                Box(modifier = Modifier.width(viewportWidth).height(800.dp)) {
+                    GroupScreen(
+                        state = GroupServiceState(netSnap, busy = true),
+                        onStart = {},
+                        onAction = {},
+                        onRoute = {},
+                        onVox = {},
+                        onBack = {},
+                        onCopy = {},
+                        onSettings = {}
+                    )
+                }
+            }
+        }
+
+        val density = compose.density.density
+        // Verify expanded 220dp @ 1.0x digits stay strictly within card inner width before toggling collapsed
+        viewportWidth = 220.dp
+        testFontScale = 1.0f
+        compose.waitForIdle()
+        val expandedDigits220 = compose.onNodeWithTag("network_invite_code_expanded_digits", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "Expanded 220dp@1.0x digits must stay within card inner width (rightDp=${expandedDigits220.right / density})",
+            expandedDigits220.right / density <= 220f - 18f - 14f + 0.5f
+        )
+        compose.onNodeWithTag("network_invite_code").assertTextContains("618390")
+
+        viewportWidth = 374.dp
+        compose.waitForIdle()
+        compose.onNodeWithTag("room_code_toggle").performScrollTo().performClick()
+
+        fun assertCollapsedFitsWithoutOverlapOrOverflow(
+            widthDp: Float,
+            expectedDigitsWidth: Float,
+            expectedCopyWidth: Float,
+            label: String
+        ) {
+            val codeBounds = compose.onNodeWithTag("network_invite_code").fetchSemanticsNode().boundsInRoot
+            val labelBounds = compose.onNodeWithTag("network_invite_code_label", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            val digitsBounds = compose.onNodeWithTag("network_invite_code_digits", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            val toggleBounds = compose.onNodeWithTag("room_code_toggle").fetchSemanticsNode().boundsInRoot
+            val rotateBounds = compose.onNodeWithTag("network_rotate_invite").fetchSemanticsNode().boundsInRoot
+            val copyBounds = compose.onNodeWithTag("room_code_copy").fetchSemanticsNode().boundsInRoot
+            val cardInnerRightDp = widthDp - 18f - 14f + 0.5f
+
+            assertEquals(
+                "$label: collapsed 6-digit invite code must preserve exact natural untruncated width",
+                expectedDigitsWidth,
+                digitsBounds.width,
+                1f
+            )
+            assertEquals(
+                "$label: copy chip must preserve exact natural untruncated width",
+                expectedCopyWidth,
+                copyBounds.width,
+                1f
+            )
+
+            val labelAndDigitsSingleRow = digitsBounds.left >= labelBounds.right + 6f * density &&
+                kotlin.math.abs(digitsBounds.center.y - labelBounds.center.y) < 16f * density
+            val labelAndDigitsStacked = digitsBounds.top >= labelBounds.bottom
+            assertTrue(
+                "$label: short label and 6-digit code must not overlap (label=$labelBounds, digits=$digitsBounds)",
+                labelAndDigitsSingleRow || labelAndDigitsStacked
+            )
+
+            val stacked = toggleBounds.top >= codeBounds.bottom
+            val singleRowNoOverlap = toggleBounds.left >= codeBounds.right + 7f * density &&
+                kotlin.math.abs(toggleBounds.center.y - codeBounds.center.y) < 20f * density
+            assertTrue(
+                "$label: collapsed code and actions must either fit single-row with gap or stack cleanly (code=$codeBounds, toggle=$toggleBounds)",
+                stacked || singleRowNoOverlap
+            )
+
+            assertTrue(
+                "$label: toggle and rotate buttons must not overlap (toggle=$toggleBounds, rotate=$rotateBounds)",
+                rotateBounds.left >= toggleBounds.right + 5f * density
+            )
+            val copyInline = copyBounds.left >= rotateBounds.right + 5f * density &&
+                kotlin.math.abs(copyBounds.center.y - rotateBounds.center.y) < 20f * density
+            val copyWrapped = copyBounds.top >= rotateBounds.bottom
+            assertTrue(
+                "$label: copy chip must sit cleanly beside or below icon buttons (rotate=$rotateBounds, copy=$copyBounds)",
+                copyInline || copyWrapped
+            )
+
+            assertTrue(
+                "$label: all collapsed elements must stay within card inner width ${cardInnerRightDp}dp (digitsRight=${digitsBounds.right / density}, rotateRight=${rotateBounds.right / density}, copyRight=${copyBounds.right / density})",
+                labelBounds.right / density <= cardInnerRightDp &&
+                    digitsBounds.right / density <= cardInnerRightDp &&
+                    codeBounds.right / density <= cardInnerRightDp &&
+                    toggleBounds.right / density <= cardInnerRightDp &&
+                    rotateBounds.right / density <= cardInnerRightDp &&
+                    copyBounds.right / density <= cardInnerRightDp
+            )
+        }
+
+        // Measure natural single-row width at generous width, then verify narrower/scaled viewports never shrink the code digits
+        viewportWidth = 480.dp
+        testFontScale = 1.0f
+        compose.waitForIdle()
+        val naturalDigitsWidth1x = compose.onNodeWithTag("network_invite_code_digits", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.width
+        val naturalCopyWidth1x = compose.onNodeWithTag("room_code_copy").fetchSemanticsNode().boundsInRoot.width
+
+        viewportWidth = 412.dp
+        testFontScale = 1.0f
+        compose.waitForIdle()
+        assertCollapsedFitsWithoutOverlapOrOverflow(412f, naturalDigitsWidth1x, naturalCopyWidth1x, "412dp@1.0x")
+
+        viewportWidth = 374.dp
+        testFontScale = 1.0f
+        compose.waitForIdle()
+        assertCollapsedFitsWithoutOverlapOrOverflow(374f, naturalDigitsWidth1x, naturalCopyWidth1x, "374dp@1.0x")
+
+        // Measure natural 1.15x baseline at wide width, then verify 404dp and ultra-narrow 220dp never clip digits or actions
+        viewportWidth = 480.dp
+        testFontScale = 1.15f
+        compose.waitForIdle()
+        val naturalDigitsWidth115x = compose.onNodeWithTag("network_invite_code_digits", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.width
+        val naturalCopyWidth115x = compose.onNodeWithTag("room_code_copy").fetchSemanticsNode().boundsInRoot.width
+
+        viewportWidth = 404.dp
+        testFontScale = 1.15f
+        compose.waitForIdle()
+        assertCollapsedFitsWithoutOverlapOrOverflow(404f, naturalDigitsWidth115x, naturalCopyWidth115x, "404dp@1.15x")
+
+        viewportWidth = 220.dp
+        testFontScale = 1.15f
+        compose.waitForIdle()
+        assertCollapsedFitsWithoutOverlapOrOverflow(220f, naturalDigitsWidth115x, naturalCopyWidth115x, "220dp@1.15x")
+        val code220 = compose.onNodeWithTag("network_invite_code").fetchSemanticsNode().boundsInRoot
+        val toggle220 = compose.onNodeWithTag("room_code_toggle").fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "Tight width must automatically stack actions below collapsed code (code=$code220, toggle=$toggle220)",
+            toggle220.top >= code220.bottom
+        )
+
+        // Verify 220dp @ 1.5x exercises both label-over-digits wrap and icon-over-copy wrap with zero truncation
+        viewportWidth = 480.dp
+        testFontScale = 1.5f
+        compose.waitForIdle()
+        val naturalDigitsWidth15x = compose.onNodeWithTag("network_invite_code_digits", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.width
+        val naturalCopyWidth15x = compose.onNodeWithTag("room_code_copy").fetchSemanticsNode().boundsInRoot.width
+
+        viewportWidth = 220.dp
+        testFontScale = 1.5f
+        compose.waitForIdle()
+        assertCollapsedFitsWithoutOverlapOrOverflow(220f, naturalDigitsWidth15x, naturalCopyWidth15x, "220dp@1.5x")
+        val code220x15 = compose.onNodeWithTag("network_invite_code").fetchSemanticsNode().boundsInRoot
+        val toggle220x15 = compose.onNodeWithTag("room_code_toggle").fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "220dp@1.5x must stack actions below collapsed code (code=$code220x15, toggle=$toggle220x15)",
+            toggle220x15.top >= code220x15.bottom
+        )
+
+        // Verify collapsed 220dp @ 2.0x remains within card inner bounds and preserves semantic 6-digit code
+        viewportWidth = 220.dp
+        testFontScale = 2.0f
+        compose.waitForIdle()
+        val digits220x2 = compose.onNodeWithTag("network_invite_code_digits", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "Collapsed 220dp@2.0x digits must stay within card inner width (rightDp=${digits220x2.right / density})",
+            digits220x2.right / density <= 220f - 18f - 14f + 0.5f
+        )
+        compose.onNodeWithTag("network_invite_code").assertTextContains("618390")
+    }
+
+    @Test
+    fun resolveFittedRoomCodeLayoutPreventsDigitClippingInExpandedAnd200PercentCollapsed() {
+        val singleLineText = "618 · 390"
+        val stackedText = com.kuma.motointercom.group.ui.formatStackedThreePlusThree("618390")
+        assertEquals("618\n390", stackedText)
+
+        val expandedBase = com.kuma.motointercom.group.ui.GroupGlassTypography.metric.copy(letterSpacing = 2.sp)
+        val collapsedBase = com.kuma.motointercom.group.ui.GroupGlassTypography.cardTitle.copy(
+            fontFamily = com.kuma.motointercom.group.ui.GroupGlassTypography.metric.fontFamily,
+            letterSpacing = 1.sp
+        )
+        // Android 15 monospace width model matching reviewer's measurement across both "618 · 390" (9 chars) and "618" (3 chars):
+        // Expanded 28sp + 2sp @ 1.0x -> ~167dp; Collapsed 16sp + 1sp @ 2.0x -> ~167dp; "618" @ 10sp 200% -> ~34dp
+        fun android15ExpandedWidth(sample: String, style: androidx.compose.ui.text.TextStyle): Int {
+            val count = sample.length
+            val glyphWidth = count * style.fontSize.value * 0.60f
+            val spacing = (count - 1).coerceAtLeast(0) * style.letterSpacing.value
+            return kotlin.math.ceil((glyphWidth + spacing).toDouble()).toInt()
+        }
+        fun android15Collapsed200Width(sample: String, style: androidx.compose.ui.text.TextStyle): Int {
+            val count = sample.length
+            val scaledSize = style.fontSize.value * 1.72f
+            val glyphWidth = count * scaledSize * 0.62f
+            val spacing = (count - 1).coerceAtLeast(0) * style.letterSpacing.value * 1.72f
+            return kotlin.math.ceil((glyphWidth + spacing).toDouble()).toInt()
+        }
+
+        // Normal wide phone (332dp expanded inner width): exact baseStyle untouched
+        val expandedNormal = com.kuma.motointercom.group.ui.resolveFittedRoomCodeLayout(
+            singleLineText = singleLineText,
+            stackedText = stackedText,
+            baseStyle = expandedBase,
+            maxWidthPx = 332,
+            measureTextWidthPx = ::android15ExpandedWidth
+        )
+        assertTrue(expandedNormal.singleLineFits)
+        assertEquals(singleLineText, expandedNormal.displayText)
+        assertEquals(1, expandedNormal.maxLines)
+        assertEquals(28f, expandedNormal.style.fontSize.value, 0.01f)
+        assertEquals(2f, expandedNormal.style.letterSpacing.value, 0.01f)
+
+        // 220dp @ 100% expanded (card inner 156dp minus 16dp Surface horizontal padding = 140dp; base needs ~167dp)
+        assertTrue(android15ExpandedWidth(singleLineText, expandedBase) > 140)
+        val expandedNarrow = com.kuma.motointercom.group.ui.resolveFittedRoomCodeLayout(
+            singleLineText = singleLineText,
+            stackedText = stackedText,
+            baseStyle = expandedBase,
+            maxWidthPx = 140,
+            measureTextWidthPx = ::android15ExpandedWidth
+        )
+        assertTrue(expandedNarrow.singleLineFits)
+        assertEquals(singleLineText, expandedNarrow.displayText)
+        assertTrue(android15ExpandedWidth(expandedNarrow.displayText, expandedNarrow.style) <= 140)
+        assertTrue(expandedNarrow.style.fontSize.value < 28f && expandedNarrow.style.fontSize.value >= 10f)
+
+        // 220dp @ 200% collapsed (card inner 156dp; base needs ~167dp)
+        assertTrue(android15Collapsed200Width(singleLineText, collapsedBase) > 156)
+        val collapsed200 = com.kuma.motointercom.group.ui.resolveFittedRoomCodeLayout(
+            singleLineText = singleLineText,
+            stackedText = stackedText,
+            baseStyle = collapsedBase,
+            maxWidthPx = 156,
+            measureTextWidthPx = ::android15Collapsed200Width
+        )
+        assertTrue(collapsed200.singleLineFits)
+        assertEquals(singleLineText, collapsed200.displayText)
+        assertTrue(android15Collapsed200Width(collapsed200.displayText, collapsed200.style) <= 156)
+        assertTrue(collapsed200.style.fontSize.value < 16f && collapsed200.style.fontSize.value >= 10f)
+
+        // Extreme narrow 46dp @ 200%: drops middle dot and renders explicit 2-line "618\n390" where each 3-digit line fits <= 46dp
+        val narrow46Fallback = com.kuma.motointercom.group.ui.resolveFittedRoomCodeLayout(
+            singleLineText = singleLineText,
+            stackedText = stackedText,
+            baseStyle = collapsedBase,
+            maxWidthPx = 46,
+            measureTextWidthPx = ::android15Collapsed200Width
+        )
+        assertFalse(narrow46Fallback.singleLineFits)
+        assertEquals("618\n390", narrow46Fallback.displayText)
+        assertEquals(10f, narrow46Fallback.style.fontSize.value, 0.01f)
+        assertEquals(2, narrow46Fallback.maxLines)
+        assertFalse(narrow46Fallback.softWrap)
+        assertTrue(
+            narrow46Fallback.displayText.split('\n').all { line ->
+                android15Collapsed200Width(line, narrow46Fallback.style) <= 46
+            }
+        )
+
+        // Ultra-extreme 24dp @ 200% where even 3 digits at 10sp exceed width: uncaps maxLines with softWrap so no digit is ever clipped
+        val ultraNarrow24Fallback = com.kuma.motointercom.group.ui.resolveFittedRoomCodeLayout(
+            singleLineText = singleLineText,
+            stackedText = stackedText,
+            baseStyle = collapsedBase,
+            maxWidthPx = 24,
+            measureTextWidthPx = ::android15Collapsed200Width
+        )
+        assertFalse(ultraNarrow24Fallback.singleLineFits)
+        assertEquals("618\n390", ultraNarrow24Fallback.displayText)
+        assertEquals(Int.MAX_VALUE, ultraNarrow24Fallback.maxLines)
+        assertTrue(ultraNarrow24Fallback.softWrap)
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w480dp-h900dp")
+    fun adaptiveTrailingRowPreventsTruncationUnderAndroid15NarrowMetrics() {
+        var cardInnerWidth by mutableStateOf(356.dp)
+        compose.setContent {
+            Box(modifier = Modifier.width(cardInnerWidth)) {
+                com.kuma.motointercom.group.ui.AdaptiveTrailingRow(
+                    horizontalSpacing = 8.dp,
+                    verticalSpacing = 8.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                    leading = {
+                        com.kuma.motointercom.group.ui.AdaptiveTrailingRow(
+                            horizontalSpacing = 7.dp,
+                            verticalSpacing = 2.dp,
+                            fillMaxWidth = false,
+                            alignTrailingEnd = false,
+                            leading = {
+                                Box(
+                                    modifier = Modifier
+                                        .width(57.dp)
+                                        .height(16.dp)
+                                        .testTag("metric_label")
+                                )
+                            },
+                            trailing = {
+                                Box(
+                                    modifier = Modifier
+                                        .width(107.dp)
+                                        .height(22.dp)
+                                        .testTag("metric_digits")
+                                )
+                            }
+                        )
+                    },
+                    trailing = {
+                        com.kuma.motointercom.group.ui.AdaptiveTrailingRow(
+                            horizontalSpacing = 6.dp,
+                            verticalSpacing = 6.dp,
+                            fillMaxWidth = false,
+                            alignTrailingEnd = true,
+                            alignLeadingEndWhenStacked = true,
+                            leading = {
+                                Box(
+                                    modifier = Modifier
+                                        .width(102.dp)
+                                        .height(48.dp)
+                                        .testTag("metric_icons")
+                                )
+                            },
+                            trailing = {
+                                Box(
+                                    modifier = Modifier
+                                        .width(68.dp)
+                                        .height(36.dp)
+                                        .testTag("metric_copy")
+                                )
+                            }
+                        )
+                    }
+                )
+            }
+        }
+
+        val density = compose.density.density
+        fun readBounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+
+        // 356dp inner width (generous phone): single-row code + single-row actions
+        cardInnerWidth = 356.dp
+        compose.waitForIdle()
+        val label356 = readBounds("metric_label")
+        val digits356 = readBounds("metric_digits")
+        val icons356 = readBounds("metric_icons")
+        val copy356 = readBounds("metric_copy")
+        assertEquals(107f * density, digits356.width, 1f)
+        assertEquals(68f * density, copy356.width, 1f)
+        assertTrue(digits356.left >= label356.right + 6.5f * density)
+        assertTrue(icons356.left >= digits356.right + 7.5f * density)
+        assertTrue(copy356.left >= icons356.right + 5.5f * density)
+        assertEquals(356f * density, copy356.right, 1f)
+
+        // 340dp inner width (404dp @ 1.15x): actions stack below code, code & actions each keep single row
+        cardInnerWidth = 340.dp
+        compose.waitForIdle()
+        val label340 = readBounds("metric_label")
+        val digits340 = readBounds("metric_digits")
+        val icons340 = readBounds("metric_icons")
+        val copy340 = readBounds("metric_copy")
+        assertEquals(107f * density, digits340.width, 1f)
+        assertEquals(68f * density, copy340.width, 1f)
+        assertTrue(digits340.left >= label340.right + 6.5f * density)
+        assertTrue(icons340.top >= digits340.bottom)
+        assertTrue(copy340.left >= icons340.right + 5.5f * density)
+        assertEquals(340f * density, copy340.right, 1f)
+
+        // 156dp inner width (220dp @ 1.15x): label stacks above 107dp digits, icons stack above 68dp copy, zero truncation
+        cardInnerWidth = 156.dp
+        compose.waitForIdle()
+        val label156 = readBounds("metric_label")
+        val digits156 = readBounds("metric_digits")
+        val icons156 = readBounds("metric_icons")
+        val copy156 = readBounds("metric_copy")
+        assertEquals(57f * density, label156.width, 1f)
+        assertEquals(107f * density, digits156.width, 1f)
+        assertEquals(102f * density, icons156.width, 1f)
+        assertEquals(68f * density, copy156.width, 1f)
+        assertTrue("220dp@1.15x must stack digits below label", digits156.top >= label156.bottom)
+        assertTrue("220dp@1.15x must stack actions below digits", icons156.top >= digits156.bottom)
+        assertTrue("220dp@1.15x must stack copy below icon pair", copy156.top >= icons156.bottom)
+        assertTrue("All elements must stay within 156dp card inner width", digits156.right <= 156f * density + 1f)
+        assertEquals(156f * density, icons156.right, 1f)
+        assertEquals(156f * density, copy156.right, 1f)
     }
 }
 

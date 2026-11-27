@@ -125,7 +125,9 @@ internal enum class GlassIconKind {
     EXPORT_SHARE,
     EDIT,
     CODE,
-    SHIELD
+    SHIELD,
+    CHEVRON_UP,
+    CHEVRON_DOWN
 }
 
 @Composable
@@ -1144,6 +1146,22 @@ internal fun GlassVectorIcon(
                     close()
                 }
                 drawPath(path = shield, color = tint, style = stroke)
+            }
+            GlassIconKind.CHEVRON_UP -> {
+                val chevron = Path().apply {
+                    moveTo(6.5f * unit, 14.5f * unit)
+                    lineTo(12f * unit, 9f * unit)
+                    lineTo(17.5f * unit, 14.5f * unit)
+                }
+                drawPath(path = chevron, color = tint, style = stroke)
+            }
+            GlassIconKind.CHEVRON_DOWN -> {
+                val chevron = Path().apply {
+                    moveTo(6.5f * unit, 9.5f * unit)
+                    lineTo(12f * unit, 15f * unit)
+                    lineTo(17.5f * unit, 9.5f * unit)
+                }
+                drawPath(path = chevron, color = tint, style = stroke)
             }
         }
     }

@@ -1,10 +1,12 @@
 package com.kuma.motointercom.group.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,8 +17,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -32,10 +36,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.kuma.motointercom.AudioRouteSelection
 import com.kuma.motointercom.MotoComThemeMode
 import com.kuma.motointercom.group.GroupChannel
@@ -89,6 +105,7 @@ internal fun GroupInRoomContent(
     val isNetwork = snapshot?.mode == GroupMode.NETWORK
     val isHybrid = snapshot?.mode == GroupMode.HYBRID
     val isCloudBacked = isNetwork || isHybrid
+    val isCloudVoiceActive = isNetwork || (isHybrid && snapshot?.activeTransport == GroupTransport.CLOUD)
     val inRoom = snapshot?.phase == GroupPhase.IN_ROOM
     val actionsEnabled = inRoom && snapshot?.channelSwitching != true &&
         snapshot?.transportSwitching != true && snapshot?.cloudOffline != true
@@ -105,149 +122,109 @@ internal fun GroupInRoomContent(
     }
     var showAllMembers by remember { mutableStateOf(false) }
     var showAllPending by remember { mutableStateOf(false) }
+    var codeExpanded by remember(snapshot?.view?.key?.instanceId, snapshot?.mode) { mutableStateOf(true) }
 
     val headerTitle = when {
-        isNetwork -> "网络 ${occupiedMembers.size}/${snapshot?.maxMembers ?: 50}"
-        isHybrid -> "双模 ${occupiedMembers.size}/4"
-        else -> "本地 ${occupiedMembers.size}/4"
+        isNetwork -> "网络群组"
+        isHybrid -> "双模群组"
+        else -> "本地群组"
+    }
+    val heroCodeDigits = when {
+        isCloudBacked -> snapshot?.inviteCode?.takeIf { snapshot.isOwner }
+        else -> snapshot?.code?.takeIf { snapshot.host }?.digits
     }
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.weight(1f)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Surface(
-                modifier = Modifier
-                    .heightIn(min = 40.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(role = Role.Button, onClick = onBack),
-                shape = RoundedCornerShape(999.dp),
-                color = colors.cardElevated,
-                border = BorderStroke(1.dp, colors.glassBorder)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Surface(
+                    modifier = Modifier
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(role = Role.Button, onClick = onBack),
+                    shape = RoundedCornerShape(999.dp),
+                    color = colors.cardElevated,
+                    border = BorderStroke(1.dp, colors.glassBorder)
                 ) {
-                    GlassVectorIcon(kind = GlassIconKind.BACK, tint = colors.textPrimary, size = 16.dp)
-                    Text(
-                        text = "收起对讲",
-                        style = GroupGlassTypography.badge,
-                        color = colors.textPrimary
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        GlassVectorIcon(kind = GlassIconKind.BACK, tint = colors.textPrimary, size = 16.dp)
+                        Text(
+                            text = "收起对讲",
+                            style = GroupGlassTypography.badge,
+                            color = colors.textPrimary
+                        )
+                    }
+                }
+                Text(
+                    text = headerTitle,
+                    style = GroupGlassTypography.pageTitle,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                GlassIconCircleButton(
+                    icon = if (themeMode == MotoComThemeMode.NIGHTRIDE) GlassIconKind.SUN else GlassIconKind.MOON,
+                    contentDescription = if (themeMode == MotoComThemeMode.NIGHTRIDE) "切换到白昼模式" else "切换到夜航模式",
+                    onClick = onToggleTheme,
+                    modifier = Modifier.testTag("theme_toggle")
+                )
+                if (room != null) {
+                    GlassIconCircleButton(
+                        icon = GlassIconKind.MORE,
+                        contentDescription = "房间治理与设置",
+                        onClick = {
+                            val defaultTarget = occupiedMembers.firstOrNull {
+                                it.lease.deviceId != snapshot?.local?.deviceId
+                            }?.lease?.let(GovernanceMemberTarget::from)
+                            onOpenSheet(GroupInRoomSheet.Governance(defaultTarget))
+                        },
+                        modifier = Modifier.testTag("open_governance_sheet")
+                    )
+                } else {
+                    GlassIconCircleButton(
+                        icon = GlassIconKind.SETTINGS,
+                        contentDescription = "打开系统设置",
+                        onClick = onOpenSettings,
+                        modifier = Modifier.testTag("open_settings")
                     )
                 }
             }
-            Text(
-                text = headerTitle,
-                style = GroupGlassTypography.pageTitle,
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (isCloudBacked && snapshot?.isOwner == true) {
-                snapshot.inviteCode?.let { invite ->
-                    Surface(
-                        modifier = Modifier
-                            .heightIn(min = 36.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .clickable(role = Role.Button) { onCopy(invite) }
-                            .testTag("network_invite_code"),
-                        shape = RoundedCornerShape(999.dp),
-                        color = colors.cardElevated,
-                        border = BorderStroke(1.dp, colors.glassBorder)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Text(
-                                text = invite,
-                                style = GroupGlassTypography.roomCode,
-                                color = colors.textPrimary
-                            )
-                            GlassVectorIcon(kind = GlassIconKind.COPY, tint = colors.textSecondary, size = 13.dp)
-                        }
-                    }
-                }
-            }
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            if (isCloudBacked && snapshot?.isOwner == true && snapshot.inviteCode != null) {
-                GlassIconCircleButton(
-                    icon = GlassIconKind.REFRESH,
-                    contentDescription = "刷新邀请码",
-                    onClick = { onAction(GroupSessionEvent.RotateInvite) },
-                    enabled = inRoom && !snapshot.cloudOffline,
-                    modifier = Modifier.testTag("network_rotate_invite")
-                )
-            }
-            GlassIconCircleButton(
-                icon = if (themeMode == MotoComThemeMode.NIGHTRIDE) GlassIconKind.SUN else GlassIconKind.MOON,
-                contentDescription = if (themeMode == MotoComThemeMode.NIGHTRIDE) "切换到白昼模式" else "切换到夜航模式",
-                onClick = onToggleTheme,
-                modifier = Modifier.testTag("theme_toggle")
-            )
-            if (room != null) {
-                GlassIconCircleButton(
-                    icon = GlassIconKind.MORE,
-                    contentDescription = "房间治理与设置",
-                    onClick = {
-                        val defaultTarget = occupiedMembers.firstOrNull {
-                            it.lease.deviceId != snapshot?.local?.deviceId
-                        }?.lease?.let(GovernanceMemberTarget::from)
-                        onOpenSheet(GroupInRoomSheet.Governance(defaultTarget))
-                    },
-                    modifier = Modifier.testTag("open_governance_sheet")
-                )
-            } else {
-                GlassIconCircleButton(
-                    icon = GlassIconKind.SETTINGS,
-                    contentDescription = "打开系统设置",
-                    onClick = onOpenSettings,
-                    modifier = Modifier.testTag("open_settings")
-                )
-            }
-        }
-    }
 
-    snapshot?.code?.takeIf { snapshot.host }?.let { joinCode ->
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 18.dp,
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "房间码 ${joinCode.digits}",
-                    style = GroupGlassTypography.cardTitle,
-                    color = colors.textPrimary
-                )
-                GlassPillChip(
-                    label = "复制房间码",
-                    leadingIcon = GlassIconKind.COPY,
-                    containerColor = colors.cardElevated,
-                    contentColor = colors.textPrimary,
-                    borderColor = colors.glassBorder,
-                    onClick = { onCopy(joinCode.digits) }
-                )
-            }
+        if (heroCodeDigits != null && snapshot != null) {
+            RoomCodeHeroCard(
+                digits = heroCodeDigits,
+                mode = snapshot.mode,
+                occupiedCount = occupiedMembers.size,
+                maxMembers = snapshot.maxMembers,
+                expanded = codeExpanded,
+                onToggleExpanded = { codeExpanded = !codeExpanded },
+                canRotate = isCloudBacked && snapshot.isOwner,
+                rotateEnabled = inRoom && !snapshot.cloudOffline,
+                onRotate = { onAction(GroupSessionEvent.RotateInvite) },
+                onCopy = { onCopy(heroCodeDigits) }
+            )
         }
-    }
 
     snapshot?.matches?.takeIf { it.isNotEmpty() }?.let { matches ->
         GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -350,7 +327,8 @@ internal fun GroupInRoomContent(
                                 style = GroupGlassTypography.badge,
                                 color = colors.textSecondary,
                                 maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("group_voice_status")
                             )
                         }
                     }
@@ -375,16 +353,6 @@ internal fun GroupInRoomContent(
                         style = GroupGlassTypography.badge,
                         color = colors.textWarning,
                         modifier = Modifier.testTag("hybrid_cloud_offline_banner")
-                    )
-                }
-                if (isCloudTransport && snapshot.activeSpeakerIds.isNotEmpty()) {
-                    Text(
-                        text = "正在发言：" + snapshot.activeSpeakerIds.joinToString("、") {
-                            snapshot.names[it] ?: "骑士"
-                        },
-                        style = GroupGlassTypography.badge,
-                        color = colors.textCloud,
-                        modifier = Modifier.testTag("network_active_speakers")
                     )
                 }
             }
@@ -434,7 +402,12 @@ internal fun GroupInRoomContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     GlassVectorIcon(kind = GlassIconKind.WIFI, tint = colors.statusOnline, size = 17.dp)
-                    Text(voiceStatusText, style = GroupGlassTypography.compact, color = colors.textSecondary)
+                    Text(
+                        text = voiceStatusText,
+                        style = GroupGlassTypography.compact,
+                        color = colors.textSecondary,
+                        modifier = Modifier.testTag("group_voice_status")
+                    )
                 }
             }
         }
@@ -735,137 +708,130 @@ internal fun GroupInRoomContent(
             }
         }
 
-        if (isNetwork) {
-            val activeSpeakers = occupiedMembers.filter { it.lease.deviceId in snapshot.activeSpeakerIds }
-            if (snapshot.activeSpeakerIds.isNotEmpty()) {
-                Text(
-                    text = "正在发言：" + snapshot.activeSpeakerIds.joinToString("、") {
-                        snapshot.names[it] ?: "骑士"
-                    },
-                    style = GroupGlassTypography.seatTitle,
-                    color = colors.textPrimary,
-                    modifier = Modifier.testTag("network_active_speakers")
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    activeSpeakers.forEach { speaker ->
-                        val speakerId = speaker.lease.deviceId
-                        val speakerName = snapshot.names[speakerId] ?: "骑士"
-                        val isOwnerSpeaker = speaker.role == GroupRole.OWNER
-                        GlassCard(
-                            modifier = Modifier.width(106.dp),
-                            containerColor = if (isOwnerSpeaker) colors.speakingSurface else colors.infoSoft,
-                            borderColor = if (isOwnerSpeaker) colors.limeActiveBorder else colors.statusCloud.copy(alpha = 0.4f),
-                            cornerRadius = 18.dp,
-                            contentPadding = PaddingValues(12.dp)
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                RiderAvatar(
-                                    seed = speakerId,
-                                    name = speakerName,
-                                    online = true,
-                                    reconnecting = false,
-                                    size = 40.dp
-                                )
-                                Text(
-                                    text = speakerName,
-                                    style = GroupGlassTypography.pill,
-                                    color = colors.textPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                GlassWaveformBars(
-                                    color = if (isOwnerSpeaker) colors.statusOnline else colors.statusCloud,
-                                    animated = true
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
+        val activeSpeakers = occupiedMembers.filter { it.lease.deviceId in snapshot.activeSpeakerIds }
+        if (snapshot.activeSpeakerIds.isNotEmpty()) {
+            Text(
+                text = "正在发言：" + snapshot.activeSpeakerIds.joinToString("、") {
+                    snapshot.names[it] ?: "骑士"
+                },
+                style = GroupGlassTypography.seatTitle,
+                color = colors.textPrimary,
+                modifier = Modifier.testTag("network_active_speakers")
+            )
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "成员列表（${occupiedMembers.size}/${snapshot.maxMembers}）",
-                    style = GroupGlassTypography.seatTitle,
-                    color = colors.textPrimary,
-                    modifier = Modifier.testTag("group_member_count")
-                )
-                if (occupiedMembers.size > 12) {
-                    TextButton(
-                        onClick = { showAllMembers = !showAllMembers },
-                        modifier = Modifier.testTag("toggle_all_members")
+                activeSpeakers.forEach { speaker ->
+                    val speakerId = speaker.lease.deviceId
+                    val speakerName = snapshot.names[speakerId] ?: "骑士"
+                    val isOwnerSpeaker = speaker.role == GroupRole.OWNER
+                    GlassCard(
+                        modifier = Modifier.width(106.dp),
+                        containerColor = if (isOwnerSpeaker) colors.speakingSurface else colors.infoSoft,
+                        borderColor = if (isOwnerSpeaker) colors.limeActiveBorder else colors.statusCloud.copy(alpha = 0.4f),
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(12.dp)
                     ) {
-                        Text(if (showAllMembers) "收起" else "展开全部 >")
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            RiderAvatar(
+                                seed = speakerId,
+                                name = speakerName,
+                                online = true,
+                                reconnecting = false,
+                                size = 40.dp
+                            )
+                            Text(
+                                text = speakerName,
+                                style = GroupGlassTypography.pill,
+                                color = colors.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            GlassWaveformBars(
+                                color = if (isOwnerSpeaker) colors.statusOnline else colors.statusCloud,
+                                animated = true
+                            )
+                        }
                     }
                 }
             }
+        }
 
-            val visibleMembers = if (showAllMembers || occupiedMembers.size <= 12) {
-                occupiedMembers
-            } else {
-                occupiedMembers.take(12)
-            }
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 22.dp,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                visibleMembers.forEach { member ->
-                    NetworkMemberRow(
-                        member = member,
-                        snapshot = snapshot,
-                        actionsEnabled = actionsEnabled,
-                        onAction = onAction,
-                        onOpenGovernance = {
-                            onOpenSheet(GroupInRoomSheet.Governance(GovernanceMemberTarget.from(member.lease)))
-                        }
-                    )
-                }
-            }
-        } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
                 text = "成员列表（${occupiedMembers.size}/${snapshot.maxMembers}）",
                 style = GroupGlassTypography.seatTitle,
                 color = colors.textPrimary,
                 modifier = Modifier.testTag("group_member_count")
             )
-            val rows = occupiedMembers.chunked(2)
-            rows.forEach { rowMembers ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+            if (occupiedMembers.size > 12) {
+                TextButton(
+                    onClick = { showAllMembers = !showAllMembers },
+                    modifier = Modifier.testTag("toggle_all_members")
                 ) {
-                    rowMembers.forEach { member ->
-                        RiderSeatGlassCard(
-                            member = member,
-                            room = room,
-                            snapshot = snapshot,
-                            selfBusyPrivate = selfBusyPrivate,
-                            actionsEnabled = actionsEnabled,
-                            onAction = onAction,
-                            onSelectRole = { onSelectRoleTarget(member.lease.deviceId) },
-                            onOpenGovernance = {
-                                onOpenSheet(GroupInRoomSheet.Governance(GovernanceMemberTarget.from(member.lease)))
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
+                    Text(if (showAllMembers) "收起" else "展开全部 >")
+                }
+            }
+        }
+
+        val visibleMembers = if (showAllMembers || occupiedMembers.size <= 12) {
+            occupiedMembers
+        } else {
+            occupiedMembers.take(12)
+        }
+        GlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 22.dp,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+        ) {
+            visibleMembers.forEach { member ->
+                UnifiedMemberRow(
+                    member = member,
+                    room = room,
+                    snapshot = snapshot,
+                    selfBusyPrivate = selfBusyPrivate,
+                    actionsEnabled = actionsEnabled,
+                    onAction = onAction,
+                    onSelectRole = { onSelectRoleTarget(member.lease.deviceId) },
+                    onOpenGovernance = {
+                        onOpenSheet(GroupInRoomSheet.Governance(GovernanceMemberTarget.from(member.lease)))
                     }
-                    if (rowMembers.size == 1) {
-                        Spacer(Modifier.weight(1f))
-                    }
+                )
+            }
+            val remainingSeats = snapshot.maxMembers - occupiedMembers.size
+            if (remainingSeats > 0 && heroCodeDigits != null) {
+                val formattedCode = formatThreePlusThree(heroCodeDigits)
+                val inviteHint = when (snapshot.mode) {
+                    GroupMode.NETWORK -> "复制 $formattedCode 发给车友 · 最多支持 ${snapshot.maxMembers} 人远程对讲"
+                    GroupMode.HYBRID -> "分享 $formattedCode 邀请车友 · 当前还可加入 $remainingSeats 人"
+                    GroupMode.LOCAL -> "报出 $formattedCode 邀请车友 · 当前还可加入 $remainingSeats 人"
+                }
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(role = Role.Button) { onCopy(heroCodeDigits) },
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isNetwork) colors.infoSoft else colors.codeCell,
+                    border = BorderStroke(1.dp, if (isNetwork) colors.statusCloud.copy(alpha = 0.35f) else colors.hairlineBorder)
+                ) {
+                    Text(
+                        text = inviteHint,
+                        style = GroupGlassTypography.badge,
+                        color = if (isNetwork) colors.textCloud else colors.textSecondary,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+                    )
                 }
             }
         }
@@ -966,77 +932,157 @@ internal fun GroupInRoomContent(
             }
         }
     }
-
-    Spacer(Modifier.height(4.dp))
+    }
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
         shape = RoundedCornerShape(28.dp),
         color = colors.dock,
         border = BorderStroke(1.dp, colors.glassBorder),
         shadowElevation = if (colors.isLight) 6.dp else 0.dp
     ) {
-        Row(
+        val routeShortLabel = when (state.route) {
+            AudioRouteSelection.BLUETOOTH -> "蓝牙头盔"
+            AudioRouteSelection.EARPIECE -> "听筒有线"
+            AudioRouteSelection.SPEAKER -> "扬声器"
+        }
+        val audioSubLabel = when {
+            isCloudVoiceActive -> "云端直通"
+            state.vox -> "VOX 自动开麦"
+            else -> "手动开麦"
+        }
+        val selfMuted = snapshot?.participation?.selfMuted == true
+        val isPrivateChannel = snapshot?.currentChannel is GroupChannel.Private
+        val micLabel = when {
+            selfMuted -> "已静音"
+            isPrivateChannel -> "私聊麦开"
+            isCloudVoiceActive -> "麦克风开"
+            state.vox -> "声控已开"
+            else -> "麦克风开"
+        }
+        val micVariant = when {
+            selfMuted -> GlassCtaVariant.DANGER_SOFT
+            isPrivateChannel || !colors.isLight -> GlassCtaVariant.LIME
+            else -> GlassCtaVariant.OBSIDIAN
+        }
+        val leaveLabel = if (snapshot?.isOwner == true || snapshot?.host == true) "结束" else "离开"
+
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 10.dp, vertical = 9.dp)
         ) {
-            GlassIconCircleButton(
-                icon = when (state.route) {
-                    AudioRouteSelection.BLUETOOTH -> GlassIconKind.HEADSET
-                    AudioRouteSelection.EARPIECE -> GlassIconKind.EARPIECE
-                    AudioRouteSelection.SPEAKER -> GlassIconKind.SPEAKER
-                },
-                contentDescription = "音频通路与声控设置",
-                onClick = { onOpenSheet(GroupInRoomSheet.AudioRoute) },
-                circleSize = 44.dp,
-                modifier = Modifier.testTag("open_audio_sheet")
-            )
-
-            val selfMuted = snapshot?.participation?.selfMuted == true
-            val isPrivateChannel = snapshot?.currentChannel is GroupChannel.Private
-            val micLabel = when {
-                selfMuted -> "已静音"
-                isPrivateChannel -> "私聊麦开"
-                isNetwork -> "麦克风开"
-                state.vox -> "声控已开"
-                else -> "麦克风开"
-            }
-            val micVariant = when {
-                selfMuted -> GlassCtaVariant.DANGER_SOFT
-                isPrivateChannel || !colors.isLight -> GlassCtaVariant.LIME
-                else -> GlassCtaVariant.OBSIDIAN
-            }
-            GlassActionButton(
-                label = micLabel,
-                onClick = {
-                    if (room != null) {
-                        onAction(GroupSessionEvent.Mute(!selfMuted))
+            val useStackedDock = maxWidth < 330.dp || LocalDensity.current.fontScale > 1.15f
+            val audioPill: @Composable (Modifier) -> Unit = { pillModifier ->
+                Surface(
+                    modifier = pillModifier
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(role = Role.Button) { onOpenSheet(GroupInRoomSheet.AudioRoute) }
+                        .testTag("open_audio_sheet"),
+                    shape = RoundedCornerShape(16.dp),
+                    color = colors.codeCell,
+                    border = BorderStroke(1.dp, colors.hairlineBorder)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        GlassVectorIcon(
+                            kind = when (state.route) {
+                                AudioRouteSelection.BLUETOOTH -> GlassIconKind.HEADSET
+                                AudioRouteSelection.EARPIECE -> GlassIconKind.EARPIECE
+                                AudioRouteSelection.SPEAKER -> GlassIconKind.SPEAKER
+                            },
+                            tint = colors.textPrimary,
+                            size = 16.dp
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = routeShortLabel,
+                                style = GroupGlassTypography.badge,
+                                color = colors.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = audioSubLabel,
+                                style = GroupGlassTypography.badge.copy(fontSize = 10.sp, lineHeight = 12.sp),
+                                color = colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                },
-                enabled = room != null,
-                variant = micVariant,
-                leadingIcon = if (selfMuted) GlassIconKind.MIC_OFF else GlassIconKind.MIC,
-                minHeight = 52.dp,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("group_mic_toggle")
-            )
+                }
+            }
+            val micButton: @Composable (Modifier) -> Unit = { micModifier ->
+                GlassActionButton(
+                    label = micLabel,
+                    onClick = {
+                        if (room != null) {
+                            onAction(GroupSessionEvent.Mute(!selfMuted))
+                        }
+                    },
+                    enabled = room != null,
+                    variant = micVariant,
+                    leadingIcon = if (selfMuted) GlassIconKind.MIC_OFF else GlassIconKind.MIC,
+                    minHeight = 52.dp,
+                    modifier = micModifier.testTag("group_mic_toggle")
+                )
+            }
+            val leaveButton: @Composable (Modifier) -> Unit = { leaveModifier ->
+                Surface(
+                    modifier = leaveModifier
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(role = Role.Button, onClick = onRequestLeaveDialog)
+                        .testTag("group_leave"),
+                    shape = RoundedCornerShape(16.dp),
+                    color = colors.dangerSoft,
+                    border = BorderStroke(1.dp, colors.dangerBorder.copy(alpha = 0.5f))
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = leaveLabel,
+                            style = GroupGlassTypography.pill,
+                            color = colors.textDanger,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
 
-            Surface(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(role = Role.Button, onClick = onRequestLeaveDialog)
-                    .testTag("group_leave"),
-                shape = RoundedCornerShape(16.dp),
-                color = colors.dangerSoft,
-                border = BorderStroke(1.dp, colors.dangerBorder.copy(alpha = 0.5f))
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    GlassVectorIcon(kind = GlassIconKind.LEAVE, tint = colors.textDanger, size = 20.dp)
+            if (useStackedDock) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    micButton(Modifier.fillMaxWidth())
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        audioPill(Modifier.weight(1f))
+                        leaveButton(Modifier)
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    audioPill(Modifier.widthIn(max = 112.dp))
+                    micButton(Modifier.weight(1f))
+                    leaveButton(Modifier.widthIn(max = 68.dp))
                 }
             }
         }
@@ -1116,8 +1162,443 @@ internal fun GroupInRoomSheetOverlay(
     }
 }
 
+private fun formatThreePlusThree(digits: String): String {
+    val clean = digits.trim()
+    return if (clean.length == 6) "${clean.take(3)} · ${clean.drop(3)}" else clean
+}
+
+internal fun formatStackedThreePlusThree(digits: String): String {
+    val clean = digits.trim()
+    return if (clean.length == 6) "${clean.take(3)}\n${clean.drop(3)}" else clean
+}
+
 @Composable
-private fun RiderSeatGlassCard(
+private fun RoomCodeHeroCard(
+    digits: String,
+    mode: GroupMode,
+    occupiedCount: Int,
+    maxMembers: Int,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    canRotate: Boolean,
+    rotateEnabled: Boolean,
+    onRotate: () -> Unit,
+    onCopy: () -> Unit
+) {
+    val colors = GroupGlassPalette.current
+    val isCloudBacked = mode != GroupMode.LOCAL
+    val isNetwork = mode == GroupMode.NETWORK
+    val modeDotColor = if (isNetwork) colors.statusCloud else colors.brandLimeDot
+    val titleLabel = when (mode) {
+        GroupMode.LOCAL -> "本地直连 · 房间码"
+        GroupMode.HYBRID -> "双模优先 · 邀请码"
+        GroupMode.NETWORK -> "云端网络 · 邀请码"
+    }
+    val shortLabel = if (isCloudBacked) "邀请码" else "房间码"
+    val footerHint = when (mode) {
+        GroupMode.LOCAL -> "队友输入 6 位码即可直连入房"
+        GroupMode.HYBRID -> "近距零流量直连 · 失联自动切云"
+        GroupMode.NETWORK -> "复制邀请码发给车友即可入房"
+    }
+    val formattedDigits = formatThreePlusThree(digits)
+    val stackedDigits = formatStackedThreePlusThree(digits)
+    val semanticCodeText = if (isCloudBacked) digits else "房间码 $digits"
+    val codeTag = if (isCloudBacked) "network_invite_code" else "local_room_code"
+    val actionControls: @Composable () -> Unit = {
+        AdaptiveTrailingRow(
+            horizontalSpacing = 6.dp,
+            verticalSpacing = 6.dp,
+            fillMaxWidth = false,
+            alignTrailingEnd = true,
+            alignLeadingEndWhenStacked = true,
+            leading = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    GlassIconCircleButton(
+                        icon = if (expanded) GlassIconKind.CHEVRON_UP else GlassIconKind.CHEVRON_DOWN,
+                        contentDescription = if (expanded) "收起房间码" else "展开房间码",
+                        onClick = onToggleExpanded,
+                        containerColor = colors.codeCell,
+                        circleSize = 32.dp,
+                        modifier = Modifier.testTag("room_code_toggle")
+                    )
+                    if (canRotate) {
+                        GlassIconCircleButton(
+                            icon = GlassIconKind.REFRESH,
+                            contentDescription = "刷新邀请码",
+                            onClick = onRotate,
+                            enabled = rotateEnabled,
+                            containerColor = colors.codeCell,
+                            circleSize = 32.dp,
+                            modifier = Modifier.testTag("network_rotate_invite")
+                        )
+                    }
+                }
+            },
+            trailing = {
+                GlassPillChip(
+                    label = "复制",
+                    leadingIcon = GlassIconKind.COPY,
+                    containerColor = colors.brandObsidian,
+                    contentColor = colors.textOnObsidian,
+                    onClick = onCopy,
+                    modifier = Modifier.testTag("room_code_copy")
+                )
+            }
+        )
+    }
+
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = colors.cardElevated,
+        borderColor = colors.glassBorder,
+        cornerRadius = if (expanded) 22.dp else 18.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = if (expanded) 12.dp else 9.dp)
+    ) {
+        if (expanded) {
+            AdaptiveTrailingRow(
+                horizontalSpacing = 8.dp,
+                verticalSpacing = 6.dp,
+                modifier = Modifier.fillMaxWidth(),
+                leading = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Spacer(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(modeDotColor)
+                        )
+                        Text(
+                            text = titleLabel,
+                            style = GroupGlassTypography.badge,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                },
+                trailing = actionControls
+            )
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 54.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(role = Role.Button, onClick = onCopy)
+                    .testTag(codeTag),
+                shape = RoundedCornerShape(16.dp),
+                color = colors.codeCell,
+                border = BorderStroke(1.dp, colors.hairlineBorder)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FitRoomCodeDigits(
+                        singleLineText = formattedDigits,
+                        stackedText = stackedDigits,
+                        semanticCodeText = semanticCodeText,
+                        baseStyle = GroupGlassTypography.metric.copy(letterSpacing = 2.sp),
+                        color = colors.textPrimary,
+                        modifier = Modifier.testTag("${codeTag}_expanded_digits")
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = footerHint,
+                    style = GroupGlassTypography.badge,
+                    color = colors.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "$occupiedCount/$maxMembers 人",
+                    style = GroupGlassTypography.badge,
+                    color = colors.textPrimary
+                )
+            }
+        } else {
+            AdaptiveTrailingRow(
+                horizontalSpacing = 8.dp,
+                verticalSpacing = 8.dp,
+                modifier = Modifier.fillMaxWidth(),
+                leading = {
+                    AdaptiveTrailingRow(
+                        horizontalSpacing = 7.dp,
+                        verticalSpacing = 2.dp,
+                        fillMaxWidth = false,
+                        alignTrailingEnd = false,
+                        modifier = Modifier
+                            .heightIn(min = 32.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(role = Role.Button, onClick = onCopy)
+                            .testTag(codeTag),
+                        leading = {
+                            Row(
+                                modifier = Modifier.testTag("${codeTag}_label"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                Spacer(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(modeDotColor)
+                                )
+                                Text(
+                                    text = shortLabel,
+                                    style = GroupGlassTypography.badge,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        },
+                        trailing = {
+                            FitRoomCodeDigits(
+                                singleLineText = formattedDigits,
+                                stackedText = stackedDigits,
+                                semanticCodeText = semanticCodeText,
+                                baseStyle = GroupGlassTypography.cardTitle.copy(
+                                    fontFamily = GroupGlassTypography.metric.fontFamily,
+                                    letterSpacing = 1.sp
+                                ),
+                                color = colors.textPrimary,
+                                modifier = Modifier.testTag("${codeTag}_digits")
+                            )
+                        }
+                    )
+                },
+                trailing = actionControls
+            )
+        }
+    }
+}
+
+internal data class FittedRoomCodeLayout(
+    val displayText: String,
+    val style: TextStyle,
+    val singleLineFits: Boolean,
+    val maxLines: Int,
+    val softWrap: Boolean
+)
+
+internal fun resolveFittedRoomCodeLayout(
+    singleLineText: String,
+    stackedText: String,
+    baseStyle: TextStyle,
+    maxWidthPx: Int,
+    minFontSizeSp: Float = 10f,
+    measureTextWidthPx: (String, TextStyle) -> Int
+): FittedRoomCodeLayout {
+    if (maxWidthPx == Constraints.Infinity || maxWidthPx <= 0 || !baseStyle.fontSize.isSp || baseStyle.fontSize.value <= 0f) {
+        return FittedRoomCodeLayout(
+            displayText = singleLineText,
+            style = baseStyle,
+            singleLineFits = true,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+    if (measureTextWidthPx(singleLineText, baseStyle) <= maxWidthPx) {
+        return FittedRoomCodeLayout(
+            displayText = singleLineText,
+            style = baseStyle,
+            singleLineFits = true,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+    val baseSizeSp = baseStyle.fontSize.value
+    val baseLineHeightSp = if (baseStyle.lineHeight.isSp) baseStyle.lineHeight.value else baseSizeSp * 1.25f
+    val baseLetterSpacingSp = if (baseStyle.letterSpacing.isSp) baseStyle.letterSpacing.value else 0f
+    val floorSp = minOf(minFontSizeSp, baseSizeSp)
+    fun scaledStyle(sizeSp: Float): TextStyle {
+        val ratio = sizeSp / baseSizeSp
+        return baseStyle.copy(
+            fontSize = sizeSp.sp,
+            lineHeight = (baseLineHeightSp * ratio).sp,
+            letterSpacing = (baseLetterSpacingSp * ratio).sp
+        )
+    }
+    val floorStyle = scaledStyle(floorSp)
+    if (measureTextWidthPx(singleLineText, floorStyle) <= maxWidthPx) {
+        var low = floorSp
+        var high = baseSizeSp
+        var bestStyle = floorStyle
+        repeat(8) {
+            val mid = (low + high) / 2f
+            val candidate = scaledStyle(mid)
+            if (measureTextWidthPx(singleLineText, candidate) <= maxWidthPx) {
+                bestStyle = candidate
+                low = mid
+            } else {
+                high = mid
+            }
+        }
+        return FittedRoomCodeLayout(
+            displayText = singleLineText,
+            style = bestStyle,
+            singleLineFits = true,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+    val stackedLines = stackedText.split('\n')
+    val stackedFitsAtFloor = stackedLines.maxOf { line -> measureTextWidthPx(line, floorStyle) } <= maxWidthPx
+    return FittedRoomCodeLayout(
+        displayText = stackedText,
+        style = floorStyle,
+        singleLineFits = false,
+        maxLines = if (stackedFitsAtFloor) stackedLines.size else Int.MAX_VALUE,
+        softWrap = !stackedFitsAtFloor
+    )
+}
+
+@Composable
+internal fun FitRoomCodeDigits(
+    singleLineText: String,
+    stackedText: String,
+    semanticCodeText: String,
+    baseStyle: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    minFontSizeSp: Float = 10f
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier = modifier) {
+        val maxWidthPx = if (constraints.hasBoundedWidth) constraints.maxWidth else Constraints.Infinity
+        val fit = remember(
+            singleLineText,
+            stackedText,
+            baseStyle,
+            maxWidthPx,
+            minFontSizeSp,
+            textMeasurer,
+            density.density,
+            density.fontScale
+        ) {
+            resolveFittedRoomCodeLayout(
+                singleLineText = singleLineText,
+                stackedText = stackedText,
+                baseStyle = baseStyle,
+                maxWidthPx = maxWidthPx,
+                minFontSizeSp = minFontSizeSp,
+                measureTextWidthPx = { sample, candidateStyle ->
+                    textMeasurer.measure(
+                        text = AnnotatedString(sample),
+                        style = candidateStyle,
+                        softWrap = false,
+                        maxLines = 1
+                    ).size.width
+                }
+            )
+        }
+        Text(
+            text = fit.displayText,
+            style = fit.style,
+            color = color,
+            maxLines = fit.maxLines,
+            softWrap = fit.softWrap,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.clearAndSetSemantics {
+                text = AnnotatedString(semanticCodeText)
+            }
+        )
+    }
+}
+
+@Composable
+internal fun AdaptiveTrailingRow(
+    horizontalSpacing: Dp,
+    verticalSpacing: Dp,
+    modifier: Modifier = Modifier,
+    fillMaxWidth: Boolean = true,
+    alignTrailingEnd: Boolean = true,
+    alignLeadingEndWhenStacked: Boolean = false,
+    leading: @Composable () -> Unit,
+    trailing: @Composable () -> Unit
+) {
+    Layout(
+        modifier = modifier,
+        content = {
+            Box { leading() }
+            Box { trailing() }
+        }
+    ) { measurables, constraints ->
+        val hGap = horizontalSpacing.roundToPx()
+        val vGap = verticalSpacing.roundToPx()
+        val relaxed = constraints.copy(minWidth = 0, minHeight = 0)
+        val leadPlaceable = measurables[0].measure(relaxed)
+        val trailPlaceable = measurables[1].measure(relaxed)
+        val hasBoundedWidth = constraints.hasBoundedWidth
+        val fitsSingleRow = !hasBoundedWidth ||
+            leadPlaceable.width + hGap + trailPlaceable.width <= constraints.maxWidth
+        if (fitsSingleRow) {
+            val naturalWidth = leadPlaceable.width + hGap + trailPlaceable.width
+            val layoutWidth = if (fillMaxWidth && hasBoundedWidth) {
+                constraints.maxWidth
+            } else {
+                naturalWidth.coerceIn(constraints.minWidth, constraints.maxWidth)
+            }
+            val rawHeight = maxOf(leadPlaceable.height, trailPlaceable.height)
+            val layoutHeight = rawHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
+            val trailX = if (alignTrailingEnd) {
+                (layoutWidth - trailPlaceable.width).coerceAtLeast(leadPlaceable.width + hGap)
+            } else {
+                leadPlaceable.width + hGap
+            }
+            layout(layoutWidth, layoutHeight) {
+                leadPlaceable.placeRelative(0, (layoutHeight - leadPlaceable.height) / 2)
+                trailPlaceable.placeRelative(trailX, (layoutHeight - trailPlaceable.height) / 2)
+            }
+        } else {
+            val layoutWidth = if (fillMaxWidth) {
+                constraints.maxWidth
+            } else {
+                maxOf(leadPlaceable.width, trailPlaceable.width)
+                    .coerceIn(constraints.minWidth, constraints.maxWidth)
+            }
+            val rawHeight = leadPlaceable.height + vGap + trailPlaceable.height
+            val layoutHeight = rawHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
+            val topOffset = ((layoutHeight - rawHeight) / 2).coerceAtLeast(0)
+            val leadX = if (alignLeadingEndWhenStacked) {
+                (layoutWidth - leadPlaceable.width).coerceAtLeast(0)
+            } else {
+                0
+            }
+            val trailX = if (alignTrailingEnd) {
+                (layoutWidth - trailPlaceable.width).coerceAtLeast(0)
+            } else {
+                0
+            }
+            layout(layoutWidth, layoutHeight) {
+                leadPlaceable.placeRelative(leadX, topOffset)
+                trailPlaceable.placeRelative(trailX, topOffset + leadPlaceable.height + vGap)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnifiedMemberRow(
     member: GroupMember,
     room: GroupRoomView,
     snapshot: GroupSessionSnapshot,
@@ -1125,8 +1606,7 @@ private fun RiderSeatGlassCard(
     actionsEnabled: Boolean,
     onAction: (GroupSessionEvent) -> Unit,
     onSelectRole: () -> Unit,
-    onOpenGovernance: () -> Unit,
-    modifier: Modifier = Modifier
+    onOpenGovernance: () -> Unit
 ) {
     val colors = GroupGlassPalette.current
     val memberId = member.lease.deviceId
@@ -1135,223 +1615,213 @@ private fun RiderSeatGlassCard(
     val isSpeaking = memberId in snapshot.activeSpeakerIds
     val isReconnecting = member.status == GroupMemberStatus.RESERVED
     val isInPrivate = member.channel is GroupChannel.Private
+    val isNetwork = snapshot.mode == GroupMode.NETWORK
     val peerBusyPrivate = isInPrivate || room.privateInvites.any { it.involves(memberId) }
-    val canCallPrivate = actionsEnabled && member.status == GroupMemberStatus.ADMITTED &&
+    val canCallPrivate = !isNetwork && actionsEnabled && member.status == GroupMemberStatus.ADMITTED &&
         !isSelf && !selfBusyPrivate && !peerBusyPrivate
     val isLocallyMuted = snapshot.participation.isBlocked(memberId)
-    val isCloudBacked = snapshot.mode == GroupMode.HYBRID || snapshot.mode == GroupMode.NETWORK
 
-    val cardContainer = when {
+    val statusText = when {
+        isReconnecting -> "重连中，席位暂时保留"
+        isNetwork && !isSelf -> "已加入"
+        isNetwork && snapshot.networkMediaState == GroupNetworkMediaState.JOINED -> "RTC 在线"
+        isNetwork -> "等待 RTC 语音"
+        isInPrivate -> "私聊中"
+        isSpeaking -> "正在发言"
+        !member.audioAvailable -> "音频待就绪"
+        else -> "收听中"
+    }
+    val rowContainer = when {
         isInPrivate -> colors.privateSurface
         isSpeaking -> colors.speakingSurface
-        else -> colors.card
+        else -> colors.cardElevated
     }
-    val cardBorder = when {
+    val rowBorder = when {
         isInPrivate -> colors.privateActiveBorder
         isSpeaking -> colors.limeActiveBorder
-        else -> colors.glassBorder
+        else -> colors.hairlineBorder
     }
+    val semanticMemberTitle = "$displayName · ${member.role.displayLabel()}" + (if (isSelf) " · 我" else "")
+    val visibleMemberTitle = if (isSelf) "$displayName (我)" else displayName
 
-    GlassCard(
-        modifier = modifier.clickable(role = Role.Button, onClick = onOpenGovernance),
-        containerColor = cardContainer,
-        borderColor = cardBorder,
-        cornerRadius = 22.dp,
-        contentPadding = PaddingValues(14.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(role = Role.Button, onClick = onOpenGovernance),
+        shape = RoundedCornerShape(16.dp),
+        color = rowContainer,
+        border = BorderStroke(1.dp, rowBorder)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 9.dp)
         ) {
-            RiderAvatar(
-                seed = memberId,
-                name = displayName,
-                online = member.status == GroupMemberStatus.ADMITTED && member.audioAvailable,
-                reconnecting = isReconnecting,
-                size = 42.dp
-            )
-            when {
-                isSpeaking -> GlassWaveformBars(
-                    color = if (isInPrivate) colors.statusPrivate else colors.statusOnline,
-                    animated = true
-                )
-                isInPrivate -> GlassPillChip(
-                    label = "私聊中",
-                    containerColor = colors.dangerSoft,
-                    contentColor = colors.textPrivate
-                )
-                isReconnecting -> GlassPillChip(
-                    label = "重连中",
-                    containerColor = colors.warningSoft,
-                    contentColor = colors.textWarning
-                )
-                !isSelf -> GlassIconCircleButton(
-                    icon = GlassIconKind.CHAT,
-                    contentDescription = "向 $displayName 发起私聊",
-                    onClick = { onAction(GroupSessionEvent.RequestPrivate(memberId)) },
-                    enabled = canCallPrivate,
-                    circleSize = 34.dp,
-                    modifier = Modifier.testTag("private_call_$memberId")
-                )
+            val isCompactWidth = maxWidth < 310.dp || LocalDensity.current.fontScale > 1.15f
+            val useTwoRowActions = !isSelf && (!isNetwork || isCompactWidth)
+            val identityHeader: @Composable (Modifier) -> Unit = { headerModifier ->
+                Row(
+                    modifier = headerModifier,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RiderAvatar(
+                        seed = memberId,
+                        name = displayName,
+                        online = member.status == GroupMemberStatus.ADMITTED && (isNetwork || member.audioAvailable),
+                        reconnecting = isReconnecting,
+                        size = 36.dp
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        if (isCompactWidth) {
+                            Text(
+                                text = visibleMemberTitle,
+                                style = GroupGlassTypography.seatTitle,
+                                color = colors.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clearAndSetSemantics {
+                                        text = AnnotatedString(semanticMemberTitle)
+                                    }
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                RolePillBadge(role = member.role)
+                                Text(
+                                    text = "频道：${member.channel.displayLabel()} · $statusText",
+                                    style = GroupGlassTypography.badge,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = visibleMemberTitle,
+                                    style = GroupGlassTypography.seatTitle,
+                                    color = colors.textPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .clearAndSetSemantics {
+                                            text = AnnotatedString(semanticMemberTitle)
+                                        }
+                                )
+                                RolePillBadge(role = member.role)
+                            }
+                            Text(
+                                text = "频道：${member.channel.displayLabel()} · $statusText",
+                                style = GroupGlassTypography.badge,
+                                color = colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    if (isSpeaking) {
+                        GlassWaveformBars(
+                            color = if (isInPrivate) colors.statusPrivate else colors.statusOnline,
+                            animated = true
+                        )
+                    }
+                }
             }
-        }
-
-        Text(
-            text = "$displayName · ${member.role.displayLabel()}" + (if (isSelf) " · 我" else ""),
-            style = GroupGlassTypography.seatTitle,
-            color = colors.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            RolePillBadge(role = member.role)
-            Text(
-                text = member.channel.displayLabel(),
-                style = GroupGlassTypography.badge,
-                color = colors.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        if (!isSelf) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                GlassPillChip(
-                    label = if (isLocallyMuted) "取消静音" else "静音",
-                    leadingIcon = GlassIconKind.MUTE_SMALL,
-                    containerColor = if (isLocallyMuted) colors.dangerSoft else colors.chipNeutral,
-                    contentColor = if (isLocallyMuted) colors.textDanger else colors.textSecondary,
+            val peerActionsContent: @Composable () -> Unit = {
+                if (!isNetwork) {
+                    when {
+                        isInPrivate -> GlassPillChip(
+                            label = "私聊中",
+                            containerColor = colors.dangerSoft,
+                            contentColor = colors.textPrivate
+                        )
+                        isReconnecting -> GlassPillChip(
+                            label = "重连中",
+                            containerColor = colors.warningSoft,
+                            contentColor = colors.textWarning
+                        )
+                        else -> GlassPillChip(
+                            label = "私聊",
+                            containerColor = colors.privateSurface,
+                            contentColor = colors.textPrivate,
+                            borderColor = colors.privateActiveBorder,
+                            onClick = { onAction(GroupSessionEvent.RequestPrivate(memberId)) },
+                            enabled = canCallPrivate,
+                            modifier = Modifier.testTag("private_call_$memberId")
+                        )
+                    }
+                    if (snapshot.isOwner) {
+                        GlassPillChip(
+                            label = "角色",
+                            containerColor = colors.card,
+                            contentColor = colors.textPrimary,
+                            borderColor = colors.glassBorder,
+                            onClick = onSelectRole,
+                            enabled = actionsEnabled,
+                            modifier = Modifier.testTag("member_role_$memberId")
+                        )
+                    }
+                }
+                GlassIconCircleButton(
+                    icon = GlassIconKind.MUTE_SMALL,
+                    contentDescription = if (isLocallyMuted) "取消本地静音" else "本地静音",
                     onClick = { onAction(GroupSessionEvent.Block(memberId, !isLocallyMuted)) },
+                    tint = if (isLocallyMuted) colors.textDanger else colors.textSecondary,
+                    containerColor = if (isLocallyMuted) colors.dangerSoft else colors.chipNeutral,
+                    circleSize = 34.dp,
                     modifier = Modifier.testTag("member_mute_$memberId")
                 )
                 if (snapshot.isOwner) {
-                    GlassPillChip(
-                        label = "角色",
-                        containerColor = colors.cardElevated,
-                        contentColor = colors.textPrimary,
-                        borderColor = colors.glassBorder,
-                        onClick = onSelectRole,
+                    GlassIconCircleButton(
+                        icon = GlassIconKind.MORE,
+                        contentDescription = "管理成员 $displayName",
+                        onClick = onOpenGovernance,
                         enabled = actionsEnabled,
-                        modifier = Modifier.testTag("member_role_$memberId")
+                        circleSize = 34.dp
                     )
                 }
             }
-            if (snapshot.isOwner && isCloudBacked) {
+
+            if (useTwoRowActions) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    identityHeader(Modifier.fillMaxWidth())
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = if (isCompactWidth) 0.dp else 46.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        peerActionsContent()
+                    }
+                }
+            } else {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (member.status == GroupMemberStatus.ADMITTED) {
-                        GlassPillChip(
-                            label = "设群主",
-                            containerColor = colors.infoSoft,
-                            contentColor = colors.textCloud,
-                            onClick = { onAction(GroupSessionEvent.TransferOwner(memberId, alsoLeave = false)) },
-                            enabled = actionsEnabled,
-                            modifier = Modifier.testTag("member_transfer_$memberId")
-                        )
+                    identityHeader(Modifier.weight(1f))
+                    if (!isSelf) {
+                        peerActionsContent()
                     }
-                    GlassPillChip(
-                        label = "移出",
-                        containerColor = colors.dangerSoft,
-                        contentColor = colors.textDanger,
-                        onClick = { onAction(GroupSessionEvent.Remove(memberId)) },
-                        enabled = actionsEnabled,
-                        modifier = Modifier.testTag("member_remove_$memberId")
-                    )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun NetworkMemberRow(
-    member: GroupMember,
-    snapshot: GroupSessionSnapshot,
-    actionsEnabled: Boolean,
-    onAction: (GroupSessionEvent) -> Unit,
-    onOpenGovernance: () -> Unit
-) {
-    val colors = GroupGlassPalette.current
-    val memberId = member.lease.deviceId
-    val isSelf = memberId == snapshot.local?.deviceId
-    val name = snapshot.names[memberId] ?: "骑士"
-    val isSpeaking = memberId in snapshot.activeSpeakerIds
-    val isLocallyMuted = snapshot.participation.isBlocked(memberId)
-    val statusText = when {
-        member.status == GroupMemberStatus.RESERVED -> "重连中，席位暂时保留"
-        !isSelf -> "已加入"
-        snapshot.networkMediaState == GroupNetworkMediaState.JOINED -> "RTC 在线"
-        else -> "等待 RTC 语音"
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        RiderAvatar(
-            seed = memberId,
-            name = name,
-            online = member.status == GroupMemberStatus.ADMITTED,
-            reconnecting = member.status == GroupMemberStatus.RESERVED,
-            size = 36.dp
-        )
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = name,
-                    style = GroupGlassTypography.seatTitle,
-                    color = colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                RolePillBadge(role = member.role)
-                if (isSelf) {
-                    GlassPillChip(label = "我")
-                }
-            }
-            Text(
-                text = "频道：${member.channel.displayLabel()} · $statusText",
-                style = GroupGlassTypography.badge,
-                color = colors.textSecondary
-            )
-        }
-        if (isSpeaking) {
-            GlassWaveformBars(color = colors.statusOnline, animated = true)
-        }
-        if (!isSelf) {
-            GlassIconCircleButton(
-                icon = GlassIconKind.MUTE_SMALL,
-                contentDescription = if (isLocallyMuted) "取消本地静音" else "本地静音",
-                onClick = { onAction(GroupSessionEvent.Block(memberId, !isLocallyMuted)) },
-                tint = if (isLocallyMuted) colors.textDanger else colors.textSecondary,
-                containerColor = if (isLocallyMuted) colors.dangerSoft else colors.chipNeutral,
-                circleSize = 34.dp
-            )
-            if (snapshot.isOwner) {
-                GlassIconCircleButton(
-                    icon = GlassIconKind.MORE,
-                    contentDescription = "管理成员 $name",
-                    onClick = onOpenGovernance,
-                    enabled = actionsEnabled,
-                    circleSize = 34.dp
-                )
             }
         }
     }

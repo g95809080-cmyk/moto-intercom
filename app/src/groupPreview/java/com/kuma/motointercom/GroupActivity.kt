@@ -15,6 +15,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -577,25 +578,32 @@ internal fun GroupScreen(
         val colors = GroupGlassPalette.current
         Box(modifier = Modifier.fillMaxSize()) {
             GroupGlassBackdrop(mood = backdropMood)
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .safeDrawingPadding()
                     .imePadding(),
                 contentAlignment = Alignment.TopCenter
             ) {
+                val viewportHeight = maxHeight
                 val pageScrollState = when (subpage) {
                     GroupSubpage.MAIN -> if (isInSession) inRoomScrollState else lobbyScrollState
                     GroupSubpage.SETTINGS -> settingsScrollState
                     GroupSubpage.LOGS -> logsScrollState
                 }
+                val usePinnedFooterLayout = subpage == GroupSubpage.MAIN
                 Column(
                     modifier = Modifier
                         .widthIn(max = 720.dp)
                         .fillMaxWidth()
                         .verticalScroll(pageScrollState)
+                        .then(if (usePinnedFooterLayout) Modifier.heightIn(min = viewportHeight) else Modifier)
                         .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = if (usePinnedFooterLayout) {
+                        Arrangement.SpaceBetween
+                    } else {
+                        Arrangement.spacedBy(12.dp)
+                    }
                 ) {
                     when (subpage) {
                         GroupSubpage.SETTINGS -> {
@@ -642,7 +650,8 @@ internal fun GroupScreen(
                                     themeMode = activeTheme,
                                     onToggleTheme = toggleThemeAction,
                                     onOpenSettings = { subpage = GroupSubpage.SETTINGS },
-                                    onBack = onBack,
+                                    route = state.route,
+                                    voxEnabled = state.vox,
                                     localCode = code,
                                     onLocalCodeChange = { code = it },
                                     inviteInput = inviteInput,
