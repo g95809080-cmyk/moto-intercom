@@ -1,0 +1,14 @@
+{
+  "name": "motocom-group-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev-config": "node dev-config.mjs",
+    "test": "node --test server.test.mjs entitlement.test.mjs"
+  }
+}

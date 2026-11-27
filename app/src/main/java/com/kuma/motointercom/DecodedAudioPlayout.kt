@@ -47,6 +47,16 @@ internal class DecodedAudioPlayout(
     private val lock = Any()
     @Volatile private var active: Lease? = null
     private var closed = false
+    @Volatile private var muted = false
+
+    fun setMuted(value: Boolean) {
+        val lease = active
+        if (lease == null) muted = value
+        else synchronized(lease.lock) {
+            muted = value
+            if (value) lease.queue.clear()
+        }
+    }
 
     fun resume(revision: Long) = synchronized(lock) {
         if (closed || !permits(revision) || active?.revision == revision) return
@@ -86,6 +96,7 @@ internal class DecodedAudioPlayout(
         val size = expected.toInt()
         val copy = ByteArray(size)
         data.duplicate().get(copy)
+        if (muted) copy.fill(0)
         if (!lease.current()) return
         val frame = Frame(rate, channels, copy)
         if (!lease.queue.offer(frame)) {
@@ -136,6 +147,7 @@ internal class DecodedAudioPlayout(
                     val written = synchronized(lease.lock) {
                         if (!lease.current()) return
                         val device = lease.playback ?: error("Missing decoded audio output")
+                        if (muted) frame.bytes.fill(0)
                         val count = device.write(frame.bytes, offset, frame.bytes.size - offset)
                         check(count >= 0 && count <= frame.bytes.size - offset) { "Decoded audio write failed: $count" }
                         if (count > 0) {

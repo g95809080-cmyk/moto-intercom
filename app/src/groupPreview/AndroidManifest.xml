@@ -1,0 +1,29 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        tools:remove="android:maxSdkVersion" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
+        tools:remove="android:maxSdkVersion" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <application
+        android:label="摩声群组 R5 预览"
+        android:networkSecurityConfig="@xml/group_preview_network_security_config"
+        tools:replace="android:label">
+        <activity android:name=".MainActivity" tools:node="remove" />
+        <service android:name=".IntercomService" tools:node="remove" />
+        <activity android:name=".GroupActivity" android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service android:name=".GroupIntercomService" android:exported="false"
+            android:foregroundServiceType="microphone|connectedDevice" />
+    </application>
+</manifest>

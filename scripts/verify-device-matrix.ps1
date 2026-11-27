@@ -1,12 +1,49 @@
 param(
     [string[]]$Serials = @("9688fa60", "efcb9031"),
-    [string]$Adb = "C:\Users\kuma\AppData\Local\Android\Sdk\platform-tools\adb.exe",
+    [string]$Adb = "",
     [string]$Apk = "app\build\outputs\apk\debug\app-debug.apk"
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path -LiteralPath $Adb -PathType Leaf)) {
+function Resolve-AdbPath {
+    param([string]$ExplicitAdb)
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitAdb)) {
+        return $ExplicitAdb
+    }
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_SDK_ROOT)) {
+        $candidates += (Join-Path $env:ANDROID_SDK_ROOT "platform-tools\adb.exe")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_HOME)) {
+        $candidates += (Join-Path $env:ANDROID_HOME "platform-tools\adb.exe")
+    }
+    $localProps = Join-Path (Split-Path -Parent $PSScriptRoot) "local.properties"
+    if (Test-Path -LiteralPath $localProps -PathType Leaf) {
+        $sdkLine = Get-Content -LiteralPath $localProps -Encoding UTF8 |
+            Where-Object { $_ -match '^\s*sdk\.dir\s*=\s*(.+)$' } |
+            Select-Object -First 1
+        if ($sdkLine -match '^\s*sdk\.dir\s*=\s*(.+)$') {
+            $sdkDir = $Matches[1].Trim() -replace '\\:', ':' -replace '\\\\', '\' -replace '/', '\'
+            if (-not [string]::IsNullOrWhiteSpace($sdkDir)) {
+                $candidates += (Join-Path $sdkDir "platform-tools\adb.exe")
+            }
+        }
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    $onPath = Get-Command adb -ErrorAction SilentlyContinue
+    if ($null -ne $onPath -and -not [string]::IsNullOrWhiteSpace($onPath.Source)) {
+        return $onPath.Source
+    }
+    return ""
+}
+
+$Adb = Resolve-AdbPath -ExplicitAdb $Adb
+if ([string]::IsNullOrWhiteSpace($Adb) -or -not (Test-Path -LiteralPath $Adb -PathType Leaf)) {
     throw "ADB not found: $Adb"
 }
 if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) {
