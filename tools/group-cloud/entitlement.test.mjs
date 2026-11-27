@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
 import { EntitlementStore, normalizeActivationCode, shanghaiMonthKey } from './entitlement-store.mjs';
 import { createGroupCloudServer } from './server.mjs';
 import { GroupCloudStore } from './room-store.mjs';
@@ -912,5 +914,438 @@ test('P1-1, P1-3, P1-4 regressions: idempotency conflict, CLI cleartext rejectio
     assert.equal(globalBlocked.json.code, 'RATE_LIMITED');
   } finally {
     await proxyEnv.close();
+  }
+});
+
+test('admin UI portal-sso session boundary: 401 and logout abort in-flight reveal/mint/load, close modals, stop timers, clear storage, and prevent stale DOM writeback', async () => {
+  const adminJsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'admin-ui', 'admin.js');
+  const adminJsSource = fs.readFileSync(adminJsPath, 'utf8');
+
+  function createFakeNode(tagName, id = '') {
+    const classes = new Set();
+    const attrs = new Map();
+    const listeners = new Map();
+    let ownText = '';
+    const node = {
+      tagName: String(tagName || 'DIV').toUpperCase(),
+      id,
+      value: '',
+      checked: false,
+      disabled: false,
+      type: '',
+      title: '',
+      dataset: {},
+      children: [],
+      parentNode: null,
+      classList: {
+        add: (...names) => names.forEach((n) => classes.add(n)),
+        remove: (...names) => names.forEach((n) => classes.delete(n)),
+        contains: (n) => classes.has(n),
+        toggle: (n, force) => {
+          if (force === undefined) {
+            if (classes.has(n)) classes.delete(n);
+            else classes.add(n);
+          } else if (force) classes.add(n);
+          else classes.delete(n);
+        }
+      },
+      set className(val) {
+        classes.clear();
+        for (const token of String(val || '').split(/\s+/).filter(Boolean)) classes.add(token);
+      },
+      get className() {
+        return Array.from(classes).join(' ');
+      },
+      get firstChild() {
+        return node.children[0] ?? null;
+      },
+      set textContent(val) {
+        ownText = String(val ?? '');
+        node.children = [];
+      },
+      get textContent() {
+        if (node.children.length === 0) return ownText;
+        return node.children.map((c) => c.textContent).join('');
+      },
+      appendChild(child) {
+        child.parentNode = node;
+        node.children.push(child);
+        return child;
+      },
+      removeChild(child) {
+        const idx = node.children.indexOf(child);
+        if (idx >= 0) {
+          node.children.splice(idx, 1);
+          child.parentNode = null;
+        }
+        return child;
+      },
+      setAttribute(k, v) {
+        attrs.set(k, String(v));
+      },
+      getAttribute(k) {
+        return attrs.get(k) ?? null;
+      },
+      addEventListener(type, fn) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(fn);
+      },
+      dispatch(type, event = {}) {
+        const ev = { preventDefault: () => {}, ...event };
+        for (const fn of listeners.get(type) ?? []) fn(ev);
+      },
+      findButtonsByText(label) {
+        const matches = [];
+        const visit = (cur) => {
+          if (cur.tagName === 'BUTTON' && cur.textContent === label) matches.push(cur);
+          for (const child of cur.children ?? []) visit(child);
+        };
+        visit(node);
+        return matches;
+      }
+    };
+    return node;
+  }
+
+  function createStorage(initial = {}) {
+    const map = new Map(Object.entries(initial));
+    return {
+      getItem: (k) => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => { map.set(k, String(v)); },
+      removeItem: (k) => { map.delete(k); },
+      dump: () => Object.fromEntries(map.entries())
+    };
+  }
+
+  function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function flushMicrotasks(rounds = 8) {
+    for (let i = 0; i < rounds; i += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  function makeOverviewPayload() {
+    return {
+      globalQuota: {
+        monthKey: '2026-11',
+        usedSeconds: 600,
+        hardLimitMinutes: 8500,
+        remainingMinutes: 8490,
+        warnThresholdRatio: 0.8,
+        requireCodeForJoin: false
+      },
+      codes: { unused: 9, redeemed: 1, revoked: 0, total: 10 },
+      entitlements: { active: 1, revoked: 0, total: 1 },
+      rooms: { activeCount: 0, rtcMembers: 0 },
+      dailyUsage: [],
+      topConsumersToday: [],
+      topConsumersMonth: []
+    };
+  }
+
+  function mountAdminUi({ href, fetchHandler, initialSessionStorage = {} }) {
+    const parsedUrl = new URL(href);
+    const elements = new Map();
+    const getEl = (id) => {
+      if (!elements.has(id)) elements.set(id, createFakeNode('div', id));
+      return elements.get(id);
+    };
+    const navItems = ['overview', 'codes', 'entitlements', 'rooms', 'policy', 'audit'].map((view) => {
+      const btn = createFakeNode('button');
+      btn.dataset.view = view;
+      return btn;
+    });
+    const viewPanels = ['overview', 'codes', 'entitlements', 'rooms', 'policy', 'audit'].map((view) => {
+      const panel = getEl(`view-${view}`);
+      panel.classList.add('view-panel');
+      return panel;
+    });
+    getEl('auto-refresh-toggle').checked = true;
+    getEl('mint-type').value = 'PLAN';
+    getEl('mint-count').value = '1';
+    getEl('mint-minutes').value = '300';
+    getEl('mint-days').value = '14';
+    getEl('mint-max-members').value = '6';
+    getEl('mint-max-rooms').value = '1';
+    getEl('mint-max-session').value = '120';
+    getEl('mint-batch').value = 'portal-race';
+    getEl('mint-note').value = 'race-test';
+    for (const modalId of ['mint-modal', 'topup-modal', 'confirm-modal']) {
+      getEl(modalId).classList.add('hidden');
+    }
+
+    const localStorage = createStorage();
+    const sessionStorage = createStorage(initialSessionStorage);
+    const activeIntervals = new Set();
+    let nextTimerId = 1;
+    const redirects = [];
+    const docListeners = new Map();
+
+    const documentObj = {
+      visibilityState: 'visible',
+      documentElement: createFakeNode('html'),
+      getElementById: (id) => getEl(id),
+      createElement: (tag) => createFakeNode(tag),
+      createElementNS: (_ns, tag) => createFakeNode(tag),
+      createTextNode: (text) => {
+        const t = createFakeNode('#text');
+        t.textContent = String(text ?? '');
+        return t;
+      },
+      querySelectorAll: (selector) => {
+        if (selector === '.nav-item') return navItems;
+        if (selector === '.view-panel') return viewPanels;
+        return [];
+      },
+      addEventListener: (type, fn) => {
+        if (!docListeners.has(type)) docListeners.set(type, []);
+        docListeners.get(type).push(fn);
+      }
+    };
+
+    const windowObj = {
+      location: {
+        href: parsedUrl.href,
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        replace: (target) => { redirects.push(String(target)); }
+      },
+      localStorage,
+      sessionStorage,
+      crypto: globalThis.crypto,
+      setInterval: (fn, ms) => {
+        const id = nextTimerId++;
+        activeIntervals.add({ id, fn, ms });
+        return id;
+      },
+      clearInterval: (id) => {
+        for (const item of activeIntervals) {
+          if (item.id === id) activeIntervals.delete(item);
+        }
+      },
+      setTimeout: () => nextTimerId++,
+      clearTimeout: () => {}
+    };
+
+    const context = {
+      window: windowObj,
+      document: documentObj,
+      fetch: fetchHandler,
+      AbortController,
+      URLSearchParams,
+      URL,
+      Blob,
+      encodeURIComponent,
+      Date,
+      Math,
+      Number,
+      String,
+      Boolean,
+      Array,
+      Object,
+      Map,
+      Set,
+      Promise,
+      Error,
+      JSON,
+      Uint8Array,
+      setTimeout: windowObj.setTimeout,
+      clearTimeout: windowObj.clearTimeout,
+      setInterval: windowObj.setInterval,
+      clearInterval: windowObj.clearInterval,
+      navigator: {}
+    };
+    vm.runInNewContext(adminJsSource, context, { filename: 'admin.js' });
+    return { getEl, navItems, sessionStorage, activeIntervals, redirects };
+  }
+
+  async function runTerminationScenario(mode) {
+    const heldReveal = deferred();
+    const heldMint = deferred();
+    const heldCodesLoad = deferred();
+    let codesGetCount = 0;
+    let overviewGetCount = 0;
+    const signals = {};
+
+    const ui = mountAdminUi({
+      href: 'https://group.toneride.top/admin',
+      initialSessionStorage: { motocom_admin_session_token: 'preexisting-manual-token' },
+      fetchHandler: async (url, init = {}) => {
+        const method = (init.method || 'GET').toUpperCase();
+        if (method === 'GET' && url === '/admin/v1/overview') {
+          overviewGetCount += 1;
+          if (overviewGetCount === 1) {
+            assert.equal(init.headers.Authorization, 'Bearer portal-sso');
+            return { ok: true, status: 200, json: async () => makeOverviewPayload() };
+          }
+          if (mode === '401' && overviewGetCount >= 3) {
+            return {
+              ok: false,
+              status: 401,
+              json: async () => ({ code: 'ADMIN_UNAUTHORIZED', message: '统一入口登录已失效' })
+            };
+          }
+          return { ok: true, status: 200, json: async () => makeOverviewPayload() };
+        }
+        if (method === 'GET' && url.startsWith('/admin/v1/codes?')) {
+          codesGetCount += 1;
+          if (codesGetCount === 1) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                total: 1,
+                items: [{
+                  codeId: 'cd_race_1',
+                  codeMask: 'MOTO-****-****-1VDG',
+                  canReveal: true,
+                  batchId: 'wechat-beta-1',
+                  codeType: 'PLAN',
+                  status: 'UNUSED',
+                  quotaMinutes: 300,
+                  validDays: 14,
+                  maxMembers: 6,
+                  note: 'beta',
+                  createdAtMs: Date.UTC(2026, 10, 27, 10, 0, 0)
+                }]
+              })
+            };
+          }
+          signals.load = init.signal;
+          return heldCodesLoad.promise;
+        }
+        if (method === 'POST' && url === '/admin/v1/codes/cd_race_1/reveal') {
+          signals.reveal = init.signal;
+          return heldReveal.promise;
+        }
+        if (method === 'POST' && url === '/admin/v1/codes/batch') {
+          signals.mint = init.signal;
+          return heldMint.promise;
+        }
+        throw new Error(`Unexpected fetch: ${method} ${url}`);
+      }
+    });
+
+    await flushMicrotasks();
+    // Portal auto-login must succeed without persisting portal-sso into sessionStorage
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), false);
+    assert.equal(ui.getEl('logout-btn').textContent, '退出统一入口');
+    assert.equal(ui.activeIntervals.size, 1);
+    assert.notEqual(ui.sessionStorage.getItem('motocom_admin_session_token'), 'portal-sso');
+
+    // Navigate to codes tab and load initial masked row
+    ui.navItems.find((b) => b.dataset.view === 'codes').dispatch('click');
+    await flushMicrotasks();
+    assert.equal(ui.getEl('codes-tbody').textContent.includes('MOTO-****-****-1VDG'), true);
+
+    // Open all 3 modals and launch concurrent in-flight reveal, mint, and codes-load requests
+    ui.getEl('open-mint-btn').dispatch('click');
+    ui.getEl('topup-modal').classList.remove('hidden');
+    ui.getEl('confirm-modal').classList.remove('hidden');
+
+    const revealBtns = ui.getEl('codes-tbody').findButtonsByText('查看');
+    assert.equal(revealBtns.length, 1);
+    revealBtns[0].dispatch('click');
+    ui.getEl('mint-form').dispatch('submit');
+    ui.getEl('codes-filter-form').dispatch('submit');
+    await flushMicrotasks();
+
+    assert.ok(signals.reveal && signals.mint && signals.load, 'all three in-flight requests must receive AbortSignal');
+    assert.equal(signals.reveal.aborted, false);
+    assert.equal(signals.mint.aborted, false);
+    assert.equal(signals.load.aborted, false);
+
+    // Trigger termination via portal 401 or portal logout click
+    if (mode === '401') {
+      ui.getEl('refresh-btn').dispatch('click');
+    } else {
+      ui.getEl('logout-btn').dispatch('click');
+    }
+    await flushMicrotasks();
+
+    // Assert complete termination boundary immediately
+    assert.equal(signals.reveal.aborted, true);
+    assert.equal(signals.mint.aborted, true);
+    assert.equal(signals.load.aborted, true);
+    assert.equal(ui.activeIntervals.size, 0);
+    assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), null);
+    assert.equal(ui.getEl('mint-modal').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('topup-modal').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('confirm-modal').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('codes-tbody').children.length, 0);
+    assert.equal(ui.getEl('mint-result-list').children.length, 0);
+    assert.deepEqual(ui.redirects, [
+      mode === '401'
+        ? 'https://entry.toneride.top/login?next=https%3A%2F%2Fgroup.toneride.top%2Fadmin'
+        : 'https://entry.toneride.top/logout'
+    ]);
+
+    // Simulate all 3 in-flight promises resolving with 200 plaintext payloads AFTER termination
+    heldReveal.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ codeId: 'cd_race_1', code: 'MOTO-SJ3R-66X9-1VDG' })
+    });
+    heldMint.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        batchId: 'portal-race',
+        count: 1,
+        quotaMinutes: 300,
+        validDays: 14,
+        maxMembers: 6,
+        codes: [{ codeId: 'cd_new_1', code: 'MOTO-NEW1-2222-3333', codeMask: 'MOTO-****-****-3333' }]
+      })
+    });
+    heldCodesLoad.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        total: 1,
+        items: [{ codeId: 'cd_race_1', codeMask: 'MOTO-****-****-1VDG', canReveal: true, status: 'UNUSED' }]
+      })
+    });
+    await flushMicrotasks(12);
+
+    // Zero stale DOM or plaintext writeback allowed
+    assert.equal(ui.getEl('codes-tbody').children.length, 0);
+    assert.equal(ui.getEl('codes-tbody').textContent.includes('MOTO-SJ3R-66X9-1VDG'), false);
+    assert.equal(ui.getEl('codes-tbody').textContent.includes('MOTO-****-****-1VDG'), false);
+    assert.equal(ui.getEl('mint-result-list').children.length, 0);
+    assert.equal(ui.getEl('mint-result-list').textContent.includes('MOTO-NEW1-2222-3333'), false);
+    assert.equal(ui.getEl('mint-modal').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('mint-error').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+  }
+
+  await runTerminationScenario('401');
+  await runTerminationScenario('logout');
+
+  // Non-portal hosts (loopback and apex domain) must not probe portal-sso
+  for (const nonPortalUrl of ['http://127.0.0.1:8443/admin', 'https://toneride.top/admin']) {
+    const calls = [];
+    const ui = mountAdminUi({
+      href: nonPortalUrl,
+      fetchHandler: async (url) => {
+        calls.push(url);
+        return { ok: false, status: 401, json: async () => ({}) };
+      }
+    });
+    await flushMicrotasks();
+    assert.deepEqual(calls, []);
+    assert.equal(ui.getEl('login-view').classList.contains('hidden'), false);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), null);
   }
 });

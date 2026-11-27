@@ -64,6 +64,8 @@
 
   const state = {
     token: '',
+    sessionGeneration: 0,
+    sessionAbortController: null,
     activeView: 'overview',
     rankMode: 'today',
     overview: null,
@@ -234,6 +236,8 @@
     state.rooms.items = [];
     state.audit.items = [];
     $('hide-all-revealed-btn').classList.add('hidden');
+    $('mint-result-meta').textContent = '';
+    $('sync-status').textContent = '未同步';
     clearChildren($('mint-result-list'));
     clearChildren($('codes-tbody'));
     clearChildren($('entitlements-tbody'));
@@ -243,9 +247,38 @@
     clearChildren($('daily-chart'));
   }
 
-  function lockSession(message = '') {
+  function isSessionActive(sessionGen) {
+    return Boolean(state.token) && state.sessionGeneration === sessionGen;
+  }
+
+  function createSessionTerminatedError() {
+    return Object.assign(new Error('管理员会话已终止'), {
+      status: 401,
+      code: 'SESSION_TERMINATED',
+      aborted: true
+    });
+  }
+
+  function beginSession(token, { isPortal = false } = {}) {
+    state.sessionGeneration += 1;
+    if (state.sessionAbortController) {
+      state.sessionAbortController.abort();
+    }
+    state.sessionAbortController = new AbortController();
+    state.token = token;
+    $('logout-btn').textContent = isPortal ? '退出统一入口' : '锁定并退出';
+  }
+
+  function terminateSessionState() {
+    state.sessionGeneration += 1;
+    if (state.sessionAbortController) {
+      state.sessionAbortController.abort();
+      state.sessionAbortController = null;
+    }
     stopAutoRefresh();
     state.token = '';
+    state.refreshing = false;
+    $('refresh-btn').disabled = false;
     try {
       window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
     } catch {
@@ -257,6 +290,11 @@
     clearSensitiveDom();
     $('token-input').value = '';
     $('app-view').classList.add('hidden');
+  }
+
+  function lockSession(message = '') {
+    terminateSessionState();
+    $('logout-btn').textContent = '锁定并退出';
     $('login-view').classList.remove('hidden');
     const errBox = $('login-error');
     if (message) {
@@ -267,7 +305,14 @@
     }
   }
 
+  function exitPortalSession(targetUrl) {
+    terminateSessionState();
+    window.location.replace(targetUrl);
+  }
+
   async function apiRequest(method, endpoint, { body = null, idempotencyKey = '', overrideToken = '' } = {}) {
+    const isSessionCall = !overrideToken;
+    const requestSessionGen = state.sessionGeneration;
     const activeToken = overrideToken || state.token;
     if (!activeToken) {
       throw Object.assign(new Error('未登录管理员会话'), { status: 401, code: 'ADMIN_UNAUTHORIZED' });
@@ -279,12 +324,29 @@
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     if (body !== null) headers['Content-Type'] = 'application/json';
 
-    const response = await fetch(endpoint, {
+    const fetchOptions = {
       method,
       headers,
       cache: 'no-store',
       body: body !== null ? JSON.stringify(body) : undefined
-    });
+    };
+    if (isSessionCall && state.sessionAbortController) {
+      fetchOptions.signal = state.sessionAbortController.signal;
+    }
+
+    let response;
+    try {
+      response = await fetch(endpoint, fetchOptions);
+    } catch (fetchErr) {
+      if (isSessionCall && (!isSessionActive(requestSessionGen) || fetchErr?.name === 'AbortError')) {
+        throw createSessionTerminatedError();
+      }
+      throw fetchErr;
+    }
+
+    if (isSessionCall && !isSessionActive(requestSessionGen)) {
+      throw createSessionTerminatedError();
+    }
 
     let payload = null;
     try {
@@ -293,18 +355,19 @@
       payload = null;
     }
 
+    if (isSessionCall && !isSessionActive(requestSessionGen)) {
+      throw createSessionTerminatedError();
+    }
+
     if (!response.ok) {
       const message = payload?.message || `请求失败（HTTP ${response.status}）`;
       const err = Object.assign(new Error(message), {
         status: response.status,
         code: payload?.code || `HTTP_${response.status}`
       });
-      if (response.status === 401 && !overrideToken) {
+      if (response.status === 401 && isSessionCall) {
         if (state.token === PORTAL_SSO_TOKEN) {
-          stopAutoRefresh();
-          state.token = '';
-          clearSensitiveDom();
-          window.location.replace(
+          exitPortalSession(
             `${PORTAL_ORIGIN}/login?next=${encodeURIComponent(window.location.href)}`
           );
           throw err;
@@ -845,39 +908,50 @@
   /* ---------------- Data Loaders ---------------- */
 
   async function loadOverview() {
+    const sessionGen = state.sessionGeneration;
     const data = await apiRequest('GET', '/admin/v1/overview');
+    if (!isSessionActive(sessionGen)) return;
     renderOverview(data);
   }
 
   async function loadCodes() {
+    const sessionGen = state.sessionGeneration;
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(state.codes.offset) });
     if (state.codes.batchId) params.set('batchId', state.codes.batchId);
     if (state.codes.status) params.set('status', state.codes.status);
     if (state.codes.codeMask) params.set('codeMask', state.codes.codeMask);
     const data = await apiRequest('GET', `/admin/v1/codes?${params.toString()}`);
+    if (!isSessionActive(sessionGen)) return;
     renderCodes(data);
   }
 
   async function loadEntitlements() {
+    const sessionGen = state.sessionGeneration;
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(state.entitlements.offset) });
     if (state.entitlements.status) params.set('status', state.entitlements.status);
     const data = await apiRequest('GET', `/admin/v1/entitlements?${params.toString()}`);
+    if (!isSessionActive(sessionGen)) return;
     renderEntitlements(data);
   }
 
   async function loadRooms() {
+    const sessionGen = state.sessionGeneration;
     const data = await apiRequest('GET', '/admin/v1/rooms/active');
+    if (!isSessionActive(sessionGen)) return;
     renderRooms(data);
   }
 
   async function loadAudit() {
+    const sessionGen = state.sessionGeneration;
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(state.audit.offset) });
     const data = await apiRequest('GET', `/admin/v1/audit-logs?${params.toString()}`);
+    if (!isSessionActive(sessionGen)) return;
     renderAudit(data);
   }
 
   async function refreshCurrentView({ silent = false } = {}) {
     if (!state.token || state.refreshing) return;
+    const sessionGen = state.sessionGeneration;
     state.refreshing = true;
     if (!silent) $('refresh-btn').disabled = true;
     try {
@@ -887,14 +961,17 @@
       else if (state.activeView === 'rooms') tasks.push(loadRooms());
       else if (state.activeView === 'audit') tasks.push(loadAudit());
       await Promise.all(tasks);
+      if (!isSessionActive(sessionGen)) return;
       $('sync-status').textContent = `上次同步 ${formatTimeShanghai(Date.now()).slice(11)}`;
     } catch (error) {
-      if (!silent && error.status !== 401) {
+      if (!silent && !error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
         showToast(error.message || '刷新失败', 'error');
       }
     } finally {
-      state.refreshing = false;
-      $('refresh-btn').disabled = false;
+      if (state.sessionGeneration === sessionGen) {
+        state.refreshing = false;
+        $('refresh-btn').disabled = false;
+      }
     }
   }
 
@@ -940,13 +1017,19 @@
     $(id).classList.add('hidden');
     if (id === 'mint-modal') {
       state.lastMinted = null;
+      $('mint-result-meta').textContent = '';
+      $('mint-result-stage').classList.add('hidden');
+      $('mint-form-stage').classList.remove('hidden');
+      $('mint-error').classList.add('hidden');
       clearChildren($('mint-result-list'));
     }
     if (id === 'topup-modal') {
       state.topupTarget = null;
+      $('topup-error').classList.add('hidden');
     }
     if (id === 'confirm-modal') {
       state.confirmAction = null;
+      $('confirm-error').classList.add('hidden');
     }
   }
 
@@ -1019,6 +1102,7 @@
   }
 
   async function revealCodeItem(item, triggerBtn) {
+    const sessionGen = state.sessionGeneration;
     const requestGen = state.revealGeneration;
     if (triggerBtn) {
       triggerBtn.disabled = true;
@@ -1026,7 +1110,7 @@
     }
     try {
       const res = await apiRequest('POST', `/admin/v1/codes/${encodeURIComponent(item.codeId)}/reveal`, { body: {} });
-      if (requestGen !== state.revealGeneration || !state.token || state.activeView !== 'codes') {
+      if (!isSessionActive(sessionGen) || requestGen !== state.revealGeneration || state.activeView !== 'codes') {
         return;
       }
       if (res.code) {
@@ -1034,10 +1118,10 @@
         renderCodes({ items: state.codes.items, total: state.codes.total });
       }
     } catch (error) {
-      if (error.status !== 401) {
+      if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
         showToast(error.message || '查看激活码失败', 'error');
       }
-      if (triggerBtn && requestGen === state.revealGeneration) {
+      if (triggerBtn && isSessionActive(sessionGen) && requestGen === state.revealGeneration) {
         triggerBtn.disabled = false;
         triggerBtn.textContent = '查看';
       }
@@ -1164,7 +1248,7 @@
     btn.textContent = '验证中...';
     try {
       const overview = await apiRequest('GET', '/admin/v1/overview', { overrideToken: rawToken });
-      state.token = rawToken;
+      beginSession(rawToken, { isPortal: false });
       if ($('remember-session-checkbox').checked) {
         try {
           window.sessionStorage.setItem(SESSION_TOKEN_KEY, rawToken);
@@ -1199,10 +1283,7 @@
     $('theme-toggle-btn').addEventListener('click', toggleTheme);
     $('logout-btn').addEventListener('click', () => {
       if (state.token === PORTAL_SSO_TOKEN) {
-        stopAutoRefresh();
-        state.token = '';
-        clearSensitiveDom();
-        window.location.replace(`${PORTAL_ORIGIN}/logout`);
+        exitPortalSession(`${PORTAL_ORIGIN}/logout`);
         return;
       }
       lockSession();
@@ -1238,6 +1319,10 @@
     });
 
     // Codes filters & pagination
+    const showLoaderError = (err) => {
+      if (!err || err.aborted || err.status === 401 || !state.token) return;
+      showToast(err.message || '加载失败', 'error');
+    };
     $('codes-filter-form').addEventListener('submit', (e) => {
       e.preventDefault();
       clearRevealedCodesAndMaskDom();
@@ -1245,7 +1330,7 @@
       state.codes.status = $('filter-code-status').value;
       state.codes.codeMask = $('filter-mask').value.trim();
       state.codes.offset = 0;
-      loadCodes().catch((err) => showToast(err.message, 'error'));
+      loadCodes().catch(showLoaderError);
     });
     $('filter-codes-reset').addEventListener('click', () => {
       clearRevealedCodesAndMaskDom();
@@ -1256,7 +1341,7 @@
       state.codes.status = '';
       state.codes.codeMask = '';
       state.codes.offset = 0;
-      loadCodes().catch((err) => showToast(err.message, 'error'));
+      loadCodes().catch(showLoaderError);
     });
     $('hide-all-revealed-btn').addEventListener('click', () => {
       clearRevealedCodesAndMaskDom();
@@ -1264,13 +1349,13 @@
     $('codes-prev-btn').addEventListener('click', () => {
       clearRevealedCodesAndMaskDom();
       state.codes.offset = Math.max(0, state.codes.offset - PAGE_SIZE);
-      loadCodes().catch((err) => showToast(err.message, 'error'));
+      loadCodes().catch(showLoaderError);
     });
     $('codes-next-btn').addEventListener('click', () => {
       if (state.codes.offset + PAGE_SIZE < state.codes.total) {
         clearRevealedCodesAndMaskDom();
         state.codes.offset += PAGE_SIZE;
-        loadCodes().catch((err) => showToast(err.message, 'error'));
+        loadCodes().catch(showLoaderError);
       }
     });
 
@@ -1279,28 +1364,28 @@
       e.preventDefault();
       state.entitlements.status = $('filter-ent-status').value;
       state.entitlements.offset = 0;
-      loadEntitlements().catch((err) => showToast(err.message, 'error'));
+      loadEntitlements().catch(showLoaderError);
     });
     $('entitlements-prev-btn').addEventListener('click', () => {
       state.entitlements.offset = Math.max(0, state.entitlements.offset - PAGE_SIZE);
-      loadEntitlements().catch((err) => showToast(err.message, 'error'));
+      loadEntitlements().catch(showLoaderError);
     });
     $('entitlements-next-btn').addEventListener('click', () => {
       if (state.entitlements.offset + PAGE_SIZE < state.entitlements.total) {
         state.entitlements.offset += PAGE_SIZE;
-        loadEntitlements().catch((err) => showToast(err.message, 'error'));
+        loadEntitlements().catch(showLoaderError);
       }
     });
 
     // Audit pagination
     $('audit-prev-btn').addEventListener('click', () => {
       state.audit.offset = Math.max(0, state.audit.offset - PAGE_SIZE);
-      loadAudit().catch((err) => showToast(err.message, 'error'));
+      loadAudit().catch(showLoaderError);
     });
     $('audit-next-btn').addEventListener('click', () => {
       if (state.audit.offset + PAGE_SIZE < state.audit.total) {
         state.audit.offset += PAGE_SIZE;
-        loadAudit().catch((err) => showToast(err.message, 'error'));
+        loadAudit().catch(showLoaderError);
       }
     });
 
@@ -1312,6 +1397,7 @@
     $('policy-form').addEventListener('change', markPolicyDirty);
     $('policy-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const sessionGen = state.sessionGeneration;
       const hardLimitMinutes = Number($('policy-hard-limit').value);
       const warnPct = Number($('policy-warn-pct').value);
       const requireCodeForJoin = $('policy-require-join').value === 'true';
@@ -1323,17 +1409,21 @@
             requireCodeForJoin
           }
         });
+        if (!isSessionActive(sessionGen)) return;
         state.policyDirty = false;
         showToast('配额与入群策略已更新', 'ok');
         await refreshCurrentView();
       } catch (error) {
-        showToast(error.message || '保存策略失败', 'error');
+        if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
+          showToast(error.message || '保存策略失败', 'error');
+        }
       }
     });
 
     // Emergency breaker
     $('emergency-stop-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const sessionGen = state.sessionGeneration;
       if ($('emergency-confirm-input').value.trim().toUpperCase() !== 'STOP') {
         showToast('请先准确输入 STOP 确认执行全局熔断', 'error');
         return;
@@ -1342,25 +1432,32 @@
         const res = await apiRequest('PUT', '/admin/v1/config/global-quota', {
           body: { hardLimitMinutes: 0 }
         });
+        if (!isSessionActive(sessionGen)) return;
         $('emergency-confirm-input').value = '';
         const ended = (res.terminatedRoomIds || []).length;
         showToast(ended > 0 ? `已全局熔断并终止 ${ended} 个在线房间` : '已触发全局熔断（当月上限清零）', 'ok');
         await refreshCurrentView();
       } catch (error) {
-        showToast(error.message || '熔断执行失败', 'error');
+        if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
+          showToast(error.message || '熔断执行失败', 'error');
+        }
       }
     });
 
     $('emergency-restore-btn').addEventListener('click', async () => {
+      const sessionGen = state.sessionGeneration;
       try {
         await apiRequest('PUT', '/admin/v1/config/global-quota', {
           body: { hardLimitMinutes: 8500 }
         });
+        if (!isSessionActive(sessionGen)) return;
         state.policyDirty = false;
         showToast('已恢复本月全局配额至 8,500 人·分钟', 'ok');
         await refreshCurrentView();
       } catch (error) {
-        showToast(error.message || '恢复配额失败', 'error');
+        if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
+          showToast(error.message || '恢复配额失败', 'error');
+        }
       }
     });
 
@@ -1378,6 +1475,7 @@
     }
     $('mint-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const sessionGen = state.sessionGeneration;
       const errBox = $('mint-error');
       errBox.classList.add('hidden');
       const submitBtn = $('mint-submit-btn');
@@ -1399,13 +1497,16 @@
           body: payload,
           idempotencyKey: state.mintIdempotencyKey
         });
+        if (!isSessionActive(sessionGen)) return;
         renderMintResult(res);
         state.mintIdempotencyKey = createIdempotencyKey('ui-mint');
         showToast(`已成功签发 ${res.count} 张激活码`, 'ok');
         refreshCurrentView({ silent: true });
       } catch (error) {
-        errBox.textContent = error.message || '签发失败';
-        errBox.classList.remove('hidden');
+        if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
+          errBox.textContent = error.message || '签发失败';
+          errBox.classList.remove('hidden');
+        }
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = '确认签发';
@@ -1440,6 +1541,7 @@
     $('topup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!state.topupTarget) return;
+      const sessionGen = state.sessionGeneration;
       const errBox = $('topup-error');
       errBox.classList.add('hidden');
       const addMinutes = Number($('topup-minutes').value);
@@ -1464,12 +1566,15 @@
           body,
           idempotencyKey: state.topupIdempotencyKey
         });
+        if (!isSessionActive(sessionGen)) return;
         closeModal('topup-modal');
         showToast('权益充值续期已生效', 'ok');
         await refreshCurrentView();
       } catch (error) {
-        errBox.textContent = error.message || '充值失败';
-        errBox.classList.remove('hidden');
+        if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
+          errBox.textContent = error.message || '充值失败';
+          errBox.classList.remove('hidden');
+        }
       } finally {
         submitBtn.disabled = false;
       }
@@ -1479,17 +1584,21 @@
     $('confirm-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!state.confirmAction) return;
+      const sessionGen = state.sessionGeneration;
       const errBox = $('confirm-error');
       errBox.classList.add('hidden');
       const btn = $('confirm-submit-btn');
       btn.disabled = true;
       try {
         await state.confirmAction($('confirm-reason-input').value.trim(), $('confirm-extra-input').value.trim());
+        if (!isSessionActive(sessionGen)) return;
         closeModal('confirm-modal');
         await refreshCurrentView();
       } catch (error) {
-        errBox.textContent = error.message || '操作失败';
-        errBox.classList.remove('hidden');
+        if (!error.aborted && error.status !== 401 && isSessionActive(sessionGen)) {
+          errBox.textContent = error.message || '操作失败';
+          errBox.classList.remove('hidden');
+        }
       } finally {
         btn.disabled = false;
       }
@@ -1526,8 +1635,7 @@
         const overview = await apiRequest('GET', '/admin/v1/overview', {
           overrideToken: PORTAL_SSO_TOKEN
         });
-        state.token = PORTAL_SSO_TOKEN;
-        $('logout-btn').textContent = '退出统一入口';
+        beginSession(PORTAL_SSO_TOKEN, { isPortal: true });
         $('login-view').classList.add('hidden');
         $('app-view').classList.remove('hidden');
         renderOverview(overview);
@@ -1548,7 +1656,7 @@
     if (sessionToken) {
       try {
         const overview = await apiRequest('GET', '/admin/v1/overview', { overrideToken: sessionToken });
-        state.token = sessionToken;
+        beginSession(sessionToken, { isPortal: false });
         $('login-view').classList.add('hidden');
         $('app-view').classList.remove('hidden');
         renderOverview(overview);
