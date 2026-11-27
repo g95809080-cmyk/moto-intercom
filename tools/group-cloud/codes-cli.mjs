@@ -105,6 +105,7 @@ Commands:
   overview
   mint [--count 10] [--minutes 300] [--days 14] [--max-members 6] [--max-rooms 1] [--max-session 120] [--type PLAN|TOPUP] [--batch id] [--note text] [--idem key]
   codes [--batch id] [--status UNUSED|REDEEMED|REVOKED] [--mask text] [--limit 50]
+  reveal-code <codeId>
   revoke-code <codeId> [--reason text]
   entitlements [--status ACTIVE|REVOKED] [--limit 50]
   topup <entitlementId> [--minutes 300] [--days 30] [--max-members 10] [--reason text] [--idem key]
@@ -174,6 +175,16 @@ async function main() {
         'POST',
         `/admin/v1/codes/${encodeURIComponent(rest[0])}/revoke`,
         { reason: flags.reason ?? '' }
+      );
+      break;
+    case 'reveal-code':
+      if (!rest[0]) throw new Error('codeId is required');
+      result = await requestJson(
+        baseUrl,
+        adminToken,
+        'POST',
+        `/admin/v1/codes/${encodeURIComponent(rest[0])}/reveal`,
+        {}
       );
       break;
     case 'entitlements': {

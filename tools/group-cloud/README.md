@@ -65,8 +65,8 @@ GROUP_CLOUD_REQUIRE_CODE_FOR_JOIN
 - 服务启动默认开启激活码权益拦截（`entitlementEnforced = true`），强制要求配置 `codeHmacSecret`（至少 16 位）；生产环境由 systemd 通过 `StateDirectory=moto-group-cloud` 将数据库落在 `/var/lib/moto-group-cloud/entitlements.db`。
 - 建房（`POST /v1/rooms`，涵盖 `NETWORK` 与 `HYBRID`）要求房主携带 `X-Moto-Entitlement`，查询权益（`GET /v1/entitlements/me`）强制校验 `X-Moto-Entitlement` 与 `X-Moto-Device-Id` 设备绑定关系；队员输入 6 位邀请码即可免码加入（可通过 `requireCodeForJoin` 动态收紧为全员激活）。
 - `HYBRID` 模式在 `LOCAL` 阶段零扣费；`NETWORK` 与 `HYBRID/CLOUD` 仅在同逻辑频道在线 `>= 2` 人时按整数人·秒扣减，并按剩余额度动态收紧 RTC Token 有效期；当单码余额归零、单次连续云端通话达上限或当月全局红线（默认 8,500 人·分钟，按 `Asia/Shanghai` 自然月重置）触发时，服务端广播终结事件并同步调用火山 OpenAPI `BanRoomUser` 立即断流。
-- 后台 HTTP 管理接口需在配置中设置高熵 `adminToken`（`Authorization: Bearer <adminToken>`）方可启用，提供 `/admin/v1/overview`、`/admin/v1/codes/batch`、`/admin/v1/codes`、`/admin/v1/codes/:codeId/revoke`、`/admin/v1/entitlements`、`/admin/v1/entitlements/:id/(topup|reset-rebind|revoke)`、`/admin/v1/rooms/active`、`/admin/v1/rooms/:roomId/force-end`、`PUT /admin/v1/config/global-quota` 与 `/admin/v1/audit-logs`，并配套命令行客户端 `node codes-cli.mjs`。
-- 可视化 Web 管理后台托管于 `/admin`（静态资源白名单 `/admin/assets/admin.css`、`/admin/assets/admin.js`，启用严格 CSP 与 `X-Frame-Options: DENY`，未配置 `adminToken` 时 fail-closed 返回 `404`），支持自然月配额水位与 14 天用量趋势图、批量发码与微信文案一键复制导出、激活码筛选吊销、设备权益充值续期/重置换绑/停用、实时活跃房间强制解散、全局熔断开关及审计日志检索。
+- 后台 HTTP 管理接口需在配置中设置高熵 `adminToken`（`Authorization: Bearer <adminToken>`）方可启用，提供 `/admin/v1/overview`、`/admin/v1/codes/batch`、`/admin/v1/codes`、`/admin/v1/codes/:codeId/reveal`、`/admin/v1/codes/:codeId/revoke`、`/admin/v1/entitlements`、`/admin/v1/entitlements/:id/(topup|reset-rebind|revoke)`、`/admin/v1/rooms/active`、`/admin/v1/rooms/:roomId/force-end`、`PUT /admin/v1/config/global-quota` 与 `/admin/v1/audit-logs`，并配套命令行客户端 `node codes-cli.mjs`。
+- 可视化 Web 管理后台托管于 `/admin`（静态资源白名单 `/admin/assets/admin.css`、`/admin/assets/admin.js`，启用严格 CSP 与 `X-Frame-Options: DENY`，未配置 `adminToken` 时 fail-closed 返回 `404`），支持自然月配额水位与 14 天用量趋势图、批量发码与微信文案一键复制导出、激活码按需加密解密查看/复制/吊销、设备权益充值续期/重置换绑/停用、实时活跃房间强制解散、全局熔断开关及审计日志检索。
 
 ## 火山引擎 RTC 部署要求
 

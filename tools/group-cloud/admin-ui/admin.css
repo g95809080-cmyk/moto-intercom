@@ -91,6 +91,12 @@ html, body {
   font-size: 12.5px;
 }
 
+.revealed-code {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+}
+
 .stack-md {
   display: flex;
   flex-direction: column;

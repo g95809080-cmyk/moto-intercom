@@ -18,6 +18,7 @@
 
   const ACTION_LABELS = {
     MINT_CODES: '批量发码',
+    REVEAL_CODE: '查看激活码',
     REVOKE_CODE: '吊销激活码',
     TOPUP_ENTITLEMENT: '权益充值',
     RESET_REBIND: '重置换绑',
@@ -72,6 +73,8 @@
     refreshing: false,
     lastMinted: null,
     mintIdempotencyKey: '',
+    revealedCodes: new Map(),
+    revealGeneration: 0,
     topupTarget: null,
     topupIdempotencyKey: '',
     confirmAction: null,
@@ -217,10 +220,13 @@
   function clearSensitiveDom() {
     state.lastMinted = null;
     state.overview = null;
+    state.revealGeneration += 1;
+    state.revealedCodes.clear();
     state.codes.items = [];
     state.entitlements.items = [];
     state.rooms.items = [];
     state.audit.items = [];
+    $('hide-all-revealed-btn').classList.add('hidden');
     clearChildren($('mint-result-list'));
     clearChildren($('codes-tbody'));
     clearChildren($('entitlements-tbody'));
@@ -531,6 +537,11 @@
     state.codes.total = data.total || 0;
     const tbody = $('codes-tbody');
     clearChildren(tbody);
+    const visibleIds = new Set(state.codes.items.map((it) => it.codeId));
+    for (const key of state.revealedCodes.keys()) {
+      if (!visibleIds.has(key)) state.revealedCodes.delete(key);
+    }
+    $('hide-all-revealed-btn').classList.toggle('hidden', state.revealedCodes.size === 0);
 
     if (!state.codes.items.length) {
       tbody.appendChild(
@@ -545,26 +556,67 @@
           attrs: { max: 100, value: pct }
         });
 
-        const actionCell = el('td', { className: 'col-actions' });
-        if (item.status !== 'REVOKED') {
-          actionCell.appendChild(
-            el('div', { className: 'row-actions' }, [
-              el('button', {
-                type: 'button',
-                className: 'btn btn-danger-outline btn-sm',
-                text: '吊销',
-                onClick: () => openRevokeCodeConfirm(item)
-              })
-            ])
+        const revealedCode = state.revealedCodes.get(item.codeId) || '';
+        const actionButtons = [];
+        if (revealedCode) {
+          actionButtons.push(
+            el('button', {
+              type: 'button',
+              className: 'btn btn-secondary btn-sm',
+              text: '复制',
+              onClick: () => copyText(revealedCode, `已复制 ${revealedCode}`)
+            }),
+            el('button', {
+              type: 'button',
+              className: 'btn btn-ghost btn-sm',
+              text: '发微信',
+              onClick: () => copyText(buildSingleWechatMessage(item, revealedCode), '已复制单条微信发放文案')
+            }),
+            el('button', {
+              type: 'button',
+              className: 'btn btn-ghost btn-sm',
+              text: '隐藏',
+              onClick: () => {
+                state.revealedCodes.delete(item.codeId);
+                renderCodes({ items: state.codes.items, total: state.codes.total });
+              }
+            })
           );
+        } else if (item.canReveal) {
+          actionButtons.push(
+            el('button', {
+              type: 'button',
+              className: 'btn btn-secondary btn-sm',
+              text: '查看',
+              onClick: (ev) => revealCodeItem(item, ev.currentTarget)
+            })
+          );
+        }
+        if (item.status !== 'REVOKED') {
+          actionButtons.push(
+            el('button', {
+              type: 'button',
+              className: 'btn btn-danger-outline btn-sm',
+              text: '吊销',
+              onClick: () => openRevokeCodeConfirm(item)
+            })
+          );
+        }
+
+        const actionCell = el('td', { className: 'col-actions' });
+        if (actionButtons.length > 0) {
+          actionCell.appendChild(el('div', { className: 'row-actions' }, actionButtons));
         } else {
-          actionCell.appendChild(el('span', { className: 'cell-sub', text: '已停用' }));
+          actionCell.appendChild(el('span', { className: 'cell-sub', text: item.status === 'REVOKED' ? '已停用' : '无原码' }));
         }
 
         tbody.appendChild(
           el('tr', {}, [
             el('td', {}, [
-              el('div', { className: 'mono', text: item.codeMask }),
+              el('div', {
+                className: revealedCode ? 'mono revealed-code' : 'mono',
+                text: revealedCode || item.codeMask
+              }),
               el('span', { className: 'cell-sub mono', text: shortId(item.codeId, 16), title: item.codeId })
             ]),
             el('td', {}, [
@@ -830,8 +882,26 @@
     }
   }
 
+  function clearRevealedCodesAndMaskDom() {
+    state.revealGeneration += 1;
+    if (state.revealedCodes.size === 0) {
+      $('hide-all-revealed-btn').classList.add('hidden');
+      return;
+    }
+    state.revealedCodes.clear();
+    $('hide-all-revealed-btn').classList.add('hidden');
+    if (state.codes.items.length > 0) {
+      renderCodes({ items: state.codes.items, total: state.codes.total });
+    } else {
+      clearChildren($('codes-tbody'));
+    }
+  }
+
   function switchView(viewName) {
     if (!VIEW_TITLES[viewName]) return;
+    if (state.activeView === 'codes' && viewName !== 'codes') {
+      clearRevealedCodesAndMaskDom();
+    }
     state.activeView = viewName;
     if (viewName === 'policy') state.policyDirty = false;
     $('view-title').textContent = VIEW_TITLES[viewName];
@@ -922,6 +992,40 @@
       '',
       codesText
     ].join('\n');
+  }
+
+  function buildSingleWechatMessage(item, plaintextCode) {
+    return [
+      `MotoCom 云端对讲内测激活码：${plaintextCode}`,
+      `规格：${item.quotaMinutes} 人·分钟 · 限 ${item.maxMembers} 人 · 激活后 ${item.validDays} 天有效`,
+      '使用方法：仅房主在 App 设置或建房入口输入激活码即可建房，队员输入 6 位邀请码直接免码加入。'
+    ].join('\n');
+  }
+
+  async function revealCodeItem(item, triggerBtn) {
+    const requestGen = state.revealGeneration;
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = '解密中...';
+    }
+    try {
+      const res = await apiRequest('POST', `/admin/v1/codes/${encodeURIComponent(item.codeId)}/reveal`, { body: {} });
+      if (requestGen !== state.revealGeneration || !state.token || state.activeView !== 'codes') {
+        return;
+      }
+      if (res.code) {
+        state.revealedCodes.set(item.codeId, res.code);
+        renderCodes({ items: state.codes.items, total: state.codes.total });
+      }
+    } catch (error) {
+      if (error.status !== 401) {
+        showToast(error.message || '查看激活码失败', 'error');
+      }
+      if (triggerBtn && requestGen === state.revealGeneration) {
+        triggerBtn.disabled = false;
+        triggerBtn.textContent = '查看';
+      }
+    }
   }
 
   function downloadMintedCodes(result) {
@@ -1111,6 +1215,7 @@
     // Codes filters & pagination
     $('codes-filter-form').addEventListener('submit', (e) => {
       e.preventDefault();
+      clearRevealedCodesAndMaskDom();
       state.codes.batchId = $('filter-batch').value.trim();
       state.codes.status = $('filter-code-status').value;
       state.codes.codeMask = $('filter-mask').value.trim();
@@ -1118,6 +1223,7 @@
       loadCodes().catch((err) => showToast(err.message, 'error'));
     });
     $('filter-codes-reset').addEventListener('click', () => {
+      clearRevealedCodesAndMaskDom();
       $('filter-batch').value = '';
       $('filter-code-status').value = '';
       $('filter-mask').value = '';
@@ -1127,12 +1233,17 @@
       state.codes.offset = 0;
       loadCodes().catch((err) => showToast(err.message, 'error'));
     });
+    $('hide-all-revealed-btn').addEventListener('click', () => {
+      clearRevealedCodesAndMaskDom();
+    });
     $('codes-prev-btn').addEventListener('click', () => {
+      clearRevealedCodesAndMaskDom();
       state.codes.offset = Math.max(0, state.codes.offset - PAGE_SIZE);
       loadCodes().catch((err) => showToast(err.message, 'error'));
     });
     $('codes-next-btn').addEventListener('click', () => {
       if (state.codes.offset + PAGE_SIZE < state.codes.total) {
+        clearRevealedCodesAndMaskDom();
         state.codes.offset += PAGE_SIZE;
         loadCodes().catch((err) => showToast(err.message, 'error'));
       }

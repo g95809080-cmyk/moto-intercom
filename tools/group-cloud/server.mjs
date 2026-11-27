@@ -351,6 +351,14 @@ export function createGroupCloudServer(options = {}) {
           return;
         }
 
+        adminMatch = /^\/admin\/v1\/codes\/([^/]+)\/reveal$/.exec(pathname);
+        if (adminMatch && method === 'POST') {
+          const codeId = decodeURIComponent(adminMatch[1]);
+          const result = entitlementStore.revealCode(codeId, { actorIp: clientIp });
+          sendJson(res, 200, result);
+          return;
+        }
+
         if (method === 'GET' && pathname === '/admin/v1/entitlements') {
           const result = entitlementStore.listEntitlements({
             status: url.searchParams.get('status') ?? '',

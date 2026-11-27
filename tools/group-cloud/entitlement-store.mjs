@@ -133,6 +133,15 @@ export class EntitlementStore {
     if (!this.codeHmacSecret) {
       throw new Error('EntitlementStore requires codeHmacSecret (>= 16 chars)');
     }
+    this.codeVaultKey = Buffer.from(
+      crypto.hkdfSync(
+        'sha256',
+        Buffer.from(this.codeHmacSecret, 'utf8'),
+        Buffer.from('motocom-activation-code-vault-v1', 'utf8'),
+        Buffer.from('aes-256-gcm', 'utf8'),
+        32
+      )
+    );
     this.defaultGlobalMonthlyLimitSeconds =
       parseNonNegativeInt(
         options.globalMonthlyLimitMinutes ?? DEFAULT_GLOBAL_MONTHLY_LIMIT_MINUTES,
@@ -186,6 +195,7 @@ export class EntitlementStore {
         code_id TEXT PRIMARY KEY,
         code_hash TEXT NOT NULL UNIQUE,
         code_mask TEXT NOT NULL,
+        code_ciphertext TEXT,
         batch_id TEXT NOT NULL,
         code_type TEXT NOT NULL,
         quota_seconds INTEGER NOT NULL,
@@ -277,6 +287,10 @@ export class EntitlementStore {
     if (!idemCols.some((c) => c.name === 'request_hash')) {
       this.db.exec("ALTER TABLE admin_idempotency ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''");
     }
+    const codeCols = this.db.prepare('PRAGMA table_info(activation_codes)').all();
+    if (!codeCols.some((c) => c.name === 'code_ciphertext')) {
+      this.db.exec('ALTER TABLE activation_codes ADD COLUMN code_ciphertext TEXT');
+    }
   }
 
   close() {
@@ -348,6 +362,33 @@ export class EntitlementStore {
 
   _hashCode(canonicalCode) {
     return hmacHex(this.codeHmacSecret, canonicalCode);
+  }
+
+  _encryptCodePlaintext(codeId, formattedCode) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', this.codeVaultKey, iv);
+    cipher.setAAD(Buffer.from(String(codeId), 'utf8'));
+    const encrypted = Buffer.concat([cipher.update(String(formattedCode), 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `v1:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+  }
+
+  _decryptCodePlaintext(codeId, ciphertext) {
+    if (typeof ciphertext !== 'string' || !ciphertext.startsWith('v1:')) return null;
+    const parts = ciphertext.split(':');
+    if (parts.length !== 4) return null;
+    try {
+      const iv = Buffer.from(parts[1], 'hex');
+      const tag = Buffer.from(parts[2], 'hex');
+      const data = Buffer.from(parts[3], 'hex');
+      if (iv.length !== 12 || tag.length !== 16 || data.length === 0) return null;
+      const decipher = crypto.createDecipheriv('aes-256-gcm', this.codeVaultKey, iv);
+      decipher.setAAD(Buffer.from(String(codeId), 'utf8'));
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+    } catch {
+      return null;
+    }
   }
 
   _hashToken(token) {
@@ -1020,8 +1061,8 @@ export class EntitlementStore {
       const generated = [];
       const insertStmt = this.db.prepare(
         `INSERT INTO activation_codes
-         (code_id, code_hash, code_mask, batch_id, code_type, quota_seconds, valid_days, max_members, max_concurrent_rooms, max_session_minutes, status, redeemed_entitlement_id, redeemed_at_ms, note, created_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNUSED', NULL, NULL, ?, ?)`
+         (code_id, code_hash, code_mask, code_ciphertext, batch_id, code_type, quota_seconds, valid_days, max_members, max_concurrent_rooms, max_session_minutes, status, redeemed_entitlement_id, redeemed_at_ms, note, created_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNUSED', NULL, NULL, ?, ?)`
       );
       for (let idx = 0; idx < validCount; idx += 1) {
         let formatted;
@@ -1039,10 +1080,12 @@ export class EntitlementStore {
           throw new CloudStoreError(500, 'CODE_GENERATION_FAILED', '激活码生成冲突，请重试');
         }
         const codeId = `cd_${crypto.randomUUID().replaceAll('-', '')}`;
+        const codeCiphertext = this._encryptCodePlaintext(codeId, formatted);
         insertStmt.run(
           codeId,
           codeHash,
           parsed.mask,
+          codeCiphertext,
           resolvedBatchId,
           normalizedType,
           validQuotaMinutes * 60,
@@ -1158,6 +1201,7 @@ export class EntitlementStore {
         return {
           codeId: row.code_id,
           codeMask: row.code_mask,
+          canReveal: Boolean(row.code_ciphertext),
           batchId: row.batch_id,
           codeType: row.code_type,
           quotaMinutes: Math.floor(row.quota_seconds / 60),
@@ -1218,6 +1262,55 @@ export class EntitlementStore {
         status: 'REVOKED',
         entitlementId,
         shouldTerminateRooms: Boolean(entitlementId && entitlementRemainingSeconds <= 0)
+      };
+    });
+  }
+
+  revealCode(codeId, { actorIp = 'local' } = {}, nowMs = this.now()) {
+    const id = sanitizeNote(codeId, 80);
+    if (!id) throw new CloudStoreError(400, 'INVALID_INPUT', 'codeId is required');
+    return this._runInTransaction(() => {
+      const row = this.db.prepare('SELECT * FROM activation_codes WHERE code_id = ?').get(id);
+      if (!row) {
+        throw new CloudStoreError(404, 'CODE_NOT_FOUND', '激活码不存在');
+      }
+      if (!row.code_ciphertext) {
+        throw new CloudStoreError(404, 'CODE_PLAINTEXT_UNAVAILABLE', '该激活码未保存加密原码，无法查看明文');
+      }
+      const plaintext = this._decryptCodePlaintext(row.code_id, row.code_ciphertext);
+      const parsed = plaintext ? normalizeActivationCode(plaintext) : null;
+      if (!parsed || this._hashCode(parsed.canonical) !== row.code_hash) {
+        throw new CloudStoreError(500, 'CODE_VAULT_CORRUPTED', '激活码密文校验失败，已拒绝输出');
+      }
+      this._writeAuditLog(
+        {
+          action: 'REVEAL_CODE',
+          targetType: 'CODE',
+          targetId: row.code_id,
+          actorIp,
+          payloadSummary: {
+            codeMask: row.code_mask,
+            batchId: row.batch_id,
+            status: row.status
+          }
+        },
+        nowMs
+      );
+      return {
+        codeId: row.code_id,
+        code: parsed.formatted,
+        codeMask: row.code_mask,
+        batchId: row.batch_id,
+        codeType: row.code_type,
+        status: row.status,
+        quotaMinutes: Math.floor(row.quota_seconds / 60),
+        validDays: row.valid_days,
+        maxMembers: row.max_members,
+        maxConcurrentRooms: row.max_concurrent_rooms,
+        maxSessionMinutes: row.max_session_minutes,
+        redeemedEntitlementId: row.redeemed_entitlement_id ?? null,
+        note: row.note,
+        createdAtMs: row.created_at_ms
       };
     });
   }

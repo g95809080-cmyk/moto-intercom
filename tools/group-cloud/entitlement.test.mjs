@@ -555,6 +555,61 @@ test('visual admin panel static routes enforce strict CSP, allowlist isolation, 
       bearer: TEST_ADMIN_TOKEN,
       body: { count: 1, quotaMinutes: 300, validDays: 14, maxMembers: 6 }
     });
+    const mintedCode = minted.json.codes[0];
+
+    // List codes must stay masked and never leak plaintext or ciphertext, while advertising canReveal=true
+    const listed = await api(env.baseUrl, 'GET', '/admin/v1/codes', { bearer: TEST_ADMIN_TOKEN });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.json.items[0].canReveal, true);
+    assert.equal(listed.json.items[0].code, undefined);
+    assert.equal(listed.json.items[0].codeCiphertext, undefined);
+
+    // Unauthenticated reveal must fail 401
+    const unauthReveal = await api(env.baseUrl, 'POST', `/admin/v1/codes/${mintedCode.codeId}/reveal`, { body: {} });
+    assert.equal(unauthReveal.status, 401);
+
+    // Authenticated reveal returns exact plaintext and records audit log without plaintext
+    const revealed = await api(env.baseUrl, 'POST', `/admin/v1/codes/${mintedCode.codeId}/reveal`, {
+      bearer: TEST_ADMIN_TOKEN,
+      body: {}
+    });
+    assert.equal(revealed.status, 200);
+    assert.equal(revealed.json.code, mintedCode.code);
+    const auditsAfterReveal = await api(env.baseUrl, 'GET', '/admin/v1/audit-logs', { bearer: TEST_ADMIN_TOKEN });
+    const revealAudit = auditsAfterReveal.json.items.find((a) => a.action === 'REVEAL_CODE');
+    assert.ok(revealAudit, 'expected REVEAL_CODE audit entry');
+    assert.ok(!JSON.stringify(revealAudit).includes(mintedCode.code), 'audit log must not contain plaintext code');
+
+    // Tampered ciphertext must fail closed 500 CODE_VAULT_CORRUPTED
+    const savedCipher = env.entitlementStore.db
+      .prepare('SELECT code_ciphertext FROM activation_codes WHERE code_id = ?')
+      .get(mintedCode.codeId).code_ciphertext;
+    env.entitlementStore.db
+      .prepare('UPDATE activation_codes SET code_ciphertext = ? WHERE code_id = ?')
+      .run(`${savedCipher.slice(0, -2)}ff`, mintedCode.codeId);
+    const tampered = await api(env.baseUrl, 'POST', `/admin/v1/codes/${mintedCode.codeId}/reveal`, {
+      bearer: TEST_ADMIN_TOKEN,
+      body: {}
+    });
+    assert.equal(tampered.status, 500);
+    assert.equal(tampered.json.code, 'CODE_VAULT_CORRUPTED');
+
+    // Legacy NULL ciphertext returns 404 CODE_PLAINTEXT_UNAVAILABLE and canReveal=false
+    env.entitlementStore.db
+      .prepare('UPDATE activation_codes SET code_ciphertext = NULL WHERE code_id = ?')
+      .run(mintedCode.codeId);
+    const legacyList = await api(env.baseUrl, 'GET', '/admin/v1/codes', { bearer: TEST_ADMIN_TOKEN });
+    assert.equal(legacyList.json.items[0].canReveal, false);
+    const legacyReveal = await api(env.baseUrl, 'POST', `/admin/v1/codes/${mintedCode.codeId}/reveal`, {
+      bearer: TEST_ADMIN_TOKEN,
+      body: {}
+    });
+    assert.equal(legacyReveal.status, 404);
+    assert.equal(legacyReveal.json.code, 'CODE_PLAINTEXT_UNAVAILABLE');
+    env.entitlementStore.db
+      .prepare('UPDATE activation_codes SET code_ciphertext = ? WHERE code_id = ?')
+      .run(savedCipher, mintedCode.codeId);
+
     const redeemed = await api(env.baseUrl, 'POST', '/v1/entitlements/redeem', {
       body: { code: minted.json.codes[0].code, deviceId: 'dev-chart-1' }
     });
