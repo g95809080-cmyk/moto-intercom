@@ -1348,4 +1348,149 @@ test('admin UI portal-sso session boundary: 401 and logout abort in-flight revea
     assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
     assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), null);
   }
+
+  // Stale auth race 1: late portal-sso probe resolving AFTER manual login + logout must not resurrect session
+  {
+    const heldPortal = deferred();
+    let portalSignal = null;
+    const ui = mountAdminUi({
+      href: 'https://group.toneride.top/admin',
+      fetchHandler: async (_url, init = {}) => {
+        if (init.headers.Authorization === 'Bearer portal-sso') {
+          portalSignal = init.signal;
+          return heldPortal.promise;
+        }
+        if (init.headers.Authorization === 'Bearer manual-token-1') {
+          return { ok: true, status: 200, json: async () => makeOverviewPayload() };
+        }
+        throw new Error(`Unexpected auth header: ${init.headers.Authorization}`);
+      }
+    });
+    await flushMicrotasks();
+    assert.ok(portalSignal);
+    assert.equal(portalSignal.aborted, false);
+
+    // User submits manual login while portal-sso probe is still pending
+    ui.getEl('token-input').value = 'manual-token-1';
+    ui.getEl('remember-session-checkbox').checked = true;
+    ui.getEl('login-form').dispatch('submit');
+    await flushMicrotasks();
+    assert.equal(portalSignal.aborted, true);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), false);
+    assert.equal(ui.getEl('logout-btn').textContent, '锁定并退出');
+    assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), 'manual-token-1');
+
+    // User logs out of manual session
+    ui.getEl('logout-btn').dispatch('click');
+    await flushMicrotasks();
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('login-view').classList.contains('hidden'), false);
+    assert.equal(ui.activeIntervals.size, 0);
+    assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), null);
+
+    // Late portal-sso 200 arrives AFTER logout — must be completely ignored
+    heldPortal.resolve({ ok: true, status: 200, json: async () => makeOverviewPayload() });
+    await flushMicrotasks(12);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('login-view').classList.contains('hidden'), false);
+    assert.equal(ui.activeIntervals.size, 0);
+    assert.equal(ui.getEl('logout-btn').textContent, '锁定并退出');
+    assert.equal(ui.getEl('sync-status').textContent, '未同步');
+  }
+
+  // Stale auth race 2: late saved-sessionToken probe resolving AFTER manual login + logout must not resurrect session or delete live session
+  {
+    const heldSaved = deferred();
+    let savedSignal = null;
+    const ui = mountAdminUi({
+      href: 'http://127.0.0.1:8443/admin',
+      initialSessionStorage: { motocom_admin_session_token: 'saved-old-token' },
+      fetchHandler: async (_url, init = {}) => {
+        if (init.headers.Authorization === 'Bearer saved-old-token') {
+          savedSignal = init.signal;
+          return heldSaved.promise;
+        }
+        if (init.headers.Authorization === 'Bearer fresh-manual-token') {
+          return { ok: true, status: 200, json: async () => makeOverviewPayload() };
+        }
+        throw new Error(`Unexpected auth header: ${init.headers.Authorization}`);
+      }
+    });
+    await flushMicrotasks();
+    assert.ok(savedSignal);
+    assert.equal(savedSignal.aborted, false);
+
+    ui.getEl('token-input').value = 'fresh-manual-token';
+    ui.getEl('remember-session-checkbox').checked = true;
+    ui.getEl('login-form').dispatch('submit');
+    await flushMicrotasks();
+    assert.equal(savedSignal.aborted, true);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), false);
+    assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), 'fresh-manual-token');
+
+    ui.getEl('logout-btn').dispatch('click');
+    await flushMicrotasks();
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.activeIntervals.size, 0);
+
+    // Late saved-token 200 resolves after logout — must not resurrect session
+    heldSaved.resolve({ ok: true, status: 200, json: async () => makeOverviewPayload() });
+    await flushMicrotasks(12);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('login-view').classList.contains('hidden'), false);
+    assert.equal(ui.activeIntervals.size, 0);
+    assert.equal(ui.getEl('sync-status').textContent, '未同步');
+  }
+
+  // Stale auth race 3: overlapping manual login #1 resolving AFTER manual login #2 + logout must not resurrect session or rewrite sessionStorage
+  {
+    const heldManual1 = deferred();
+    let manual1Signal = null;
+    const ui = mountAdminUi({
+      href: 'http://127.0.0.1:8443/admin',
+      fetchHandler: async (_url, init = {}) => {
+        if (init.headers.Authorization === 'Bearer manual-first') {
+          manual1Signal = init.signal;
+          return heldManual1.promise;
+        }
+        if (init.headers.Authorization === 'Bearer manual-second') {
+          return { ok: true, status: 200, json: async () => makeOverviewPayload() };
+        }
+        throw new Error(`Unexpected auth header: ${init.headers.Authorization}`);
+      }
+    });
+    await flushMicrotasks();
+
+    ui.getEl('token-input').value = 'manual-first';
+    ui.getEl('remember-session-checkbox').checked = true;
+    ui.getEl('login-form').dispatch('submit');
+    await flushMicrotasks();
+    assert.ok(manual1Signal);
+    assert.equal(manual1Signal.aborted, false);
+
+    // Second login supersedes first
+    ui.getEl('token-input').value = 'manual-second';
+    ui.getEl('remember-session-checkbox').checked = false;
+    ui.getEl('login-form').dispatch('submit');
+    await flushMicrotasks();
+    assert.equal(manual1Signal.aborted, true);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), false);
+    assert.equal(ui.getEl('login-submit-btn').disabled, false);
+
+    // Logout from second session
+    ui.getEl('logout-btn').dispatch('click');
+    await flushMicrotasks();
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.activeIntervals.size, 0);
+
+    // Delayed manual #1 resolves 200 AFTER logout — must not resurrect session or write sessionStorage
+    ui.getEl('remember-session-checkbox').checked = true;
+    heldManual1.resolve({ ok: true, status: 200, json: async () => makeOverviewPayload() });
+    await flushMicrotasks(12);
+    assert.equal(ui.getEl('app-view').classList.contains('hidden'), true);
+    assert.equal(ui.getEl('login-view').classList.contains('hidden'), false);
+    assert.equal(ui.activeIntervals.size, 0);
+    assert.equal(ui.sessionStorage.getItem('motocom_admin_session_token'), null);
+    assert.equal(ui.getEl('sync-status').textContent, '未同步');
+  }
 });

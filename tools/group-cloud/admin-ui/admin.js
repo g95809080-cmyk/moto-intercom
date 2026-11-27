@@ -66,6 +66,8 @@
     token: '',
     sessionGeneration: 0,
     sessionAbortController: null,
+    authGeneration: 0,
+    authAbortController: null,
     activeView: 'overview',
     rankMode: 'today',
     overview: null,
@@ -251,6 +253,34 @@
     return Boolean(state.token) && state.sessionGeneration === sessionGen;
   }
 
+  function abortPendingAuthAttempts() {
+    state.authGeneration += 1;
+    if (state.authAbortController) {
+      state.authAbortController.abort();
+      state.authAbortController = null;
+    }
+  }
+
+  function beginAuthAttempt() {
+    abortPendingAuthAttempts();
+    const controller = new AbortController();
+    state.authAbortController = controller;
+    return {
+      authGen: state.authGeneration,
+      sessionGen: state.sessionGeneration,
+      signal: controller.signal
+    };
+  }
+
+  function isAuthAttemptCurrent(attempt) {
+    return Boolean(
+      attempt &&
+        !state.token &&
+        state.authGeneration === attempt.authGen &&
+        state.sessionGeneration === attempt.sessionGen
+    );
+  }
+
   function createSessionTerminatedError() {
     return Object.assign(new Error('管理员会话已终止'), {
       status: 401,
@@ -260,6 +290,7 @@
   }
 
   function beginSession(token, { isPortal = false } = {}) {
+    abortPendingAuthAttempts();
     state.sessionGeneration += 1;
     if (state.sessionAbortController) {
       state.sessionAbortController.abort();
@@ -270,6 +301,7 @@
   }
 
   function terminateSessionState() {
+    abortPendingAuthAttempts();
     state.sessionGeneration += 1;
     if (state.sessionAbortController) {
       state.sessionAbortController.abort();
@@ -279,6 +311,8 @@
     state.token = '';
     state.refreshing = false;
     $('refresh-btn').disabled = false;
+    $('login-submit-btn').disabled = false;
+    $('login-submit-btn').textContent = '验证并进入控制台';
     try {
       window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
     } catch {
@@ -310,12 +344,19 @@
     window.location.replace(targetUrl);
   }
 
-  async function apiRequest(method, endpoint, { body = null, idempotencyKey = '', overrideToken = '' } = {}) {
+  async function apiRequest(
+    method,
+    endpoint,
+    { body = null, idempotencyKey = '', overrideToken = '', signal = null, authAttempt = null } = {}
+  ) {
     const isSessionCall = !overrideToken;
     const requestSessionGen = state.sessionGeneration;
     const activeToken = overrideToken || state.token;
     if (!activeToken) {
       throw Object.assign(new Error('未登录管理员会话'), { status: 401, code: 'ADMIN_UNAUTHORIZED' });
+    }
+    if (authAttempt && !isAuthAttemptCurrent(authAttempt)) {
+      throw createSessionTerminatedError();
     }
     const headers = {
       Accept: 'application/json',
@@ -332,19 +373,25 @@
     };
     if (isSessionCall && state.sessionAbortController) {
       fetchOptions.signal = state.sessionAbortController.signal;
+    } else if (signal) {
+      fetchOptions.signal = signal;
     }
+
+    const isRequestStale = () =>
+      (isSessionCall && !isSessionActive(requestSessionGen)) ||
+      (authAttempt && !isAuthAttemptCurrent(authAttempt));
 
     let response;
     try {
       response = await fetch(endpoint, fetchOptions);
     } catch (fetchErr) {
-      if (isSessionCall && (!isSessionActive(requestSessionGen) || fetchErr?.name === 'AbortError')) {
+      if (isRequestStale() || fetchErr?.name === 'AbortError') {
         throw createSessionTerminatedError();
       }
       throw fetchErr;
     }
 
-    if (isSessionCall && !isSessionActive(requestSessionGen)) {
+    if (isRequestStale()) {
       throw createSessionTerminatedError();
     }
 
@@ -355,7 +402,7 @@
       payload = null;
     }
 
-    if (isSessionCall && !isSessionActive(requestSessionGen)) {
+    if (isRequestStale()) {
       throw createSessionTerminatedError();
     }
 
@@ -1243,12 +1290,20 @@
       errBox.classList.remove('hidden');
       return;
     }
+    const attempt = beginAuthAttempt();
     const btn = $('login-submit-btn');
     btn.disabled = true;
     btn.textContent = '验证中...';
     try {
-      const overview = await apiRequest('GET', '/admin/v1/overview', { overrideToken: rawToken });
+      const overview = await apiRequest('GET', '/admin/v1/overview', {
+        overrideToken: rawToken,
+        signal: attempt.signal,
+        authAttempt: attempt
+      });
+      if (!isAuthAttemptCurrent(attempt)) return;
       beginSession(rawToken, { isPortal: false });
+      btn.disabled = false;
+      btn.textContent = '验证并进入控制台';
       if ($('remember-session-checkbox').checked) {
         try {
           window.sessionStorage.setItem(SESSION_TOKEN_KEY, rawToken);
@@ -1263,11 +1318,15 @@
       $('sync-status').textContent = `上次同步 ${formatTimeShanghai(Date.now()).slice(11)}`;
       startAutoRefresh();
     } catch (error) {
-      errBox.textContent = error.message || '认证失败，请检查 adminToken';
-      errBox.classList.remove('hidden');
+      if (!error.aborted && isAuthAttemptCurrent(attempt)) {
+        errBox.textContent = error.message || '认证失败，请检查 adminToken';
+        errBox.classList.remove('hidden');
+      }
     } finally {
-      btn.disabled = false;
-      btn.textContent = '验证并进入控制台';
+      if (state.authGeneration === attempt.authGen) {
+        btn.disabled = false;
+        btn.textContent = '验证并进入控制台';
+      }
     }
   }
 
@@ -1631,10 +1690,14 @@
 
     if (isPortalManagedHost()) {
       // 统一入口由网关注入真实管理令牌，浏览器仅携带占位值。
+      const portalAttempt = beginAuthAttempt();
       try {
         const overview = await apiRequest('GET', '/admin/v1/overview', {
-          overrideToken: PORTAL_SSO_TOKEN
+          overrideToken: PORTAL_SSO_TOKEN,
+          signal: portalAttempt.signal,
+          authAttempt: portalAttempt
         });
+        if (!isAuthAttemptCurrent(portalAttempt)) return;
         beginSession(PORTAL_SSO_TOKEN, { isPortal: true });
         $('login-view').classList.add('hidden');
         $('app-view').classList.remove('hidden');
@@ -1643,6 +1706,7 @@
         startAutoRefresh();
         return;
       } catch {
+        if (!isAuthAttemptCurrent(portalAttempt)) return;
         // 保留 adminToken 登录，作为未接入统一入口时的兜底。
       }
     }
@@ -1654,8 +1718,14 @@
       // ignore
     }
     if (sessionToken) {
+      const savedAttempt = beginAuthAttempt();
       try {
-        const overview = await apiRequest('GET', '/admin/v1/overview', { overrideToken: sessionToken });
+        const overview = await apiRequest('GET', '/admin/v1/overview', {
+          overrideToken: sessionToken,
+          signal: savedAttempt.signal,
+          authAttempt: savedAttempt
+        });
+        if (!isAuthAttemptCurrent(savedAttempt)) return;
         beginSession(sessionToken, { isPortal: false });
         $('login-view').classList.add('hidden');
         $('app-view').classList.remove('hidden');
@@ -1664,6 +1734,7 @@
         startAutoRefresh();
         return;
       } catch {
+        if (!isAuthAttemptCurrent(savedAttempt)) return;
         try {
           window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
         } catch {
@@ -1671,8 +1742,10 @@
         }
       }
     }
-    $('login-view').classList.remove('hidden');
-    $('app-view').classList.add('hidden');
+    if (!state.token) {
+      $('login-view').classList.remove('hidden');
+      $('app-view').classList.add('hidden');
+    }
   }
 
   bootstrap();
